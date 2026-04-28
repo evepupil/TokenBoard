@@ -1,4 +1,5 @@
 export * from './command'
+export * from './cli'
 export * from './config'
 export * from './normalize-ccusage'
 export * from './providers/claude-code'

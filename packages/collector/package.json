@@ -6,7 +6,12 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "tokenboard": "./bin/tokenboard.mjs"
+  },
   "scripts": {
+    "preview": "tsx src/cli.ts preview",
+    "sync": "tsx src/cli.ts sync",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
@@ -15,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"
   }
