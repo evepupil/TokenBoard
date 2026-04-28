@@ -19,7 +19,7 @@ export default createRoute(async (c) => {
             Connect local Claude Code and Codex collectors, upload aggregate token metrics, and publish only the views you explicitly enable.
           </p>
           <div class="mt-8 flex flex-wrap gap-3">
-            <a class="rounded-full bg-stone-950 px-5 py-3 text-sm font-black text-lime-200" href="/auth/sign-up">Create account</a>
+            <a class="rounded-full bg-stone-950 px-5 py-3 text-sm font-black text-lime-200" href="/auth/sign-in">Sign in with GitHub</a>
             <a class="rounded-full border border-stone-400 px-5 py-3 text-sm font-bold text-stone-800" href="/auth/sign-in">Sign in</a>
           </div>
         </div>

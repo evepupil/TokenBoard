@@ -3,7 +3,10 @@ import type { Bindings } from '../../lib/db'
 
 export const authBasePath = '/api/auth'
 
-export function createAuth(env: Pick<Bindings, 'DB' | 'BETTER_AUTH_SECRET' | 'BETTER_AUTH_URL'>, request?: Request) {
+export function createAuth(
+  env: Pick<Bindings, 'DB' | 'BETTER_AUTH_SECRET' | 'BETTER_AUTH_URL' | 'GITHUB_CLIENT_ID' | 'GITHUB_CLIENT_SECRET'>,
+  request?: Request
+) {
   const origin = request ? new URL(request.url).origin : undefined
   const secret = env.BETTER_AUTH_SECRET || (origin?.startsWith('http://localhost') ? 'dev-tokenboard-local-secret' : undefined)
 
@@ -13,9 +16,11 @@ export function createAuth(env: Pick<Bindings, 'DB' | 'BETTER_AUTH_SECRET' | 'BE
     baseURL: env.BETTER_AUTH_URL || origin,
     secret,
     database: env.DB,
-    emailAndPassword: {
-      enabled: true,
-      minPasswordLength: 8
+    socialProviders: {
+      github: {
+        clientId: env.GITHUB_CLIENT_ID || '',
+        clientSecret: env.GITHUB_CLIENT_SECRET || ''
+      }
     },
     trustedOrigins: origin ? [origin] : undefined,
     user: {

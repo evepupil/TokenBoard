@@ -1,27 +1,21 @@
-﻿import { createRoute } from 'honox/factory'
-import { LinkButton, Button } from '../../components/ui/button'
+﻿import { LogIn, ShieldCheck, Trophy } from 'lucide'
+import { createRoute } from 'honox/factory'
+import { Button, LinkButton } from '../../components/ui/button'
 import { Card } from '../../components/ui/card'
-import { Input, Label } from '../../components/ui/input'
+import { GitHubMark, LucideIcon } from '../../components/ui/icon'
 import { getOptionalUser } from '../../features/auth/middleware'
-import { forwardAuthForm } from '../../features/auth/service'
+import { forwardGithubSignIn } from '../../features/auth/service'
 
 export const GET = createRoute(async (c) => {
   const user = await getOptionalUser(c)
   if (user) return c.redirect('/dashboard')
 
-  return c.render(<AuthScreen />)
+  return c.render(<AuthScreen hasError={c.req.query('error') === 'github'} />)
 })
 
-export const POST = createRoute(async (c) => {
-  const form = await c.req.parseBody()
-  return forwardAuthForm(c, 'sign-in/email', {
-    email: String(form.email || ''),
-    password: String(form.password || ''),
-    rememberMe: true
-  })
-})
+export const POST = createRoute((c) => forwardGithubSignIn(c))
 
-function AuthScreen() {
+function AuthScreen(props: { hasError: boolean }) {
   return (
     <main class="min-h-screen bg-[#10130f] px-5 py-8 text-stone-50">
       <title>Sign in - TokenBoard</title>
@@ -33,12 +27,12 @@ function AuthScreen() {
             Your AI token cockpit.
           </h1>
           <p class="mt-6 max-w-lg text-base leading-7 text-stone-300">
-            Collect Claude Code and Codex usage locally, upload only aggregate metrics, then compare daily spend, model mix, and public leaderboard position.
+            Sign in with GitHub, connect local collectors, and publish only aggregate token stats you explicitly enable.
           </p>
           <div class="mt-10 grid gap-3 sm:grid-cols-3">
-            <Panel label="Private by default" value="0 prompts" />
-            <Panel label="Sources" value="Claude + Codex" />
-            <Panel label="Storage" value="D1 aggregates" />
+            <Panel icon={ShieldCheck} label="Private by default" value="0 prompts" />
+            <Panel icon={LogIn} label="Sign in" value="GitHub OAuth" />
+            <Panel icon={Trophy} label="Ranking" value="Opt-in only" />
           </div>
         </div>
 
@@ -46,14 +40,23 @@ function AuthScreen() {
           <form method="post">
             <div class="mb-6 flex items-center justify-between gap-4">
               <div>
-                <p class="text-sm text-lime-300">Welcome back</p>
+                <p class="text-sm text-lime-300">GitHub account required</p>
                 <h2 class="mt-1 text-2xl font-bold">Sign in</h2>
               </div>
-              <LinkButton variant="secondary" size="sm" href="/auth/sign-up">Create account</LinkButton>
+              <LinkButton variant="secondary" size="sm" href="/">Home</LinkButton>
             </div>
-            <Label>Email<Input name="email" type="email" autocomplete="email" required /></Label>
-            <Label class="mt-4">Password<Input name="password" type="password" autocomplete="current-password" required /></Label>
-            <Button class="mt-6 w-full rounded-xl" type="submit">Enter dashboard</Button>
+            {props.hasError ? (
+              <p class="mb-4 rounded-2xl border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-100">
+                GitHub sign-in failed. Check OAuth configuration and try again.
+              </p>
+            ) : null}
+            <Button class="w-full rounded-xl" type="submit">
+              <GitHubMark />
+              Continue with GitHub
+            </Button>
+            <p class="mt-4 text-sm leading-6 text-stone-500">
+              TokenBoard uses GitHub only for identity. Collector uploads still use per-device upload tokens.
+            </p>
           </form>
         </Card>
       </section>
@@ -61,10 +64,11 @@ function AuthScreen() {
   )
 }
 
-function Panel(props: { label: string; value: string }) {
+function Panel(props: { icon: typeof ShieldCheck; label: string; value: string }) {
   return (
     <div class="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-      <p class="text-xs uppercase tracking-wide text-stone-400">{props.label}</p>
+      <LucideIcon icon={props.icon} class="text-lime-200" />
+      <p class="mt-3 text-xs uppercase tracking-wide text-stone-400">{props.label}</p>
       <p class="mt-2 text-lg font-bold text-stone-50">{props.value}</p>
     </div>
   )
