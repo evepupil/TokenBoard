@@ -1,6 +1,6 @@
-﻿import { createRoute } from 'honox/factory'
+import { createRoute } from 'honox/factory'
+import { AppNav } from '../../components/app-nav'
 import { Badge } from '../../components/ui/badge'
-import { LinkButton } from '../../components/ui/button'
 import { Card, CardContent, CardHeader } from '../../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
 import { getOptionalUser } from '../../features/auth/middleware'
@@ -12,25 +12,18 @@ export default createRoute(async (c) => {
   const entries = await getDailyLeaderboard(c.env.DB)
 
   return c.render(
-    <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
+    <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
       <title>排行榜 - TokenBoard</title>
-      <nav class="mx-auto mb-6 flex max-w-6xl items-center justify-between rounded-lg border border-stone-800 bg-stone-950/75 px-4 py-3">
-        <a class="font-black text-lime-200" href={user ? '/dashboard' : '/'}>TokenBoard</a>
-        <div class="flex items-center gap-2 text-sm">
-          {user ? <LinkButton variant="ghost" size="sm" href="/dashboard">控制台</LinkButton> : null}
-          {user ? <LinkButton variant="ghost" size="sm" href="/settings/install">安装采集器</LinkButton> : null}
-          {user ? null : <LinkButton size="sm" href="/auth/sign-in">登录</LinkButton>}
-        </div>
-      </nav>
-      <Card class="mx-auto max-w-6xl rounded-xl">
-        <CardHeader class="flex-col gap-4 border-b border-stone-800 md:flex-row md:items-end md:justify-between">
+      <AppNav active="leaderboards" email={user?.email} isAuthenticated={Boolean(user)} />
+      <Card class="mx-auto max-w-6xl rounded-2xl">
+        <CardHeader class="flex-col gap-4 border-b border-[var(--app-border)] md:flex-row md:items-end md:justify-between">
           <div>
             <Badge>排行榜</Badge>
             <h1 class="mt-3 text-4xl font-black tracking-tight">每日 token 排名</h1>
           </div>
-          <div class="flex rounded-full border border-stone-800 p-1 text-sm text-stone-300">
+          <div class="flex rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)]">
             <Badge>每日</Badge>
-            <span class="px-3 py-1.5 text-stone-500">每月</span>
+            <span class="px-3 py-1.5 text-[var(--app-subtle)]">每月</span>
           </div>
         </CardHeader>
         <CardContent class="pt-5">
@@ -46,15 +39,15 @@ export default createRoute(async (c) => {
               </TableHeader>
               <TableBody>
                 {entries.length > 0 ? entries.map((entry) => (
-                  <TableRow class="border-0 bg-stone-900/70">
-                    <TableCell class="rounded-l-xl font-black text-lime-200">#{entry.rank}</TableCell>
+                  <TableRow class="border-0 bg-[var(--app-bg-soft)]">
+                    <TableCell class="rounded-l-xl font-black text-lime-300">#{entry.rank}</TableCell>
                     <TableCell>{entry.displayName}</TableCell>
                     <TableCell class="font-bold">{formatInteger(entry.totalTokens)}</TableCell>
-                    <TableCell class="rounded-r-xl text-stone-300">{formatUsd(entry.costUsd)}</TableCell>
+                    <TableCell class="rounded-r-xl text-[var(--app-muted)]">{formatUsd(entry.costUsd)}</TableCell>
                   </TableRow>
                 )) : (
                   <TableRow>
-                    <TableCell class="rounded-md border border-dashed border-stone-800 py-8 text-center text-stone-500" colSpan={4}>还没有公开排行榜数据。</TableCell>
+                    <TableCell class="rounded-xl border border-dashed border-[var(--app-border)] py-8 text-center text-[var(--app-muted)]" colSpan={4}>还没有公开排行榜数据。</TableCell>
                   </TableRow>
                 )}
               </TableBody>

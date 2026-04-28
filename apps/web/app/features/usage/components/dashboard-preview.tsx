@@ -1,4 +1,4 @@
-﻿import { Badge } from '../../../components/ui/badge'
+import { Badge } from '../../../components/ui/badge'
 import { LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
 import { formatUsd } from '../../../lib/money'
@@ -12,14 +12,14 @@ export function DashboardPreview(props: { summary: UsageSummary; userName?: stri
 
   return (
     <section class="mx-auto flex max-w-6xl flex-col gap-5">
-      <header class="relative overflow-hidden rounded-xl border border-lime-200/10 bg-[radial-gradient(circle_at_85%_10%,rgba(190,242,100,.22),transparent_28%),linear-gradient(135deg,#171b12,#0b0d0a)] p-6">
+      <header class="relative overflow-hidden rounded-2xl border border-lime-200/20 bg-[radial-gradient(circle_at_85%_10%,rgba(190,242,100,.24),transparent_28%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-6">
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <Badge>控制台</Badge>
             <h1 class="mt-3 text-4xl font-black tracking-tight md:text-5xl">
               {props.userName ? `${props.userName} 的 token 面板` : 'AI token 使用面板'}
             </h1>
-            <p class="mt-3 text-sm text-stone-400">
+            <p class="mt-3 text-sm text-[var(--app-muted)]">
               最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / 设备数：{props.summary.deviceCount}
             </p>
           </div>
@@ -44,7 +44,7 @@ export function DashboardPreview(props: { summary: UsageSummary; userName?: stri
             <Badge variant="outline">tokens</Badge>
           </CardHeader>
           <CardContent>
-            <div class="flex h-44 items-end gap-2 rounded-md border border-dashed border-stone-800 bg-stone-900/50 p-4">
+            <div class="flex h-44 items-end gap-2 rounded-md border border-dashed border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
               {Array.from({ length: 18 }).map((_, index) => (
                 <div class="flex flex-1 items-end">
                   <div class="w-full rounded-t bg-lime-300/70" style={`height:${20 + ((index * 17) % 70)}%`} />
@@ -58,23 +58,23 @@ export function DashboardPreview(props: { summary: UsageSummary; userName?: stri
           <CardHeader>
             <CardTitle>来源占比</CardTitle>
           </CardHeader>
-          <CardContent class="space-y-4 text-sm text-stone-400">
+          <CardContent class="space-y-4 text-sm text-[var(--app-muted)]">
             {props.summary.sourceSplit.length > 0 ? (
               props.summary.sourceSplit.map((item) => (
                 <div>
                   <div class="flex items-center justify-between gap-4">
                     <span>{formatSource(item.source)}</span>
-                    <span class="font-bold text-stone-100">
+                    <span class="font-bold text-[var(--app-text)]">
                       {formatPercent(item.totalTokens, totalSourceTokens)}
                     </span>
                   </div>
-                  <div class="mt-2 h-2 overflow-hidden rounded-full bg-stone-800">
+                  <div class="mt-2 h-2 overflow-hidden rounded-full bg-[var(--app-border)]">
                     <div class="h-full rounded-full bg-lime-300" style={`width:${formatPercent(item.totalTokens, totalSourceTokens)}`} />
                   </div>
                 </div>
               ))
             ) : (
-              <p class="rounded-md border border-dashed border-stone-800 p-4">还没有上传使用数据。</p>
+              <p class="rounded-md border border-dashed border-[var(--app-border)] p-4">还没有上传使用数据。</p>
             )}
           </CardContent>
         </Card>
@@ -98,8 +98,8 @@ function formatPercent(value: number, total: number) {
 
 function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (
-    <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-stone-800 bg-stone-950/75 text-stone-50'}`}>
-      <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-stone-500'}`}>{props.label}</p>
+    <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
+      <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
       <p class="mt-3 text-3xl font-black tracking-tight">{props.value}</p>
     </div>
   )

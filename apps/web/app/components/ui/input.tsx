@@ -11,9 +11,9 @@ export function Input(props: {
   minLength?: number
 }) {
   const { class: className, ...rest } = props
-  return <input class={cn('mt-2 w-full rounded-md border border-stone-800 bg-stone-900 px-4 py-3 text-stone-50 outline-none transition placeholder:text-stone-600 focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20', className)} {...rest} />
+  return <input class={cn('mt-2 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-4 py-3 text-[var(--app-text)] outline-none transition placeholder:text-[var(--app-subtle)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20', className)} {...rest} />
 }
 
 export function Label(props: { class?: string; children?: Child }) {
-  return <label class={cn('block text-sm text-stone-300', props.class)}>{props.children}</label>
+  return <label class={cn('block text-sm text-[var(--app-muted)]', props.class)}>{props.children}</label>
 }

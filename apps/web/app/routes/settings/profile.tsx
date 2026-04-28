@@ -1,4 +1,5 @@
-﻿import { createRoute } from 'honox/factory'
+import { createRoute } from 'honox/factory'
+import { AppNav } from '../../components/app-nav'
 import { Button, LinkButton } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Input, Label } from '../../components/ui/input'
@@ -10,7 +11,7 @@ export const GET = createRoute(async (c) => {
   try {
     const user = await requireUser(c)
     const profile = await getProfileSettings(c.env.DB, user.id, new URL(c.req.url).origin)
-    return c.render(<ProfilePage profile={profile} saved={c.req.query('saved') === '1'} />)
+    return c.render(<ProfilePage profile={profile} saved={c.req.query('saved') === '1'} email={user.email} />)
   } catch (error) {
     return jsonError(c, error)
   }
@@ -27,18 +28,11 @@ export const POST = createRoute(async (c) => {
   }
 })
 
-function ProfilePage(props: { profile: ProfileSettings; saved: boolean }) {
+function ProfilePage(props: { profile: ProfileSettings; saved: boolean; email: string }) {
   return (
-    <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
+    <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
       <title>公开资料 - TokenBoard</title>
-      <nav class="mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-800 bg-stone-950/75 px-4 py-3">
-        <a class="font-black tracking-tight text-lime-200" href="/dashboard">TokenBoard</a>
-        <div class="flex flex-wrap items-center gap-2 text-sm text-stone-300">
-          <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/dashboard">控制台</a>
-          <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/settings/install">安装采集器</a>
-          <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/leaderboards">排行榜</a>
-        </div>
-      </nav>
+      <AppNav active="profile" email={props.email} />
 
       <section class="mx-auto grid max-w-6xl gap-5 lg:grid-cols-[1fr_0.9fr]">
         <Card>
@@ -58,23 +52,23 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean }) {
               <Label>
                 公开 slug
                 <Input name="slug" value={props.profile.slug} required />
-                <span class="mt-1 block text-xs text-stone-500">只能使用小写字母、数字和连字符，长度 3-32。</span>
+                <span class="mt-1 block text-xs text-[var(--app-muted)]">只能使用小写字母、数字和连字符，长度 3-32。</span>
               </Label>
               <Label>
                 时区
                 <Input name="timezone" value={props.profile.timezone} required />
               </Label>
-              <label class="flex items-start gap-3 rounded-md border border-stone-800 bg-stone-900/60 p-3 text-sm text-stone-300">
+              <label class="flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
                 <input class="mt-1" type="checkbox" name="isPublic" checked={props.profile.isPublic} />
                 <span>
-                  <strong class="block text-stone-100">公开 JSON / SVG</strong>
+                  <strong class="block text-[var(--app-text)]">公开 JSON / SVG</strong>
                   允许任何人通过公开链接查看你的聚合统计。
                 </span>
               </label>
-              <label class="flex items-start gap-3 rounded-md border border-stone-800 bg-stone-900/60 p-3 text-sm text-stone-300">
+              <label class="flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
                 <input class="mt-1" type="checkbox" name="participatesInLeaderboards" checked={props.profile.participatesInLeaderboards} />
                 <span>
-                  <strong class="block text-stone-100">参与排行榜</strong>
+                  <strong class="block text-[var(--app-text)]">参与排行榜</strong>
                   只有公开资料开启后，排行榜才会统计你的数据。
                 </span>
               </label>
@@ -105,8 +99,8 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean }) {
 function CopyBlock(props: { label: string; value: string }) {
   return (
     <div>
-      <p class="mb-2 text-sm font-bold text-stone-300">{props.label}</p>
-      <pre class="overflow-x-auto rounded-md border border-stone-800 bg-stone-900 p-3 text-sm text-stone-200">{props.value}</pre>
+      <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">{props.label}</p>
+      <pre class="overflow-x-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-text)]">{props.value}</pre>
     </div>
   )
 }

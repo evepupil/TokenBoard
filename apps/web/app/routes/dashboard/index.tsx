@@ -1,4 +1,5 @@
 import { createRoute } from 'honox/factory'
+import { AppNav } from '../../components/app-nav'
 import { requireUser } from '../../features/auth/middleware'
 import { DashboardPreview } from '../../features/usage/components/dashboard-preview'
 import { getDashboardSummary } from '../../features/usage/service'
@@ -8,27 +9,10 @@ export default createRoute(async (c) => {
   const summary = await getDashboardSummary(c.env.DB, user.id)
 
   return c.render(
-    <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
+    <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
       <title>控制台 - TokenBoard</title>
-      <AppNav email={user.email} />
+      <AppNav active="dashboard" email={user.email} />
       <DashboardPreview summary={summary} userName={user.name} />
     </main>
   )
 })
-
-function AppNav(props: { email: string }) {
-  return (
-    <nav class="mx-auto mb-6 flex max-w-6xl flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-800 bg-stone-950/75 px-4 py-3">
-      <a class="font-black tracking-tight text-lime-200" href="/dashboard">TokenBoard</a>
-      <div class="flex flex-wrap items-center gap-2 text-sm text-stone-300">
-        <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/dashboard">控制台</a>
-        <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/leaderboards">排行榜</a>
-        <a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/settings/install">安装采集器</a><a class="rounded-md px-3 py-1.5 hover:bg-stone-800" href="/settings/profile">公开资料</a>
-        <span class="hidden text-stone-600 sm:inline">{props.email}</span>
-        <form method="post" action="/auth/sign-out">
-          <button class="rounded-md border border-stone-700 px-3 py-1.5 hover:border-lime-300 hover:text-lime-200" type="submit">退出登录</button>
-        </form>
-      </div>
-    </nav>
-  )
-}

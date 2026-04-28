@@ -7,8 +7,8 @@ export function Badge(props: { class?: string; variant?: 'default' | 'secondary'
     <span class={cn(
       'inline-flex items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide',
       variant === 'default' && 'bg-lime-300 text-stone-950',
-      variant === 'secondary' && 'bg-stone-800 text-stone-200',
-      variant === 'outline' && 'border border-stone-700 text-stone-300',
+      variant === 'secondary' && 'bg-[var(--app-bg-soft)] text-[var(--app-text)]',
+      variant === 'outline' && 'border border-[var(--app-border)] text-[var(--app-muted)]',
       props.class
     )}>{props.children}</span>
   )

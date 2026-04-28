@@ -1,1 +1,51 @@
 @import 'tailwindcss' source('../app');
+
+:root {
+  color-scheme: dark;
+  --app-bg: #10130f;
+  --app-bg-soft: #151812;
+  --app-panel: rgba(12, 13, 10, 0.78);
+  --app-panel-strong: rgba(16, 19, 15, 0.94);
+  --app-border: rgba(120, 113, 108, 0.34);
+  --app-text: #fafaf9;
+  --app-muted: #a8a29e;
+  --app-subtle: #78716c;
+  --app-hover: rgba(255, 255, 255, 0.06);
+  --app-input: rgba(28, 25, 23, 0.72);
+}
+
+.theme-light {
+  color-scheme: light;
+  --app-bg: #f4f0e8;
+  --app-bg-soft: #ede6d8;
+  --app-panel: rgba(255, 255, 255, 0.82);
+  --app-panel-strong: rgba(255, 255, 255, 0.95);
+  --app-border: rgba(87, 83, 78, 0.22);
+  --app-text: #1c1917;
+  --app-muted: #57534e;
+  --app-subtle: #78716c;
+  --app-hover: rgba(41, 37, 36, 0.07);
+  --app-input: rgba(255, 255, 255, 0.86);
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--app-bg);
+}
+
+body {
+  color: var(--app-text);
+}
+
+[data-theme-icon='dark'] {
+  display: none;
+}
+
+.theme-light [data-theme-icon='light'] {
+  display: none;
+}
+
+.theme-light [data-theme-icon='dark'] {
+  display: inline-flex;
+}

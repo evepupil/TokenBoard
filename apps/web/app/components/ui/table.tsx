@@ -1,4 +1,4 @@
-﻿import type { Child } from 'hono/jsx'
+import type { Child } from 'hono/jsx'
 import { cn } from '../../lib/cn'
 
 export function Table(props: { class?: string; children?: Child }) {
@@ -6,7 +6,7 @@ export function Table(props: { class?: string; children?: Child }) {
 }
 
 export function TableHeader(props: { class?: string; children?: Child }) {
-  return <thead class={cn('text-xs uppercase tracking-wide text-stone-500', props.class)}>{props.children}</thead>
+  return <thead class={cn('text-xs uppercase tracking-wide text-[var(--app-muted)]', props.class)}>{props.children}</thead>
 }
 
 export function TableBody(props: { class?: string; children?: Child }) {
@@ -14,7 +14,7 @@ export function TableBody(props: { class?: string; children?: Child }) {
 }
 
 export function TableRow(props: { class?: string; children?: Child }) {
-  return <tr class={cn('border-b border-stone-800 transition-colors', props.class)}>{props.children}</tr>
+  return <tr class={cn('border-b border-[var(--app-border)] transition-colors', props.class)}>{props.children}</tr>
 }
 
 export function TableHead(props: { class?: string; children?: Child }) {
