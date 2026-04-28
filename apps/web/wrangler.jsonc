@@ -9,10 +9,6 @@
   "assets": {
     "directory": "./dist"
   },
-  "vars": {
-    "SEED_USER_ID": "seed-user",
-    "SEED_UPLOAD_TOKEN_SHA256": "ce64707c5082e6eaa8d41bf755f6948a4ddbbc4e8455616fd080d9249e24f4b0"
-  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",

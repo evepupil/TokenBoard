@@ -1,12 +1,14 @@
 import { createRoute } from 'honox/factory'
+import { requireUser } from '../../features/auth/middleware'
 import { InstallCommand } from '../../features/device/components/install-command'
 import { D1DevicePairingRepository } from '../../features/device/repository'
 import { createPairingCode, createPairingCodeDeps } from '../../features/device/service'
 import { jsonError } from '../../lib/http'
 
-export const GET = createRoute((c) => {
+export const GET = createRoute(async (c) => {
+  await requireUser(c)
   return c.render(
-    <main class="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-50">
+    <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
       <title>Connect TokenBoard</title>
       <InstallCommand baseUrl={new URL(c.req.url).origin} timezone="Asia/Shanghai" />
     </main>
@@ -15,18 +17,14 @@ export const GET = createRoute((c) => {
 
 export const POST = createRoute(async (c) => {
   try {
+    const user = await requireUser(c)
     const form = await c.req.parseBody()
     const timezone = String(form.timezone || 'Asia/Shanghai')
     const repository = new D1DevicePairingRepository(c.env.DB)
-    // Temporary bootstrap path until Better Auth user sessions are wired in.
-    const result = await createPairingCode(
-      repository,
-      c.env.SEED_USER_ID,
-      createPairingCodeDeps()
-    )
+    const result = await createPairingCode(repository, user.id, createPairingCodeDeps())
 
     return c.render(
-      <main class="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-50">
+      <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
         <title>Connect TokenBoard</title>
         <InstallCommand
           baseUrl={new URL(c.req.url).origin}

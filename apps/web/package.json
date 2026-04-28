@@ -13,9 +13,12 @@
   "dependencies": {
     "@tokenboard/usage-core": "workspace:*",
     "better-auth": "^1.4.10",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.12.15",
     "honox": "0.1.55",
+    "tailwind-merge": "^3.5.0",
     "zod": "^4.2.1"
   },
   "devDependencies": {
@@ -23,9 +26,9 @@
     "@hono/vite-build": "^1.11.1",
     "@hono/vite-dev-server": "^0.25.2",
     "@tailwindcss/vite": "^4.2.2",
+    "drizzle-kit": "^0.31.8",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.9",
-    "drizzle-kit": "^0.31.8",
     "wrangler": "^4.83.0"
   }
 }
