@@ -29,7 +29,7 @@
     {
       "binding": "DB",
       "database_name": "tokenboard",
-      "database_id": "replace-with-cloudflare-d1-id",
+      "database_id": "4af5cf99-10d9-4114-b707-f82e75f89746",
       "migrations_dir": "db/migrations"
     }
   ],
