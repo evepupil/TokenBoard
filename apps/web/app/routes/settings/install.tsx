@@ -1,4 +1,4 @@
-import { createRoute } from 'honox/factory'
+﻿import { createRoute } from 'honox/factory'
 import { requireUser } from '../../features/auth/middleware'
 import { InstallCommand } from '../../features/device/components/install-command'
 import { D1DevicePairingRepository } from '../../features/device/repository'

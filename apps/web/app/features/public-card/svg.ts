@@ -1,4 +1,4 @@
-export type UsageCardInput = {
+﻿export type UsageCardInput = {
   displayName: string
   todayTokens: number
   monthCostUsd: number
@@ -22,4 +22,3 @@ function escapeXml(value: string) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
 }
-
