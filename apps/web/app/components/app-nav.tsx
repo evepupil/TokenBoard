@@ -9,6 +9,7 @@ type AppNavProps = {
 }
 
 const repositoryUrl = 'https://github.com/evepupil/TokenBoard'
+const iconButtonClass = 'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
 
 export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
@@ -25,7 +26,7 @@ export function AppNav(props: AppNavProps) {
         </a>
         <div class="flex items-center gap-2 md:hidden">
           <ThemeToggle />
-          <RepositoryLink compact />
+          <RepositoryLink />
         </div>
       </div>
 
@@ -70,21 +71,17 @@ function NavLink(props: { href: string; active?: boolean; children: string }) {
   )
 }
 
-function RepositoryLink(props: { compact?: boolean }) {
+function RepositoryLink() {
   return (
     <a
-      class={cn(
-        'inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] px-3 py-2 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]',
-        props.compact && 'h-10 w-10 px-0'
-      )}
+      class={iconButtonClass}
       href={repositoryUrl}
       target="_blank"
       rel="noreferrer"
       aria-label="打开 GitHub 仓库"
       title="GitHub 仓库"
     >
-      <GitHubMark size={16} />
-      {props.compact ? null : <span>GitHub</span>}
+      <GitHubMark size={17} />
     </a>
   )
 }
@@ -92,15 +89,14 @@ function RepositoryLink(props: { compact?: boolean }) {
 function ThemeToggle() {
   return (
     <button
-      class="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] px-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]"
+      class={iconButtonClass}
       type="button"
       data-theme-toggle="true"
       aria-label="切换明暗主题"
       title="切换明暗主题"
     >
-      <span data-theme-icon="light"><LucideIcon icon={Sun} size={15} /></span>
-      <span data-theme-icon="dark"><LucideIcon icon={Moon} size={15} /></span>
-      <span class="hidden sm:inline" data-theme-label>主题</span>
+      <span data-theme-icon="light"><LucideIcon icon={Sun} size={17} /></span>
+      <span data-theme-icon="dark"><LucideIcon icon={Moon} size={17} /></span>
     </button>
   )
 }

@@ -7,8 +7,12 @@ const themeKey = 'tokenboard-theme'
 type Theme = 'dark' | 'light'
 
 function getStoredTheme(): Theme | null {
-  const value = window.localStorage.getItem(themeKey)
-  return value === 'light' || value === 'dark' ? value : null
+  try {
+    const value = window.localStorage.getItem(themeKey)
+    return value === 'light' || value === 'dark' ? value : null
+  } catch (_) {
+    return null
+  }
 }
 
 function getPreferredTheme(): Theme {
@@ -18,22 +22,15 @@ function getPreferredTheme(): Theme {
 function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle('theme-light', theme === 'light')
   document.documentElement.dataset.theme = theme
-  document.querySelectorAll<HTMLElement>('[data-theme-label]').forEach((label) => {
-    label.textContent = theme === 'light' ? '浅色' : '深色'
+  document.querySelectorAll<HTMLElement>('[data-theme-toggle]').forEach((button) => {
+    const targetThemeLabel = theme === 'light' ? '深色' : '浅色'
+    button.setAttribute('aria-label', `切换到${targetThemeLabel}主题`)
+    button.setAttribute('title', `切换到${targetThemeLabel}主题`)
   })
 }
 
 function initTheme() {
   applyTheme(getStoredTheme() ?? getPreferredTheme())
-
-  document.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-theme-toggle]') : null
-    if (!target) return
-
-    const nextTheme: Theme = document.documentElement.classList.contains('theme-light') ? 'dark' : 'light'
-    window.localStorage.setItem(themeKey, nextTheme)
-    applyTheme(nextTheme)
-  })
 }
 
 initTheme()
