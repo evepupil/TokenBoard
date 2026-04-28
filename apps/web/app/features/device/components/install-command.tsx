@@ -15,6 +15,10 @@ export function InstallCommand(props: InstallCommandProps) {
       <header class="flex flex-col gap-2 border-b border-zinc-800 pb-6">
         <p class="text-sm font-medium uppercase tracking-wide text-cyan-300">TokenBoard</p>
         <h1 class="text-3xl font-semibold">Connect this machine</h1>
+        <p class="max-w-2xl text-sm text-zinc-400">
+          Generate a short-lived pairing prompt, paste it into Codex or Claude Code, and let the
+          local agent install the TokenBoard skill plus daily sync.
+        </p>
       </header>
 
       <form method="post" class="rounded-lg border border-zinc-800 bg-zinc-900/70 p-5">
@@ -51,7 +55,11 @@ export function InstallCommand(props: InstallCommandProps) {
 
 export function createInstallPrompt(baseUrl: string, timezone: string, pairingCode: string) {
   return [
-    'Install the TokenBoard skill from https://github.com/evepupil/TokenBoard/tree/master/skills/tokenboard, then use that skill to run setup with this pairing code.',
+    'Install and run TokenBoard on this machine.',
+    '',
+    '1. Install the TokenBoard skill from this GitHub repo path:',
+    '   https://github.com/evepupil/TokenBoard/tree/master/skills/tokenboard',
+    '2. Use the installed TokenBoard skill to run setup:',
     '',
     `node scripts/setup.mjs --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
     '',

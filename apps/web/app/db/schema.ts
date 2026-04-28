@@ -34,6 +34,7 @@ export const uploadTokens = sqliteTable('upload_tokens', {
     .references(() => users.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
+  deviceId: text('device_id'),
   lastUsedAt: text('last_used_at'),
   createdAt: text('created_at').notNull(),
   revokedAt: text('revoked_at')

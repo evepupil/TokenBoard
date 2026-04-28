@@ -12,7 +12,11 @@ describe('verifyUploadToken', () => {
       'Bearer dev-upload-token'
     )
 
-    expect(user).toEqual({ id: 'seed-user' })
+    expect(user).toEqual({
+      id: 'seed-user',
+      uploadTokenHash: 'ce64707c5082e6eaa8d41bf755f6948a4ddbbc4e8455616fd080d9249e24f4b0',
+      deviceId: null
+    })
   })
 
   test('rejects a bearer token that does not match the configured hash', async () => {
@@ -39,12 +43,13 @@ describe('verifyUploadToken', () => {
         DB: {
           prepare(sql: string) {
             expect(sql).toContain('FROM upload_tokens')
+            expect(sql).toContain('device_id as deviceId')
             return {
               bind(value: string) {
                 expect(value).toBe('hash:tb_upload_secret')
                 return {
                   async first() {
-                    return { userId: 'paired-user' }
+                    return { userId: 'paired-user', deviceId: 'dev_123' }
                   }
                 }
               }
@@ -56,6 +61,10 @@ describe('verifyUploadToken', () => {
       async (value) => `hash:${value}`
     )
 
-    expect(user).toEqual({ id: 'paired-user' })
+    expect(user).toEqual({
+      id: 'paired-user',
+      uploadTokenHash: 'hash:tb_upload_secret',
+      deviceId: 'dev_123'
+    })
   })
 })

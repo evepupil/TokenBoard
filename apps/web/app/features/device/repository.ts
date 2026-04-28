@@ -57,8 +57,8 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
     await this.db
       .prepare(
         `
-          INSERT INTO upload_tokens (id, user_id, name, token_hash, created_at)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO upload_tokens (id, user_id, name, token_hash, device_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
         `
       )
       .bind(
@@ -66,6 +66,7 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
         input.userId,
         input.deviceName,
         input.uploadTokenHash,
+        input.deviceId,
         input.createdAt
       )
       .run()

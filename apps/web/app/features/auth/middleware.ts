@@ -4,6 +4,8 @@ import { sha256Hex } from '../../lib/crypto'
 
 export type AuthenticatedUser = {
   id: string
+  uploadTokenHash: string
+  deviceId: string | null
 }
 
 export async function requireUser() {
@@ -30,14 +32,14 @@ export async function verifyUploadToken(
 
   const tokenHash = await hash(token)
   if (tokenHash === env.SEED_UPLOAD_TOKEN_SHA256) {
-    return { id: env.SEED_USER_ID }
+    return { id: env.SEED_USER_ID, uploadTokenHash: tokenHash, deviceId: null }
   }
 
   if (env.DB) {
     const row = await env.DB
       .prepare(
         `
-          SELECT user_id as userId
+          SELECT user_id as userId, device_id as deviceId
           FROM upload_tokens
           WHERE token_hash = ?
             AND revoked_at IS NULL
@@ -45,10 +47,10 @@ export async function verifyUploadToken(
         `
       )
       .bind(tokenHash)
-      .first<{ userId: string }>()
+      .first<{ userId: string; deviceId: string | null }>()
 
     if (row) {
-      return { id: row.userId }
+      return { id: row.userId, uploadTokenHash: tokenHash, deviceId: row.deviceId ?? null }
     }
   }
 

@@ -8,7 +8,7 @@ export const POST = createRoute(async (c) => {
   try {
     const user = await verifyUploadToken(c.env, c.req.header('authorization') ?? null)
     const body = ingestRequestSchema.parse(await c.req.json())
-    const result = await ingestSnapshots(c.env.DB, user.id, body.snapshots)
+    const result = await ingestSnapshots(c.env.DB, user, body.snapshots)
     return c.json(result)
   } catch (error) {
     return jsonError(c, error)
