@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { readConfig, parseArgs, collectorDir } from './config.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
@@ -25,12 +26,12 @@ const env = {
 
 const result = spawnSync(
   process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
-  ['--filter', '@tokenboard/collector', mode, '--', '--source', source],
+  ['run', mode, '--source', source],
   {
-    cwd: repoDir,
+    cwd: join(repoDir, 'packages', 'collector'),
     env,
     stdio: 'inherit',
-    shell: false
+    shell: process.platform === 'win32'
   }
 )
 
