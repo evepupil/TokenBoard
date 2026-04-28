@@ -1,8 +1,8 @@
-﻿import type { Child } from 'hono/jsx'
+import type { Child } from 'hono/jsx'
 import { cn } from '../../lib/cn'
 
 export function Card(props: { class?: string; children?: Child }) {
-  return <section class={cn('rounded-[1.5rem] border border-stone-800 bg-stone-950/75 text-stone-50 shadow-xl shadow-black/10', props.class)}>{props.children}</section>
+  return <section class={cn('rounded-xl border border-stone-800 bg-stone-950/75 text-stone-50 shadow-xl shadow-black/10', props.class)}>{props.children}</section>
 }
 
 export function CardHeader(props: { class?: string; children?: Child }) {

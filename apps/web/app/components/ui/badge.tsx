@@ -1,4 +1,4 @@
-﻿import type { Child } from 'hono/jsx'
+import type { Child } from 'hono/jsx'
 import { cn } from '../../lib/cn'
 
 export function Badge(props: { class?: string; variant?: 'default' | 'secondary' | 'outline'; children?: Child }) {

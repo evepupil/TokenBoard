@@ -9,7 +9,7 @@ export const GET = createRoute(async (c) => {
   await requireUser(c)
   return c.render(
     <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
-      <title>Connect TokenBoard</title>
+      <title>连接 TokenBoard</title>
       <InstallCommand baseUrl={new URL(c.req.url).origin} timezone="Asia/Shanghai" />
     </main>
   )
@@ -25,7 +25,7 @@ export const POST = createRoute(async (c) => {
 
     return c.render(
       <main class="min-h-screen bg-[#10130f] px-5 py-6 text-stone-50">
-        <title>Connect TokenBoard</title>
+        <title>连接 TokenBoard</title>
         <InstallCommand
           baseUrl={new URL(c.req.url).origin}
           timezone={timezone}
