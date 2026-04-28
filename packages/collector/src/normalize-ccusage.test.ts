@@ -113,5 +113,60 @@ describe('normalizeCcusageDailyJson', () => {
       }
     ])
   })
-})
 
+  test('normalizes codex rows with display dates and models object', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        daily: [
+          {
+            date: 'Apr 28, 2026',
+            inputTokens: 63578474,
+            cachedInputTokens: 58842240,
+            outputTokens: 250965,
+            totalTokens: 63829439,
+            costUSD: 18.860285,
+            models: {
+              'gpt-5.4': {
+                inputTokens: 6663074,
+                cachedInputTokens: 4871680,
+                outputTokens: 45372,
+                totalTokens: 6708446
+              },
+              'gpt-5.5': {
+                inputTokens: 56915400,
+                cachedInputTokens: 53970560,
+                outputTokens: 205593,
+                totalTokens: 57120993
+              }
+            }
+          }
+        ]
+      },
+      { source: 'codex', timezone: 'Asia/Shanghai', collectedAt }
+    )
+
+    expect(snapshots).toMatchObject([
+      {
+        source: 'codex',
+        usageDate: '2026-04-28',
+        model: 'gpt-5.4',
+        inputTokens: 6663074,
+        outputTokens: 45372,
+        cacheReadTokens: 4871680,
+        totalTokens: 6708446
+      },
+      {
+        source: 'codex',
+        usageDate: '2026-04-28',
+        model: 'gpt-5.5',
+        inputTokens: 56915400,
+        outputTokens: 205593,
+        cacheReadTokens: 53970560,
+        totalTokens: 57120993
+      }
+    ])
+    expect(snapshots[0].costUsd).toBeCloseTo(1.9822076685823609)
+    expect(snapshots[1].costUsd).toBeCloseTo(16.878077331417643)
+    expect(snapshots[0].costUsd + snapshots[1].costUsd).toBeCloseTo(18.860285)
+  })
+})
