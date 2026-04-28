@@ -1,0 +1,19 @@
+{
+  "name": "tokenboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.21.0",
+  "scripts": {
+    "dev": "pnpm --filter @tokenboard/web dev",
+    "build": "pnpm --filter @tokenboard/web build",
+    "preview": "pnpm --filter @tokenboard/web preview",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}
+

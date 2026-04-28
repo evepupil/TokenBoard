@@ -1,0 +1,31 @@
+{
+  "name": "@tokenboard/web",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build --mode client && vite build",
+    "preview": "wrangler dev",
+    "deploy": "pnpm run build && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "private": true,
+  "dependencies": {
+    "@tokenboard/usage-core": "workspace:*",
+    "better-auth": "^1.4.10",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.12.15",
+    "honox": "0.1.55",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260420.1",
+    "@hono/vite-build": "^1.11.1",
+    "@hono/vite-dev-server": "^0.25.2",
+    "@tailwindcss/vite": "^4.2.2",
+    "tailwindcss": "^4.2.2",
+    "vite": "^8.0.9",
+    "drizzle-kit": "^0.31.8",
+    "wrangler": "^4.83.0"
+  }
+}

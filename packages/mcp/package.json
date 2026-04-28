@@ -1,0 +1,21 @@
+{
+  "name": "@tokenboard/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "tokenboard-mcp": "./src/server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@tokenboard/collector": "workspace:*",
+    "@tokenboard/usage-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}

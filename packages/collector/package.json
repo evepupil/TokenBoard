@@ -1,0 +1,20 @@
+{
+  "name": "@tokenboard/collector",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@tokenboard/usage-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}
