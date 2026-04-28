@@ -8,7 +8,7 @@ aggregates to Cloudflare Workers + D1, and shows usage stats on a hosted dashboa
 Open the deployed site and visit:
 
 ```txt
-https://tokenboard.yeton92479.workers.dev/settings/install
+https://tokenboard.chaosyn.com/settings/install
 ```
 
 Generate an install prompt, paste it into Codex or Claude Code, and let the agent install the

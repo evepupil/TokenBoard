@@ -9,6 +9,16 @@
   "assets": {
     "directory": "./dist"
   },
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "tokenboard.chaosyn.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://tokenboard.chaosyn.com"
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",

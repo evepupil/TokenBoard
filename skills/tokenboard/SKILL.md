@@ -18,7 +18,7 @@ node scripts/setup.mjs --pairing-code <pairing-code>
 Optional flags:
 
 ```bash
---base-url https://tokenboard.yeton92479.workers.dev
+--base-url https://tokenboard.chaosyn.com
 --timezone Asia/Shanghai
 --device-name "Codex Desktop"
 --skip-collector
@@ -57,5 +57,5 @@ node scripts/status.mjs
 ## Troubleshooting
 
 - If Node is missing, ask the user to install Node.js 20 or newer.
-- If the collector cannot reach `workers.dev`, ask the user to configure proxy environment variables or use a TokenBoard custom domain.
+- If the collector cannot reach `https://tokenboard.chaosyn.com`, ask the user to configure proxy environment variables or verify the TokenBoard custom domain.
 - If pairing fails, ask the user to generate a new pairing code from TokenBoard.

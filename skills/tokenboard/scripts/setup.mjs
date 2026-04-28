@@ -6,7 +6,7 @@ import { parseArgs, writeConfig } from './config.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
 const pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
-const baseUrl = String(flags['base-url'] || process.env.TOKENBOARD_BASE_URL || 'https://tokenboard.yeton92479.workers.dev').replace(/\/$/, '')
+const baseUrl = String(flags['base-url'] || process.env.TOKENBOARD_BASE_URL || 'https://tokenboard.chaosyn.com').replace(/\/$/, '')
 const timezone = flags.timezone || process.env.TOKENBOARD_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone
 const deviceName = flags['device-name'] || `${hostname()} ${platform()}`
 
