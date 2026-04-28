@@ -1,0 +1,8 @@
+interface:
+  display_name: "TokenBoard"
+  short_description: "Connect local AI token usage collection"
+  brand_color: "#22D3EE"
+  default_prompt: "Use $tokenboard to connect this machine with my TokenBoard pairing code."
+
+policy:
+  allow_implicit_invocation: true

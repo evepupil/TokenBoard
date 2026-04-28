@@ -39,6 +39,29 @@ export const uploadTokens = sqliteTable('upload_tokens', {
   revokedAt: text('revoked_at')
 })
 
+export const pairingCodes = sqliteTable('pairing_codes', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull().unique(),
+  expiresAt: text('expires_at').notNull(),
+  consumedAt: text('consumed_at'),
+  createdAt: text('created_at').notNull()
+})
+
+export const devices = sqliteTable('devices', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  platform: text('platform').notNull(),
+  lastSyncedAt: text('last_synced_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+})
+
 export const dailyUsage = sqliteTable(
   'daily_usage',
   {
@@ -69,6 +92,7 @@ export const schema = {
   users,
   profiles,
   uploadTokens,
+  pairingCodes,
+  devices,
   dailyUsage
 }
-

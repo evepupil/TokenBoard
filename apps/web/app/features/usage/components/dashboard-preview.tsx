@@ -6,6 +6,9 @@ export function DashboardPreview() {
       <header class="flex flex-col gap-2 border-b border-zinc-800 pb-6">
         <p class="text-sm font-medium uppercase tracking-wide text-cyan-300">TokenBoard</p>
         <h1 class="text-3xl font-semibold">AI token usage board</h1>
+        <a class="w-fit text-sm font-medium text-cyan-300" href="/settings/install">
+          Connect a machine
+        </a>
       </header>
 
       <div class="grid gap-4 md:grid-cols-4">
@@ -40,4 +43,3 @@ function Metric(props: { label: string; value: string }) {
     </div>
   )
 }
-

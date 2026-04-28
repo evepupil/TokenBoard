@@ -30,5 +30,32 @@ describe('verifyUploadToken', () => {
       status: 401
     })
   })
-})
 
+  test('returns token owner from upload_tokens when bearer token is stored in D1', async () => {
+    const user = await verifyUploadToken(
+      {
+        SEED_USER_ID: 'seed-user',
+        SEED_UPLOAD_TOKEN_SHA256: 'seed-hash',
+        DB: {
+          prepare(sql: string) {
+            expect(sql).toContain('FROM upload_tokens')
+            return {
+              bind(value: string) {
+                expect(value).toBe('hash:tb_upload_secret')
+                return {
+                  async first() {
+                    return { userId: 'paired-user' }
+                  }
+                }
+              }
+            }
+          }
+        } as unknown as D1Database
+      },
+      'Bearer tb_upload_secret',
+      async (value) => `hash:${value}`
+    )
+
+    expect(user).toEqual({ id: 'paired-user' })
+  })
+})
