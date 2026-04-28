@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @tokenboard/web dev",
     "build": "pnpm --filter @tokenboard/web build",
     "preview": "pnpm --filter @tokenboard/web preview",
+    "deploy": "pnpm --filter @tokenboard/web run deploy",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
   },
@@ -16,4 +17,3 @@
     "vitest": "^4.0.16"
   }
 }
-
