@@ -18,7 +18,13 @@ export function AppNav(props: AppNavProps) {
     <nav class="mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-4 py-3 text-[var(--app-text)] shadow-xl shadow-black/10 backdrop-blur md:flex-row md:items-center md:justify-between">
       <div class="flex items-center justify-between gap-3">
         <a class="group flex items-center gap-3" href={isAuthenticated ? '/dashboard' : '/'}>
-          <span class="grid h-10 w-10 place-items-center rounded-xl bg-lime-300 text-sm font-black text-stone-950 shadow-lg shadow-lime-950/20 transition group-hover:rotate-3">TB</span>
+          <img
+            class="h-10 w-10 rounded-xl shadow-lg shadow-lime-950/20 transition group-hover:rotate-3"
+            src="/logo.svg"
+            alt="TokenBoard"
+            width="40"
+            height="40"
+          />
           <span>
             <span class="block text-base font-black tracking-tight text-[var(--app-text)]">TokenBoard</span>
             <span class="block text-xs text-[var(--app-muted)]">AI token 使用统计</span>
