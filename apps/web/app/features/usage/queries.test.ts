@@ -167,7 +167,8 @@ describe('getUsageDetails', () => {
       userId: 'user_1',
       source: 'claude-code',
       startDate: '2026-04-27',
-      endDate: '2026-04-29'
+      endDate: '2026-04-29',
+      modelQuery: 'sonnet'
     })
 
     expect(details.summary).toEqual({
@@ -182,21 +183,37 @@ describe('getUsageDetails', () => {
         totalTokens: 120,
         costUsd: 0.12,
         sessionCount: 2,
-        sourceSplit: [{ source: 'claude-code', totalTokens: 120 }]
+        sourceSplit: [{ source: 'claude-code', totalTokens: 120 }],
+        modelRows: []
       },
       {
         usageDate: '2026-04-28',
         totalTokens: 0,
         costUsd: 0,
         sessionCount: 0,
-        sourceSplit: []
+        sourceSplit: [],
+        modelRows: []
       },
       {
         usageDate: '2026-04-29',
         totalTokens: 340,
         costUsd: 0.34,
         sessionCount: 3,
-        sourceSplit: [{ source: 'claude-code', totalTokens: 340 }]
+        sourceSplit: [{ source: 'claude-code', totalTokens: 340 }],
+        modelRows: [
+          {
+            usageDate: '2026-04-29',
+            source: 'claude-code',
+            model: 'claude-sonnet',
+            inputTokens: 100,
+            outputTokens: 80,
+            cacheCreationTokens: 60,
+            cacheReadTokens: 100,
+            totalTokens: 340,
+            costUsd: 0.34,
+            sessionCount: 3
+          }
+        ]
       }
     ])
     expect(details.modelRows).toEqual([
@@ -214,10 +231,12 @@ describe('getUsageDetails', () => {
       }
     ])
     expect(bindings).toEqual([
-      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code'],
-      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code']
+      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code', 'sonnet', 'sonnet'],
+      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code', 'sonnet', 'sonnet']
     ])
     expect(sqlStatements[0]).toContain('GROUP BY usage_date, source')
+    expect(sqlStatements[0]).toContain('lower(model)')
     expect(sqlStatements[1]).toContain('GROUP BY usage_date, source, model')
+    expect(sqlStatements[1]).toContain('lower(model)')
   })
 })

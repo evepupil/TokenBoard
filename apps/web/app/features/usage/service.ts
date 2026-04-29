@@ -1,4 +1,4 @@
-import { getDailyUsageTrend, getUsageSummary, type DailyUsageTrendItem, type UsageSummary } from './queries'
+import { getDailyUsageTrend, getUsageSummary, type DailyUsageTrendItem, type UsageDetails, type UsageSummary } from './queries'
 import { toIsoDate } from '../../lib/time'
 import { usageSourceSchema } from './schema'
 
@@ -24,6 +24,7 @@ export type UsageDetailsFilters = {
   source: 'all' | 'claude-code' | 'codex'
   startDate: string
   endDate: string
+  modelQuery: string
 }
 
 export function parseUsageDetailsFilters(
@@ -36,20 +37,53 @@ export function parseUsageDetailsFilters(
   const source = query.source === 'all' || !parsedSource.success ? 'all' : parsedSource.data
   const startDate = readIsoDate(query.startDate, defaultStart)
   const endDate = readIsoDate(query.endDate, today)
+  const modelQuery = String(query.model ?? '').trim()
 
   if (startDate > endDate) {
     return {
       source,
       startDate: endDate,
-      endDate: startDate
+      endDate: startDate,
+      modelQuery
     }
   }
 
   return {
     source,
     startDate,
-    endDate
+    endDate,
+    modelQuery
   }
+}
+
+export function usageDetailsToCsv(details: UsageDetails) {
+  const header = [
+    'date',
+    'source',
+    'model',
+    'input_tokens',
+    'output_tokens',
+    'cache_creation_tokens',
+    'cache_read_tokens',
+    'total_tokens',
+    'cost_usd',
+    'session_count'
+  ]
+
+  const rows = details.modelRows.map((row) => [
+    row.usageDate,
+    row.source,
+    row.model,
+    row.inputTokens,
+    row.outputTokens,
+    row.cacheCreationTokens,
+    row.cacheReadTokens,
+    row.totalTokens,
+    row.costUsd,
+    row.sessionCount
+  ])
+
+  return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')
 }
 
 function addUtcDays(date: Date, days: number) {
@@ -60,4 +94,12 @@ function addUtcDays(date: Date, days: number) {
 
 function readIsoDate(value: string | undefined, fallback: string) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback
+}
+
+function csvCell(value: string | number) {
+  const text = String(value)
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`
+  }
+  return text
 }

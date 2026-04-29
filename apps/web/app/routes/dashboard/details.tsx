@@ -10,7 +10,8 @@ export default createRoute(async (c) => {
   const filters = parseUsageDetailsFilters({
     source: c.req.query('source'),
     startDate: c.req.query('startDate'),
-    endDate: c.req.query('endDate')
+    endDate: c.req.query('endDate'),
+    model: c.req.query('model')
   })
   const details = await getUsageDetails(c.env.DB, {
     userId: user.id,

@@ -1,5 +1,5 @@
 import { Badge } from '../../../components/ui/badge'
-import { Button } from '../../../components/ui/button'
+import { Button, LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table'
 import { formatUsd } from '../../../lib/money'
@@ -21,6 +21,7 @@ export function UsageDetailsPanel(props: {
             <h1 class="mt-3 text-4xl font-black tracking-tight">每日用量详情</h1>
             <p class="mt-2 text-sm text-[var(--app-muted)]">
               {props.filters.startDate} 至 {props.filters.endDate} / {formatSource(props.filters.source)}
+              {props.filters.modelQuery ? ` / 模型包含 ${props.filters.modelQuery}` : ''}
             </p>
           </div>
           <UsageDetailsFiltersForm filters={props.filters} />
@@ -37,99 +38,82 @@ export function UsageDetailsPanel(props: {
       <Card>
         <CardHeader>
           <CardTitle>每日汇总</CardTitle>
-          <CardDescription>按日期聚合，保留范围内没有用量的日期。</CardDescription>
+          <CardDescription>按日期聚合；展开任意日期查看当天模型明细。</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div class="overflow-x-auto">
-            <Table class="min-w-[760px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>日期</TableHead>
-                  <TableHead>Tokens</TableHead>
-                  <TableHead>费用</TableHead>
-                  <TableHead>Sessions</TableHead>
-                  <TableHead>来源</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dailyRows.map((row) => (
-                  <TableRow>
-                    <TableCell class="font-bold">{row.usageDate}</TableCell>
-                    <TableCell>{formatInteger(row.totalTokens)}</TableCell>
-                    <TableCell>{formatUsd(row.costUsd)}</TableCell>
-                    <TableCell>{formatInteger(row.sessionCount)}</TableCell>
-                    <TableCell>
-                      {row.sourceSplit.length > 0 ? (
-                        <div class="flex flex-wrap gap-2">
-                          {row.sourceSplit.map((item) => (
-                            <span class="rounded-full border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-muted)]">
-                              {formatSource(item.source)} {formatPercent(item.totalTokens, row.totalTokens)}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span class="text-[var(--app-subtle)]">-</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+        <CardContent class="space-y-3">
+          <div class="hidden grid-cols-[1.1fr_1fr_0.8fr_0.7fr_1.2fr] gap-3 px-4 text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:grid">
+            <span>日期</span>
+            <span>Tokens</span>
+            <span>费用</span>
+            <span>Sessions</span>
+            <span>来源</span>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>模型明细</CardTitle>
-          <CardDescription>按日期、来源和模型聚合。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="overflow-x-auto">
-            <Table class="min-w-[1040px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>日期</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead>模型</TableHead>
-                  <TableHead>Input</TableHead>
-                  <TableHead>Output</TableHead>
-                  <TableHead>Cache 写入</TableHead>
-                  <TableHead>Cache 读取</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>费用</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {props.details.modelRows.length > 0 ? (
-                  props.details.modelRows.map((row) => (
-                    <TableRow>
-                      <TableCell class="font-bold">{row.usageDate}</TableCell>
-                      <TableCell>{formatSource(row.source)}</TableCell>
-                      <TableCell class="max-w-64 truncate">
-                        <span title={row.model}>{row.model}</span>
-                      </TableCell>
-                      <TableCell>{formatInteger(row.inputTokens)}</TableCell>
-                      <TableCell>{formatInteger(row.outputTokens)}</TableCell>
-                      <TableCell>{formatInteger(row.cacheCreationTokens)}</TableCell>
-                      <TableCell>{formatInteger(row.cacheReadTokens)}</TableCell>
-                      <TableCell class="font-bold">{formatInteger(row.totalTokens)}</TableCell>
-                      <TableCell>{formatUsd(row.costUsd)}</TableCell>
-                    </TableRow>
-                  ))
+          {dailyRows.map((row) => (
+            <details class="group rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
+              <summary class="grid cursor-pointer list-none gap-3 p-4 text-sm md:grid-cols-[1.1fr_1fr_0.8fr_0.7fr_1.2fr] md:items-center">
+                <span class="flex items-center gap-2 font-bold">
+                  <span class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--app-border)] text-xs text-[var(--app-muted)] transition group-open:rotate-90">›</span>
+                  {row.usageDate}
+                </span>
+                <span>{formatInteger(row.totalTokens)}</span>
+                <span>{formatUsd(row.costUsd)}</span>
+                <span>{formatInteger(row.sessionCount)}</span>
+                <span>
+                  {row.sourceSplit.length > 0 ? (
+                    <span class="flex flex-wrap gap-2">
+                      {row.sourceSplit.map((item) => (
+                        <span class="rounded-full border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-muted)]">
+                          {formatSource(item.source)} {formatPercent(item.totalTokens, row.totalTokens)}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span class="text-[var(--app-subtle)]">无用量</span>
+                  )}
+                </span>
+              </summary>
+              <div class="border-t border-[var(--app-border)] p-4">
+                {row.modelRows.length > 0 ? (
+                  <div class="overflow-x-auto">
+                    <Table class="min-w-[920px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>来源</TableHead>
+                          <TableHead>模型</TableHead>
+                          <TableHead>Input</TableHead>
+                          <TableHead>Output</TableHead>
+                          <TableHead>Cache 写入</TableHead>
+                          <TableHead>Cache 读取</TableHead>
+                          <TableHead>Total</TableHead>
+                          <TableHead>费用</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {row.modelRows.map((modelRow) => (
+                          <TableRow>
+                            <TableCell>{formatSource(modelRow.source)}</TableCell>
+                            <TableCell class="max-w-64 truncate">
+                              <span title={modelRow.model}>{modelRow.model}</span>
+                            </TableCell>
+                            <TableCell>{formatInteger(modelRow.inputTokens)}</TableCell>
+                            <TableCell>{formatInteger(modelRow.outputTokens)}</TableCell>
+                            <TableCell>{formatInteger(modelRow.cacheCreationTokens)}</TableCell>
+                            <TableCell>{formatInteger(modelRow.cacheReadTokens)}</TableCell>
+                            <TableCell class="font-bold">{formatInteger(modelRow.totalTokens)}</TableCell>
+                            <TableCell>{formatUsd(modelRow.costUsd)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 ) : (
-                  <TableRow>
-                    <TableCell
-                      class="rounded-xl border border-dashed border-[var(--app-border)] py-8 text-center text-[var(--app-muted)]"
-                      colSpan={9}
-                    >
-                      当前筛选范围没有模型明细。
-                    </TableCell>
-                  </TableRow>
+                  <p class="rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+                    当前日期没有匹配的模型明细。
+                  </p>
                 )}
-              </TableBody>
-            </Table>
-          </div>
+              </div>
+            </details>
+          ))}
         </CardContent>
       </Card>
     </section>
@@ -138,7 +122,7 @@ export function UsageDetailsPanel(props: {
 
 function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters }) {
   return (
-    <form method="get" class="grid gap-3 sm:grid-cols-[160px_1fr_1fr_auto] lg:min-w-[680px]">
+    <form method="get" class="grid gap-3 sm:grid-cols-2 lg:min-w-[760px] lg:grid-cols-[150px_1fr_1fr_1fr_auto_auto]">
       <label class="text-sm font-bold text-[var(--app-muted)]">
         来源
         <select
@@ -168,7 +152,17 @@ function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters }) {
           value={props.filters.endDate}
         />
       </label>
+      <label class="text-sm font-bold text-[var(--app-muted)]">
+        模型
+        <input
+          class="mt-2 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-[var(--app-text)] outline-none transition placeholder:text-[var(--app-subtle)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20"
+          name="model"
+          placeholder="sonnet"
+          value={props.filters.modelQuery}
+        />
+      </label>
       <Button class="mt-7 h-11" type="submit">应用</Button>
+      <LinkButton class="mt-7 h-11" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
     </form>
   )
 }
@@ -195,4 +189,16 @@ function formatSource(source: string) {
 function formatPercent(value: number, total: number) {
   if (total <= 0) return '0%'
   return `${Math.round((value / total) * 100)}%`
+}
+
+function csvHref(filters: UsageDetailsFilters) {
+  const params = new URLSearchParams({
+    source: filters.source,
+    startDate: filters.startDate,
+    endDate: filters.endDate
+  })
+  if (filters.modelQuery) {
+    params.set('model', filters.modelQuery)
+  }
+  return `/dashboard/details.csv?${params.toString()}`
 }

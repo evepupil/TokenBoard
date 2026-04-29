@@ -36,6 +36,7 @@ export type UsageDetailsInput = {
   startDate: string
   endDate: string
   source: UsageSource | 'all'
+  modelQuery?: string
 }
 
 export type UsageDetailsDailyRow = {
@@ -47,6 +48,7 @@ export type UsageDetailsDailyRow = {
     source: UsageSource
     totalTokens: number
   }>
+  modelRows: UsageDetailsModelRow[]
 }
 
 export type UsageDetailsModelRow = {
@@ -197,11 +199,20 @@ export async function getUsageDetails(
           AND usage_date >= ?
           AND usage_date <= ?
           AND (? = 'all' OR source = ?)
+          AND (? = '' OR lower(model) LIKE '%' || lower(?) || '%')
         GROUP BY usage_date, source
         ORDER BY usage_date ASC, source ASC
       `
     )
-    .bind(input.userId, input.startDate, input.endDate, input.source, input.source)
+    .bind(
+      input.userId,
+      input.startDate,
+      input.endDate,
+      input.source,
+      input.source,
+      input.modelQuery ?? '',
+      input.modelQuery ?? ''
+    )
     .all<{
       usageDate: string
       source: UsageSource
@@ -210,7 +221,7 @@ export async function getUsageDetails(
       sessionCount: number
     }>()
 
-  const modelRows = await db
+  const modelRowsResult = await db
     .prepare(
       `
         SELECT
@@ -229,13 +240,34 @@ export async function getUsageDetails(
           AND usage_date >= ?
           AND usage_date <= ?
           AND (? = 'all' OR source = ?)
+          AND (? = '' OR lower(model) LIKE '%' || lower(?) || '%')
         GROUP BY usage_date, source, model
         ORDER BY usage_date DESC, totalTokens DESC, model ASC
       `
     )
-    .bind(input.userId, input.startDate, input.endDate, input.source, input.source)
+    .bind(
+      input.userId,
+      input.startDate,
+      input.endDate,
+      input.source,
+      input.source,
+      input.modelQuery ?? '',
+      input.modelQuery ?? ''
+    )
     .all<UsageDetailsModelRow>()
 
+  const modelRows = (modelRowsResult.results ?? []).map((row) => ({
+    usageDate: row.usageDate,
+    source: row.source,
+    model: row.model,
+    inputTokens: Number(row.inputTokens),
+    outputTokens: Number(row.outputTokens),
+    cacheCreationTokens: Number(row.cacheCreationTokens),
+    cacheReadTokens: Number(row.cacheReadTokens),
+    totalTokens: Number(row.totalTokens),
+    costUsd: Number(row.costUsd),
+    sessionCount: Number(row.sessionCount)
+  }))
   const dailyRows = buildDailyDetails(
     input.startDate,
     input.endDate,
@@ -245,7 +277,8 @@ export async function getUsageDetails(
       totalTokens: Number(row.totalTokens),
       costUsd: Number(row.costUsd),
       sessionCount: Number(row.sessionCount)
-    }))
+    })),
+    modelRows
   )
 
   return {
@@ -256,18 +289,7 @@ export async function getUsageDetails(
       activeDays: dailyRows.filter((row) => row.totalTokens > 0).length
     },
     dailyRows,
-    modelRows: (modelRows.results ?? []).map((row) => ({
-      usageDate: row.usageDate,
-      source: row.source,
-      model: row.model,
-      inputTokens: Number(row.inputTokens),
-      outputTokens: Number(row.outputTokens),
-      cacheCreationTokens: Number(row.cacheCreationTokens),
-      cacheReadTokens: Number(row.cacheReadTokens),
-      totalTokens: Number(row.totalTokens),
-      costUsd: Number(row.costUsd),
-      sessionCount: Number(row.sessionCount)
-    }))
+    modelRows
   }
 }
 
@@ -280,7 +302,8 @@ function buildDailyDetails(
     totalTokens: number
     costUsd: number
     sessionCount: number
-  }>
+  }>,
+  modelRows: UsageDetailsModelRow[]
 ) {
   const byDate = new Map<string, UsageDetailsDailyRow>()
 
@@ -290,7 +313,8 @@ function buildDailyDetails(
       totalTokens: 0,
       costUsd: 0,
       sessionCount: 0,
-      sourceSplit: []
+      sourceSplit: [],
+      modelRows: []
     })
   }
 
@@ -305,6 +329,10 @@ function buildDailyDetails(
       source: row.source,
       totalTokens: row.totalTokens
     })
+  }
+
+  for (const row of modelRows) {
+    byDate.get(row.usageDate)?.modelRows.push(row)
   }
 
   return [...byDate.values()]
