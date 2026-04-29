@@ -1,6 +1,7 @@
 ﻿import { describe, expect, test } from 'vitest'
 import {
   getCanonicalPublicOrigin,
+  getProfileDisplayName,
   getProfileSettings,
   parseProfileForm,
   updateProfileSettings
@@ -115,6 +116,48 @@ describe('settings service', () => {
     )
     expect(settings.publicSvgUrl).toBe(
       'https://tokenboard.chaosyn.com/api/public/eve-tokenboard.svg'
+    )
+  })
+
+  test('uses the profile display name for dashboard labels', async () => {
+    const db = {
+      prepare(sql: string) {
+        expect(sql).toContain('SELECT display_name as displayName FROM profiles')
+        return {
+          bind(userId: string) {
+            expect(userId).toBe('user_1')
+            return {
+              async first() {
+                return { displayName: 'New Public Name' }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe(
+      'New Public Name'
+    )
+  })
+
+  test('falls back to the session name when profile display name is missing', async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return null
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe(
+      'Old Session Name'
     )
   })
 

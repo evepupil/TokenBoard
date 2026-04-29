@@ -1,3 +1,6 @@
+import { Copy } from 'lucide'
+import { LucideIcon } from '../../../components/ui/icon'
+
 export type InstallCommandProps = {
   baseUrl: string
   timezone: string
@@ -44,9 +47,20 @@ export function InstallCommand(props: InstallCommandProps) {
             <h2 class="text-base font-black">粘贴到 Codex 或 Claude Code</h2>
             <p class="text-sm text-[var(--app-muted)]">过期时间：{props.expiresAt}</p>
           </div>
-          <pre class="mt-4 overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 text-sm leading-6 text-[var(--app-text)]">
-            {prompt}
-          </pre>
+          <div class="relative mt-4">
+            <button
+              type="button"
+              class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+              data-copy-target="install-prompt-text"
+              aria-label="复制安装提示词"
+              title="复制安装提示词"
+            >
+              <LucideIcon icon={Copy} size={17} />
+            </button>
+            <pre id="install-prompt-text" class="overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 text-sm leading-6 text-[var(--app-text)]">
+              {prompt}
+            </pre>
+          </div>
         </section>
       ) : null}
     </section>

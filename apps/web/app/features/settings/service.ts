@@ -14,6 +14,10 @@ type ProfileRow = {
   participatesInLeaderboards: number | boolean
 }
 
+type ProfileDisplayNameRow = {
+  displayName: string | null
+}
+
 export function canShowPublicProfile(isPublic: boolean) {
   return isPublic
 }
@@ -62,6 +66,20 @@ export async function getProfileSettings(
   }
 
   return toProfileSettings(row, origin)
+}
+
+export async function getProfileDisplayName(
+  db: D1Database,
+  userId: string,
+  fallback?: string | null
+) {
+  const row = await db
+    .prepare('SELECT display_name as displayName FROM profiles WHERE user_id = ? LIMIT 1')
+    .bind(userId)
+    .first<ProfileDisplayNameRow>()
+
+  const displayName = row?.displayName?.trim()
+  return displayName || fallback || undefined
 }
 
 export async function updateProfileSettings(

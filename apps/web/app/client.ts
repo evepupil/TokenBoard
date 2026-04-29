@@ -1,4 +1,5 @@
 import { createClient } from 'honox/client'
+import { copyTextToClipboard } from './lib/clipboard'
 
 createClient()
 
@@ -35,7 +36,37 @@ function initTheme() {
 
 initTheme()
 
+initCopyButtons()
 initAppNavigation()
+
+function initCopyButtons() {
+  document.addEventListener('click', async (event) => {
+    if (!(event.target instanceof Element)) return
+
+    const button = event.target.closest<HTMLButtonElement>('[data-copy-target]')
+    if (!button) return
+
+    const targetId = button.dataset.copyTarget
+    const text = targetId ? document.getElementById(targetId)?.textContent : null
+    if (!text) return
+
+    event.preventDefault()
+
+    const originalLabel = button.getAttribute('aria-label') || '复制'
+    const originalTitle = button.getAttribute('title') || originalLabel
+    const copied = await copyTextToClipboard(navigator.clipboard, text)
+
+    button.dataset.copied = copied ? 'true' : 'false'
+    button.setAttribute('aria-label', copied ? '已复制' : '复制失败')
+    button.setAttribute('title', copied ? '已复制' : '复制失败')
+
+    window.setTimeout(() => {
+      button.dataset.copied = 'idle'
+      button.setAttribute('aria-label', originalLabel)
+      button.setAttribute('title', originalTitle)
+    }, 1600)
+  })
+}
 
 function initAppNavigation() {
   document.addEventListener('click', async (event) => {
