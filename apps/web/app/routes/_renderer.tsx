@@ -1,5 +1,8 @@
 import { jsxRenderer } from 'hono/jsx-renderer'
-import { Link, Script } from 'honox/server'
+import { Link } from 'honox/server'
+
+type Manifest = Record<string, { file?: string }>
+type ManifestModule = { default?: Manifest }
 
 const themeScript = `
 (function () {
@@ -38,6 +41,8 @@ const themeScript = `
 `
 
 export default jsxRenderer(({ children }) => {
+  const clientScriptSrc = getClientScriptSrc()
+
   return (
     <html lang="zh-CN">
       <head>
@@ -46,9 +51,22 @@ export default jsxRenderer(({ children }) => {
         <link rel="icon" href="/favicon.ico" />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <Link href="/app/style.css" rel="stylesheet" />
-        <Script src="/app/client.ts" async />
+        <script type="module" src={clientScriptSrc} async />
       </head>
       <body>{children}</body>
     </html>
   )
 })
+
+function getClientScriptSrc() {
+  if (!import.meta.env.PROD) return '/app/client.ts'
+
+  const manifestFiles = import.meta.glob<ManifestModule>('/dist/.vite/manifest.json', { eager: true })
+  for (const manifestFile of Object.values(manifestFiles)) {
+    const manifest = manifestFile.default
+    const clientEntry = manifest?.['app/client.ts']
+    if (clientEntry?.file) return `/${clientEntry.file}`
+  }
+
+  return '/app/client.ts'
+}
