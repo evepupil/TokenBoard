@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { getUsageSummary } from './queries'
+import { getDailyUsageTrend, getUsageSummary } from './queries'
 
 describe('getUsageSummary', () => {
   test('returns dashboard totals, source split, and last sync for one user', async () => {
@@ -62,5 +62,47 @@ describe('getUsageSummary', () => {
     expect(bindings[1]).toEqual(['seed-user', '2026-04-01'])
     expect(sqlStatements[0]).toContain('daily_usage')
     expect(sqlStatements[0]).toContain('LEFT JOIN device_stats')
+  })
+})
+
+describe('getDailyUsageTrend', () => {
+  test('returns a continuous daily trend and fills missing days with zeroes', async () => {
+    const sqlStatements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async all() {
+                return {
+                  results: [
+                    { usageDate: '2026-04-27', totalTokens: 120, costUsd: 0.12 },
+                    { usageDate: '2026-04-29', totalTokens: 340, costUsd: 0.34 }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const trend = await getDailyUsageTrend(db, {
+      userId: 'user_1',
+      startDate: '2026-04-27',
+      endDate: '2026-04-29'
+    })
+
+    expect(trend).toEqual([
+      { usageDate: '2026-04-27', totalTokens: 120, costUsd: 0.12 },
+      { usageDate: '2026-04-28', totalTokens: 0, costUsd: 0 },
+      { usageDate: '2026-04-29', totalTokens: 340, costUsd: 0.34 }
+    ])
+    expect(bindings[0]).toEqual(['user_1', '2026-04-27', '2026-04-29'])
+    expect(sqlStatements[0]).toContain('GROUP BY usage_date')
+    expect(sqlStatements[0]).toContain('ORDER BY usage_date ASC')
   })
 })

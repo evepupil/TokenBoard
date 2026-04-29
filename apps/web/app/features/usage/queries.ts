@@ -19,6 +19,18 @@ export type UsageSummary = {
   }>
 }
 
+export type DailyUsageTrendInput = {
+  userId: string
+  startDate: string
+  endDate: string
+}
+
+export type DailyUsageTrendItem = {
+  usageDate: string
+  totalTokens: number
+  costUsd: number
+}
+
 type SummaryRow = {
   todayTokens: number | null
   todayCostUsd: number | null
@@ -85,4 +97,55 @@ export async function getUsageSummary(
       totalTokens: Number(row.totalTokens)
     }))
   }
+}
+
+export async function getDailyUsageTrend(
+  db: D1Database,
+  input: DailyUsageTrendInput
+): Promise<DailyUsageTrendItem[]> {
+  const rows = await db
+    .prepare(
+      `
+        SELECT
+          usage_date as usageDate,
+          COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(cost_usd), 0) as costUsd
+        FROM daily_usage
+        WHERE user_id = ?
+          AND usage_date >= ?
+          AND usage_date <= ?
+        GROUP BY usage_date
+        ORDER BY usage_date ASC
+      `
+    )
+    .bind(input.userId, input.startDate, input.endDate)
+    .all<DailyUsageTrendItem>()
+
+  const byDate = new Map(
+    (rows.results ?? []).map((row) => [
+      row.usageDate,
+      {
+        usageDate: row.usageDate,
+        totalTokens: Number(row.totalTokens),
+        costUsd: Number(row.costUsd)
+      }
+    ])
+  )
+
+  return eachIsoDate(input.startDate, input.endDate).map(
+    (usageDate) => byDate.get(usageDate) ?? { usageDate, totalTokens: 0, costUsd: 0 }
+  )
+}
+
+function eachIsoDate(startDate: string, endDate: string) {
+  const dates: string[] = []
+  const current = new Date(`${startDate}T00:00:00.000Z`)
+  const end = new Date(`${endDate}T00:00:00.000Z`)
+
+  while (current <= end) {
+    dates.push(current.toISOString().slice(0, 10))
+    current.setUTCDate(current.getUTCDate() + 1)
+  }
+
+  return dates
 }

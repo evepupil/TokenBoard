@@ -2,10 +2,15 @@ import { Badge } from '../../../components/ui/badge'
 import { LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
 import { formatUsd } from '../../../lib/money'
-import type { UsageSummary } from '../queries'
+import type { DashboardSummary } from '../service'
 
-export function DashboardPreview(props: { summary: UsageSummary; userName?: string }) {
+export function DashboardPreview(props: { summary: DashboardSummary; userName?: string }) {
   const totalSourceTokens = props.summary.sourceSplit.reduce(
+    (total, item) => total + item.totalTokens,
+    0
+  )
+  const trendMaxTokens = Math.max(...props.summary.dailyTrend.map((item) => item.totalTokens), 0)
+  const trendTotalTokens = props.summary.dailyTrend.reduce(
     (total, item) => total + item.totalTokens,
     0
   )
@@ -39,17 +44,27 @@ export function DashboardPreview(props: { summary: UsageSummary; userName?: stri
           <CardHeader class="flex-row items-center justify-between gap-4">
             <div>
               <CardTitle>30 天趋势</CardTitle>
-              <CardDescription>下一步会接入真实每日查询。</CardDescription>
+              <CardDescription>
+                最近 30 天共 {formatInteger(trendTotalTokens)} tokens。
+              </CardDescription>
             </div>
             <Badge variant="outline">tokens</Badge>
           </CardHeader>
           <CardContent>
-            <div class="flex h-44 items-end gap-2 rounded-md border border-dashed border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
-              {Array.from({ length: 18 }).map((_, index) => (
-                <div class="flex flex-1 items-end">
-                  <div class="w-full rounded-t bg-lime-300/70" style={`height:${20 + ((index * 17) % 70)}%`} />
+            <div class="flex h-44 items-end gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+              {props.summary.dailyTrend.map((item) => (
+                <div class="group relative flex h-full flex-1 items-end">
+                  <div
+                    class={`w-full rounded-t transition ${item.totalTokens > 0 ? 'bg-lime-300/80 group-hover:bg-lime-200' : 'bg-[var(--app-border)]'}`}
+                    style={`height:${trendBarHeight(item.totalTokens, trendMaxTokens)}%`}
+                    title={`${item.usageDate}: ${formatInteger(item.totalTokens)} tokens`}
+                  />
                 </div>
               ))}
+            </div>
+            <div class="mt-3 flex justify-between text-xs text-[var(--app-muted)]">
+              <span>{props.summary.dailyTrend[0]?.usageDate ?? '-'}</span>
+              <span>{props.summary.dailyTrend.at(-1)?.usageDate ?? '-'}</span>
             </div>
           </CardContent>
         </Card>
@@ -94,6 +109,11 @@ function formatSource(source: string) {
 function formatPercent(value: number, total: number) {
   if (total <= 0) return '0%'
   return `${Math.round((value / total) * 100)}%`
+}
+
+function trendBarHeight(value: number, max: number) {
+  if (max <= 0 || value <= 0) return 2
+  return Math.max(8, Math.round((value / max) * 100))
 }
 
 function Metric(props: { label: string; value: string; tone?: 'lime' }) {
