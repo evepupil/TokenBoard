@@ -35,45 +35,71 @@ function initTheme() {
 
 initTheme()
 
-initLeaderboardNavigation()
+initAppNavigation()
 
-function initLeaderboardNavigation() {
+function initAppNavigation() {
   document.addEventListener('click', async (event) => {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return
-    }
-
-    const link = event.target instanceof Element
-      ? event.target.closest<HTMLAnchorElement>('[data-leaderboard-link]')
-      : null
-    if (!link || link.origin !== window.location.origin) return
+    const link = getNavigableLink(event)
+    if (!link) return
 
     event.preventDefault()
-    await replaceLeaderboardPanel(link.href, true)
+    await navigateTo(link.href, true)
   })
 
   window.addEventListener('popstate', () => {
-    if (window.location.pathname === '/leaderboards') {
-      void replaceLeaderboardPanel(window.location.href, false)
-    }
+    void navigateTo(window.location.href, false)
   })
 }
 
-async function replaceLeaderboardPanel(pageHref: string, pushState: boolean) {
-  const currentPanel = document.querySelector<HTMLElement>('[data-leaderboard-panel]')
-  if (!currentPanel) {
-    window.location.href = pageHref
+function getNavigableLink(event: MouseEvent) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    !(event.target instanceof Element)
+  ) {
+    return null
+  }
+
+  const link = event.target.closest<HTMLAnchorElement>('a[href]')
+  if (!link) return null
+  if (link.target && link.target !== '_self') return null
+  if (link.hasAttribute('download') || link.dataset.noAjax === 'true') return null
+  if (link.origin !== window.location.origin) return null
+
+  const url = new URL(link.href)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  if (url.pathname.startsWith('/api/')) return null
+  if (url.pathname === window.location.pathname && url.search === window.location.search && url.hash) return null
+
+  return link
+}
+
+async function navigateTo(pageHref: string, pushState: boolean) {
+  const pageUrl = new URL(pageHref)
+  const currentUrl = new URL(window.location.href)
+  const shouldReplaceLeaderboardPanel =
+    pageUrl.pathname === '/leaderboards' &&
+    currentUrl.pathname === '/leaderboards'
+
+  if (shouldReplaceLeaderboardPanel) {
+    await replaceLeaderboardPanel(pageUrl, pushState)
     return
   }
 
-  const pageUrl = new URL(pageHref)
+  await replaceDocument(pageUrl, pushState)
+}
+
+async function replaceLeaderboardPanel(pageUrl: URL, pushState: boolean) {
+  const currentPanel = document.querySelector<HTMLElement>('[data-leaderboard-panel]')
+  if (!currentPanel) {
+    window.location.href = pageUrl.toString()
+    return
+  }
+
   const fragmentUrl = new URL('/leaderboards/fragment', window.location.origin)
   fragmentUrl.search = pageUrl.search
 
@@ -89,11 +115,59 @@ async function replaceLeaderboardPanel(pageHref: string, pushState: boolean) {
     const html = await response.text()
     currentPanel.outerHTML = html
     if (pushState) window.history.pushState({}, '', pageUrl)
+    syncDocumentTitle(pageUrl)
+    syncScroll(pageUrl)
   } catch (_) {
-    window.location.href = pageHref
+    window.location.href = pageUrl.toString()
   } finally {
     document
       .querySelector<HTMLElement>('[data-leaderboard-panel]')
       ?.removeAttribute('aria-busy')
   }
+}
+
+async function replaceDocument(pageUrl: URL, pushState: boolean) {
+  document.body.setAttribute('aria-busy', 'true')
+
+  try {
+    const response = await fetch(pageUrl, {
+      headers: { 'x-tokenboard-fragment': 'document' }
+    })
+    if (!response.ok) throw new Error(`Failed to load page: ${response.status}`)
+
+    const html = await response.text()
+    const nextDocument = new DOMParser().parseFromString(html, 'text/html')
+    const nextBody = nextDocument.body
+    const resolvedUrl = new URL(response.url || pageUrl.toString())
+    if (!nextBody) throw new Error('Missing body in response document')
+
+    document.body.innerHTML = nextBody.innerHTML
+    if (pushState) window.history.pushState({}, '', resolvedUrl)
+    document.title = nextDocument.title || document.title
+    syncScroll(resolvedUrl)
+  } catch (_) {
+    window.location.href = pageUrl.toString()
+  } finally {
+    document.body.removeAttribute('aria-busy')
+  }
+}
+
+function syncDocumentTitle(pageUrl: URL) {
+  if (pageUrl.pathname !== '/leaderboards') return
+
+  const period = pageUrl.searchParams.get('period') === 'monthly' ? '每月' : '每日'
+  const metric = pageUrl.searchParams.get('metric') === 'cost' ? '费用' : 'token'
+  document.title = `${period}${metric}排行榜 - TokenBoard`
+}
+
+function syncScroll(pageUrl: URL) {
+  if (pageUrl.hash) {
+    const target = document.getElementById(pageUrl.hash.slice(1))
+    if (target) {
+      target.scrollIntoView()
+      return
+    }
+  }
+
+  window.scrollTo(0, 0)
 }
