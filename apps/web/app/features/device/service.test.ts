@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'vitest'
 import { ApiError } from '../../lib/errors'
-import { createPairingCode, pairDevice, type DevicePairingRepository } from './service'
+import {
+  createPairingCode,
+  listUserDevices,
+  parseDeviceNameForm,
+  pairDevice,
+  revokeDevice,
+  renameDevice,
+  type DevicePairingRepository
+} from './service'
 
 function createRepository(overrides: Partial<DevicePairingRepository> = {}) {
   const calls: string[] = []
@@ -125,5 +133,119 @@ describe('pairDevice', () => {
         }
       )
     ).rejects.toBeInstanceOf(ApiError)
+  })
+})
+
+describe('device management', () => {
+  test('lists devices with active token state for one user', async () => {
+    const sqlStatements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async all() {
+                return {
+                  results: [
+                    {
+                      id: 'dev_1',
+                      name: 'Office PC',
+                      platform: 'windows',
+                      lastSyncedAt: '2026-04-29T08:00:00.000Z',
+                      createdAt: '2026-04-28T08:00:00.000Z',
+                      activeTokenCount: 1
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await expect(listUserDevices(db, 'user_1')).resolves.toEqual([
+      {
+        id: 'dev_1',
+        name: 'Office PC',
+        platform: 'windows',
+        lastSyncedAt: '2026-04-29T08:00:00.000Z',
+        createdAt: '2026-04-28T08:00:00.000Z',
+        activeTokenCount: 1
+      }
+    ])
+    expect(sqlStatements[0]).toContain('LEFT JOIN upload_tokens')
+    expect(sqlStatements[0]).toContain('revoked_at IS NULL')
+    expect(bindings[0]).toEqual(['user_1'])
+  })
+
+  test('renames a device owned by the current user', async () => {
+    const sqlStatements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await renameDevice(db, {
+      userId: 'user_1',
+      deviceId: 'dev_1',
+      name: 'Laptop',
+      now: '2026-04-29T09:00:00.000Z'
+    })
+
+    expect(sqlStatements[0]).toContain('UPDATE devices')
+    expect(bindings[0]).toEqual(['Laptop', '2026-04-29T09:00:00.000Z', 'dev_1', 'user_1'])
+  })
+
+  test('revokes active upload tokens for a device owned by the current user', async () => {
+    const sqlStatements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await revokeDevice(db, {
+      userId: 'user_1',
+      deviceId: 'dev_1',
+      now: '2026-04-29T09:00:00.000Z'
+    })
+
+    expect(sqlStatements[0]).toContain('UPDATE upload_tokens')
+    expect(sqlStatements[0]).toContain('revoked_at IS NULL')
+    expect(sqlStatements[1]).toContain('UPDATE devices')
+    expect(bindings[0]).toEqual(['2026-04-29T09:00:00.000Z', 'user_1', 'dev_1'])
+    expect(bindings[1]).toEqual(['2026-04-29T09:00:00.000Z', 'dev_1', 'user_1'])
+  })
+
+  test('rejects blank device names from forms', () => {
+    expect(() => parseDeviceNameForm({ name: '   ' })).toThrow()
+    expect(parseDeviceNameForm({ name: '  Laptop  ' })).toBe('Laptop')
   })
 })

@@ -9,6 +9,7 @@ export const GET = createRoute(async (c) => {
     source: c.req.query('source'),
     startDate: c.req.query('startDate'),
     endDate: c.req.query('endDate'),
+    device: c.req.query('device'),
     model: c.req.query('model')
   })
   const details = await getUsageDetails(c.env.DB, {

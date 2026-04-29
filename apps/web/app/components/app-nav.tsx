@@ -3,7 +3,7 @@ import { cn } from '../lib/cn'
 import { GitHubMark, LucideIcon } from './ui/icon'
 
 type AppNavProps = {
-  active?: 'dashboard' | 'details' | 'leaderboards' | 'install' | 'profile'
+  active?: 'dashboard' | 'details' | 'leaderboards' | 'install' | 'profile' | 'devices'
   email?: string
   isAuthenticated?: boolean
 }
@@ -35,6 +35,7 @@ export function AppNav(props: AppNavProps) {
         {isAuthenticated ? <NavLink href="/dashboard/details" active={props.active === 'details'}>详情</NavLink> : null}
         <NavLink href="/leaderboards" active={props.active === 'leaderboards'}>排行榜</NavLink>
         {isAuthenticated ? <NavLink href="/settings/install" active={props.active === 'install'}>安装采集器</NavLink> : null}
+        {isAuthenticated ? <NavLink href="/settings/devices" active={props.active === 'devices'}>设备</NavLink> : null}
         {isAuthenticated ? <NavLink href="/settings/profile" active={props.active === 'profile'}>公开资料</NavLink> : null}
         {isAuthenticated ? null : <NavLink href="/auth/sign-in">登录</NavLink>}
         {isAuthenticated ? (

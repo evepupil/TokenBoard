@@ -3,14 +3,17 @@ import { Button, LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table'
 import { formatUsd } from '../../../lib/money'
+import type { UserDevice } from '../../device/service'
 import type { UsageDetails } from '../queries'
 import type { UsageDetailsFilters } from '../service'
 
 export function UsageDetailsPanel(props: {
   details: UsageDetails
   filters: UsageDetailsFilters
+  devices: UserDevice[]
 }) {
   const dailyRows = [...props.details.dailyRows].reverse()
+  const selectedDevice = props.devices.find((device) => device.id === props.filters.deviceId)
 
   return (
     <section class="mx-auto flex max-w-6xl flex-col gap-5">
@@ -21,10 +24,11 @@ export function UsageDetailsPanel(props: {
             <h1 class="mt-3 text-4xl font-black tracking-tight">每日用量详情</h1>
             <p class="mt-2 text-sm text-[var(--app-muted)]">
               {props.filters.startDate} 至 {props.filters.endDate} / {formatSource(props.filters.source)}
+              {selectedDevice ? ` / ${selectedDevice.name}` : ''}
               {props.filters.modelQuery ? ` / 模型包含 ${props.filters.modelQuery}` : ''}
             </p>
           </div>
-          <UsageDetailsFiltersForm filters={props.filters} />
+          <UsageDetailsFiltersForm filters={props.filters} devices={props.devices} />
         </div>
       </header>
 
@@ -120,9 +124,9 @@ export function UsageDetailsPanel(props: {
   )
 }
 
-function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters }) {
+function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
   return (
-    <form method="get" class="grid gap-3 sm:grid-cols-2 lg:min-w-[760px] lg:grid-cols-[150px_1fr_1fr_1fr_auto_auto]">
+    <form method="get" class="grid gap-3 sm:grid-cols-2 lg:min-w-[900px] lg:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]">
       <label class="text-sm font-bold text-[var(--app-muted)]">
         来源
         <select
@@ -132,6 +136,20 @@ function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters }) {
           <option value="all" selected={props.filters.source === 'all'}>全部</option>
           <option value="claude-code" selected={props.filters.source === 'claude-code'}>Claude Code</option>
           <option value="codex" selected={props.filters.source === 'codex'}>Codex</option>
+        </select>
+      </label>
+      <label class="text-sm font-bold text-[var(--app-muted)]">
+        设备
+        <select
+          class="mt-2 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20"
+          name="device"
+        >
+          <option value="all" selected={props.filters.deviceId === 'all'}>全部设备</option>
+          {props.devices.map((device) => (
+            <option value={device.id} selected={props.filters.deviceId === device.id}>
+              {device.name}
+            </option>
+          ))}
         </select>
       </label>
       <label class="text-sm font-bold text-[var(--app-muted)]">
@@ -195,7 +213,8 @@ function csvHref(filters: UsageDetailsFilters) {
   const params = new URLSearchParams({
     source: filters.source,
     startDate: filters.startDate,
-    endDate: filters.endDate
+    endDate: filters.endDate,
+    device: filters.deviceId
   })
   if (filters.modelQuery) {
     params.set('model', filters.modelQuery)

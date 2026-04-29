@@ -36,6 +36,7 @@ export type UsageDetailsInput = {
   startDate: string
   endDate: string
   source: UsageSource | 'all'
+  deviceId?: string
   modelQuery?: string
 }
 
@@ -199,6 +200,7 @@ export async function getUsageDetails(
           AND usage_date >= ?
           AND usage_date <= ?
           AND (? = 'all' OR source = ?)
+          AND (? = 'all' OR device_id = ?)
           AND (? = '' OR lower(model) LIKE '%' || lower(?) || '%')
         GROUP BY usage_date, source
         ORDER BY usage_date ASC, source ASC
@@ -210,6 +212,8 @@ export async function getUsageDetails(
       input.endDate,
       input.source,
       input.source,
+      input.deviceId ?? 'all',
+      input.deviceId ?? 'all',
       input.modelQuery ?? '',
       input.modelQuery ?? ''
     )
@@ -240,6 +244,7 @@ export async function getUsageDetails(
           AND usage_date >= ?
           AND usage_date <= ?
           AND (? = 'all' OR source = ?)
+          AND (? = 'all' OR device_id = ?)
           AND (? = '' OR lower(model) LIKE '%' || lower(?) || '%')
         GROUP BY usage_date, source, model
         ORDER BY usage_date DESC, totalTokens DESC, model ASC
@@ -251,6 +256,8 @@ export async function getUsageDetails(
       input.endDate,
       input.source,
       input.source,
+      input.deviceId ?? 'all',
+      input.deviceId ?? 'all',
       input.modelQuery ?? '',
       input.modelQuery ?? ''
     )

@@ -168,6 +168,7 @@ describe('getUsageDetails', () => {
       source: 'claude-code',
       startDate: '2026-04-27',
       endDate: '2026-04-29',
+      deviceId: 'dev_123',
       modelQuery: 'sonnet'
     })
 
@@ -231,12 +232,34 @@ describe('getUsageDetails', () => {
       }
     ])
     expect(bindings).toEqual([
-      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code', 'sonnet', 'sonnet'],
-      ['user_1', '2026-04-27', '2026-04-29', 'claude-code', 'claude-code', 'sonnet', 'sonnet']
+      [
+        'user_1',
+        '2026-04-27',
+        '2026-04-29',
+        'claude-code',
+        'claude-code',
+        'dev_123',
+        'dev_123',
+        'sonnet',
+        'sonnet'
+      ],
+      [
+        'user_1',
+        '2026-04-27',
+        '2026-04-29',
+        'claude-code',
+        'claude-code',
+        'dev_123',
+        'dev_123',
+        'sonnet',
+        'sonnet'
+      ]
     ])
     expect(sqlStatements[0]).toContain('GROUP BY usage_date, source')
+    expect(sqlStatements[0]).toContain('device_id')
     expect(sqlStatements[0]).toContain('lower(model)')
     expect(sqlStatements[1]).toContain('GROUP BY usage_date, source, model')
+    expect(sqlStatements[1]).toContain('device_id')
     expect(sqlStatements[1]).toContain('lower(model)')
   })
 })

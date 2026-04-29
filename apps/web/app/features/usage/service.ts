@@ -24,6 +24,7 @@ export type UsageDetailsFilters = {
   source: 'all' | 'claude-code' | 'codex'
   startDate: string
   endDate: string
+  deviceId: string
   modelQuery: string
 }
 
@@ -37,6 +38,7 @@ export function parseUsageDetailsFilters(
   const source = query.source === 'all' || !parsedSource.success ? 'all' : parsedSource.data
   const startDate = readIsoDate(query.startDate, defaultStart)
   const endDate = readIsoDate(query.endDate, today)
+  const deviceId = readDeviceId(query.device)
   const modelQuery = String(query.model ?? '').trim()
 
   if (startDate > endDate) {
@@ -44,6 +46,7 @@ export function parseUsageDetailsFilters(
       source,
       startDate: endDate,
       endDate: startDate,
+      deviceId,
       modelQuery
     }
   }
@@ -52,6 +55,7 @@ export function parseUsageDetailsFilters(
     source,
     startDate,
     endDate,
+    deviceId,
     modelQuery
   }
 }
@@ -94,6 +98,11 @@ function addUtcDays(date: Date, days: number) {
 
 function readIsoDate(value: string | undefined, fallback: string) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback
+}
+
+function readDeviceId(value: string | undefined) {
+  if (!value || value === 'all') return 'all'
+  return /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : 'all'
 }
 
 function csvCell(value: string | number) {

@@ -25,7 +25,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
               {props.userName ? `${props.userName} 的 token 面板` : 'AI token 使用面板'}
             </h1>
             <p class="mt-3 text-sm text-[var(--app-muted)]">
-              最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / 设备数：{props.summary.deviceCount}
+              最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / <a class="font-bold text-[var(--app-text)] underline decoration-lime-300/50 underline-offset-4 hover:text-lime-200" href="/settings/devices">设备数：{props.summary.deviceCount}</a>
             </p>
           </div>
           <div class="flex flex-wrap gap-3">

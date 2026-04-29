@@ -9,16 +9,18 @@ describe('parseUsageDetailsFilters', () => {
       source: 'all',
       startDate: '2026-03-31',
       endDate: '2026-04-29',
+      deviceId: 'all',
       modelQuery: ''
     })
   })
 
-  test('keeps valid date range, source, and model filters', () => {
+  test('keeps valid date range, source, device, and model filters', () => {
     const filters = parseUsageDetailsFilters(
       {
         source: 'claude-code',
         startDate: '2026-04-01',
         endDate: '2026-04-15',
+        device: 'dev_123',
         model: ' sonnet '
       },
       new Date('2026-04-29T12:00:00.000Z')
@@ -28,6 +30,7 @@ describe('parseUsageDetailsFilters', () => {
       source: 'claude-code',
       startDate: '2026-04-01',
       endDate: '2026-04-15',
+      deviceId: 'dev_123',
       modelQuery: 'sonnet'
     })
   })
@@ -46,6 +49,7 @@ describe('parseUsageDetailsFilters', () => {
       source: 'codex',
       startDate: '2026-04-01',
       endDate: '2026-04-20',
+      deviceId: 'all',
       modelQuery: ''
     })
   })
