@@ -1,7 +1,19 @@
 ﻿import { describe, expect, test } from 'vitest'
-import { getPublicUsageJson } from './service'
+import { getPublicRouteSlug, getPublicUsageJson, normalizePublicSlug } from './service'
 
 describe('public card service', () => {
+  test('normalizes slugs captured from extension routes', () => {
+    expect(normalizePublicSlug('eve-tokenboard.json', 'json')).toBe('eve-tokenboard')
+    expect(normalizePublicSlug('eve-tokenboard.svg', 'svg')).toBe('eve-tokenboard')
+    expect(normalizePublicSlug('eve-tokenboard', 'json')).toBe('eve-tokenboard')
+  })
+
+  test('reads slugs from Hono extension route params', () => {
+    expect(getPublicRouteSlug({ slug: 'eve-tokenboard.json' }, 'json')).toBe('eve-tokenboard')
+    expect(getPublicRouteSlug({ 'slug.json': 'eve-tokenboard' }, 'json')).toBe('eve-tokenboard')
+    expect(getPublicRouteSlug({ 'slug.svg': 'eve-tokenboard' }, 'svg')).toBe('eve-tokenboard')
+  })
+
   test('returns public usage without leaking internal ids', async () => {
     const bindings: unknown[][] = []
     const db = {

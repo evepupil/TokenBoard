@@ -18,6 +18,13 @@ export function canShowPublicProfile(isPublic: boolean) {
   return isPublic
 }
 
+export function getCanonicalPublicOrigin(input: {
+  configuredOrigin?: string | null
+  requestOrigin: string
+}) {
+  return (input.configuredOrigin || input.requestOrigin).replace(/\/$/, '')
+}
+
 export function parseProfileForm(form: Record<string, unknown>): PublicProfileInput {
   return publicProfileSchema.parse({
     slug: String(form.slug || ''),
@@ -72,6 +79,8 @@ export async function updateProfileSettings(
     throw new ApiError('BAD_REQUEST', 'Slug is already taken', 400)
   }
 
+  const isPublic = input.isPublic || input.participatesInLeaderboards
+
   await db
     .prepare(
       `
@@ -90,7 +99,7 @@ export async function updateProfileSettings(
       input.slug,
       input.displayName,
       input.timezone,
-      input.isPublic ? 1 : 0,
+      isPublic ? 1 : 0,
       input.participatesInLeaderboards ? 1 : 0,
       now,
       userId

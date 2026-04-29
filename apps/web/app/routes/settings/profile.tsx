@@ -4,13 +4,17 @@ import { Button, LinkButton } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { Input, Label } from '../../components/ui/input'
 import { requireUser } from '../../features/auth/middleware'
-import { getProfileSettings, parseProfileForm, updateProfileSettings, type ProfileSettings } from '../../features/settings/service'
+import { getCanonicalPublicOrigin, getProfileSettings, parseProfileForm, updateProfileSettings, type ProfileSettings } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
 
 export const GET = createRoute(async (c) => {
   try {
     const user = await requireUser(c)
-    const profile = await getProfileSettings(c.env.DB, user.id, new URL(c.req.url).origin)
+    const publicOrigin = getCanonicalPublicOrigin({
+      configuredOrigin: c.env.BETTER_AUTH_URL,
+      requestOrigin: new URL(c.req.url).origin
+    })
+    const profile = await getProfileSettings(c.env.DB, user.id, publicOrigin)
     return c.render(<ProfilePage profile={profile} saved={c.req.query('saved') === '1'} email={user.email} />)
   } catch (error) {
     return jsonError(c, error)
@@ -69,7 +73,7 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean; email: s
                 <input class="mt-1" type="checkbox" name="participatesInLeaderboards" checked={props.profile.participatesInLeaderboards} />
                 <span>
                   <strong class="block text-[var(--app-text)]">参与排行榜</strong>
-                  只有公开资料开启后，排行榜才会统计你的数据。
+                  开启后会自动公开资料，排行榜才会统计你的数据。
                 </span>
               </label>
               <div class="flex flex-wrap gap-3 pt-2">
