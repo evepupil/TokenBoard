@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { verifyUploadToken } from './middleware'
+import { ensureProfile, verifyUploadToken } from './middleware'
 
 describe('verifyUploadToken', () => {
   test('returns token owner from upload_tokens when bearer token is stored in D1', async () => {
@@ -73,5 +73,42 @@ describe('verifyUploadToken', () => {
     await expect(verifyUploadToken(env, 'Token abc')).rejects.toMatchObject({
       code: 'UNAUTHORIZED'
     })
+  })
+})
+
+describe('ensureProfile', () => {
+  test('creates new profiles as public leaderboard participants by default', async () => {
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        expect(sql).toContain('INSERT INTO profiles')
+        expect(sql).toContain("VALUES (?, ?, ?, 'UTC', 1, 1, ?, ?)")
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async run() {
+                return { success: true }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await ensureProfile(db, {
+      id: 'USER123456789',
+      email: 'eve@example.com',
+      name: 'Eve',
+      image: null
+    })
+
+    expect(bindings[0]).toEqual([
+      'USER123456789',
+      'eve-user1234',
+      'Eve',
+      expect.any(String),
+      expect.any(String)
+    ])
   })
 })

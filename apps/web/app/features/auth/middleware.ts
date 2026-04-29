@@ -79,7 +79,7 @@ export async function verifyUploadToken(
   throw new ApiError('UNAUTHORIZED', 'Invalid upload token', 401)
 }
 
-async function ensureProfile(db: D1Database, user: SessionUser) {
+export async function ensureProfile(db: D1Database, user: SessionUser) {
   const now = new Date().toISOString()
   await db
     .prepare(
@@ -94,7 +94,7 @@ async function ensureProfile(db: D1Database, user: SessionUser) {
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, 'UTC', 0, 0, ?, ?)
+        VALUES (?, ?, ?, 'UTC', 1, 1, ?, ?)
         ON CONFLICT(user_id) DO NOTHING
       `
     )
