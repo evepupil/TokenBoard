@@ -2,12 +2,14 @@ import type { UsageSnapshot } from '@tokenboard/usage-core'
 
 export type IngestRecord = UsageSnapshot & {
   userId: string
+  deviceId: string
 }
 
 export async function upsertUsageSnapshots(db: D1Database, records: IngestRecord[]) {
   const sql = `
     INSERT INTO daily_usage (
       user_id,
+      device_id,
       source,
       usage_date,
       timezone,
@@ -21,8 +23,8 @@ export async function upsertUsageSnapshots(db: D1Database, records: IngestRecord
       session_count,
       synced_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(user_id, source, usage_date, model) DO UPDATE SET
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET
       timezone = excluded.timezone,
       input_tokens = excluded.input_tokens,
       output_tokens = excluded.output_tokens,
@@ -39,6 +41,7 @@ export async function upsertUsageSnapshots(db: D1Database, records: IngestRecord
       .prepare(sql)
       .bind(
         record.userId,
+        record.deviceId,
         record.source,
         record.usageDate,
         record.timezone,

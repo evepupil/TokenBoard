@@ -110,6 +110,7 @@ export const dailyUsage = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    deviceId: text('device_id').notNull().default('legacy'),
     source: text('source').notNull(),
     usageDate: text('usage_date').notNull(),
     timezone: text('timezone').notNull(),
@@ -125,7 +126,7 @@ export const dailyUsage = sqliteTable(
   },
   (table) => [
     primaryKey({
-      columns: [table.userId, table.source, table.usageDate, table.model]
+      columns: [table.userId, table.deviceId, table.source, table.usageDate, table.model]
     })
   ]
 )

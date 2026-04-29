@@ -4,6 +4,7 @@ import { markIngestSynced, upsertUsageSnapshots, type IngestRecord } from './rep
 function makeRecord(overrides: Partial<IngestRecord> = {}): IngestRecord {
   return {
     userId: 'seed-user',
+    deviceId: 'dev_123',
     source: 'claude-code',
     usageDate: '2026-04-28',
     timezone: 'Asia/Shanghai',
@@ -21,7 +22,7 @@ function makeRecord(overrides: Partial<IngestRecord> = {}): IngestRecord {
 }
 
 describe('upsertUsageSnapshots', () => {
-  test('upserts daily usage rows with the aggregate primary key', async () => {
+  test('upserts daily usage rows with the device-level aggregate primary key', async () => {
     const bindings: unknown[][] = []
     const sqlStatements: string[] = []
     const db = {
@@ -45,10 +46,11 @@ describe('upsertUsageSnapshots', () => {
     expect(result).toEqual({ upserted: 1 })
     expect(sqlStatements[0]).toContain('INSERT INTO daily_usage')
     expect(sqlStatements[0]).toContain(
-      'ON CONFLICT(user_id, source, usage_date, model) DO UPDATE SET'
+      'ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET'
     )
     expect(bindings[0]).toEqual([
       'seed-user',
+      'dev_123',
       'claude-code',
       '2026-04-28',
       'Asia/Shanghai',
