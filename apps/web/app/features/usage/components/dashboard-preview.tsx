@@ -28,7 +28,10 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
               最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / 设备数：{props.summary.deviceCount}
             </p>
           </div>
-          <LinkButton href="/settings/install">连接设备</LinkButton>
+          <div class="flex flex-wrap gap-3">
+            <LinkButton variant="secondary" href="/dashboard/details">查看详情</LinkButton>
+            <LinkButton href="/settings/install">连接设备</LinkButton>
+          </div>
         </div>
       </header>
 

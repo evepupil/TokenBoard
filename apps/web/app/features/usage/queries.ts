@@ -31,6 +31,48 @@ export type DailyUsageTrendItem = {
   costUsd: number
 }
 
+export type UsageDetailsInput = {
+  userId: string
+  startDate: string
+  endDate: string
+  source: UsageSource | 'all'
+}
+
+export type UsageDetailsDailyRow = {
+  usageDate: string
+  totalTokens: number
+  costUsd: number
+  sessionCount: number
+  sourceSplit: Array<{
+    source: UsageSource
+    totalTokens: number
+  }>
+}
+
+export type UsageDetailsModelRow = {
+  usageDate: string
+  source: UsageSource
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+  costUsd: number
+  sessionCount: number
+}
+
+export type UsageDetails = {
+  summary: {
+    totalTokens: number
+    costUsd: number
+    sessionCount: number
+    activeDays: number
+  }
+  dailyRows: UsageDetailsDailyRow[]
+  modelRows: UsageDetailsModelRow[]
+}
+
 type SummaryRow = {
   todayTokens: number | null
   todayCostUsd: number | null
@@ -137,6 +179,137 @@ export async function getDailyUsageTrend(
   )
 }
 
+export async function getUsageDetails(
+  db: D1Database,
+  input: UsageDetailsInput
+): Promise<UsageDetails> {
+  const dailySourceRows = await db
+    .prepare(
+      `
+        SELECT
+          usage_date as usageDate,
+          source,
+          COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(cost_usd), 0) as costUsd,
+          COALESCE(SUM(session_count), 0) as sessionCount
+        FROM daily_usage
+        WHERE user_id = ?
+          AND usage_date >= ?
+          AND usage_date <= ?
+          AND (? = 'all' OR source = ?)
+        GROUP BY usage_date, source
+        ORDER BY usage_date ASC, source ASC
+      `
+    )
+    .bind(input.userId, input.startDate, input.endDate, input.source, input.source)
+    .all<{
+      usageDate: string
+      source: UsageSource
+      totalTokens: number
+      costUsd: number
+      sessionCount: number
+    }>()
+
+  const modelRows = await db
+    .prepare(
+      `
+        SELECT
+          usage_date as usageDate,
+          source,
+          model,
+          COALESCE(SUM(input_tokens), 0) as inputTokens,
+          COALESCE(SUM(output_tokens), 0) as outputTokens,
+          COALESCE(SUM(cache_creation_tokens), 0) as cacheCreationTokens,
+          COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
+          COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(cost_usd), 0) as costUsd,
+          COALESCE(SUM(session_count), 0) as sessionCount
+        FROM daily_usage
+        WHERE user_id = ?
+          AND usage_date >= ?
+          AND usage_date <= ?
+          AND (? = 'all' OR source = ?)
+        GROUP BY usage_date, source, model
+        ORDER BY usage_date DESC, totalTokens DESC, model ASC
+      `
+    )
+    .bind(input.userId, input.startDate, input.endDate, input.source, input.source)
+    .all<UsageDetailsModelRow>()
+
+  const dailyRows = buildDailyDetails(
+    input.startDate,
+    input.endDate,
+    (dailySourceRows.results ?? []).map((row) => ({
+      usageDate: row.usageDate,
+      source: row.source,
+      totalTokens: Number(row.totalTokens),
+      costUsd: Number(row.costUsd),
+      sessionCount: Number(row.sessionCount)
+    }))
+  )
+
+  return {
+    summary: {
+      totalTokens: dailyRows.reduce((total, row) => total + row.totalTokens, 0),
+      costUsd: roundMetric(dailyRows.reduce((total, row) => total + row.costUsd, 0)),
+      sessionCount: dailyRows.reduce((total, row) => total + row.sessionCount, 0),
+      activeDays: dailyRows.filter((row) => row.totalTokens > 0).length
+    },
+    dailyRows,
+    modelRows: (modelRows.results ?? []).map((row) => ({
+      usageDate: row.usageDate,
+      source: row.source,
+      model: row.model,
+      inputTokens: Number(row.inputTokens),
+      outputTokens: Number(row.outputTokens),
+      cacheCreationTokens: Number(row.cacheCreationTokens),
+      cacheReadTokens: Number(row.cacheReadTokens),
+      totalTokens: Number(row.totalTokens),
+      costUsd: Number(row.costUsd),
+      sessionCount: Number(row.sessionCount)
+    }))
+  }
+}
+
+function buildDailyDetails(
+  startDate: string,
+  endDate: string,
+  rows: Array<{
+    usageDate: string
+    source: UsageSource
+    totalTokens: number
+    costUsd: number
+    sessionCount: number
+  }>
+) {
+  const byDate = new Map<string, UsageDetailsDailyRow>()
+
+  for (const usageDate of eachIsoDate(startDate, endDate)) {
+    byDate.set(usageDate, {
+      usageDate,
+      totalTokens: 0,
+      costUsd: 0,
+      sessionCount: 0,
+      sourceSplit: []
+    })
+  }
+
+  for (const row of rows) {
+    const daily = byDate.get(row.usageDate)
+    if (!daily) continue
+
+    daily.totalTokens += row.totalTokens
+    daily.costUsd = roundMetric(daily.costUsd + row.costUsd)
+    daily.sessionCount += row.sessionCount
+    daily.sourceSplit.push({
+      source: row.source,
+      totalTokens: row.totalTokens
+    })
+  }
+
+  return [...byDate.values()]
+}
+
 function eachIsoDate(startDate: string, endDate: string) {
   const dates: string[] = []
   const current = new Date(`${startDate}T00:00:00.000Z`)
@@ -148,4 +321,8 @@ function eachIsoDate(startDate: string, endDate: string) {
   }
 
   return dates
+}
+
+function roundMetric(value: number) {
+  return Math.round(value * 10000) / 10000
 }
