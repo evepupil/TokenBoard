@@ -9,6 +9,22 @@ describe('collectClaudeCodeUsage', () => {
       collectedAt: '2026-04-28T10:00:00.000Z',
       async runner(command, args) {
         calls.push({ command, args })
+        if (args[1] === 'session') {
+          return {
+            data: [
+              {
+                sessionId: 's1',
+                lastActivity: '2026-04-28T10:00:00.000Z',
+                modelBreakdowns: {
+                  'claude-sonnet-4-5': {
+                    inputTokens: 1,
+                    outputTokens: 2
+                  }
+                }
+              }
+            ]
+          }
+        }
         return {
           data: [
             {
@@ -32,13 +48,17 @@ describe('collectClaudeCodeUsage', () => {
       {
         command: 'npx',
         args: ['ccusage@latest', 'daily', '--json', '--breakdown']
+      },
+      {
+        command: 'npx',
+        args: ['ccusage@latest', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
       source: 'claude-code',
       model: 'claude-sonnet-4-5',
-      totalTokens: 10
+      totalTokens: 10,
+      sessionCount: 1
     })
   })
 })
-

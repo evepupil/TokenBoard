@@ -12,11 +12,15 @@ export async function collectCodexUsage(
   options: CollectCodexUsageOptions = {}
 ): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
-  const json = await runner('npx', ['@ccusage/codex@latest', 'daily', '--json'])
+  const [json, sessions] = await Promise.all([
+    runner('npx', ['@ccusage/codex@latest', 'daily', '--json']),
+    runner('npx', ['@ccusage/codex@latest', 'session', '--json'])
+  ])
 
   return normalizeCcusageDailyJson(json, {
     source: 'codex',
     timezone: options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-    collectedAt: options.collectedAt
+    collectedAt: options.collectedAt,
+    sessions
   })
 }

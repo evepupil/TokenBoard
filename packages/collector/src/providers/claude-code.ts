@@ -12,11 +12,15 @@ export async function collectClaudeCodeUsage(
   options: CollectUsageOptions = {}
 ): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
-  const json = await runner('npx', ['ccusage@latest', 'daily', '--json', '--breakdown'])
+  const [json, sessions] = await Promise.all([
+    runner('npx', ['ccusage@latest', 'daily', '--json', '--breakdown']),
+    runner('npx', ['ccusage@latest', 'session', '--json'])
+  ])
 
   return normalizeCcusageDailyJson(json, {
     source: 'claude-code',
     timezone: options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-    collectedAt: options.collectedAt
+    collectedAt: options.collectedAt,
+    sessions
   })
 }

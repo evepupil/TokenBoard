@@ -169,4 +169,70 @@ describe('normalizeCcusageDailyJson', () => {
     expect(snapshots[1].costUsd).toBeCloseTo(16.878077331417643)
     expect(snapshots[0].costUsd + snapshots[1].costUsd).toBeCloseTo(18.860285)
   })
+
+  test('merges session counts by date and primary model', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        data: [
+          {
+            date: '2026-04-28',
+            modelBreakdowns: [
+              {
+                modelName: 'claude-sonnet',
+                inputTokens: 100,
+                outputTokens: 10
+              },
+              {
+                modelName: 'claude-opus',
+                inputTokens: 200,
+                outputTokens: 20
+              }
+            ]
+          }
+        ]
+      },
+      {
+        source: 'claude-code',
+        timezone: 'Asia/Shanghai',
+        collectedAt,
+        sessions: {
+          data: [
+            {
+              sessionId: 's1',
+              lastActivity: '2026-04-28T10:00:00.000Z',
+              modelBreakdowns: {
+                'claude-sonnet': {
+                  inputTokens: 100,
+                  outputTokens: 10
+                }
+              }
+            },
+            {
+              sessionId: 's2',
+              lastActivity: '2026-04-28T11:00:00.000Z',
+              modelBreakdowns: {
+                'claude-opus': {
+                  inputTokens: 200,
+                  outputTokens: 20
+                }
+              }
+            }
+          ]
+        }
+      }
+    )
+
+    expect(snapshots).toMatchObject([
+      {
+        usageDate: '2026-04-28',
+        model: 'claude-sonnet',
+        sessionCount: 1
+      },
+      {
+        usageDate: '2026-04-28',
+        model: 'claude-opus',
+        sessionCount: 1
+      }
+    ])
+  })
 })

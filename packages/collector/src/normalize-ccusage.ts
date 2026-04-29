@@ -4,12 +4,14 @@ type NormalizeOptions = {
   source: UsageSource
   timezone: string
   collectedAt?: string
+  sessions?: unknown
 }
 
 type UnknownRecord = Record<string, unknown>
 
 export function normalizeCcusageDailyJson(input: unknown, options: NormalizeOptions): UsageSnapshot[] {
   const collectedAt = options.collectedAt ?? new Date().toISOString()
+  const sessionCounts = getSessionCounts(options.sessions)
 
   return extractDailyRows(input).flatMap((row) =>
     extractModelRows(row).map(({ model, metrics, parent }) =>
@@ -32,11 +34,54 @@ export function normalizeCcusageDailyJson(input: unknown, options: NormalizeOpti
         ]),
         totalTokens: readTotalTokens(metrics),
         costUsd: readCostUsd(metrics, parent),
-        sessionCount: readNumber(metrics, ['sessionCount', 'sessions']),
+        sessionCount:
+          sessionCounts.get(sessionCountKey(readDate(row), model)) ??
+          readNumber(metrics, ['sessionCount', 'sessions']),
         collectedAt
       })
     )
   )
+}
+
+function getSessionCounts(input: unknown) {
+  const counts = new Map<string, number>()
+
+  for (const row of extractDailyRows(input)) {
+    const date = readSessionDate(row)
+    const model = readPrimarySessionModel(row)
+    if (!date || !model) continue
+
+    const key = sessionCountKey(date, model)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return counts
+}
+
+function readSessionDate(row: UnknownRecord) {
+  const value = row.lastActivity ?? row.date ?? row.usageDate
+  if (typeof value !== 'string') {
+    return null
+  }
+  return normalizeDate(value)
+}
+
+function readPrimarySessionModel(row: UnknownRecord) {
+  const models = extractModelRows(row)
+  let primary: { model: string; tokens: number } | null = null
+
+  for (const item of models) {
+    const tokens = readTotalTokens(item.metrics)
+    if (!primary || tokens > primary.tokens) {
+      primary = { model: item.model, tokens }
+    }
+  }
+
+  return primary?.model ?? null
+}
+
+function sessionCountKey(date: string, model: string) {
+  return `${date}\u0000${model}`
 }
 
 function extractDailyRows(input: unknown): UnknownRecord[] {
@@ -48,7 +93,7 @@ function extractDailyRows(input: unknown): UnknownRecord[] {
     return []
   }
 
-  for (const key of ['data', 'daily', 'rows', 'items']) {
+  for (const key of ['data', 'daily', 'rows', 'items', 'sessions']) {
     const value = input[key]
     if (Array.isArray(value)) {
       return value.filter(isRecord)
@@ -165,6 +210,13 @@ function readCostUsd(row: UnknownRecord, parent: UnknownRecord) {
 function normalizeDate(value: string) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return value
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    const directParsed = Date.parse(value)
+    if (!Number.isNaN(directParsed)) {
+      return new Date(directParsed).toISOString().slice(0, 10)
+    }
   }
 
   const parsed = Date.parse(`${value} UTC`)

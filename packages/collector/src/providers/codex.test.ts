@@ -9,6 +9,23 @@ describe('collectCodexUsage', () => {
       collectedAt: '2026-04-28T10:00:00.000Z',
       async runner(command, args) {
         calls.push({ command, args })
+        if (args[1] === 'session') {
+          return {
+            data: [
+              {
+                sessionId: 's1',
+                lastActivity: 'Apr 28, 2026',
+                models: {
+                  'gpt-5': {
+                    inputTokens: 1,
+                    outputTokens: 2,
+                    cachedInputTokens: 4
+                  }
+                }
+              }
+            ]
+          }
+        }
         return {
           data: [
             {
@@ -29,6 +46,10 @@ describe('collectCodexUsage', () => {
       {
         command: 'npx',
         args: ['@ccusage/codex@latest', 'daily', '--json']
+      },
+      {
+        command: 'npx',
+        args: ['@ccusage/codex@latest', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -36,8 +57,8 @@ describe('collectCodexUsage', () => {
       model: 'gpt-5',
       cacheCreationTokens: 3,
       cacheReadTokens: 4,
-      totalTokens: 10
+      totalTokens: 10,
+      sessionCount: 1
     })
   })
 })
-
