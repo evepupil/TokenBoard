@@ -20,7 +20,7 @@ export function InstallCommand(props: InstallCommandProps) {
         <p class="text-sm font-black uppercase tracking-[0.28em] text-lime-300">TokenBoard Collector</p>
         <h1 class="mt-4 text-4xl font-black tracking-tight">连接这台机器</h1>
         <p class="mt-3 max-w-2xl text-sm leading-6 text-[var(--app-muted)]">
-          生成一个短期有效的配对提示词，把它粘贴给 Codex 或 Claude Code，让本地 agent 安装 TokenBoard skill 并配置每日同步。
+          生成一个短期有效的配对提示词，把它粘贴给 Codex 或 Claude Code，让本地 agent 用终端命令安装采集器并配置每日同步。
         </p>
       </header>
 
@@ -69,14 +69,38 @@ export function InstallCommand(props: InstallCommandProps) {
 
 export function createInstallPrompt(baseUrl: string, timezone: string, pairingCode: string) {
   return [
-    '请在这台机器上安装并运行 TokenBoard。',
+    '请在这台机器上安装并运行 TokenBoard collector。',
     '',
-    '1. 从这个 GitHub repo 路径安装 TokenBoard skill：',
-    '   https://github.com/evepupil/TokenBoard/tree/master/skills/tokenboard',
-    '2. 使用安装好的 TokenBoard skill 执行 setup：',
+    '重要约束：',
+    '- 只使用终端命令完成安装和 setup。',
+    '- 不要使用浏览器、Playwright、网页抓取、fetch 或 curl 去访问 GitHub 页面。',
+    '- 不要打印 upload token、配对响应、配置文件内容或任何本地隐私数据。',
+    '- 如果已经安装了 TokenBoard skill，可以直接运行其中的 setup 脚本；否则用 git clone/update 仓库后运行脚本。',
     '',
-    `node scripts/setup.mjs --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
+    'macOS / Linux / Git Bash：',
+    '```bash',
+    'repo="$HOME/.tokenboard/TokenBoard"',
+    'if [ -d "$repo/.git" ]; then',
+    '  git -C "$repo" pull --ff-only',
+    'else',
+    '  mkdir -p "$HOME/.tokenboard"',
+    '  git clone https://github.com/evepupil/TokenBoard.git "$repo"',
+    'fi',
+    `node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
+    '```',
     '',
-    '不要打印 upload token。安装每日同步计划，并立即执行第一次同步。'
+    'Windows PowerShell：',
+    '```powershell',
+    '$repo = Join-Path $HOME ".tokenboard\\TokenBoard"',
+    'if (Test-Path (Join-Path $repo ".git")) {',
+    '  git -C $repo pull --ff-only',
+    '} else {',
+    '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
+    '  git clone https://github.com/evepupil/TokenBoard.git $repo',
+    '}',
+    `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
+    '```',
+    '',
+    '完成后只汇报：config 是否写入、每日计划是否安装、首次同步是否成功。'
   ].join('\n')
 }
