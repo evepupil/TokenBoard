@@ -1,9 +1,14 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { collectClaudeCodeUsage } from './claude-code'
 
 describe('collectClaudeCodeUsage', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   test('runs ccusage daily json with breakdown and normalizes the output', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     const snapshots = await collectClaudeCodeUsage({
       timezone: 'Asia/Shanghai',
       collectedAt: '2026-04-28T10:00:00.000Z',
@@ -60,5 +65,52 @@ describe('collectClaudeCodeUsage', () => {
       totalTokens: 10,
       sessionCount: 1
     })
+  })
+
+  test('uses since and selected package manager when configured', async () => {
+    const calls: Array<{ command: string; args: string[] }> = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', 'npm')
+    vi.stubEnv('TOKENBOARD_SINCE', '20260509')
+
+    await collectClaudeCodeUsage({
+      async runner(command, args) {
+        calls.push({ command, args })
+        return { data: [] }
+      }
+    })
+
+    expect(calls).toEqual([
+      {
+        command: 'npm',
+        args: [
+          'exec',
+          '--yes',
+          '--package',
+          'ccusage@latest',
+          '--',
+          'ccusage',
+          'daily',
+          '--json',
+          '--breakdown',
+          '--since',
+          '20260509'
+        ]
+      },
+      {
+        command: 'npm',
+        args: [
+          'exec',
+          '--yes',
+          '--package',
+          'ccusage@latest',
+          '--',
+          'ccusage',
+          'session',
+          '--json',
+          '--since',
+          '20260509'
+        ]
+      }
+    ])
   })
 })

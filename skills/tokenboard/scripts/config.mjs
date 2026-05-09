@@ -14,6 +14,36 @@ export function collectorDir() {
   return process.env.TOKENBOARD_COLLECTOR_DIR || join(configDir(), 'TokenBoard')
 }
 
+export function readPackageManager(flags = {}, config = {}) {
+  const value =
+    flags['package-manager'] ||
+    process.env.TOKENBOARD_PACKAGE_MANAGER ||
+    config.packageManager ||
+    'pnpm'
+
+  if (value === 'pnpm' || value === 'bun' || value === 'npm') {
+    return value
+  }
+
+  throw new Error(`Unsupported package manager: ${value}. Expected pnpm, bun, or npm.`)
+}
+
+export function packageManagerCommand(packageManager) {
+  if (process.platform !== 'win32') {
+    return packageManager
+  }
+
+  return `${packageManager}.cmd`
+}
+
+export function packageManagerRunArgs(packageManager, scriptName, scriptArgs = []) {
+  if (packageManager === 'npm') {
+    return ['run', scriptName, '--', ...scriptArgs]
+  }
+
+  return ['run', scriptName, ...scriptArgs]
+}
+
 export function readConfig() {
   const file = configPath()
   if (!existsSync(file)) {

@@ -2,13 +2,14 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { hostname, platform } from 'node:os'
-import { parseArgs, writeConfig } from './config.mjs'
+import { parseArgs, readPackageManager, writeConfig } from './config.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
 const pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
 const baseUrl = String(flags['base-url'] || process.env.TOKENBOARD_BASE_URL || 'https://tokenboard.chaosyn.com').replace(/\/$/, '')
 const timezone = flags.timezone || process.env.TOKENBOARD_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone
 const deviceName = flags['device-name'] || `${hostname()} ${platform()}`
+const packageManager = readPackageManager(flags)
 
 if (!pairingCode) {
   console.error('Missing --pairing-code')
@@ -38,6 +39,7 @@ writeConfig({
   deviceId: paired.deviceId,
   timezone: paired.timezone,
   source: 'all',
+  packageManager,
   createdAt: new Date().toISOString()
 })
 console.log('TokenBoard config written.')
@@ -47,9 +49,13 @@ function scriptPath(name) {
 }
 
 if (!flags['skip-collector']) {
-  const installCollector = spawnSync(process.execPath, [scriptPath('./install-collector.mjs')], {
-    stdio: 'inherit'
-  })
+  const installCollector = spawnSync(
+    process.execPath,
+    [scriptPath('./install-collector.mjs'), '--package-manager', packageManager],
+    {
+      stdio: 'inherit'
+    }
+  )
   if (installCollector.status !== 0) process.exit(installCollector.status ?? 1)
 }
 
@@ -61,8 +67,20 @@ if (!flags['skip-schedule']) {
 }
 
 if (!flags['skip-initial-sync']) {
-  const sync = spawnSync(process.execPath, [scriptPath('./sync.mjs'), '--mode', 'sync', '--source', 'all'], {
-    stdio: 'inherit'
-  })
+  const sync = spawnSync(
+    process.execPath,
+    [
+      scriptPath('./sync.mjs'),
+      '--mode',
+      'sync',
+      '--source',
+      'all',
+      '--package-manager',
+      packageManager
+    ],
+    {
+      stdio: 'inherit'
+    }
+  )
   if (sync.status !== 0) process.exit(sync.status ?? 1)
 }

@@ -4,9 +4,18 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const packageManager = process.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm'
+const command = process.platform === 'win32' ? `${packageManager}.cmd` : packageManager
+const args =
+  packageManager === 'npm'
+    ? ['exec', '--', 'tsx', 'src/cli.ts', ...process.argv.slice(2)]
+    : packageManager === 'bun'
+      ? ['run', 'tsx', 'src/cli.ts', ...process.argv.slice(2)]
+      : ['exec', 'tsx', 'src/cli.ts', ...process.argv.slice(2)]
+
 const result = spawnSync(
-  process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
-  ['exec', 'tsx', 'src/cli.ts', ...process.argv.slice(2)],
+  command,
+  args,
   {
     cwd: packageDir,
     stdio: 'inherit',
@@ -15,4 +24,3 @@ const result = spawnSync(
 )
 
 process.exit(result.status ?? 1)
-

@@ -18,6 +18,7 @@ console.log(
       deviceId: config.deviceId,
       timezone: config.timezone,
       source: config.source,
+      packageManager: config.packageManager || 'pnpm',
       collectorDir: config.collectorDir
     },
     null,

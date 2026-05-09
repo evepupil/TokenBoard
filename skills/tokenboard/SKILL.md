@@ -24,11 +24,12 @@ Optional flags:
 --skip-collector
 --skip-schedule
 --skip-initial-sync
+--package-manager pnpm|bun|npm
 ```
 
 After setup, report whether config was written, schedule was installed, and initial sync succeeded. Do not show `uploadToken`.
 
-The setup script clones or updates `https://github.com/evepupil/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install`, writes local config, installs the daily schedule unless skipped, and runs an initial sync unless skipped.
+The setup script clones or updates `https://github.com/evepupil/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install` by default, writes local config, installs the daily schedule unless skipped, and runs an initial sync unless skipped. Use `--package-manager bun`, `--package-manager npm`, or `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm` only when the local environment requires a non-default package manager.
 
 If the user pasted a TokenBoard install prompt from the website, follow the prompt and run the included setup command. Treat pairing codes as short-lived secrets and do not repeat them unless needed to execute setup.
 
@@ -44,6 +45,13 @@ Upload:
 
 ```bash
 node scripts/sync.mjs --mode sync --source all
+```
+
+Optional package manager selection:
+
+```bash
+node scripts/sync.mjs --mode sync --source all --package-manager bun
+TOKENBOARD_PACKAGE_MANAGER=npm node scripts/sync.mjs --mode preview --source all
 ```
 
 ## Status

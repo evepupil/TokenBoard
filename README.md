@@ -32,3 +32,22 @@ Deploy:
 ```bash
 pnpm run deploy
 ```
+
+## Package Managers
+
+The repository defaults to pnpm for development and CI. The collector install and sync scripts also
+support Bun and npm for local agent environments:
+
+```bash
+node skills/tokenboard/scripts/install-collector.mjs --package-manager pnpm
+node skills/tokenboard/scripts/install-collector.mjs --package-manager bun
+node skills/tokenboard/scripts/install-collector.mjs --package-manager npm
+```
+
+The same option is available for sync:
+
+```bash
+node skills/tokenboard/scripts/sync.mjs --mode sync --source all --package-manager pnpm
+```
+
+You can also set `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm`. When unset, scripts use pnpm.

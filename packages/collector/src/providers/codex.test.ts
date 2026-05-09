@@ -1,9 +1,14 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { collectCodexUsage } from './codex'
 
 describe('collectCodexUsage', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   test('runs codex ccusage daily json and normalizes cache input aliases', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     const snapshots = await collectCodexUsage({
       timezone: 'Asia/Shanghai',
       collectedAt: '2026-04-28T10:00:00.000Z',
@@ -60,5 +65,30 @@ describe('collectCodexUsage', () => {
       totalTokens: 10,
       sessionCount: 1
     })
+  })
+
+  test('uses since and selected package manager when configured', async () => {
+    const calls: Array<{ command: string; args: string[] }> = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', 'bun')
+    vi.stubEnv('TOKENBOARD_BUNX_BIN', '/opt/bin/bunx')
+    vi.stubEnv('TOKENBOARD_SINCE', '20260509')
+
+    await collectCodexUsage({
+      async runner(command, args) {
+        calls.push({ command, args })
+        return { data: [] }
+      }
+    })
+
+    expect(calls).toEqual([
+      {
+        command: '/opt/bin/bunx',
+        args: ['@ccusage/codex@latest', 'daily', '--json', '--since', '20260509']
+      },
+      {
+        command: '/opt/bin/bunx',
+        args: ['@ccusage/codex@latest', 'session', '--json', '--since', '20260509']
+      }
+    ])
   })
 })
