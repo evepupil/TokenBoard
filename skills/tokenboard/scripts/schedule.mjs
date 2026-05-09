@@ -51,6 +51,7 @@ export function normalizePathEnv({ pathEnv, homeDir, nodePath }) {
   const paths = pathEnv.split(':').filter(Boolean)
   prependOnce(paths, dirname(nodePath))
   prependOnce(paths, `${homeDir}/.local/bin`)
+  prependOnce(paths, `${homeDir}/.bun/bin`)
   return paths.join(':')
 }
 

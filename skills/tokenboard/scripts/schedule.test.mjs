@@ -36,7 +36,7 @@ test('builds Linux user systemd units with pnpm available in PATH', () => {
   })
 
   assert.match(units.service, /Environment=TOKENBOARD_PACKAGE_MANAGER=pnpm/)
-  assert.match(units.service, /Environment=PATH=\/home\/mison\/.local\/bin:\/usr\/bin:\/bin/)
+  assert.match(units.service, /Environment=PATH=\/home\/mison\/.bun\/bin:\/home\/mison\/.local\/bin:\/usr\/bin:\/bin/)
   assert.match(units.service, /ExecStart=\/usr\/bin\/node \/home\/mison\/.tokenboard\/TokenBoard\/skills\/tokenboard\/scripts\/sync.mjs --mode sync --source all/)
   assert.match(units.timer, /OnCalendar=09:00/)
   assert.match(units.timer, /OnCalendar=12:00/)
@@ -52,15 +52,15 @@ test('normalizePathEnv prepends missing local and node bin directories once', ()
       homeDir: '/home/mison',
       nodePath: '/opt/node/bin/node'
     }),
-    '/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin'
+    '/home/mison/.bun/bin:/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin'
   )
 
   assert.equal(
     normalizePathEnv({
-      pathEnv: '/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin',
+      pathEnv: '/home/mison/.bun/bin:/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin',
       homeDir: '/home/mison',
       nodePath: '/opt/node/bin/node'
     }),
-    '/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin'
+    '/home/mison/.bun/bin:/home/mison/.local/bin:/opt/node/bin:/usr/bin:/bin'
   )
 })
