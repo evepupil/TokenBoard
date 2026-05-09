@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { collectorDir, mergeConfig, packageManagerCommand, parseArgs, readPackageManager } from './config.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
-const repoUrl = flags['repo-url'] || process.env.TOKENBOARD_REPO_URL || 'https://github.com/evepupil/TokenBoard.git'
+const repoUrl = flags['repo-url'] || process.env.TOKENBOARD_REPO_URL || 'https://github.com/MisonL/TokenBoard.git'
 const packageManager = readPackageManager(flags)
 const dir = collectorDir()
 

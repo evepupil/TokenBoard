@@ -1,6 +1,8 @@
 import { Copy } from 'lucide'
 import { LucideIcon } from '../../../components/ui/icon'
 
+const collectorRepoUrl = 'https://github.com/MisonL/TokenBoard.git'
+
 export type InstallCommandProps = {
   baseUrl: string
   timezone: string
@@ -84,7 +86,7 @@ export function createInstallPrompt(baseUrl: string, timezone: string, pairingCo
     '  git -C "$repo" pull --ff-only',
     'else',
     '  mkdir -p "$HOME/.tokenboard"',
-    '  git clone https://github.com/evepupil/TokenBoard.git "$repo"',
+    `  git clone ${collectorRepoUrl} "$repo"`,
     'fi',
     `node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
     '```',
@@ -96,7 +98,7 @@ export function createInstallPrompt(baseUrl: string, timezone: string, pairingCo
     '  git -C $repo pull --ff-only',
     '} else {',
     '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
-    '  git clone https://github.com/evepupil/TokenBoard.git $repo',
+    `  git clone ${collectorRepoUrl} $repo`,
     '}',
     `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${pairingCode} --base-url ${baseUrl} --timezone ${timezone}`,
     '```',

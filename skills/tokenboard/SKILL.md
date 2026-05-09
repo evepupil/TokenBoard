@@ -29,7 +29,7 @@ Optional flags:
 
 After setup, report whether config was written, schedule was installed, and initial sync succeeded. Do not show `uploadToken`.
 
-The setup script clones or updates `https://github.com/evepupil/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install` by default, writes local config, installs the daily schedule unless skipped, and runs an initial sync unless skipped. Use `--package-manager bun`, `--package-manager npm`, or `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm` only when the local environment requires a non-default package manager.
+The setup script clones or updates `https://github.com/MisonL/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install` by default, writes local config, installs the daily schedule unless skipped, and runs an initial sync unless skipped. Use `--package-manager bun`, `--package-manager npm`, or `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm` only when the local environment requires a non-default package manager.
 
 If the user pasted a TokenBoard install prompt from the website, follow the prompt and run the included setup command. Treat pairing codes as short-lived secrets and do not repeat them unless needed to execute setup.
 

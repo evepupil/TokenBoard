@@ -26,7 +26,7 @@ describe('InstallCommand', () => {
     )
 
     expect(prompt).toContain('不要使用浏览器、Playwright、网页抓取、fetch 或 curl')
-    expect(prompt).toContain('git clone https://github.com/evepupil/TokenBoard.git')
+    expect(prompt).toContain('git clone https://github.com/MisonL/TokenBoard.git')
     expect(prompt).toContain('git -C "$repo" pull --ff-only')
     expect(prompt).toContain('skills/tokenboard/scripts/setup.mjs')
     expect(prompt).toContain('--pairing-code pair_123')
