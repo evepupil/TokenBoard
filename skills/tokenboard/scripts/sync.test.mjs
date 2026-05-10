@@ -13,6 +13,41 @@ test('buildDefaultSince returns compact local date for the lookback window', () 
   )
 })
 
+test('buildDefaultSince handles timezone calendar dates without locale string parsing', () => {
+  const RealDate = globalThis.Date
+  class ThrowOnStringDate extends RealDate {
+    constructor(...args) {
+      if (typeof args[0] === 'string') {
+        throw new Error('string date parsing is not allowed')
+      }
+      super(...args)
+    }
+  }
+
+  globalThis.Date = ThrowOnStringDate
+  try {
+    assert.equal(
+      buildDefaultSince({
+        now: new RealDate('2026-01-01T00:30:00.000Z'),
+        timezone: 'America/Los_Angeles',
+        lookbackDays: 1
+      }),
+      '20251230'
+    )
+
+    assert.equal(
+      buildDefaultSince({
+        now: new RealDate('2026-01-01T00:30:00.000Z'),
+        timezone: 'Pacific/Kiritimati',
+        lookbackDays: 1
+      }),
+      '20251231'
+    )
+  } finally {
+    globalThis.Date = RealDate
+  }
+})
+
 test('readSince prefers CLI flag then environment then config then default', () => {
   assert.equal(
     readSince({

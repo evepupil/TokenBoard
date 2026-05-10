@@ -14,10 +14,35 @@ export function readSince({ flags = {}, env = process.env, config = {}, now = ne
 }
 
 export function buildDefaultSince({ now, timezone, lookbackDays }) {
-  const localNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }))
-  localNow.setDate(localNow.getDate() - lookbackDays)
-  const year = localNow.getFullYear()
-  const month = String(localNow.getMonth() + 1).padStart(2, '0')
-  const day = String(localNow.getDate()).padStart(2, '0')
+  const parts = readTimeZoneDateParts(now, timezone)
+  const localDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
+  localDate.setUTCDate(localDate.getUTCDate() - lookbackDays)
+  return formatCompactDate(localDate)
+}
+
+function readTimeZoneDateParts(date, timezone) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+  const values = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  )
+  return {
+    year: Number.parseInt(values.year, 10),
+    month: Number.parseInt(values.month, 10),
+    day: Number.parseInt(values.day, 10)
+  }
+}
+
+function formatCompactDate(date) {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
   return `${year}${month}${day}`
 }
