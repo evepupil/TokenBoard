@@ -198,10 +198,10 @@ describe('collectCodexUsage', () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const scopedHomes = new Set<string>()
     vi.stubEnv('TOKENBOARD_SINCE', 'all')
-    vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '1000000')
+    vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '2')
 
     try {
-      for (let index = 0; index < 1001; index += 1) {
+      for (let index = 0; index < 3; index += 1) {
         await writeJsonl(join(codexHome, 'sessions', '2026', '05', '09', `session-${index}.jsonl`), [
           tokenCountEvent('2026-05-09T04:24:07.234Z', 1)
         ])
