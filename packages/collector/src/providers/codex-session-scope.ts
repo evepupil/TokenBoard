@@ -22,28 +22,54 @@ export type CodexSessionScope = {
 export async function createCodexSessionScope(
   options: CodexSessionScopeOptions = {}
 ): Promise<CodexSessionScope | null> {
-  const files = await collectMatchingSessionFiles(options)
-  if (!files) {
+  const scan = await prepareSessionScan(options)
+  if (!scan) {
     return null
   }
-  return createScope(files.sourceSessionsDir, files.files)
+
+  const scope = await createEmptyScope()
+  let copied = 0
+  try {
+    for await (const file of iterateMatchingSessionFiles(scan)) {
+      await copySessionFile(scan.sourceSessionsDir, scope.codexHome, file)
+      copied += 1
+    }
+
+    if (copied === 0) {
+      await scope.cleanup()
+      return null
+    }
+
+    return scope
+  } catch (error) {
+    await scope.cleanup()
+    throw error
+  }
 }
 
 export async function* createCodexSessionScopeBatches(
   options: CodexSessionScopeOptions = {}
 ): AsyncGenerator<CodexSessionScope> {
-  const matching = await collectMatchingSessionFiles(options)
-  if (!matching) {
+  const scan = await prepareSessionScan(options)
+  if (!scan) {
     return
   }
 
   const batchSize = normalizeBatchSize(options.batchSize)
-  for (let index = 0; index < matching.files.length; index += batchSize) {
-    yield await createScope(matching.sourceSessionsDir, matching.files.slice(index, index + batchSize))
+  const batch: string[] = []
+  for await (const file of iterateMatchingSessionFiles(scan)) {
+    batch.push(file)
+    if (batch.length >= batchSize) {
+      yield await createScope(scan.sourceSessionsDir, batch.splice(0, batch.length))
+    }
+  }
+
+  if (batch.length > 0) {
+    yield await createScope(scan.sourceSessionsDir, batch)
   }
 }
 
-async function collectMatchingSessionFiles(options: CodexSessionScopeOptions = {}) {
+async function prepareSessionScan(options: CodexSessionScopeOptions = {}) {
   const since = parseFilterDate(options.since, 'start')
   const until = parseFilterDate(options.until, 'end')
   const includeAll = options.since === 'all' && !until
@@ -58,35 +84,52 @@ async function collectMatchingSessionFiles(options: CodexSessionScopeOptions = {
     return null
   }
 
-  const files: string[] = []
-  const filter = { since, until, now: options.now || new Date() }
-  for await (const file of glob(JSONL_GLOB, { cwd: sourceSessionsDir })) {
-    const absoluteFile = isAbsolute(file) ? file : join(sourceSessionsDir, file)
-    if (!includeAll && !(await isActiveSessionFile(absoluteFile, filter))) {
+  return {
+    sourceSessionsDir,
+    includeAll,
+    filter: { since, until, now: options.now || new Date() }
+  }
+}
+
+async function* iterateMatchingSessionFiles(scan: {
+  sourceSessionsDir: string
+  includeAll: boolean
+  filter: { since?: Date; until?: Date; now: Date }
+}) {
+  for await (const file of glob(JSONL_GLOB, { cwd: scan.sourceSessionsDir })) {
+    const absoluteFile = isAbsolute(file) ? file : join(scan.sourceSessionsDir, file)
+    if (!scan.includeAll && !(await isActiveSessionFile(absoluteFile, scan.filter))) {
       continue
     }
 
-    files.push(absoluteFile)
+    yield absoluteFile
   }
-  return files.length > 0 ? { sourceSessionsDir, files } : null
 }
 
 async function createScope(sourceSessionsDir: string, files: string[]) {
-  const scopedHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))
-  const scopedSessionsDir = join(scopedHome, CODEX_SESSIONS_DIR)
-  await mkdir(scopedSessionsDir, { recursive: true })
+  const scope = await createEmptyScope()
 
   for (const file of files) {
-    const relativePath = relative(sourceSessionsDir, file)
-    const target = join(scopedSessionsDir, relativePath)
-    await mkdir(dirname(target), { recursive: true })
-    await cp(file, target)
+    await copySessionFile(sourceSessionsDir, scope.codexHome, file)
   }
 
+  return scope
+}
+
+async function createEmptyScope() {
+  const scopedHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))
+  await mkdir(join(scopedHome, CODEX_SESSIONS_DIR), { recursive: true })
   return {
     codexHome: scopedHome,
     cleanup: () => rm(scopedHome, { recursive: true, force: true })
   }
+}
+
+async function copySessionFile(sourceSessionsDir: string, scopedHome: string, file: string) {
+  const relativePath = relative(sourceSessionsDir, file)
+  const target = join(scopedHome, CODEX_SESSIONS_DIR, relativePath)
+  await mkdir(dirname(target), { recursive: true })
+  await cp(file, target)
 }
 
 function normalizeBatchSize(value: number | undefined) {
