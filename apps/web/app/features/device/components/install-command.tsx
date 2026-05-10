@@ -82,6 +82,17 @@ export function createInstallPrompt(input: {
   collectorRepoUrl?: string
 }) {
   const collectorRepoUrl = input.collectorRepoUrl || defaultCollectorRepoUrl
+  const bashRepoUrl = escapeBashArg(collectorRepoUrl)
+  const bashPairingCode = escapeBashArg(input.pairingCode)
+  const bashBaseUrl = escapeBashArg(input.baseUrl)
+  const bashTimezone = escapeBashArg(input.timezone)
+  const bashSetupRepoArg = collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${bashRepoUrl}`
+  const powerShellRepoUrl = escapePowerShellArg(collectorRepoUrl)
+  const powerShellPairingCode = escapePowerShellArg(input.pairingCode)
+  const powerShellBaseUrl = escapePowerShellArg(input.baseUrl)
+  const powerShellTimezone = escapePowerShellArg(input.timezone)
+  const powerShellSetupRepoArg = collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${powerShellRepoUrl}`
+
   return [
     '请在这台机器上安装并运行 TokenBoard collector。',
     '',
@@ -100,9 +111,9 @@ export function createInstallPrompt(input: {
     '  git -C "$repo" pull --ff-only',
     'else',
     '  mkdir -p "$HOME/.tokenboard"',
-    `  git clone ${collectorRepoUrl} "$repo"`,
+    `  git clone ${bashRepoUrl} "$repo"`,
     'fi',
-    `node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${input.pairingCode} --base-url ${input.baseUrl} --timezone ${input.timezone} --schedule-times "09:00,12:00,18:00,23:00"`,
+    `node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${bashPairingCode} --base-url ${bashBaseUrl} --timezone ${bashTimezone} --schedule-times "09:00,12:00,18:00,23:00"${bashSetupRepoArg}`,
     '```',
     '',
     'Windows PowerShell：',
@@ -112,11 +123,22 @@ export function createInstallPrompt(input: {
     '  git -C $repo pull --ff-only',
     '} else {',
     '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
-    `  git clone ${collectorRepoUrl} $repo`,
+    `  git clone ${powerShellRepoUrl} $repo`,
     '}',
-    `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${input.pairingCode} --base-url ${input.baseUrl} --timezone ${input.timezone} --schedule-times "09:00,12:00,18:00,23:00"`,
+    `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${powerShellPairingCode} --base-url ${powerShellBaseUrl} --timezone ${powerShellTimezone} --schedule-times "09:00,12:00,18:00,23:00"${powerShellSetupRepoArg}`,
     '```',
     '',
     '完成后只汇报：config 是否写入、每日计划是否安装、已安装的触发时间、首次同步是否成功。'
   ].join('\n')
+}
+
+function escapeBashArg(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+function escapePowerShellArg(value: string) {
+  return `"${value
+    .replaceAll('`', '``')
+    .replaceAll('"', '`"')
+    .replaceAll('$', '`$')}"`
 }
