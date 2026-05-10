@@ -28,9 +28,13 @@ export function readPackageManager(flags = {}, config = {}) {
   throw new Error(`Unsupported package manager: ${value}. Expected pnpm, bun, or npm.`)
 }
 
-export function packageManagerCommand(packageManager) {
-  if (process.platform !== 'win32') {
+export function packageManagerCommand(packageManager, platform = process.platform) {
+  if (platform !== 'win32') {
     return packageManager
+  }
+
+  if (packageManager === 'bun') {
+    return 'bun.exe'
   }
 
   return `${packageManager}.cmd`
