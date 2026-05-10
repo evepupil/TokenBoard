@@ -1,4 +1,4 @@
-import { glob, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { glob, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -161,6 +161,26 @@ describe('createCodexSessionScope', () => {
       await rm(codexHome, { recursive: true, force: true })
     }
   })
+
+  test('cleans up a failed batch scope copy', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
+    const before = await listScopeTempDirs()
+    try {
+      await writeJsonl(join(codexHome, 'sessions', '2026', '05', 'ok.jsonl'), [
+        tokenCountEvent('2026-05-09T04:24:07.234Z')
+      ])
+      await mkdir(join(codexHome, 'sessions', '2026', '05', 'broken.jsonl'))
+
+      await expect(
+        collectBatches(createCodexSessionScopeBatches({ codexHome, since: 'all', batchSize: 2 }))
+      ).rejects.toThrow()
+
+      const after = await listScopeTempDirs()
+      expect(after.filter((entry) => !before.includes(entry))).toHaveLength(0)
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
 })
 
 async function writeJsonl(file: string, rows: unknown[]) {
@@ -189,4 +209,17 @@ async function fileExists(file: string) {
   return stat(file)
     .then(() => true)
     .catch(() => false)
+}
+
+async function collectBatches(source: AsyncGenerator<unknown>) {
+  const batches = []
+  for await (const batch of source) {
+    batches.push(batch)
+  }
+  return batches
+}
+
+async function listScopeTempDirs() {
+  const entries = await readdir(tmpdir())
+  return entries.filter((entry) => entry.startsWith('tokenboard-codex-home-'))
 }

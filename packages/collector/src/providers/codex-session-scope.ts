@@ -108,12 +108,15 @@ async function* iterateMatchingSessionFiles(scan: {
 
 async function createScope(sourceSessionsDir: string, files: string[]) {
   const scope = await createEmptyScope()
-
-  for (const file of files) {
-    await copySessionFile(sourceSessionsDir, scope.codexHome, file)
+  try {
+    for (const file of files) {
+      await copySessionFile(sourceSessionsDir, scope.codexHome, file)
+    }
+    return scope
+  } catch (error) {
+    await scope.cleanup()
+    throw error
   }
-
-  return scope
 }
 
 async function createEmptyScope() {
