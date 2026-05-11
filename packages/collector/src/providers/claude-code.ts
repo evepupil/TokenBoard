@@ -14,10 +14,8 @@ export async function collectClaudeCodeUsage(
   const runner = options.runner ?? runJsonCommand
   const since = process.env.TOKENBOARD_SINCE || process.env.TOKENBOARD_DEFAULT_SINCE || ''
   const sinceArgs = since && since !== 'all' ? ['--since', since] : []
-  const [json, sessions] = await Promise.all([
-    runner('npx', ['ccusage@latest', 'daily', '--json', '--breakdown', ...sinceArgs]),
-    runner('npx', ['ccusage@latest', 'session', '--json', ...sinceArgs])
-  ])
+  const json = await runner('npx', ['ccusage@latest', 'daily', '--json', '--breakdown', ...sinceArgs])
+  const sessions = await runner('npx', ['ccusage@latest', 'session', '--json', ...sinceArgs])
 
   return normalizeCcusageDailyJson(json, {
     source: 'claude-code',

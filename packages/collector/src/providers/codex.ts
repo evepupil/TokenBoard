@@ -43,10 +43,8 @@ export async function collectCodexUsage(
     return mergeSnapshots(snapshots)
   }
 
-  const [json, sessions] = await Promise.all([
-    runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...rangeArgs], { env: process.env }),
-    runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...rangeArgs], { env: process.env })
-  ])
+  const json = await runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...rangeArgs], { env: process.env })
+  const sessions = await runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...rangeArgs], { env: process.env })
 
   return normalizeCcusageDailyJson(json, {
     source: 'codex',
@@ -65,10 +63,8 @@ async function collectScopedBatch(input: {
 }) {
   try {
     const env = { ...process.env, CODEX_HOME: input.scope.codexHome }
-    const [json, sessions] = await Promise.all([
-      input.runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...input.rangeArgs], { env }),
-      input.runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...input.rangeArgs], { env })
-    ])
+    const json = await input.runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...input.rangeArgs], { env })
+    const sessions = await input.runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...input.rangeArgs], { env })
 
     return normalizeCcusageDailyJson(json, {
       source: 'codex',
