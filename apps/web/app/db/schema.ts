@@ -122,6 +122,7 @@ export const dailyUsage = sqliteTable(
     totalTokens: integer('total_tokens').notNull().default(0),
     costUsd: real('cost_usd').notNull().default(0),
     sessionCount: integer('session_count').notNull().default(0),
+    snapshotHash: text('snapshot_hash'),
     syncedAt: text('synced_at').notNull()
   },
   (table) => [

@@ -164,8 +164,11 @@ describe('createCodexSessionScope', () => {
 
   test('cleans up a failed batch scope copy', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
-    const before = await listScopeTempDirs()
+    const sandboxTmpdir = await mkdtemp(join(tmpdir(), 'tokenboard-scope-root-'))
+    const previousTmpdir = process.env.TMPDIR
+    process.env.TMPDIR = sandboxTmpdir
     try {
+      const before = await listScopeTempDirs(sandboxTmpdir)
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', 'ok.jsonl'), [
         tokenCountEvent('2026-05-09T04:24:07.234Z')
       ])
@@ -175,10 +178,12 @@ describe('createCodexSessionScope', () => {
         collectBatches(createCodexSessionScopeBatches({ codexHome, since: 'all', batchSize: 2 }))
       ).rejects.toThrow()
 
-      const after = await listScopeTempDirs()
+      const after = await listScopeTempDirs(sandboxTmpdir)
       expect(after.filter((entry) => !before.includes(entry))).toHaveLength(0)
     } finally {
+      process.env.TMPDIR = previousTmpdir
       await rm(codexHome, { recursive: true, force: true })
+      await rm(sandboxTmpdir, { recursive: true, force: true })
     }
   })
 })
@@ -219,7 +224,7 @@ async function collectBatches(source: AsyncGenerator<unknown>) {
   return batches
 }
 
-async function listScopeTempDirs() {
-  const entries = await readdir(tmpdir())
+async function listScopeTempDirs(root: string) {
+  const entries = await readdir(root)
   return entries.filter((entry) => entry.startsWith('tokenboard-codex-home-'))
 }
