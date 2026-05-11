@@ -35,6 +35,8 @@ If the user pasted a TokenBoard install prompt from the website, follow the prom
 
 ## Sync
 
+Daily and manual sync default to a 7-day lookback window. Use `--since all` only when the user explicitly asks for a full-history backfill.
+
 Preview without upload:
 
 ```bash
@@ -45,6 +47,7 @@ Upload:
 
 ```bash
 node scripts/sync.mjs --mode sync --source all
+node scripts/sync.mjs --mode sync --source all --since all
 ```
 
 ## Status
