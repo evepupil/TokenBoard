@@ -7,7 +7,7 @@ export type CommandRunner = (command: string, args: string[]) => Promise<unknown
 
 export const runJsonCommand: CommandRunner = async (command, args) => {
   const { stdout } = await execFileAsync(command, args, {
-    shell: process.platform === 'win32',
+    shell: false,
     maxBuffer: 128 * 1024 * 1024
   })
 
