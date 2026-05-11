@@ -8,8 +8,6 @@ import {
   readConfig,
   parseArgs,
   collectorDir,
-  packageManagerCommand,
-  packageManagerRunArgs,
   readPackageManager
 } from './config.mjs'
 import { normalizePathEnv } from './schedule.mjs'
@@ -67,13 +65,12 @@ export function buildSyncInvocation({
   const packageManager = readPackageManager(flags, config)
   const since = readSince({ flags, config, env })
   const delimiter = platform === 'win32' ? ';' : ':'
-  const command = packageManagerCommand(packageManager, platform)
   return {
-    command,
-    args: packageManagerRunArgs(packageManager, mode, ['--source', source]),
+    command: nodePath,
+    args: ['--import', 'tsx', 'src/cli.ts', mode, '--source', source],
     cwd: join(repoDir, 'packages', 'collector'),
     repoDir,
-    shell: platform === 'win32' && command.endsWith('.cmd'),
+    shell: false,
     env: {
       ...env,
       PATH: normalizePathEnv({

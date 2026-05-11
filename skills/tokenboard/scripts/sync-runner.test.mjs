@@ -19,8 +19,9 @@ test('builds Windows sync invocation with semicolon PATH delimiter', () => {
     platform: 'win32'
   })
 
-  assert.equal(invocation.command, 'pnpm.exe')
+  assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe')
   assert.equal(invocation.shell, false)
+  assert.deepEqual(invocation.args, ['--import', 'tsx', 'src/cli.ts', 'sync', '--source', 'all'])
   assert.equal(invocation.env.PATH, 'C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32')
 })
 
@@ -40,8 +41,8 @@ test('builds Windows npm sync invocation through cmd shim', () => {
     platform: 'win32'
   })
 
-  assert.equal(invocation.command, 'npm.cmd')
-  assert.equal(invocation.shell, true)
+  assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe')
+  assert.equal(invocation.shell, false)
 })
 
 test('builds Windows bun sync invocation with bun executable', () => {
@@ -60,7 +61,7 @@ test('builds Windows bun sync invocation with bun executable', () => {
     platform: 'win32'
   })
 
-  assert.equal(invocation.command, 'bun.exe')
+  assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe')
   assert.equal(invocation.shell, false)
-  assert.deepEqual(invocation.args, ['run', 'preview', '--source', 'all'])
+  assert.deepEqual(invocation.args, ['--import', 'tsx', 'src/cli.ts', 'preview', '--source', 'all'])
 })
