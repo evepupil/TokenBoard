@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { packageManagerCommand } from './config.mjs'
+import { stripUtf8Bom, packageManagerCommand } from './config.mjs'
+
+test('strips UTF-8 BOM before parsing config content', () => {
+  const parsed = JSON.parse(stripUtf8Bom('\ufeff{"configured":true}'))
+
+  assert.deepEqual(parsed, { configured: true })
+})
+
+test('leaves non-BOM config content unchanged', () => {
+  const config = '{"configured":true}'
+
+  assert.equal(stripUtf8Bom(config), config)
+})
 
 test('uses bun.exe on Windows package manager commands', () => {
   assert.equal(packageManagerCommand('bun', 'win32'), 'bun.exe')

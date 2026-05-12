@@ -54,12 +54,19 @@ export function readConfig() {
     throw new Error(`TokenBoard config not found: ${file}`)
   }
 
-  return JSON.parse(readFileSync(file, 'utf8'))
+  return JSON.parse(stripUtf8Bom(readFileSync(file, 'utf8')))
 }
 
 export function writeConfig(config) {
   mkdirSync(configDir(), { recursive: true })
   writeFileSync(configPath(), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
+}
+
+export function stripUtf8Bom(value) {
+  if (value.charCodeAt(0) === 0xfeff) {
+    return value.slice(1)
+  }
+  return value
 }
 
 export function mergeConfig(patch) {
