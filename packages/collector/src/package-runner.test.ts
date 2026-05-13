@@ -10,7 +10,7 @@ describe('resolvePackageRunner', () => {
     vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     const runner = resolvePackageRunner()
 
-    expect(runner.command).toBe('npx')
+    expect(runner.command).toBe(platformCommand('npx'))
     expect(runner.runPackageArgs('ccusage@latest', 'ccusage', ['daily', '--json'])).toEqual([
       'ccusage@latest',
       'daily',
@@ -68,3 +68,7 @@ describe('resolvePackageRunner', () => {
     ])
   })
 })
+
+function platformCommand(command: string) {
+  return process.platform === 'win32' ? `${command}.cmd` : command
+}

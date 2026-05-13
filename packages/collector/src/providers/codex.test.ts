@@ -51,11 +51,11 @@ describe('collectCodexUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['@ccusage/codex@latest', 'daily', '--json']
       },
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['@ccusage/codex@latest', 'session', '--json']
       }
     ])
@@ -93,11 +93,11 @@ describe('collectCodexUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['@ccusage/codex@latest', 'daily', '--json', '--since', '20260501']
       },
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['@ccusage/codex@latest', 'session', '--json', '--since', '20260501']
       }
     ])
@@ -199,19 +199,19 @@ describe('collectCodexUsage', () => {
 
       expect(calls).toEqual([
         {
-          command: 'npx',
+          command: platformCommand('npx'),
           args: ['@ccusage/codex@latest', 'daily', '--json']
         },
         {
-          command: 'npx',
+          command: platformCommand('npx'),
           args: ['@ccusage/codex@latest', 'session', '--json']
         },
         {
-          command: 'npx',
+          command: platformCommand('npx'),
           args: ['@ccusage/codex@latest', 'daily', '--json']
         },
         {
-          command: 'npx',
+          command: platformCommand('npx'),
           args: ['@ccusage/codex@latest', 'session', '--json']
         }
       ])
@@ -391,4 +391,8 @@ function tokenCountEvent(timestamp: string, totalTokens: number) {
       }
     }
   }
+}
+
+function platformCommand(command: string) {
+  return process.platform === 'win32' ? `${command}.cmd` : command
 }

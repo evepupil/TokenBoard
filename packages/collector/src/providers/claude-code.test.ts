@@ -50,11 +50,11 @@ describe('collectClaudeCodeUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['ccusage@latest', 'daily', '--json', '--breakdown']
       },
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['ccusage@latest', 'session', '--json']
       }
     ])
@@ -80,7 +80,7 @@ describe('collectClaudeCodeUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npm',
+        command: platformCommand('npm'),
         args: [
           'exec',
           '--yes',
@@ -96,7 +96,7 @@ describe('collectClaudeCodeUsage', () => {
         ]
       },
       {
-        command: 'npm',
+        command: platformCommand('npm'),
         args: [
           'exec',
           '--yes',
@@ -128,13 +128,17 @@ describe('collectClaudeCodeUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['ccusage@latest', 'daily', '--json', '--breakdown']
       },
       {
-        command: 'npx',
+        command: platformCommand('npx'),
         args: ['ccusage@latest', 'session', '--json']
       }
     ])
   })
 })
+
+function platformCommand(command: string) {
+  return process.platform === 'win32' ? `${command}.cmd` : command
+}
