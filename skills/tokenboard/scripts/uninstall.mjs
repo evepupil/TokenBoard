@@ -34,8 +34,10 @@ export function uninstallClient(options = {}) {
   }
 
   if (removeCollector && runtime.exists(runtime.collectorDir)) {
-    removePath(runtime, runtime.collectorDir)
-    removed.collector = true
+    if (!samePath(runtime.collectorDir, runtime.configDir)) {
+      removePath(runtime, runtime.collectorDir)
+      removed.collector = true
+    }
   }
 
   if (removeConfig && !removeConfigDir && runtime.exists(runtime.configPath)) {
@@ -66,6 +68,10 @@ function leaveDirectoryBeforeRemove(runtime, targetPath) {
 function isInsidePath(candidatePath, targetPath) {
   const relativePath = relative(resolve(targetPath), resolve(candidatePath))
   return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.startsWith('/') && relativePath !== '..')
+}
+
+function samePath(leftPath, rightPath) {
+  return resolve(leftPath) === resolve(rightPath)
 }
 
 function runCli() {

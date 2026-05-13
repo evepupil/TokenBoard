@@ -97,6 +97,26 @@ test('leaves collector directory before removing it', () => {
   ])
 })
 
+test('does not delete the config directory before the collector when they are the same path', () => {
+  const harness = createHarness()
+
+  const removed = uninstallClient({
+    ...harness.options,
+    collectorDir: '/home/tokenboard/.tokenboard',
+    argv: ['--all']
+  })
+
+  assert.deepEqual(removed, {
+    schedule: true,
+    collector: false,
+    config: false,
+    configDir: true
+  })
+  assert.deepEqual(harness.removedPaths, [
+    '/home/tokenboard/.tokenboard'
+  ])
+})
+
 function createHarness() {
   const existingPaths = new Set([
     '/home/tokenboard/.tokenboard',

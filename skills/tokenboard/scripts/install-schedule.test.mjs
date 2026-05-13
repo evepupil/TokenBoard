@@ -90,12 +90,19 @@ test('creates Windows scheduled tasks through an isolated schtasks harness', () 
       argv: ['--schedule-times', '08:15,21:45']
     })
 
-    assert.deepEqual(harness.calls.map(commandLine), [
-      'schtasks.exe --version',
-      'schtasks.exe /Create /F /SC DAILY /TN TokenBoardDailySync0815 /TR "node-test" "sync-test.mjs" --mode sync --source all --scheduled /ST 08:15',
-      'schtasks.exe /Create /F /SC DAILY /TN TokenBoardDailySync2145 /TR "node-test" "sync-test.mjs" --mode sync --source all --scheduled /ST 21:45',
-      "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $current = @('TokenBoardDailySync0815','TokenBoardDailySync2145'); Get-ScheduledTask -TaskPath '\\' | Where-Object { (($_.TaskName -like 'TokenBoardDailySync*') -or ($_.Actions | Where-Object { $_.Execute -like '*node*' -and $_.Arguments -like '*TokenBoard*skills*tokenboard*scripts*sync.mjs*' })) -and $current -notcontains $_.TaskName } | Unregister-ScheduledTask -Confirm:$false"
-    ])
+    const calls = harness.calls.map(commandLine)
+    assert.equal(calls[0], 'schtasks.exe --version')
+    assert.match(calls[1], /schtasks\.exe \/Create \/F \/SC DAILY \/TN TokenBoardDailySync0815 \/TR cmd\.exe \/d \/c/)
+    assert.match(calls[1], /TOKENBOARD_PACKAGE_MANAGER=pnpm/)
+    assert.match(calls[1], /TOKENBOARD_SCHEDULED_SYNC=1/)
+    assert.match(calls[1], /TOKENBOARD_LOG_DIR=/)
+    assert.match(calls[1], /PATH=/)
+    assert.match(calls[1], /node-test/)
+    assert.match(calls[1], /sync-test\.mjs/)
+    assert.match(calls[1], /--mode sync --source all --scheduled" \/ST 08:15/)
+    assert.match(calls[2], /TokenBoardDailySync2145/)
+    assert.match(calls[2], /--scheduled" \/ST 21:45/)
+    assert.equal(calls[3], "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $current = @('TokenBoardDailySync0815','TokenBoardDailySync2145'); Get-ScheduledTask -TaskPath '\\' | Where-Object { (($_.TaskName -like 'TokenBoardDailySync*') -or ($_.Actions | Where-Object { $_.Execute -like '*node*' -and $_.Arguments -like '*TokenBoard*skills*tokenboard*scripts*sync.mjs*' })) -and $current -notcontains $_.TaskName } | Unregister-ScheduledTask -Confirm:$false")
   } finally {
     harness.cleanup()
   }

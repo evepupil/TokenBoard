@@ -32,7 +32,8 @@ test('updates the existing collector origin before pulling', () => {
       dir: '/home/user/.tokenboard/TokenBoard',
       repoUrl: 'https://github.com/example/TokenBoard.git',
       packageManager: 'npm',
-      exists: true
+      exists: true,
+      isGitRepo: true
     }),
     [
       {
@@ -51,5 +52,48 @@ test('updates the existing collector origin before pulling', () => {
         options: { cwd: '/home/user/.tokenboard/TokenBoard' }
       }
     ]
+  )
+})
+
+test('removes an existing non-git collector directory before cloning', () => {
+  assert.deepEqual(
+    buildInstallCollectorPlan({
+      dir: '/home/user/.tokenboard/TokenBoard',
+      repoUrl: 'https://github.com/example/TokenBoard.git',
+      packageManager: 'bun',
+      exists: true,
+      isGitRepo: false
+    }),
+    [
+      {
+        command: 'remove',
+        args: ['/home/user/.tokenboard/TokenBoard'],
+        options: { recursive: true, force: true }
+      },
+      {
+        command: 'git',
+        args: ['clone', '--depth', '1', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        options: {}
+      },
+      {
+        command: packageManagerCommand('bun'),
+        args: ['install'],
+        options: { cwd: '/home/user/.tokenboard/TokenBoard' }
+      }
+    ]
+  )
+})
+
+test('refuses to replace the config directory as a non-git collector', () => {
+  assert.throws(
+    () => buildInstallCollectorPlan({
+      dir: '/home/user/.tokenboard',
+      configDir: '/home/user/.tokenboard',
+      repoUrl: 'https://github.com/example/TokenBoard.git',
+      packageManager: 'pnpm',
+      exists: true,
+      isGitRepo: false
+    }),
+    /Refusing to replace TokenBoard config directory/
   )
 })

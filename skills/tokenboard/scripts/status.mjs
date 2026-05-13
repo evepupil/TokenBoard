@@ -1,27 +1,32 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { configPath, readConfig } from './config.mjs'
 
-const file = configPath()
-if (!existsSync(file)) {
-  console.log('TokenBoard is not configured.')
-  process.exit(1)
+export function buildStatus({ configPath, config }) {
+  return {
+    configured: true,
+    configPath,
+    endpoint: config.endpoint,
+    deviceId: config.deviceId,
+    timezone: config.timezone,
+    source: config.source,
+    packageManager: config.packageManager || 'pnpm',
+    collectorDir: config.collectorDir,
+    scheduleTimes: Array.isArray(config.scheduleTimes) ? config.scheduleTimes : []
+  }
 }
 
-const config = readConfig()
-console.log(
-  JSON.stringify(
-    {
-      configured: true,
-      configPath: file,
-      endpoint: config.endpoint,
-      deviceId: config.deviceId,
-      timezone: config.timezone,
-      source: config.source,
-      packageManager: config.packageManager || 'pnpm',
-      collectorDir: config.collectorDir
-    },
-    null,
-    2
-  )
-)
+function runCli() {
+  const file = configPath()
+  if (!existsSync(file)) {
+    console.log('TokenBoard is not configured.')
+    process.exit(1)
+  }
+
+  console.log(JSON.stringify(buildStatus({ configPath: file, config: readConfig() }), null, 2))
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runCli()
+}

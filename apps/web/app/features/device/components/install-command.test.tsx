@@ -36,6 +36,7 @@ describe('InstallCommand', () => {
     expect(prompt).toContain('只有用户明确要求跳过首次同步')
     expect(prompt).toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
     expect(prompt).toContain('git -C "$repo" pull --ff-only')
+    expect(prompt).toContain('rm -rf "$repo"')
     expect(prompt).toContain('skills/tokenboard/scripts/setup.mjs')
     expect(prompt).toContain("--pairing-code 'pair_123'")
     expect(prompt).toContain("--base-url 'https://tokenboard.example'")
@@ -66,6 +67,7 @@ describe('InstallCommand', () => {
 
     expect(command).toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
     expect(command).toContain('git -C "$repo" pull --ff-only')
+    expect(command).toContain('rm -rf "$repo"')
     expect(command).toContain('skills/tokenboard/scripts/uninstall.mjs" --all')
     expect(command).toContain('skills\\tokenboard\\scripts\\uninstall.mjs") --all')
   })

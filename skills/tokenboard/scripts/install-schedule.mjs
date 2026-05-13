@@ -55,9 +55,13 @@ export function installSchedule(options = {}) {
 
 function installWindows(runtime, scheduleTimes) {
   requireCommand(runtime, 'schtasks.exe')
+  const config = runtime.readConfig()
   for (const task of buildWindowsTaskDefinitions({
     nodePath: runtime.nodePath,
     scriptPath: runtime.scriptPath,
+    packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
+    pathEnv: runtime.env.PATH || 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+    homeDir: runtime.homeDir,
     scheduleTimes
   })) {
     runOrThrow(runtime, 'schtasks.exe', task.args)

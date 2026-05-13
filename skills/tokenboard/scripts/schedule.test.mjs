@@ -15,18 +15,20 @@ test('builds the Windows scheduled task shape with time-suffixed names', () => {
     scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
   })
 
-  assert.deepEqual(args, [
+  assert.deepEqual(args.slice(0, 7), [
     '/Create',
     '/F',
     '/SC',
     'DAILY',
     '/TN',
     'TokenBoardDailySync0900',
-    '/TR',
-    '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs" --mode sync --source all --scheduled',
-    '/ST',
-    '09:00'
+    '/TR'
   ])
+  assert.match(args[7], /cmd\.exe \/d \/c/)
+  assert.match(args[7], /TOKENBOARD_PACKAGE_MANAGER=pnpm/)
+  assert.match(args[7], /TOKENBOARD_SCHEDULED_SYNC=1/)
+  assert.match(args[7], /--mode sync --source all --scheduled/)
+  assert.deepEqual(args.slice(8), ['/ST', '09:00'])
 })
 
 test('builds Windows scheduled task definitions for every daily sync time', () => {
@@ -174,4 +176,24 @@ test('normalizePathEnv preserves Windows PATH separators and drive letters', () 
     }),
     'C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32'
   )
+})
+
+test('builds Windows scheduled task command with explicit runtime environment', () => {
+  const args = buildWindowsTaskArgs({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
+    packageManager: 'bun',
+    pathEnv: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+    homeDir: 'C:\\Users\\mison'
+  })
+  const taskCommand = args[args.indexOf('/TR') + 1]
+
+  assert.match(taskCommand, /^cmd\.exe \/d \/c /)
+  assert.match(taskCommand, /TOKENBOARD_PACKAGE_MANAGER=bun/)
+  assert.match(taskCommand, /TOKENBOARD_SCHEDULED_SYNC=1/)
+  assert.match(taskCommand, /TOKENBOARD_LOG_DIR=C:\\Users\\mison\\.tokenboard\\logs/)
+  assert.match(taskCommand, /PATH=C:\\Users\\mison\\.bun\\bin;C:\\Users\\mison\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32/)
+  assert.match(taskCommand, /C:\\Program Files\\nodejs\\node\.exe/)
+  assert.match(taskCommand, /C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs/)
+  assert.match(taskCommand, /--mode sync --source all --scheduled/)
 })

@@ -5,8 +5,22 @@ export const timerName = 'tokenboard-daily-sync.timer'
 export const launchAgentLabel = 'com.tokenboard.daily-sync'
 export const dailyScheduleTimes = ['09:00', '12:00', '18:00', '23:00']
 
-export function buildWindowsTaskArgs({ nodePath, scriptPath, taskName = windowsTaskName(dailyScheduleTimes[0]), startTime = dailyScheduleTimes[0] }) {
-  const taskCommand = `${quoteWindowsArg(nodePath)} ${quoteWindowsArg(scriptPath)} --mode sync --source all --scheduled`
+export function buildWindowsTaskArgs({
+  nodePath,
+  scriptPath,
+  packageManager = 'pnpm',
+  pathEnv = 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+  homeDir = '',
+  taskName = windowsTaskName(dailyScheduleTimes[0]),
+  startTime = dailyScheduleTimes[0]
+}) {
+  const taskCommand = buildWindowsTaskCommand({
+    nodePath,
+    scriptPath,
+    packageManager,
+    pathEnv,
+    homeDir
+  })
   return [
     '/Create',
     '/F',
@@ -21,16 +35,41 @@ export function buildWindowsTaskArgs({ nodePath, scriptPath, taskName = windowsT
   ]
 }
 
-export function buildWindowsTaskDefinitions({ nodePath, scriptPath, scheduleTimes = dailyScheduleTimes }) {
+export function buildWindowsTaskDefinitions({
+  nodePath,
+  scriptPath,
+  packageManager = 'pnpm',
+  pathEnv = 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+  homeDir = '',
+  scheduleTimes = dailyScheduleTimes
+}) {
   return scheduleTimes.map((startTime) => ({
     name: windowsTaskName(startTime),
     args: buildWindowsTaskArgs({
       nodePath,
       scriptPath,
+      packageManager,
+      pathEnv,
+      homeDir,
       taskName: windowsTaskName(startTime),
       startTime
     })
   }))
+}
+
+export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, pathEnv, homeDir }) {
+  const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath, delimiter: ';' })
+  const logDir = joinForDelimiter(homeDir, '.tokenboard', 'logs', ';')
+  const syncCommand = `${quoteWindowsArg(nodePath)} ${quoteWindowsArg(scriptPath)} --mode sync --source all --scheduled`
+  const command = [
+    `set "TOKENBOARD_PACKAGE_MANAGER=${escapeWindowsCmdValue(packageManager)}"`,
+    'set "TOKENBOARD_SCHEDULED_SYNC=1"',
+    `set "TOKENBOARD_LOG_DIR=${escapeWindowsCmdValue(logDir)}"`,
+    `set "PATH=${escapeWindowsCmdValue(normalizedPath)}"`,
+    syncCommand
+  ].join(' && ')
+
+  return `cmd.exe /d /c ${quoteWindowsArg(command)}`
 }
 
 export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager, pathEnv, homeDir, logDir, scheduleTimes = dailyScheduleTimes }) {
@@ -185,4 +224,13 @@ function joinForDelimiter(base, first, second, delimiter) {
 
 function quoteWindowsArg(value) {
   return `"${String(value).replaceAll('"', '""')}"`
+}
+
+function escapeWindowsCmdValue(value) {
+  return String(value)
+    .replaceAll('^', '^^')
+    .replaceAll('&', '^&')
+    .replaceAll('|', '^|')
+    .replaceAll('<', '^<')
+    .replaceAll('>', '^>')
 }
