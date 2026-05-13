@@ -24,9 +24,10 @@ test('builds the Windows scheduled task shape with time-suffixed names', () => {
     'TokenBoardDailySync0900',
     '/TR'
   ])
-  assert.match(args[7], /cmd\.exe \/d \/c/)
+  assert.match(args[7], /cmd\.exe \/d \/s \/c/)
   assert.match(args[7], /TOKENBOARD_PACKAGE_MANAGER=pnpm/)
   assert.match(args[7], /TOKENBOARD_SCHEDULED_SYNC=1/)
+  assert.doesNotMatch(args[7], /""TOKENBOARD_/)
   assert.match(args[7], /--mode sync --source all --scheduled/)
   assert.deepEqual(args.slice(8), ['/ST', '09:00'])
 })
@@ -188,7 +189,8 @@ test('builds Windows scheduled task command with explicit runtime environment', 
   })
   const taskCommand = args[args.indexOf('/TR') + 1]
 
-  assert.match(taskCommand, /^cmd\.exe \/d \/c /)
+  assert.match(taskCommand, /^cmd\.exe \/d \/s \/c /)
+  assert.doesNotMatch(taskCommand, /""TOKENBOARD_/)
   assert.match(taskCommand, /TOKENBOARD_PACKAGE_MANAGER=bun/)
   assert.match(taskCommand, /TOKENBOARD_SCHEDULED_SYNC=1/)
   assert.match(taskCommand, /TOKENBOARD_LOG_DIR=C:\\Users\\mison\\.tokenboard\\logs/)

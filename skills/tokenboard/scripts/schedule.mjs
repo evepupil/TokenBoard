@@ -69,7 +69,7 @@ export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, 
     syncCommand
   ].join(' && ')
 
-  return `cmd.exe /d /c ${quoteWindowsArg(command)}`
+  return `cmd.exe /d /s /c ${quoteWindowsArg(command)}`
 }
 
 export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager, pathEnv, homeDir, logDir, scheduleTimes = dailyScheduleTimes }) {
@@ -223,7 +223,7 @@ function joinForDelimiter(base, first, second, delimiter) {
 }
 
 function quoteWindowsArg(value) {
-  return `"${String(value).replaceAll('"', '""')}"`
+  return `"${String(value)}"`
 }
 
 function escapeWindowsCmdValue(value) {
