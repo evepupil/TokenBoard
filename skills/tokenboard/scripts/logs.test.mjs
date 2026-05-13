@@ -100,3 +100,90 @@ test('rotated log names do not overwrite existing archives in the same second', 
     'daily-sync.err.log.20260513090000.1'
   ])
 })
+
+test('rotates logs by reading only the retained tail bytes', () => {
+  const calls = []
+  const fileSystem = {
+    mkdirSync() {},
+    existsSync() {
+      return false
+    },
+    statSync(filePath) {
+      if (filePath.endsWith('daily-sync.out.log')) {
+        return { size: 20, mtime: new Date('2026-05-13T01:00:00.000Z') }
+      }
+      return { size: 0, mtime: new Date('2026-05-13T01:00:00.000Z') }
+    },
+    renameSync() {},
+    openSync() {
+      return 1
+    },
+    readSync(_fd, buffer, offset, length, position) {
+      calls.push({ length, position })
+      buffer.write('klmnopqrst', offset, length, 'utf8')
+      return length
+    },
+    closeSync() {},
+    writeFileSync(_filePath, content) {
+      calls.push({ content: String(content) })
+    },
+    readdirSync() {
+      return []
+    },
+    unlinkSync() {}
+  }
+
+  rotateScheduledLogs({
+    logDir: '/tmp/tokenboard-logs',
+    now: new Date('2026-05-13T09:00:00+08:00'),
+    maxBytes: 10,
+    retentionDays: 7,
+    fileSystem
+  })
+
+  assert.deepEqual(calls, [
+    { length: 10, position: 10 },
+    { content: 'klmnopqrst' },
+    { content: '' }
+  ])
+})
+
+test('ignores log rotation races when another process already moved the active file', () => {
+  const fileSystem = {
+    mkdirSync() {},
+    existsSync() {
+      return false
+    },
+    statSync(filePath) {
+      if (filePath.endsWith('daily-sync.out.log')) {
+        return { size: 20, mtime: new Date('2026-05-13T01:00:00.000Z') }
+      }
+      return { size: 0, mtime: new Date('2026-05-13T01:00:00.000Z') }
+    },
+    renameSync() {
+      const error = new Error('missing')
+      error.code = 'ENOENT'
+      throw error
+    },
+    openSync() {
+      throw new Error('should not trim missing file')
+    },
+    readSync() {},
+    closeSync() {},
+    writeFileSync() {
+      throw new Error('should not recreate a file moved by another process')
+    },
+    readdirSync() {
+      return []
+    },
+    unlinkSync() {}
+  }
+
+  assert.doesNotThrow(() => rotateScheduledLogs({
+    logDir: '/tmp/tokenboard-logs',
+    now: new Date('2026-05-13T09:00:00+08:00'),
+    maxBytes: 10,
+    retentionDays: 7,
+    fileSystem
+  }))
+})

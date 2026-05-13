@@ -146,7 +146,28 @@ async function isActiveSessionFile(
   file: string,
   options: { since?: Date; until?: Date; now: Date }
 ) {
-  const content = await readFile(file, 'utf8').catch(() => '')
+  const fileStat = await stat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') {
+      return null
+    }
+    throw new Error(`Unable to stat Codex session file ${file}: ${error.message}`)
+  })
+  if (!fileStat) {
+    return false
+  }
+  if (!fileStat.isFile()) {
+    throw new Error(`Unable to read Codex session file ${file}: path is not a file`)
+  }
+  if (isDateInRange(fileStat.mtime, options)) {
+    return true
+  }
+
+  const content = await readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') {
+      return ''
+    }
+    throw new Error(`Unable to read Codex session file ${file}: ${error.message}`)
+  })
   const tokenCountActivity = readTokenCountActivity(content, options)
   if (tokenCountActivity.hasInRangeTimestamp) {
     return true
@@ -155,8 +176,7 @@ async function isActiveSessionFile(
     return false
   }
 
-  const fileStat = await stat(file).catch(() => null)
-  return fileStat ? isDateInRange(fileStat.mtime, options) : false
+  return false
 }
 
 function readTokenCountActivity(content: string, options: { since?: Date; until?: Date }) {

@@ -103,6 +103,43 @@ describe('collectCodexUsage', () => {
     ])
   })
 
+  test('reports partial codex collection when session counts fail', async () => {
+    const errors: string[] = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+
+    const snapshots = await collectCodexUsage({
+      stderr: (line) => errors.push(line),
+      async runner(_command, args) {
+        if (args[1] === 'session') {
+          throw new Error('session timed out')
+        }
+        return {
+          data: [
+            {
+              date: '2026-05-12',
+              model: 'gpt-5',
+              inputTokens: 1,
+              outputTokens: 2,
+              totalTokens: 3
+            }
+          ]
+        }
+      }
+    })
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toMatchObject({
+      source: 'codex',
+      usageDate: '2026-05-12',
+      model: 'gpt-5',
+      totalTokens: 3,
+      sessionCount: 0
+    })
+    expect(errors).toEqual([
+      'Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: session timed out'
+    ])
+  })
+
   test('allows explicit full codex scan in batches', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))

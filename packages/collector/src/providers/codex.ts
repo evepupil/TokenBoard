@@ -141,7 +141,7 @@ async function collectSessionCounts({
       options
     )
   } catch (error) {
-    stderr(`Skipping codex session counts: ${errorMessage(error)}`)
+    stderr(`Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: ${errorMessage(error)}`)
     return { data: [] }
   }
 }
