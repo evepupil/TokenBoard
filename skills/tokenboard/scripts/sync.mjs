@@ -94,6 +94,7 @@ export function buildSyncInvocation({
       TOKENBOARD_TIMEZONE: config.timezone,
       TOKENBOARD_SOURCE: source,
       TOKENBOARD_PACKAGE_MANAGER: packageManager,
+      TOKENBOARD_SINCE: since,
       TOKENBOARD_DEFAULT_SINCE: since
     }
   }

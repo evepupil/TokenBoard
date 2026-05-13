@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildDefaultSince, readSince } from './sync-options.mjs'
 
@@ -100,4 +101,11 @@ test('readSince keeps explicit all sentinel', () => {
     }),
     'all'
   )
+})
+
+test('sync script forwards resolved since to all collectors', () => {
+  const source = readFileSync(new URL('./sync.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /TOKENBOARD_SINCE:\s*since/)
+  assert.match(source, /TOKENBOARD_DEFAULT_SINCE:\s*since/)
 })

@@ -20,6 +20,7 @@ const RETRYABLE_ERROR_PATTERNS = [
 ]
 
 export type CommandRunnerOptions = {
+  env?: NodeJS.ProcessEnv
   timeoutMs?: number
   retries?: number
   retryDelayMs?: number
@@ -37,7 +38,8 @@ export const runJsonCommand: CommandRunner = async (command, args, options = {})
       const { stdout } = await execFileAsync(command, args, {
         shell: false,
         maxBuffer: 128 * 1024 * 1024,
-        timeout: options.timeoutMs ?? readCommandTimeoutMs()
+        timeout: options.timeoutMs ?? readCommandTimeoutMs(),
+        env: options.env
       })
 
       return JSON.parse(stdout)

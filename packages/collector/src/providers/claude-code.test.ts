@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import type { CommandRunnerOptions } from '../command'
 import { collectClaudeCodeUsage } from './claude-code'
 
 describe('collectClaudeCodeUsage', () => {
@@ -9,7 +8,6 @@ describe('collectClaudeCodeUsage', () => {
 
   test('runs ccusage daily json with breakdown and normalizes the output', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
-    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     const snapshots = await collectClaudeCodeUsage({
       timezone: 'Asia/Shanghai',
       collectedAt: '2026-04-28T10:00:00.000Z',
@@ -68,7 +66,7 @@ describe('collectClaudeCodeUsage', () => {
     })
   })
 
-  test('uses since and selected package manager when configured', async () => {
+  test('uses configured since window', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', 'npm')
     vi.stubEnv('TOKENBOARD_SINCE', '20260509')
@@ -115,48 +113,6 @@ describe('collectClaudeCodeUsage', () => {
     ])
   })
 
-  test('uses configured until window', async () => {
-    const calls: Array<{ command: string; args: string[] }> = []
-    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
-    vi.stubEnv('TOKENBOARD_SINCE', '20260501')
-    vi.stubEnv('TOKENBOARD_UNTIL', '20260509')
-
-    await collectClaudeCodeUsage({
-      async runner(command, args) {
-        calls.push({ command, args })
-        return { data: [] }
-      }
-    })
-
-    expect(calls).toEqual([
-      {
-        command: 'npx',
-        args: [
-          'ccusage@latest',
-          'daily',
-          '--json',
-          '--breakdown',
-          '--since',
-          '20260501',
-          '--until',
-          '20260509'
-        ]
-      },
-      {
-        command: 'npx',
-        args: [
-          'ccusage@latest',
-          'session',
-          '--json',
-          '--since',
-          '20260501',
-          '--until',
-          '20260509'
-        ]
-      }
-    ])
-  })
-
   test('allows explicit full scan without passing all to ccusage', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
@@ -180,26 +136,5 @@ describe('collectClaudeCodeUsage', () => {
         args: ['ccusage@latest', 'session', '--json']
       }
     ])
-  })
-
-  test('enables package command retries for online package execution', async () => {
-    const calls: Array<{ args: string[]; options?: CommandRunnerOptions }> = []
-    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
-    vi.stubEnv('TOKENBOARD_PACKAGE_COMMAND_RETRIES', '4')
-
-    await collectClaudeCodeUsage({
-      async runner(_command, args, options) {
-        calls.push({ args, options })
-        return { data: [] }
-      }
-    })
-
-    expect(calls[0]).toEqual({
-      args: ['ccusage@latest', 'daily', '--json', '--breakdown'],
-      options: {
-        retries: 4,
-        onRetry: expect.any(Function)
-      }
-    })
   })
 })

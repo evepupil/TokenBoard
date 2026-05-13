@@ -20,3 +20,24 @@ export const usageSnapshotSchema = z.object({
 export type UsageSource = z.infer<typeof usageSourceSchema>
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>
 
+export type UsageSnapshotKey = Pick<UsageSnapshot, 'source' | 'usageDate' | 'model'>
+
+export function snapshotKey(snapshot: UsageSnapshotKey) {
+  return [snapshot.source, snapshot.usageDate, snapshot.model].join('\u0000')
+}
+
+export function snapshotHashPayload(snapshot: UsageSnapshot) {
+  return JSON.stringify({
+    source: snapshot.source,
+    usageDate: snapshot.usageDate,
+    timezone: snapshot.timezone,
+    model: snapshot.model,
+    inputTokens: snapshot.inputTokens,
+    outputTokens: snapshot.outputTokens,
+    cacheCreationTokens: snapshot.cacheCreationTokens,
+    cacheReadTokens: snapshot.cacheReadTokens,
+    totalTokens: snapshot.totalTokens,
+    costUsd: snapshot.costUsd,
+    sessionCount: snapshot.sessionCount
+  })
+}

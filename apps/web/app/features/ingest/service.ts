@@ -1,6 +1,6 @@
-import type { UsageSnapshot } from '@tokenboard/usage-core'
+import type { UsageSnapshot, UsageSnapshotKey } from '@tokenboard/usage-core'
 import type { AuthenticatedUser } from '../auth/middleware'
-import { markIngestSynced, upsertUsageSnapshots } from './repository'
+import { findExistingSnapshotHashes, markIngestSynced, upsertUsageSnapshots } from './repository'
 
 const legacyDeviceId = 'legacy'
 
@@ -24,4 +24,17 @@ export async function ingestSnapshots(
     syncedAt
   })
   return result
+}
+
+export async function checkExistingSnapshots(
+  db: D1Database,
+  user: AuthenticatedUser,
+  keys: UsageSnapshotKey[]
+) {
+  const existing = await findExistingSnapshotHashes(db, {
+    userId: user.id,
+    deviceId: user.deviceId ?? legacyDeviceId,
+    keys
+  })
+  return { existing }
 }

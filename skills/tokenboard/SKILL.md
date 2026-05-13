@@ -12,7 +12,7 @@ Use the bundled scripts to install TokenBoard collection on the user's machine. 
 When the user provides a pairing code, run:
 
 ```bash
-node scripts/setup.mjs --pairing-code <pairing-code>
+TOKENBOARD_CODEX_BATCH_SIZE=200 node scripts/setup.mjs --pairing-code <pairing-code>
 ```
 
 Optional flags:
@@ -24,17 +24,19 @@ Optional flags:
 --skip-collector
 --skip-schedule
 --skip-initial-sync
+--repo-url https://github.com/evepupil/TokenBoard.git
 --package-manager pnpm|bun|npm
---schedule-times 09:00,12:00,18:00,23:00
 ```
 
 After setup, report whether config was written, schedule was installed, and initial sync succeeded. Do not show `uploadToken`.
 
-The setup script clones or updates `https://github.com/evepupil/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install` by default, writes local config, installs the daily schedule unless skipped, and runs an initial sync using the configured package manager unless skipped. The default schedule is `09:00,12:00,18:00,23:00`; use `--schedule-times` only after confirming a custom 24-hour `HH:MM` comma-separated list with the user. Use `--repo-url`, `TOKENBOARD_REPO_URL`, `--package-manager bun`, `--package-manager npm`, or `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm` only when the local environment requires a non-default collector source or package manager.
+The setup script clones or updates `https://github.com/evepupil/TokenBoard.git` into `~/.tokenboard/TokenBoard`, runs `pnpm install` by default, writes local config, installs the daily schedule unless skipped, and runs a full-history initial sync unless skipped. Do not change the initial sync to a 7-day window unless the user explicitly asks. Codex history is processed in batches during full scans; use `TOKENBOARD_CODEX_BATCH_SIZE=200` by default, lower it only when the user needs lower peak resource usage. Use `--repo-url`, `TOKENBOARD_REPO_URL`, `--package-manager bun`, `--package-manager npm`, or `TOKENBOARD_PACKAGE_MANAGER=pnpm|bun|npm` only when the local environment requires a non-default collector source or package manager.
 
 If the user pasted a TokenBoard install prompt from the website, follow the prompt and run the included setup command. Treat pairing codes as short-lived secrets and do not repeat them unless needed to execute setup.
 
 ## Sync
+
+Daily and manual sync default to a 7-day lookback window. Use `--since all` only when the user explicitly asks for a full-history backfill.
 
 Preview without upload:
 
@@ -46,13 +48,7 @@ Upload:
 
 ```bash
 node scripts/sync.mjs --mode sync --source all
-```
-
-Optional package manager selection:
-
-```bash
-node scripts/sync.mjs --mode sync --source all --package-manager bun
-TOKENBOARD_PACKAGE_MANAGER=npm node scripts/sync.mjs --mode preview --source all
+node scripts/sync.mjs --mode sync --source all --since all
 ```
 
 ## Status
@@ -61,23 +57,6 @@ Check local config and schedule hint:
 
 ```bash
 node scripts/status.mjs
-```
-
-## Uninstall
-
-Remove the local daily schedule without deleting config, upload token, logs, or the collector checkout:
-
-```bash
-node scripts/uninstall.mjs
-```
-
-Explicit cleanup options:
-
-```bash
-node scripts/uninstall.mjs --remove-collector
-node scripts/uninstall.mjs --remove-config
-node scripts/uninstall.mjs --remove-config-dir
-node scripts/uninstall.mjs --all
 ```
 
 ## Troubleshooting

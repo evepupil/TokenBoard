@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { hostname, platform } from 'node:os'
 import { parseArgs, readPackageManager, writeConfig } from './config.mjs'
 import { dailyScheduleTimes, parseScheduleTimes } from './schedule.mjs'
-import { buildInstallCollectorArgs } from './setup-options.mjs'
+import { buildInitialSyncArgs, buildInstallCollectorArgs } from './setup-options.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
 const pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
@@ -83,12 +83,7 @@ if (!flags['skip-initial-sync']) {
     process.execPath,
     [
       scriptPath('./sync.mjs'),
-      '--mode',
-      'sync',
-      '--source',
-      'all',
-      '--package-manager',
-      packageManager
+      ...buildInitialSyncArgs({ flags, packageManager })
     ],
     {
       stdio: 'inherit'

@@ -24,12 +24,18 @@ export async function collectClaudeCodeUsage(
   const json = await runner(
     packageRunner.command,
     packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['daily', '--json', '--breakdown', ...rangeArgs]),
-    packageCommandOptions(options.stderr)
+    packageCommandOptions({
+      env: process.env,
+      stderr: options.stderr
+    })
   )
   const sessions = await runner(
     packageRunner.command,
     packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['session', '--json', ...rangeArgs]),
-    packageCommandOptions(options.stderr)
+    packageCommandOptions({
+      env: process.env,
+      stderr: options.stderr
+    })
   )
 
   return normalizeCcusageDailyJson(json, {
@@ -40,10 +46,17 @@ export async function collectClaudeCodeUsage(
   })
 }
 
-function packageCommandOptions(stderr: ((line: string) => void) | undefined) {
+function packageCommandOptions({
+  env,
+  stderr = console.error
+}: {
+  env: NodeJS.ProcessEnv
+  stderr?: (line: string) => void
+}) {
   return {
+    env,
     retries: readPackageCommandRetries(),
-    onRetry: stderr ?? console.error
+    onRetry: stderr
   }
 }
 
