@@ -16,7 +16,7 @@ describe('collectCodexUsage', () => {
       collectedAt: '2026-04-28T10:00:00.000Z',
       async runner(command, args) {
         calls.push({ command, args })
-        if (args[1] === 'session') {
+        if (args.includes('session')) {
           return {
             data: [
               {
@@ -52,11 +52,11 @@ describe('collectCodexUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['@ccusage/codex@latest', 'daily', '--json']
+        args: ['ccusage@latest', 'codex', 'daily', '--json']
       },
       {
         command: platformCommand('npx'),
-        args: ['@ccusage/codex@latest', 'session', '--json']
+        args: ['ccusage@latest', 'codex', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -94,11 +94,11 @@ describe('collectCodexUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['@ccusage/codex@latest', 'daily', '--json', '--since', '20260501']
+        args: ['ccusage@latest', 'codex', 'daily', '--json', '--since', '20260501']
       },
       {
         command: platformCommand('npx'),
-        args: ['@ccusage/codex@latest', 'session', '--json', '--since', '20260501']
+        args: ['ccusage@latest', 'codex', 'session', '--json', '--since', '20260501']
       }
     ])
   })
@@ -110,7 +110,7 @@ describe('collectCodexUsage', () => {
     const snapshots = await collectCodexUsage({
       stderr: (line) => errors.push(line),
       async runner(_command, args) {
-        if (args[1] === 'session') {
+        if (args.includes('session')) {
           throw new Error('session timed out')
         }
         return {
@@ -167,7 +167,7 @@ describe('collectCodexUsage', () => {
         async runner(command, args, options) {
           calls.push({ command, args })
           scopedHomes.add(String(options?.env?.CODEX_HOME))
-          if (args[1] === 'session') {
+          if (args.includes('session')) {
             return {
               data: [
                 {
@@ -200,19 +200,19 @@ describe('collectCodexUsage', () => {
       expect(calls).toEqual([
         {
           command: platformCommand('npx'),
-          args: ['@ccusage/codex@latest', 'daily', '--json']
+          args: ['ccusage@latest', 'codex', 'daily', '--json']
         },
         {
           command: platformCommand('npx'),
-          args: ['@ccusage/codex@latest', 'session', '--json']
+          args: ['ccusage@latest', 'codex', 'session', '--json']
         },
         {
           command: platformCommand('npx'),
-          args: ['@ccusage/codex@latest', 'daily', '--json']
+          args: ['ccusage@latest', 'codex', 'daily', '--json']
         },
         {
           command: platformCommand('npx'),
-          args: ['@ccusage/codex@latest', 'session', '--json']
+          args: ['ccusage@latest', 'codex', 'session', '--json']
         }
       ])
       expect(scopedHomes.size).toBe(2)
@@ -257,11 +257,11 @@ describe('collectCodexUsage', () => {
     expect(calls).toEqual([
       {
         command: '/opt/bin/bunx',
-        args: ['@ccusage/codex@latest', 'daily', '--json', '--since', '20260509']
+        args: ['ccusage@latest', 'codex', 'daily', '--json', '--since', '20260509']
       },
       {
         command: '/opt/bin/bunx',
-        args: ['@ccusage/codex@latest', 'session', '--json', '--since', '20260509']
+        args: ['ccusage@latest', 'codex', 'session', '--json', '--since', '20260509']
       }
     ])
   })
@@ -321,7 +321,7 @@ describe('collectCodexUsage', () => {
         codexHome,
         timezone: 'Asia/Shanghai',
         async runner(_command, args, options) {
-          if (args[1] === 'daily') {
+          if (args.includes('daily')) {
             const scopedHome = String(options?.env?.CODEX_HOME)
             scopedHomes.push(scopedHome)
             scopedFiles.activeOld = await fileContainsTokenCount(

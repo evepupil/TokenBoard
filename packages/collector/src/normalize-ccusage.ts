@@ -137,7 +137,7 @@ function extractModelRows(row: UnknownRecord) {
 }
 
 function readDate(row: UnknownRecord) {
-  const value = row.date ?? row.usageDate
+  const value = row.date ?? row.usageDate ?? row.period
   if (typeof value !== 'string') {
     throw new Error('ccusage row is missing date')
   }

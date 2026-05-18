@@ -13,7 +13,7 @@ describe('collectClaudeCodeUsage', () => {
       collectedAt: '2026-04-28T10:00:00.000Z',
       async runner(command, args) {
         calls.push({ command, args })
-        if (args[1] === 'session') {
+        if (args.includes('session')) {
           return {
             data: [
               {
@@ -51,11 +51,11 @@ describe('collectClaudeCodeUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['ccusage@latest', 'daily', '--json', '--breakdown']
+        args: ['ccusage@latest', 'claude', 'daily', '--json', '--breakdown']
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@latest', 'session', '--json']
+        args: ['ccusage@latest', 'claude', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -88,6 +88,7 @@ describe('collectClaudeCodeUsage', () => {
           'ccusage@latest',
           '--',
           'ccusage',
+          'claude',
           'daily',
           '--json',
           '--breakdown',
@@ -104,6 +105,7 @@ describe('collectClaudeCodeUsage', () => {
           'ccusage@latest',
           '--',
           'ccusage',
+          'claude',
           'session',
           '--json',
           '--since',
@@ -129,11 +131,11 @@ describe('collectClaudeCodeUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['ccusage@latest', 'daily', '--json', '--breakdown']
+        args: ['ccusage@latest', 'claude', 'daily', '--json', '--breakdown']
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@latest', 'session', '--json']
+        args: ['ccusage@latest', 'claude', 'session', '--json']
       }
     ])
   })

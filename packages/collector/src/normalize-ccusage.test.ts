@@ -80,6 +80,45 @@ describe('normalizeCcusageDailyJson', () => {
     ])
   })
 
+  test('accepts ccusage agent rows that use period instead of date', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        daily: [
+          {
+            period: '2026-05-18',
+            agent: 'claude',
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            totalCost: 0.12,
+            modelBreakdowns: [
+              {
+                modelName: 'claude-opus-4-6',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+                cost: 0.12
+              }
+            ]
+          }
+        ]
+      },
+      { source: 'claude-code', timezone: 'Asia/Shanghai', collectedAt }
+    )
+
+    expect(snapshots).toMatchObject([
+      {
+        source: 'claude-code',
+        usageDate: '2026-05-18',
+        model: 'claude-opus-4-6',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        costUsd: 0.12
+      }
+    ])
+  })
+
   test('accepts cache input token aliases from companion CLIs', () => {
     const snapshots = normalizeCcusageDailyJson(
       {

@@ -23,7 +23,7 @@ export async function collectClaudeCodeUsage(
   })
   const json = await runner(
     packageRunner.command,
-    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['daily', '--json', '--breakdown', ...rangeArgs]),
+    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'daily', '--json', '--breakdown', ...rangeArgs]),
     packageCommandOptions({
       env: process.env,
       stderr: options.stderr
@@ -31,7 +31,7 @@ export async function collectClaudeCodeUsage(
   )
   const sessions = await runner(
     packageRunner.command,
-    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['session', '--json', ...rangeArgs]),
+    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'session', '--json', ...rangeArgs]),
     packageCommandOptions({
       env: process.env,
       stderr: options.stderr

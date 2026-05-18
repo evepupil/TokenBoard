@@ -52,7 +52,7 @@ export async function collectCodexUsage(
 
   const json = await runner(
     packageRunner.command,
-    packageRunner.runPackageArgs('@ccusage/codex@latest', 'ccusage-codex', ['daily', '--json', ...rangeArgs]),
+    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...rangeArgs]),
     packageCommandOptions({
       env: process.env,
       timeoutMs: readDailyTimeoutMs(),
@@ -62,7 +62,7 @@ export async function collectCodexUsage(
   const sessions = await collectSessionCounts({
     runner,
     command: packageRunner.command,
-    args: packageRunner.runPackageArgs('@ccusage/codex@latest', 'ccusage-codex', ['session', '--json', ...rangeArgs]),
+    args: packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...rangeArgs]),
     options: packageCommandOptions({
       env: process.env,
       timeoutMs: readSessionTimeoutMs(),
@@ -91,7 +91,7 @@ async function collectScopedBatch(input: {
     const env = { ...process.env, CODEX_HOME: input.scope.codexHome }
     const json = await input.runner(
       input.packageRunner.command,
-      input.packageRunner.runPackageArgs('@ccusage/codex@latest', 'ccusage-codex', ['daily', '--json', ...input.rangeArgs]),
+      input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...input.rangeArgs]),
       packageCommandOptions({
         env,
         timeoutMs: readDailyTimeoutMs(),
@@ -101,7 +101,7 @@ async function collectScopedBatch(input: {
     const sessions = await collectSessionCounts({
       runner: input.runner,
       command: input.packageRunner.command,
-      args: input.packageRunner.runPackageArgs('@ccusage/codex@latest', 'ccusage-codex', ['session', '--json', ...input.rangeArgs]),
+      args: input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...input.rangeArgs]),
       options: packageCommandOptions({
         env,
         timeoutMs: readSessionTimeoutMs(),

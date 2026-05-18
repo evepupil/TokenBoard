@@ -31,8 +31,9 @@ describe('resolvePackageRunner', () => {
     const runner = resolvePackageRunner('bun')
 
     expect(runner.command).toBe('/opt/bin/bunx')
-    expect(runner.runPackageArgs('@ccusage/codex@latest', 'ccusage-codex', ['session', '--json'])).toEqual([
-      '@ccusage/codex@latest',
+    expect(runner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json'])).toEqual([
+      'ccusage@latest',
+      'codex',
       'session',
       '--json'
     ])
