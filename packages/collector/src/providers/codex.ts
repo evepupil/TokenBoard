@@ -1,22 +1,28 @@
 import type { UsageSnapshot } from '@tokenboard/usage-core'
 import { runJsonCommand, type CommandRunner } from '../command'
 import { normalizeCcusageDailyJson } from '../normalize-ccusage'
+import { resolvePackageRunner, type PackageRunner } from '../package-runner'
 import { createCodexSessionScopeBatches, type CodexSessionScope } from './codex-session-scope'
 
 const DEFAULT_CODEX_BATCH_SIZE = 200
 const MAX_CODEX_BATCH_SIZE = 1000
+const DEFAULT_DAILY_TIMEOUT_MS = 900_000
+const DEFAULT_SESSION_TIMEOUT_MS = 900_000
+const DEFAULT_PACKAGE_COMMAND_RETRIES = 2
 
 export type CollectCodexUsageOptions = {
   timezone?: string
   collectedAt?: string
   codexHome?: string
   runner?: CommandRunner
+  stderr?: (line: string) => void
 }
 
 export async function collectCodexUsage(
   options: CollectCodexUsageOptions = {}
 ): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
+  const packageRunner = resolvePackageRunner()
   const since = readSince()
   const until = process.env.TOKENBOARD_UNTIL
   const rangeArgs = buildRangeArgs({ since, until })
@@ -33,6 +39,7 @@ export async function collectCodexUsage(
     })) {
       snapshots.push(...(await collectScopedBatch({
         runner,
+        packageRunner,
         rangeArgs,
         scope,
         options,
@@ -43,8 +50,26 @@ export async function collectCodexUsage(
     return mergeSnapshots(snapshots)
   }
 
-  const json = await runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...rangeArgs], { env: process.env })
-  const sessions = await runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...rangeArgs], { env: process.env })
+  const json = await runner(
+    packageRunner.command,
+    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...rangeArgs]),
+    packageCommandOptions({
+      env: process.env,
+      timeoutMs: readDailyTimeoutMs(),
+      stderr: options.stderr
+    })
+  )
+  const sessions = await collectSessionCounts({
+    runner,
+    command: packageRunner.command,
+    args: packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...rangeArgs]),
+    options: packageCommandOptions({
+      env: process.env,
+      timeoutMs: readSessionTimeoutMs(),
+      stderr: options.stderr
+    }),
+    stderr: options.stderr
+  })
 
   return normalizeCcusageDailyJson(json, {
     source: 'codex',
@@ -56,6 +81,7 @@ export async function collectCodexUsage(
 
 async function collectScopedBatch(input: {
   runner: CommandRunner
+  packageRunner: PackageRunner
   rangeArgs: string[]
   scope: CodexSessionScope
   options: CollectCodexUsageOptions
@@ -63,8 +89,26 @@ async function collectScopedBatch(input: {
 }) {
   try {
     const env = { ...process.env, CODEX_HOME: input.scope.codexHome }
-    const json = await input.runner('npx', ['@ccusage/codex@latest', 'daily', '--json', ...input.rangeArgs], { env })
-    const sessions = await input.runner('npx', ['@ccusage/codex@latest', 'session', '--json', ...input.rangeArgs], { env })
+    const json = await input.runner(
+      input.packageRunner.command,
+      input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...input.rangeArgs]),
+      packageCommandOptions({
+        env,
+        timeoutMs: readDailyTimeoutMs(),
+        stderr: input.options.stderr
+      })
+    )
+    const sessions = await collectSessionCounts({
+      runner: input.runner,
+      command: input.packageRunner.command,
+      args: input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...input.rangeArgs]),
+      options: packageCommandOptions({
+        env,
+        timeoutMs: readSessionTimeoutMs(),
+        stderr: input.options.stderr
+      }),
+      stderr: input.options.stderr
+    })
 
     return normalizeCcusageDailyJson(json, {
       source: 'codex',
@@ -75,6 +119,72 @@ async function collectScopedBatch(input: {
   } finally {
     await input.scope.cleanup()
   }
+}
+
+async function collectSessionCounts({
+  runner,
+  command,
+  args,
+  options,
+  stderr = console.error
+}: {
+  runner: CommandRunner
+  command: string
+  args: string[]
+  options: Parameters<CommandRunner>[2]
+  stderr?: (line: string) => void
+}) {
+  try {
+    return await runner(
+      command,
+      args,
+      options
+    )
+  } catch (error) {
+    stderr(`Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: ${errorMessage(error)}`)
+    return { data: [] }
+  }
+}
+
+function packageCommandOptions({
+  env,
+  timeoutMs,
+  stderr = console.error
+}: {
+  env: NodeJS.ProcessEnv
+  timeoutMs: number
+  stderr?: (line: string) => void
+}) {
+  return {
+    env,
+    timeoutMs,
+    retries: readPackageCommandRetries(),
+    onRetry: stderr
+  }
+}
+
+function readPackageCommandRetries() {
+  const value = Number.parseInt(process.env.TOKENBOARD_PACKAGE_COMMAND_RETRIES || '', 10)
+  if (Number.isFinite(value) && value >= 0) {
+    return value
+  }
+  return DEFAULT_PACKAGE_COMMAND_RETRIES
+}
+
+function readDailyTimeoutMs() {
+  const value = Number.parseInt(process.env.TOKENBOARD_CODEX_DAILY_TIMEOUT_MS || '', 10)
+  if (Number.isFinite(value) && value > 0) {
+    return value
+  }
+  return DEFAULT_DAILY_TIMEOUT_MS
+}
+
+function readSessionTimeoutMs() {
+  const value = Number.parseInt(process.env.TOKENBOARD_CODEX_SESSION_TIMEOUT_MS || '', 10)
+  if (Number.isFinite(value) && value > 0) {
+    return value
+  }
+  return DEFAULT_SESSION_TIMEOUT_MS
 }
 
 function buildRangeArgs(options: { since?: string; until?: string }) {
@@ -129,4 +239,11 @@ function mergeSnapshots(snapshots: UsageSnapshot[]) {
     left.usageDate.localeCompare(right.usageDate) ||
     left.model.localeCompare(right.model)
   )
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+  return String(error)
 }

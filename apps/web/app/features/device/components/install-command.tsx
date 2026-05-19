@@ -1,19 +1,28 @@
 import { Copy } from 'lucide'
 import { LucideIcon } from '../../../components/ui/icon'
 
-const collectorRepoUrl = 'https://github.com/evepupil/TokenBoard.git'
+export const defaultCollectorRepoUrl = 'https://github.com/evepupil/TokenBoard.git'
 
 export type InstallCommandProps = {
   baseUrl: string
   timezone: string
+  collectorRepoUrl?: string
   pairingCode?: string
   expiresAt?: string
 }
 
 export function InstallCommand(props: InstallCommandProps) {
   const prompt = props.pairingCode
-    ? createInstallPrompt(props.baseUrl, props.timezone, props.pairingCode)
+    ? createInstallPrompt({
+        baseUrl: props.baseUrl,
+        timezone: props.timezone,
+        pairingCode: props.pairingCode,
+        collectorRepoUrl: props.collectorRepoUrl
+      })
     : ''
+  const uninstallCommand = createUninstallCommand({
+    collectorRepoUrl: props.collectorRepoUrl
+  })
 
   return (
     <section class="mx-auto flex max-w-4xl flex-col gap-5">
@@ -65,17 +74,47 @@ export function InstallCommand(props: InstallCommandProps) {
           </div>
         </section>
       ) : null}
+
+      <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10 backdrop-blur">
+        <div class="flex flex-col gap-1">
+          <h2 class="text-base font-black">一键卸载 collector</h2>
+        </div>
+        <div class="relative mt-4">
+          <button
+            type="button"
+            class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+            data-copy-target="uninstall-command-text"
+            aria-label="复制卸载命令"
+            title="复制卸载命令"
+          >
+            <LucideIcon icon={Copy} size={17} />
+          </button>
+          <pre id="uninstall-command-text" class="overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 text-sm leading-6 text-[var(--app-text)]">
+            {uninstallCommand}
+          </pre>
+        </div>
+      </section>
     </section>
   )
 }
 
-export function createInstallPrompt(baseUrl: string, timezone: string, pairingCode: string) {
-  const bashPairingCode = escapeBashArg(pairingCode)
-  const bashBaseUrl = escapeBashArg(baseUrl)
-  const bashTimezone = escapeBashArg(timezone)
-  const powerShellPairingCode = escapePowerShellArg(pairingCode)
-  const powerShellBaseUrl = escapePowerShellArg(baseUrl)
-  const powerShellTimezone = escapePowerShellArg(timezone)
+export function createInstallPrompt(input: {
+  baseUrl: string
+  timezone: string
+  pairingCode: string
+  collectorRepoUrl?: string
+}) {
+  const collectorRepoUrl = input.collectorRepoUrl || defaultCollectorRepoUrl
+  const bashRepoUrl = escapeBashArg(collectorRepoUrl)
+  const bashPairingCode = escapeBashArg(input.pairingCode)
+  const bashBaseUrl = escapeBashArg(input.baseUrl)
+  const bashTimezone = escapeBashArg(input.timezone)
+  const bashSetupRepoArg = collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${bashRepoUrl}`
+  const powerShellRepoUrl = escapePowerShellArg(collectorRepoUrl)
+  const powerShellPairingCode = escapePowerShellArg(input.pairingCode)
+  const powerShellBaseUrl = escapePowerShellArg(input.baseUrl)
+  const powerShellTimezone = escapePowerShellArg(input.timezone)
+  const powerShellSetupRepoArg = collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${powerShellRepoUrl}`
 
   return [
     '请在这台机器上安装并运行 TokenBoard collector。',
@@ -89,6 +128,8 @@ export function createInstallPrompt(baseUrl: string, timezone: string, pairingCo
     '- 历史会话很多时首次全量可能耗时较长；保持命令运行，不要把长时间解析误判为失败。',
     '- 使用 TOKENBOARD_CODEX_BATCH_SIZE=200 控制 Codex 历史会话分批处理，只有用户明确要求降低资源峰值时才调小。',
     '- 只有用户明确要求跳过首次同步时，才允许添加 --skip-initial-sync。',
+    '- 执行 setup 前必须先向用户确认每日任务触发时间：默认是 09:00,12:00,18:00,23:00；如果用户要自定义，只接受 24 小时制 HH:MM 逗号分隔列表。',
+    '- 根据用户确认的时间把 setup 命令中的 --schedule-times 参数替换为实际值，不要让用户手工创建定时任务。',
     '',
     'macOS / Linux / Git Bash：',
     '```bash',
@@ -96,10 +137,11 @@ export function createInstallPrompt(baseUrl: string, timezone: string, pairingCo
     'if [ -d "$repo/.git" ]; then',
     '  git -C "$repo" pull --ff-only',
     'else',
+    '  if [ -e "$repo" ]; then rm -rf "$repo"; fi',
     '  mkdir -p "$HOME/.tokenboard"',
-    `  git clone ${escapeBashArg(collectorRepoUrl)} "$repo"`,
+    `  git clone ${bashRepoUrl} "$repo"`,
     'fi',
-    `TOKENBOARD_CODEX_BATCH_SIZE=200 node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${bashPairingCode} --base-url ${bashBaseUrl} --timezone ${bashTimezone}`,
+    `TOKENBOARD_CODEX_BATCH_SIZE=200 node "$repo/skills/tokenboard/scripts/setup.mjs" --pairing-code ${bashPairingCode} --base-url ${bashBaseUrl} --timezone ${bashTimezone} --schedule-times "09:00,12:00,18:00,23:00"${bashSetupRepoArg}`,
     '```',
     '',
     'Windows PowerShell：',
@@ -108,14 +150,51 @@ export function createInstallPrompt(baseUrl: string, timezone: string, pairingCo
     'if (Test-Path (Join-Path $repo ".git")) {',
     '  git -C $repo pull --ff-only',
     '} else {',
+    '  if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }',
     '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
-    `  git clone ${escapePowerShellArg(collectorRepoUrl)} $repo`,
+    `  git clone ${powerShellRepoUrl} $repo`,
     '}',
     '$env:TOKENBOARD_CODEX_BATCH_SIZE = "200"',
-    `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${powerShellPairingCode} --base-url ${powerShellBaseUrl} --timezone ${powerShellTimezone}`,
+    `node (Join-Path $repo "skills\\tokenboard\\scripts\\setup.mjs") --pairing-code ${powerShellPairingCode} --base-url ${powerShellBaseUrl} --timezone ${powerShellTimezone} --schedule-times "09:00,12:00,18:00,23:00"${powerShellSetupRepoArg}`,
     '```',
     '',
-    '完成后只汇报：config 是否写入、每日计划是否安装、首次同步是否成功。'
+    '完成后只汇报：config 是否写入、每日计划是否安装、已安装的触发时间、首次同步是否成功。'
+  ].join('\n')
+}
+
+export function createUninstallCommand(input: {
+  collectorRepoUrl?: string
+} = {}) {
+  const collectorRepoUrl = input.collectorRepoUrl || defaultCollectorRepoUrl
+  const bashRepoUrl = escapeBashArg(collectorRepoUrl)
+  const powerShellRepoUrl = escapePowerShellArg(collectorRepoUrl)
+
+  return [
+    'macOS / Linux / Git Bash：',
+    '```bash',
+    'repo="$HOME/.tokenboard/TokenBoard"',
+    'if [ -d "$repo/.git" ]; then',
+    '  git -C "$repo" pull --ff-only',
+    'else',
+    '  if [ -e "$repo" ]; then rm -rf "$repo"; fi',
+    '  mkdir -p "$HOME/.tokenboard"',
+    `  git clone ${bashRepoUrl} "$repo"`,
+    'fi',
+    'node "$repo/skills/tokenboard/scripts/uninstall.mjs" --all',
+    '```',
+    '',
+    'Windows PowerShell：',
+    '```powershell',
+    '$repo = Join-Path $HOME ".tokenboard\\TokenBoard"',
+    'if (Test-Path (Join-Path $repo ".git")) {',
+    '  git -C $repo pull --ff-only',
+    '} else {',
+    '  if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }',
+    '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
+    `  git clone ${powerShellRepoUrl} $repo`,
+    '}',
+    'node (Join-Path $repo "skills\\tokenboard\\scripts\\uninstall.mjs") --all',
+    '```'
   ].join('\n')
 }
 

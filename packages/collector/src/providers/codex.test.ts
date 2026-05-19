@@ -16,7 +16,7 @@ describe('collectCodexUsage', () => {
       collectedAt: '2026-04-28T10:00:00.000Z',
       async runner(command, args) {
         calls.push({ command, args })
-        if (args[1] === 'session') {
+        if (args.includes('session')) {
           return {
             data: [
               {
@@ -51,12 +51,12 @@ describe('collectCodexUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
-        args: ['@ccusage/codex@latest', 'daily', '--json']
+        command: platformCommand('npx'),
+        args: ['ccusage@latest', 'codex', 'daily', '--json']
       },
       {
-        command: 'npx',
-        args: ['@ccusage/codex@latest', 'session', '--json']
+        command: platformCommand('npx'),
+        args: ['ccusage@latest', 'codex', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -72,6 +72,7 @@ describe('collectCodexUsage', () => {
   test('uses configured default since window when env is unset', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const codexHome = await createEmptyCodexHome()
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     vi.stubEnv('TOKENBOARD_SINCE', '')
     vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '20260501')
 
@@ -92,19 +93,57 @@ describe('collectCodexUsage', () => {
 
     expect(calls).toEqual([
       {
-        command: 'npx',
-        args: ['@ccusage/codex@latest', 'daily', '--json', '--since', '20260501']
+        command: platformCommand('npx'),
+        args: ['ccusage@latest', 'codex', 'daily', '--json', '--since', '20260501']
       },
       {
-        command: 'npx',
-        args: ['@ccusage/codex@latest', 'session', '--json', '--since', '20260501']
+        command: platformCommand('npx'),
+        args: ['ccusage@latest', 'codex', 'session', '--json', '--since', '20260501']
       }
+    ])
+  })
+
+  test('reports partial codex collection when session counts fail', async () => {
+    const errors: string[] = []
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+
+    const snapshots = await collectCodexUsage({
+      stderr: (line) => errors.push(line),
+      async runner(_command, args) {
+        if (args.includes('session')) {
+          throw new Error('session timed out')
+        }
+        return {
+          data: [
+            {
+              date: '2026-05-12',
+              model: 'gpt-5',
+              inputTokens: 1,
+              outputTokens: 2,
+              totalTokens: 3
+            }
+          ]
+        }
+      }
+    })
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toMatchObject({
+      source: 'codex',
+      usageDate: '2026-05-12',
+      model: 'gpt-5',
+      totalTokens: 3,
+      sessionCount: 0
+    })
+    expect(errors).toEqual([
+      'Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: session timed out'
     ])
   })
 
   test('allows explicit full codex scan in batches', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     vi.stubEnv('TOKENBOARD_SINCE', 'all')
     vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '20260501')
     vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '2')
@@ -128,7 +167,7 @@ describe('collectCodexUsage', () => {
         async runner(command, args, options) {
           calls.push({ command, args })
           scopedHomes.add(String(options?.env?.CODEX_HOME))
-          if (args[1] === 'session') {
+          if (args.includes('session')) {
             return {
               data: [
                 {
@@ -160,20 +199,20 @@ describe('collectCodexUsage', () => {
 
       expect(calls).toEqual([
         {
-          command: 'npx',
-          args: ['@ccusage/codex@latest', 'daily', '--json']
+          command: platformCommand('npx'),
+          args: ['ccusage@latest', 'codex', 'daily', '--json']
         },
         {
-          command: 'npx',
-          args: ['@ccusage/codex@latest', 'session', '--json']
+          command: platformCommand('npx'),
+          args: ['ccusage@latest', 'codex', 'session', '--json']
         },
         {
-          command: 'npx',
-          args: ['@ccusage/codex@latest', 'daily', '--json']
+          command: platformCommand('npx'),
+          args: ['ccusage@latest', 'codex', 'daily', '--json']
         },
         {
-          command: 'npx',
-          args: ['@ccusage/codex@latest', 'session', '--json']
+          command: platformCommand('npx'),
+          args: ['ccusage@latest', 'codex', 'session', '--json']
         }
       ])
       expect(scopedHomes.size).toBe(2)
@@ -193,10 +232,45 @@ describe('collectCodexUsage', () => {
     }
   })
 
+  test('uses since and selected package manager when configured', async () => {
+    const calls: Array<{ command: string; args: string[] }> = []
+    const codexHome = await createEmptyCodexHome()
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', 'bun')
+    vi.stubEnv('TOKENBOARD_BUNX_BIN', '/opt/bin/bunx')
+    vi.stubEnv('TOKENBOARD_SINCE', '20260509')
+
+    try {
+      await writeJsonl(join(codexHome, 'sessions', '2026', '05', '09', 'active.jsonl'), [
+        tokenCountEvent('2026-05-09T04:24:07.234Z', 10)
+      ])
+      await collectCodexUsage({
+        codexHome,
+        async runner(command, args) {
+          calls.push({ command, args })
+          return { data: [] }
+        }
+      })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+
+    expect(calls).toEqual([
+      {
+        command: '/opt/bin/bunx',
+        args: ['ccusage@latest', 'codex', 'daily', '--json', '--since', '20260509']
+      },
+      {
+        command: '/opt/bin/bunx',
+        args: ['ccusage@latest', 'codex', 'session', '--json', '--since', '20260509']
+      }
+    ])
+  })
+
   test('caps the configured Codex batch size', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))
     const calls: Array<{ command: string; args: string[] }> = []
     const scopedHomes = new Set<string>()
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
     vi.stubEnv('TOKENBOARD_SINCE', 'all')
     vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '2')
 
@@ -247,7 +321,7 @@ describe('collectCodexUsage', () => {
         codexHome,
         timezone: 'Asia/Shanghai',
         async runner(_command, args, options) {
-          if (args[1] === 'daily') {
+          if (args.includes('daily')) {
             const scopedHome = String(options?.env?.CODEX_HOME)
             scopedHomes.push(scopedHome)
             scopedFiles.activeOld = await fileContainsTokenCount(
@@ -317,4 +391,8 @@ function tokenCountEvent(timestamp: string, totalTokens: number) {
       }
     }
   }
+}
+
+function platformCommand(command: string) {
+  return process.platform === 'win32' ? `${command}.cmd` : command
 }

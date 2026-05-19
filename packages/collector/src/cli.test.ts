@@ -96,5 +96,61 @@ describe('runCollectorCli', () => {
     expect(stderr[0]).toContain('TOKENBOARD_ENDPOINT')
     expect(stderr[0]).toContain('TOKENBOARD_UPLOAD_TOKEN')
   })
-})
 
+  test('warns and continues when one source is unavailable in all mode', async () => {
+    const stderr: string[] = []
+    const uploaded: UsageSnapshot[][] = []
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'all'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'tk_test',
+        TOKENBOARD_TIMEZONE: 'Asia/Shanghai'
+      },
+      {
+        stdout: () => undefined,
+        stderr: (line) => stderr.push(line),
+        collectClaudeCodeUsage: async () => {
+          throw new Error('No valid Claude data directories found')
+        },
+        collectCodexUsage: async () => [codexSnapshot],
+        uploadSnapshots: async (_config, snapshots) => {
+          uploaded.push(snapshots)
+          return { upserted: snapshots.length }
+        }
+      }
+    )
+
+    expect(result).toBe(0)
+    expect(stderr).toEqual([
+      'Skipping claude-code source: No valid Claude data directories found'
+    ])
+    expect(uploaded).toEqual([[codexSnapshot]])
+  })
+
+  test('fails when the selected source is unavailable', async () => {
+    const stderr: string[] = []
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'claude-code'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'tk_test',
+        TOKENBOARD_TIMEZONE: 'Asia/Shanghai'
+      },
+      {
+        stdout: () => undefined,
+        stderr: (line) => stderr.push(line),
+        collectClaudeCodeUsage: async () => {
+          throw new Error('No valid Claude data directories found')
+        },
+        collectCodexUsage: async () => [codexSnapshot],
+        uploadSnapshots: async () => ({ upserted: 0 })
+      }
+    )
+
+    expect(result).toBe(1)
+    expect(stderr).toEqual(['No valid Claude data directories found'])
+  })
+})

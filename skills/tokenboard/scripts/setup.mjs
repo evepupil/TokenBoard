@@ -2,7 +2,8 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { hostname, platform } from 'node:os'
-import { parseArgs, writeConfig } from './config.mjs'
+import { parseArgs, readPackageManager, writeConfig } from './config.mjs'
+import { dailyScheduleTimes, parseScheduleTimes } from './schedule.mjs'
 import { buildInitialSyncArgs, buildInstallCollectorArgs } from './setup-options.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
@@ -10,6 +11,8 @@ const pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
 const baseUrl = String(flags['base-url'] || process.env.TOKENBOARD_BASE_URL || 'https://tokenboard.chaosyn.com').replace(/\/$/, '')
 const timezone = flags.timezone || process.env.TOKENBOARD_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone
 const deviceName = flags['device-name'] || `${hostname()} ${platform()}`
+const packageManager = readPackageManager(flags)
+const scheduleTimes = parseScheduleTimes(flags['schedule-times'] || process.env.TOKENBOARD_SCHEDULE_TIMES || dailyScheduleTimes.join(','))
 
 if (!pairingCode) {
   console.error('Missing --pairing-code')
@@ -39,6 +42,8 @@ writeConfig({
   deviceId: paired.deviceId,
   timezone: paired.timezone,
   source: 'all',
+  packageManager,
+  scheduleTimes,
   createdAt: new Date().toISOString()
 })
 console.log('TokenBoard config written.')
@@ -52,6 +57,7 @@ if (!flags['skip-collector']) {
     process.execPath,
     buildInstallCollectorArgs({
       flags,
+      packageManager,
       installCollectorScript: scriptPath('./install-collector.mjs')
     }),
     {
@@ -62,7 +68,11 @@ if (!flags['skip-collector']) {
 }
 
 if (!flags['skip-schedule']) {
-  const schedule = spawnSync(process.execPath, [scriptPath('./install-schedule.mjs')], {
+  const schedule = spawnSync(process.execPath, [
+    scriptPath('./install-schedule.mjs'),
+    '--schedule-times',
+    scheduleTimes.join(',')
+  ], {
     stdio: 'inherit'
   })
   if (schedule.status !== 0) process.exit(schedule.status ?? 1)
@@ -73,7 +83,7 @@ if (!flags['skip-initial-sync']) {
     process.execPath,
     [
       scriptPath('./sync.mjs'),
-      ...buildInitialSyncArgs({ flags })
+      ...buildInitialSyncArgs({ flags, packageManager })
     ],
     {
       stdio: 'inherit'

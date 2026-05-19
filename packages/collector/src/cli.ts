@@ -83,16 +83,44 @@ function parseArgs(args: string[], env: CliEnv) {
 }
 
 async function collectSnapshots(source: CliSource, timezone: string, deps: CliDeps) {
+  if (source === 'all') {
+    return collectAllSnapshots(timezone, deps)
+  }
+
   const snapshots: UsageSnapshot[] = []
-  if (source === 'claude-code' || source === 'all') {
+  if (source === 'claude-code') {
     snapshots.push(...(await deps.collectClaudeCodeUsage({ timezone })))
   }
 
-  if (source === 'codex' || source === 'all') {
+  if (source === 'codex') {
     snapshots.push(...(await deps.collectCodexUsage({ timezone })))
   }
 
   return snapshots
+}
+
+async function collectAllSnapshots(timezone: string, deps: CliDeps) {
+  const snapshots: UsageSnapshot[] = []
+  await collectOptionalSource('claude-code', () => deps.collectClaudeCodeUsage({ timezone }), snapshots, deps)
+  await collectOptionalSource('codex', () => deps.collectCodexUsage({ timezone }), snapshots, deps)
+  return snapshots
+}
+
+async function collectOptionalSource(
+  source: CliSource,
+  collect: () => Promise<UsageSnapshot[]>,
+  snapshots: UsageSnapshot[],
+  deps: CliDeps
+) {
+  try {
+    snapshots.push(...(await collect()))
+  } catch (error) {
+    deps.stderr(`Skipping ${source} source: ${errorMessage(error)}`)
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function readCommand(value: string | undefined): CliCommand {
@@ -135,5 +163,5 @@ function readFlags(args: string[]) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const exitCode = await runCollectorCli(process.argv.slice(2))
-  process.exit(exitCode)
+  process.exitCode = exitCode
 }

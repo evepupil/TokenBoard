@@ -17,7 +17,11 @@ export const GET = createRoute(async (c) => {
     <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
       <title>连接 TokenBoard</title>
       <AppNav active="install" email={user.email} />
-      <InstallCommand baseUrl={publicOrigin} timezone="Asia/Shanghai" />
+      <InstallCommand
+        baseUrl={publicOrigin}
+        timezone="Asia/Shanghai"
+        collectorRepoUrl={c.env.TOKENBOARD_COLLECTOR_REPO_URL}
+      />
     </main>
   )
 })
@@ -41,6 +45,7 @@ export const POST = createRoute(async (c) => {
         <InstallCommand
           baseUrl={publicOrigin}
           timezone={timezone}
+          collectorRepoUrl={c.env.TOKENBOARD_COLLECTOR_REPO_URL}
           pairingCode={result.pairingCode}
           expiresAt={result.expiresAt}
         />

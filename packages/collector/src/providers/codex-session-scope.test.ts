@@ -186,6 +186,20 @@ describe('createCodexSessionScope', () => {
       await rm(sandboxTmpdir, { recursive: true, force: true })
     }
   })
+
+  test('fails visibly when an active session candidate cannot be read', async () => {
+    const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
+    try {
+      const unreadable = join(codexHome, 'sessions', '2026', '05', 'unreadable.jsonl')
+      await mkdir(unreadable, { recursive: true })
+      await utimes(unreadable, new Date('2026-05-09T04:24:07.234Z'), new Date('2026-05-09T04:24:07.234Z'))
+
+      await expect(createCodexSessionScope({ codexHome, since: '20260508' }))
+        .rejects.toThrow(/Unable to read Codex session file/)
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
 })
 
 async function writeJsonl(file: string, rows: unknown[]) {

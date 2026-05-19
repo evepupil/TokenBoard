@@ -1,27 +1,84 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { collectorDir, mergeConfig, parseArgs } from './config.mjs'
+import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
+import { collectorDir, configDir, mergeConfig, parseArgs, readPackageManager } from './config.mjs'
 
-const flags = parseArgs(process.argv.slice(2))
-const repoUrl = flags['repo-url'] || process.env.TOKENBOARD_REPO_URL || 'https://github.com/evepupil/TokenBoard.git'
-const dir = collectorDir()
+const defaultRepoUrl = 'https://github.com/evepupil/TokenBoard.git'
 
 function run(command, args, options = {}) {
+  if (command === 'remove') {
+    rmSync(args[0], options)
+    return
+  }
+
   const result = spawnSync(command, args, {
     stdio: 'inherit',
-    shell: process.platform === 'win32' && command === 'pnpm.cmd',
+    shell: process.platform === 'win32' && command.endsWith('.cmd'),
     ...options
   })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
-if (!existsSync(dir)) {
-  run('git', ['clone', '--depth', '1', repoUrl, dir])
-} else {
-  run('git', ['pull', '--ff-only'], { cwd: dir })
+export function buildInstallCollectorPlan({ dir, repoUrl, packageManager, exists, isGitRepo = exists, configDir, platform = process.platform }) {
+  if (exists && !isGitRepo && configDir && samePath(dir, configDir)) {
+    throw new Error(`Refusing to replace TokenBoard config directory as collector checkout: ${dir}`)
+  }
+
+  const steps = exists && isGitRepo
+    ? [
+        { command: 'git', args: ['remote', 'set-url', 'origin', repoUrl], options: { cwd: dir } },
+        { command: 'git', args: ['pull', '--ff-only'], options: { cwd: dir } }
+      ]
+    : exists
+      ? [
+          { command: 'remove', args: [dir], options: { recursive: true, force: true } },
+          { command: 'git', args: ['clone', '--depth', '1', repoUrl, dir], options: {} }
+        ]
+      : [
+        { command: 'git', args: ['clone', '--depth', '1', repoUrl, dir], options: {} }
+      ]
+
+  steps.push({
+    command: corepackCommand(platform),
+    args: ['pnpm', 'install', '--frozen-lockfile'],
+    options: { cwd: dir }
+  })
+
+  return steps
 }
 
-run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['install'], { cwd: dir })
-mergeConfig({ collectorDir: dir, repoUrl, updatedAt: new Date().toISOString() })
-console.log(`TokenBoard collector ready at ${dir}`)
+function runCli() {
+  const flags = parseArgs(process.argv.slice(2))
+  const repoUrl = flags['repo-url'] || process.env.TOKENBOARD_REPO_URL || defaultRepoUrl
+  const packageManager = readPackageManager(flags)
+  const dir = collectorDir()
+
+  for (const step of buildInstallCollectorPlan({
+    dir,
+    repoUrl,
+    packageManager,
+    exists: existsSync(dir),
+    isGitRepo: existsSync(join(dir, '.git')),
+    configDir: configDir(),
+    platform: process.platform
+  })) {
+    run(step.command, step.args, step.options)
+  }
+
+  mergeConfig({ collectorDir: dir, repoUrl, packageManager, updatedAt: new Date().toISOString() })
+  console.log(`TokenBoard collector ready at ${dir}`)
+}
+
+function samePath(leftPath, rightPath) {
+  return resolve(leftPath) === resolve(rightPath)
+}
+
+function corepackCommand(platform) {
+  return platform === 'win32' ? 'corepack.cmd' : 'corepack'
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runCli()
+}
