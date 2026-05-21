@@ -132,6 +132,10 @@ describe('public card service', () => {
     expect(svg).toContain('本月额度')
     expect(svg).toContain('$6.78')
     expect(svg).toContain('Eve &amp; Co')
+    expect(svg).toContain('card-logo-panel')
+    expect(svg).toContain('card-logo-lime')
+    expect(svg).toContain('M130 118H282V164H229V382H181V164H130V118Z')
+    expect(svg).toContain('M120 390H392')
   })
 
   test('rejects a private profile', async () => {
