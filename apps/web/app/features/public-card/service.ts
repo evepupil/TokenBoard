@@ -8,6 +8,8 @@ export type PublicUsageProfile = {
   slug: string
   displayName: string
   timezone: string
+  totalTokens: number
+  totalCostUsd: number
   todayTokens: number
   todayCostUsd: number
   monthTokens: number
@@ -25,6 +27,8 @@ type ProfileRow = {
 }
 
 type TotalsRow = {
+  totalTokens: number | null
+  totalCostUsd: number | null
   todayTokens: number | null
   todayCostUsd: number | null
   monthTokens: number | null
@@ -67,6 +71,8 @@ export async function getPublicUsageProfile(
     slug: profile.slug,
     displayName: profile.displayName,
     timezone: profile.timezone,
+    totalTokens: Number(totals?.totalTokens ?? 0),
+    totalCostUsd: Number(totals?.totalCostUsd ?? 0),
     todayTokens: Number(totals?.todayTokens ?? 0),
     todayCostUsd: Number(totals?.todayCostUsd ?? 0),
     monthTokens: Number(totals?.monthTokens ?? 0),
@@ -82,6 +88,10 @@ export async function getPublicUsageJson(db: D1Database, slug: string, now = new
     slug: profile.slug,
     displayName: profile.displayName,
     timezone: profile.timezone,
+    total: {
+      tokens: profile.totalTokens,
+      costUsd: profile.totalCostUsd
+    },
     today: {
       tokens: profile.todayTokens,
       costUsd: profile.todayCostUsd
@@ -99,7 +109,9 @@ export async function getPublicUsageCard(db: D1Database, slug: string, now = new
   const profile = await getPublicUsageProfile(db, slug, now)
   return renderUsageCardSvg({
     displayName: profile.displayName,
-    todayTokens: profile.todayTokens,
+    totalTokens: profile.totalTokens,
+    totalCostUsd: profile.totalCostUsd,
+    monthTokens: profile.monthTokens,
     monthCostUsd: profile.monthCostUsd
   })
 }
@@ -107,7 +119,9 @@ export async function getPublicUsageCard(db: D1Database, slug: string, now = new
 export function getEmptyPublicCard() {
   return renderUsageCardSvg({
     displayName: 'TokenBoard',
-    todayTokens: 0,
+    totalTokens: 0,
+    totalCostUsd: 0,
+    monthTokens: 0,
     monthCostUsd: 0
   })
 }
@@ -131,6 +145,8 @@ async function getPublicTotals(db: D1Database, userId: string, today: string, mo
     .prepare(
       `
         SELECT
+          COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(cost_usd), 0) as totalCostUsd,
           COALESCE(SUM(CASE WHEN usage_date = ? THEN total_tokens ELSE 0 END), 0) as todayTokens,
           COALESCE(SUM(CASE WHEN usage_date = ? THEN cost_usd ELSE 0 END), 0) as todayCostUsd,
           COALESCE(SUM(CASE WHEN usage_date >= ? THEN total_tokens ELSE 0 END), 0) as monthTokens,

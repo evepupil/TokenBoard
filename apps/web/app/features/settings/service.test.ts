@@ -117,6 +117,9 @@ describe('settings service', () => {
     expect(settings.publicSvgUrl).toBe(
       'https://tokenboard.chaosyn.com/api/public/eve-tokenboard.svg'
     )
+    expect(settings.publicMarkdown).toBe(
+      '[![TokenBoard](https://tokenboard.chaosyn.com/api/public/eve-tokenboard.svg)](https://tokenboard.chaosyn.com)'
+    )
   })
 
   test('uses the profile display name for dashboard labels', async () => {

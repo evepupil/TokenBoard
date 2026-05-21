@@ -4,6 +4,7 @@ import { publicProfileSchema, type PublicProfileInput } from './schema'
 export type ProfileSettings = PublicProfileInput & {
   publicJsonUrl: string
   publicSvgUrl: string
+  publicMarkdown: string
 }
 
 type ProfileRow = {
@@ -134,9 +135,12 @@ function toProfileSettings(row: ProfileRow, origin: string): ProfileSettings {
     participatesInLeaderboards: Boolean(row.participatesInLeaderboards)
   })
 
+  const publicSvgUrl = `${origin}/api/public/${profile.slug}.svg`
+
   return {
     ...profile,
     publicJsonUrl: `${origin}/api/public/${profile.slug}.json`,
-    publicSvgUrl: `${origin}/api/public/${profile.slug}.svg`
+    publicSvgUrl,
+    publicMarkdown: `[![TokenBoard](${publicSvgUrl})](https://tokenboard.chaosyn.com)`
   }
 }

@@ -92,7 +92,7 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean; email: s
           <CardContent class="space-y-4">
             <CopyBlock label="Public JSON" value={props.profile.publicJsonUrl} />
             <CopyBlock label="README SVG" value={props.profile.publicSvgUrl} />
-            <CopyBlock label="Markdown" value={`![TokenBoard](${props.profile.publicSvgUrl})`} />
+            <CopyBlock label="Markdown" value={props.profile.publicMarkdown} />
           </CardContent>
         </Card>
       </section>
