@@ -58,6 +58,10 @@ node scripts/sync.mjs --mode sync --source all
 node scripts/sync.mjs --mode sync --source all --since all
 ```
 
+If a Codex session file disappears between scan and copy, the collector should warn on stderr and
+continue with the remaining session files. Treat non-ENOENT copy failures, provider command
+failures, or upload failures as real failures that need debugging.
+
 ## Status
 
 Check local config and installed schedule metadata:

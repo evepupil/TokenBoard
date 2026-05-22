@@ -26,6 +26,8 @@ Collector compatibility:
   snapshots. Older collectors do not call it and should still upload through `/api/v1/ingest`.
 - Upload tokens created before device pairing may have no `device_id`. Server ingest stores those
   rows under the `legacy` device id so old collectors and old tokens keep syncing.
+- All-device dashboard, details, CSV, public card, and leaderboard views dedupe overlapping
+  `legacy` and paired-device rows. A concrete device filter still reads that device's raw rows.
 
 `setup.mjs` clones or updates the collector checkout in `~/.tokenboard/TokenBoard`, writes
 `~/.tokenboard/config.json`, installs the platform scheduler, and runs a full-history initial sync
@@ -40,7 +42,9 @@ Scheduler targets:
 
 Daily and manual sync default to a 7-day local-time lookback window. Use `--since all` only for
 explicit backfills. For large Codex histories, set `TOKENBOARD_CODEX_BATCH_SIZE=200` during full
-history scans.
+history scans. If a Codex session file disappears while the collector is copying a scanned batch,
+that file is skipped with a stderr warning and the rest of the Codex source continues. Other copy
+errors still fail visibly.
 
 Scheduled runs write logs to `~/.tokenboard/logs/daily-sync.out.log` and
 `~/.tokenboard/logs/daily-sync.err.log`. Rotated logs are capped at 1 MiB and kept for 7 days.
