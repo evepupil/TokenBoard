@@ -18,6 +18,15 @@ token, installs the collector, creates the daily schedule, and runs the first sy
 The collector uploads aggregate token counts only. It does not upload prompts, completions, file
 contents, or raw conversation logs.
 
+Collector compatibility:
+
+- `POST /api/v1/ingest` is the long-lived upload endpoint. It accepts the stable body shape
+  `{ "snapshots": [...] }` and must remain compatible with older collectors.
+- `POST /api/v1/ingest/check` is an optimization used by newer collectors to skip unchanged
+  snapshots. Older collectors do not call it and should still upload through `/api/v1/ingest`.
+- Upload tokens created before device pairing may have no `device_id`. Server ingest stores those
+  rows under the `legacy` device id so old collectors and old tokens keep syncing.
+
 `setup.mjs` clones or updates the collector checkout in `~/.tokenboard/TokenBoard`, writes
 `~/.tokenboard/config.json`, installs the platform scheduler, and runs a full-history initial sync
 unless `--skip-initial-sync` is set. The default schedule is `09:00,12:00,18:00,23:00`, and
@@ -48,8 +57,13 @@ pnpm build
 Deploy:
 
 ```bash
+pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote
 pnpm run deploy
 ```
+
+Run the D1 migrations as part of every server rollout. The current compatibility path depends on
+the device and snapshot-hash schema migrations, including `device_id` on upload tokens and
+`snapshot_hash` on `daily_usage`.
 
 ## Package Managers
 
