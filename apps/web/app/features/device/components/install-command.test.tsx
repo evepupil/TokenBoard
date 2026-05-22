@@ -48,6 +48,20 @@ describe('InstallCommand', () => {
     expect(prompt).not.toContain('node scripts/setup.mjs')
   })
 
+  test('makes the old-client upgrade path explicit for agents', () => {
+    const prompt = createInstallPrompt({
+      baseUrl: 'https://tokenboard.example',
+      timezone: 'Asia/Shanghai',
+      pairingCode: 'pair_123'
+    })
+
+    expect(prompt).toContain('本提示词同时适用于首次安装和旧版 collector 升级')
+    expect(prompt).toContain('必须在需要同步用量的目标机器上执行')
+    expect(prompt).toContain('如果已经安装旧版 TokenBoard collector，更新现有 checkout 后重新运行 setup')
+    expect(prompt).toContain('不要为了升级手动删除 ~/.tokenboard/config.json')
+    expect(prompt).toContain('重新配对设备、刷新 upload token/deviceId、刷新每日定时任务')
+  })
+
   test('allows deployments to override the collector repo url', () => {
     const prompt = createInstallPrompt({
       baseUrl: 'https://tokenboard.example',

@@ -117,12 +117,15 @@ export function createInstallPrompt(input: {
   const powerShellSetupRepoArg = collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${powerShellRepoUrl}`
 
   return [
-    '请在这台机器上安装并运行 TokenBoard collector。',
+    '请在这台机器上安装或升级 TokenBoard collector。',
+    '本提示词同时适用于首次安装和旧版 collector 升级；必须在需要同步用量的目标机器上执行。',
     '',
     '重要约束：',
     '- 只使用终端命令完成安装和 setup。',
     '- 不要使用浏览器、Playwright、网页抓取、fetch 或 curl 去访问 GitHub 页面。',
     '- 不要打印 upload token、配对响应、配置文件内容或任何本地隐私数据。',
+    '- 如果已经安装旧版 TokenBoard collector，更新现有 checkout 后重新运行 setup；setup 会重新配对设备、刷新 upload token/deviceId、刷新每日定时任务。',
+    '- 不要为了升级手动删除 ~/.tokenboard/config.json，也不要卸载旧计划任务；除非用户明确要求重装或卸载。',
     '- 如果已经安装了 TokenBoard skill，可以直接运行其中的 setup 脚本；否则用 git clone/update 仓库后运行脚本。',
     '- 首次安装默认执行全量同步，用于补齐历史 Claude Code / Codex 用量；不要擅自改成最近 7 天窗口。',
     '- 历史会话很多时首次全量可能耗时较长；保持命令运行，不要把长时间解析误判为失败。',
