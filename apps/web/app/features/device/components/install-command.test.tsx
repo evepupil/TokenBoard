@@ -1,6 +1,6 @@
 import { renderToString } from 'hono/jsx/dom/server'
 import { describe, expect, test } from 'vitest'
-import { createInstallPrompt, createUninstallCommand, InstallCommand } from './install-command'
+import { createInstallPrompt, createUninstallCommand, createUninstallCommands, InstallCommand } from './install-command'
 
 describe('InstallCommand', () => {
   test('renders a copy action for the generated install prompt', async () => {
@@ -14,9 +14,13 @@ describe('InstallCommand', () => {
     )
 
     expect(html).toContain('data-copy-target="install-prompt-text"')
-    expect(html).toContain('data-copy-target="uninstall-command-text"')
+    expect(html).toContain('data-copy-target="uninstall-bash-command-text"')
+    expect(html).toContain('data-copy-target="uninstall-powershell-command-text"')
     expect(html).toContain('aria-label="复制安装提示词"')
-    expect(html).toContain('aria-label="复制卸载命令"')
+    expect(html).toContain('aria-label="复制 macOS / Linux / Git Bash 卸载命令"')
+    expect(html).toContain('aria-label="复制 Windows PowerShell 卸载命令"')
+    expect(html).toContain('macOS / Linux / Git Bash')
+    expect(html).toContain('Windows PowerShell')
     expect(html).toContain('skills/tokenboard/scripts/setup.mjs')
     expect(html).toContain('skills/tokenboard/scripts/uninstall.mjs')
   })
@@ -76,24 +80,39 @@ describe('InstallCommand', () => {
     expect(prompt).not.toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
   })
 
-  test('generates one-command uninstall instructions', () => {
+  test('generates platform-specific one-command uninstall instructions', () => {
+    const commands = createUninstallCommands()
+
+    expect(commands.bash).toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
+    expect(commands.bash).toContain('git -C "$repo" pull --ff-only')
+    expect(commands.bash).toContain('rm -rf "$repo"')
+    expect(commands.bash).toContain('skills/tokenboard/scripts/uninstall.mjs" --all')
+    expect(commands.bash).not.toContain('```')
+    expect(commands.bash).not.toContain('Windows PowerShell')
+    expect(commands.powerShell).toContain('git clone "https://github.com/evepupil/TokenBoard.git" $repo')
+    expect(commands.powerShell).toContain('skills\\tokenboard\\scripts\\uninstall.mjs") --all')
+    expect(commands.powerShell).not.toContain('```')
+    expect(commands.powerShell).not.toContain('macOS / Linux / Git Bash')
+  })
+
+  test('keeps the combined uninstall prompt available for agent handoff', () => {
     const command = createUninstallCommand()
 
-    expect(command).toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
-    expect(command).toContain('git -C "$repo" pull --ff-only')
-    expect(command).toContain('rm -rf "$repo"')
-    expect(command).toContain('skills/tokenboard/scripts/uninstall.mjs" --all')
-    expect(command).toContain('skills\\tokenboard\\scripts\\uninstall.mjs") --all')
+    expect(command).toContain('macOS / Linux / Git Bash：')
+    expect(command).toContain('```bash')
+    expect(command).toContain('Windows PowerShell：')
+    expect(command).toContain('```powershell')
   })
 
   test('uses overridden repo url for uninstall command bootstrap', () => {
-    const command = createUninstallCommand({
+    const commands = createUninstallCommands({
       collectorRepoUrl: 'https://github.com/example/TokenBoard.git'
     })
 
-    expect(command).toContain("git clone 'https://github.com/example/TokenBoard.git'")
-    expect(command).toContain('git clone "https://github.com/example/TokenBoard.git" $repo')
-    expect(command).not.toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
+    expect(commands.bash).toContain("git clone 'https://github.com/example/TokenBoard.git'")
+    expect(commands.powerShell).toContain('git clone "https://github.com/example/TokenBoard.git" $repo')
+    expect(commands.bash).not.toContain("git clone 'https://github.com/evepupil/TokenBoard.git'")
+    expect(commands.powerShell).not.toContain('git clone "https://github.com/evepupil/TokenBoard.git" $repo')
   })
 
   test('escapes install prompt command arguments for shells', () => {

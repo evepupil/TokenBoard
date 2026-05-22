@@ -20,7 +20,7 @@ export function InstallCommand(props: InstallCommandProps) {
         collectorRepoUrl: props.collectorRepoUrl
       })
     : ''
-  const uninstallCommand = createUninstallCommand({
+  const uninstallCommands = createUninstallCommands({
     collectorRepoUrl: props.collectorRepoUrl
   })
 
@@ -68,7 +68,7 @@ export function InstallCommand(props: InstallCommandProps) {
             >
               <LucideIcon icon={Copy} size={17} />
             </button>
-            <pre id="install-prompt-text" class="overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 text-sm leading-6 text-[var(--app-text)]">
+            <pre id="install-prompt-text" class="overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 pt-14 text-sm leading-6 text-[var(--app-text)]">
               {prompt}
             </pre>
           </div>
@@ -79,22 +79,47 @@ export function InstallCommand(props: InstallCommandProps) {
         <div class="flex flex-col gap-1">
           <h2 class="text-base font-black">一键卸载 collector</h2>
         </div>
-        <div class="relative mt-4">
-          <button
-            type="button"
-            class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
-            data-copy-target="uninstall-command-text"
-            aria-label="复制卸载命令"
-            title="复制卸载命令"
-          >
-            <LucideIcon icon={Copy} size={17} />
-          </button>
-          <pre id="uninstall-command-text" class="overflow-x-auto rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 text-sm leading-6 text-[var(--app-text)]">
-            {uninstallCommand}
-          </pre>
+        <div class="mt-4 flex flex-col gap-4">
+          <CopyableCommandBlock
+            title="macOS / Linux / Git Bash"
+            command={uninstallCommands.bash}
+            targetId="uninstall-bash-command-text"
+            copyLabel="复制 macOS / Linux / Git Bash 卸载命令"
+          />
+          <CopyableCommandBlock
+            title="Windows PowerShell"
+            command={uninstallCommands.powerShell}
+            targetId="uninstall-powershell-command-text"
+            copyLabel="复制 Windows PowerShell 卸载命令"
+          />
         </div>
       </section>
     </section>
+  )
+}
+
+function CopyableCommandBlock(props: {
+  title: string
+  command: string
+  targetId: string
+  copyLabel: string
+}) {
+  return (
+    <div class="min-w-0">
+      <div class="relative rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 pr-16 text-sm leading-6 text-[var(--app-text)]">
+        <button
+          type="button"
+          class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+          data-copy-target={props.targetId}
+          aria-label={props.copyLabel}
+          title={props.copyLabel}
+        >
+          <LucideIcon icon={Copy} size={17} />
+        </button>
+        <p class="font-mono">{props.title}：</p>
+        <pre id={props.targetId} class="mt-5 overflow-x-auto">{props.command}</pre>
+      </div>
+    </div>
   )
 }
 
@@ -165,38 +190,53 @@ export function createInstallPrompt(input: {
   ].join('\n')
 }
 
-export function createUninstallCommand(input: {
+type UninstallCommandInput = {
   collectorRepoUrl?: string
-} = {}) {
+}
+
+export function createUninstallCommands(input: UninstallCommandInput = {}) {
   const collectorRepoUrl = input.collectorRepoUrl || defaultCollectorRepoUrl
   const bashRepoUrl = escapeBashArg(collectorRepoUrl)
   const powerShellRepoUrl = escapePowerShellArg(collectorRepoUrl)
 
+  return {
+    bash: [
+      'repo="$HOME/.tokenboard/TokenBoard"',
+      'if [ -d "$repo/.git" ]; then',
+      '  git -C "$repo" pull --ff-only',
+      'else',
+      '  if [ -e "$repo" ]; then rm -rf "$repo"; fi',
+      '  mkdir -p "$HOME/.tokenboard"',
+      `  git clone ${bashRepoUrl} "$repo"`,
+      'fi',
+      'node "$repo/skills/tokenboard/scripts/uninstall.mjs" --all'
+    ].join('\n'),
+    powerShell: [
+      '$repo = Join-Path $HOME ".tokenboard\\TokenBoard"',
+      'if (Test-Path (Join-Path $repo ".git")) {',
+      '  git -C $repo pull --ff-only',
+      '} else {',
+      '  if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }',
+      '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
+      `  git clone ${powerShellRepoUrl} $repo`,
+      '}',
+      'node (Join-Path $repo "skills\\tokenboard\\scripts\\uninstall.mjs") --all'
+    ].join('\n')
+  }
+}
+
+export function createUninstallCommand(input: UninstallCommandInput = {}) {
+  const commands = createUninstallCommands(input)
+
   return [
     'macOS / Linux / Git Bash：',
     '```bash',
-    'repo="$HOME/.tokenboard/TokenBoard"',
-    'if [ -d "$repo/.git" ]; then',
-    '  git -C "$repo" pull --ff-only',
-    'else',
-    '  if [ -e "$repo" ]; then rm -rf "$repo"; fi',
-    '  mkdir -p "$HOME/.tokenboard"',
-    `  git clone ${bashRepoUrl} "$repo"`,
-    'fi',
-    'node "$repo/skills/tokenboard/scripts/uninstall.mjs" --all',
+    commands.bash,
     '```',
     '',
     'Windows PowerShell：',
     '```powershell',
-    '$repo = Join-Path $HOME ".tokenboard\\TokenBoard"',
-    'if (Test-Path (Join-Path $repo ".git")) {',
-    '  git -C $repo pull --ff-only',
-    '} else {',
-    '  if (Test-Path $repo) { Remove-Item -Recurse -Force $repo }',
-    '  New-Item -ItemType Directory -Force (Split-Path $repo) | Out-Null',
-    `  git clone ${powerShellRepoUrl} $repo`,
-    '}',
-    'node (Join-Path $repo "skills\\tokenboard\\scripts\\uninstall.mjs") --all',
+    commands.powerShell,
     '```'
   ].join('\n')
 }

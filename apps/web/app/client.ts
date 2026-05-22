@@ -6,6 +6,7 @@ createClient()
 const themeKey = 'tokenboard-theme'
 
 type Theme = 'dark' | 'light'
+type ToastTone = 'success' | 'error'
 
 function getStoredTheme(): Theme | null {
   try {
@@ -59,6 +60,7 @@ function initCopyButtons() {
     button.dataset.copied = copied ? 'true' : 'false'
     button.setAttribute('aria-label', copied ? '已复制' : '复制失败')
     button.setAttribute('title', copied ? '已复制' : '复制失败')
+    showToast(copied ? '已复制到剪贴板' : '复制失败，请手动选择文本复制', copied ? 'success' : 'error')
 
     window.setTimeout(() => {
       button.dataset.copied = 'idle'
@@ -66,6 +68,41 @@ function initCopyButtons() {
       button.setAttribute('title', originalTitle)
     }, 1600)
   })
+}
+
+function showToast(message: string, tone: ToastTone) {
+  const container = getToastContainer()
+  const toast = document.createElement('div')
+  toast.className = 'app-toast'
+  toast.dataset.tone = tone
+  toast.setAttribute('role', 'status')
+  toast.textContent = message
+
+  container.appendChild(toast)
+  window.requestAnimationFrame(() => {
+    toast.dataset.visible = 'true'
+  })
+
+  window.setTimeout(() => {
+    toast.dataset.visible = 'false'
+    window.setTimeout(() => {
+      toast.remove()
+      if (!container.childElementCount) container.remove()
+    }, 220)
+  }, 2200)
+}
+
+function getToastContainer() {
+  const existing = document.querySelector<HTMLDivElement>('[data-toast-container]')
+  if (existing) return existing
+
+  const container = document.createElement('div')
+  container.className = 'app-toast-viewport'
+  container.dataset.toastContainer = 'true'
+  container.setAttribute('aria-live', 'polite')
+  container.setAttribute('aria-atomic', 'true')
+  document.body.appendChild(container)
+  return container
 }
 
 function initAppNavigation() {

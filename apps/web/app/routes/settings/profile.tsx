@@ -1,7 +1,9 @@
 import { createRoute } from 'honox/factory'
+import { Copy } from 'lucide'
 import { AppNav } from '../../components/app-nav'
 import { Button, LinkButton } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
+import { LucideIcon } from '../../components/ui/icon'
 import { Input, Label } from '../../components/ui/input'
 import { requireUser } from '../../features/auth/middleware'
 import { getCanonicalPublicOrigin, getProfileSettings, parseProfileForm, updateProfileSettings, type ProfileSettings } from '../../features/settings/service'
@@ -90,9 +92,21 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean; email: s
             <CardDescription>README SVG 卡片可以直接嵌入 GitHub 个人页或项目 README。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
-            <CopyBlock label="Public JSON" value={props.profile.publicJsonUrl} />
-            <CopyBlock label="README SVG" value={props.profile.publicSvgUrl} />
-            <CopyBlock label="Markdown" value={props.profile.publicMarkdown} />
+            <CopyBlock
+              label="Public JSON"
+              value={props.profile.publicJsonUrl}
+              targetId="public-json-url-text"
+            />
+            <CopyBlock
+              label="README SVG"
+              value={props.profile.publicSvgUrl}
+              targetId="public-svg-url-text"
+            />
+            <CopyBlock
+              label="Markdown"
+              value={props.profile.publicMarkdown}
+              targetId="public-markdown-text"
+            />
           </CardContent>
         </Card>
       </section>
@@ -100,11 +114,22 @@ function ProfilePage(props: { profile: ProfileSettings; saved: boolean; email: s
   )
 }
 
-function CopyBlock(props: { label: string; value: string }) {
+function CopyBlock(props: { label: string; value: string; targetId: string }) {
   return (
     <div>
       <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">{props.label}</p>
-      <pre class="overflow-x-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-text)]">{props.value}</pre>
+      <div class="relative">
+        <button
+          type="button"
+          class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+          data-copy-target={props.targetId}
+          aria-label={`复制 ${props.label}`}
+          title={`复制 ${props.label}`}
+        >
+          <LucideIcon icon={Copy} size={17} />
+        </button>
+        <pre id={props.targetId} class="overflow-x-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 pr-16 text-sm text-[var(--app-text)]">{props.value}</pre>
+      </div>
     </div>
   )
 }
