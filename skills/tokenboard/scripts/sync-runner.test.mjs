@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildSyncInvocation } from './sync.mjs'
+import { buildSyncInvocation, shouldRunUpgrade } from './sync.mjs'
 
 test('builds Windows sync invocation with semicolon PATH delimiter', () => {
   const invocation = buildSyncInvocation({
@@ -64,4 +64,11 @@ test('builds Windows bun sync invocation with bun executable', () => {
   assert.equal(invocation.command, 'C:\\Program Files\\nodejs\\node.exe')
   assert.equal(invocation.shell, false)
   assert.deepEqual(invocation.args, ['--import', 'tsx', 'src/cli.ts', 'preview', '--source', 'all'])
+})
+
+test('sync runs upgrade by default and supports skip flag', () => {
+  assert.equal(shouldRunUpgrade({ flags: {}, env: {} }), true)
+  assert.equal(shouldRunUpgrade({ flags: { 'skip-upgrade': true }, env: {} }), false)
+  assert.equal(shouldRunUpgrade({ flags: {}, env: { TOKENBOARD_SKIP_UPGRADE: '1' } }), false)
+  assert.equal(shouldRunUpgrade({ flags: {}, env: { TOKENBOARD_AUTO_UPGRADE: '0' } }), false)
 })

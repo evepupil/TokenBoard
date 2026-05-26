@@ -45,6 +45,8 @@ If the user pasted a TokenBoard install prompt from the website, follow the prom
 
 Daily and manual sync default to a 7-day lookback window. Use `--since all` only when the user explicitly asks for a full-history backfill.
 
+Sync runs a lightweight upgrade first by default. It updates the local collector checkout and this installed skill from the configured TokenBoard repo, then continues with collection. If Git upgrade fails, the script falls back to the GitHub ZIP archive path. If upgrade still fails, treat it as a warning unless sync itself fails. For troubleshooting only, skip the upgrade with `--skip-upgrade`, `TOKENBOARD_SKIP_UPGRADE=1`, or `TOKENBOARD_AUTO_UPGRADE=0`.
+
 Preview without upload:
 
 ```bash
@@ -56,6 +58,12 @@ Upload:
 ```bash
 node scripts/sync.mjs --mode sync --source all
 node scripts/sync.mjs --mode sync --source all --since all
+```
+
+Manual upgrade without syncing:
+
+```bash
+node scripts/upgrade.mjs
 ```
 
 If a Codex session file disappears between scan and copy, the collector should warn on stderr and

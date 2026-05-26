@@ -8,7 +8,8 @@ test('clones the configured collector repo before installing dependencies', () =
       dir: '/home/user/.tokenboard/TokenBoard',
       repoUrl: 'https://github.com/example/TokenBoard.git',
       packageManager: 'pnpm',
-      exists: false
+      exists: false,
+      platform: 'linux'
     }),
     [
       {
@@ -32,7 +33,8 @@ test('updates the existing collector origin before pulling', () => {
       repoUrl: 'https://github.com/example/TokenBoard.git',
       packageManager: 'npm',
       exists: true,
-      isGitRepo: true
+      isGitRepo: true,
+      platform: 'linux'
     }),
     [
       {
@@ -61,7 +63,8 @@ test('removes an existing non-git collector directory before cloning', () => {
       repoUrl: 'https://github.com/example/TokenBoard.git',
       packageManager: 'bun',
       exists: true,
-      isGitRepo: false
+      isGitRepo: false,
+      platform: 'linux'
     }),
     [
       {

@@ -13,6 +13,7 @@ import {
 import { normalizePathEnv } from './schedule.mjs'
 import { readSince } from './sync-options.mjs'
 import { closeScheduledLogRuntime, createScheduledLogRuntime } from './logs.mjs'
+import { runUpgrade } from './upgrade.mjs'
 
 if (isMain()) {
   const flags = parseArgs(process.argv.slice(2))
@@ -31,6 +32,20 @@ if (isMain()) {
     homeDir,
     scheduled: flags.scheduled === true
   })
+
+  if (shouldRunUpgrade({ flags, env: process.env })) {
+    try {
+      runUpgrade({
+        flags,
+        log: (line) => {
+          if (!logs) console.log(line)
+        }
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`TokenBoard upgrade skipped: ${message}`)
+    }
+  }
 
   if (!existsSync(invocation.repoDir)) {
     console.error(`TokenBoard collector is not installed: ${invocation.repoDir}`)
@@ -58,6 +73,19 @@ if (isMain()) {
 
   closeScheduledLogRuntime(logs)
   process.exit(result.status ?? 1)
+}
+
+export function shouldRunUpgrade({ flags = {}, env = process.env } = {}) {
+  if (flags['skip-upgrade'] === true) {
+    return false
+  }
+  if (env.TOKENBOARD_SKIP_UPGRADE === '1') {
+    return false
+  }
+  if (env.TOKENBOARD_AUTO_UPGRADE === '0') {
+    return false
+  }
+  return true
 }
 
 export function buildSyncInvocation({
