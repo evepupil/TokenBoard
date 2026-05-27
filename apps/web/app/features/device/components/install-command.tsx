@@ -67,13 +67,16 @@ function InstallTimezoneForm(props: { timezone: string }) {
       <label class="flex flex-col gap-2 text-sm font-bold text-[var(--app-muted)]">
         时区
         <input
-          class="rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-4 py-3 text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20"
+          class="min-h-11 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-4 py-3 text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20"
           name="timezone"
           value={props.timezone}
+          data-timezone-input="true"
+          data-timezone-default={props.timezone}
+          data-timezone-autofill="always"
         />
       </label>
       <button
-        class="mt-4 rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-black text-stone-950 transition hover:bg-lime-200"
+        class="mt-4 min-h-11 rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-black text-stone-950 transition hover:bg-lime-200"
         type="submit"
       >
         生成安装提示词
@@ -176,7 +179,7 @@ function CopyIconButton(props: { targetId: string; label: string }) {
   return (
     <button
       type="button"
-      class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+      class="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
       data-copy-target={props.targetId}
       aria-label={props.label}
       title={props.label}

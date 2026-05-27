@@ -35,6 +35,16 @@ describe('settings service', () => {
     })
   })
 
+  test('rejects invalid profile timezones', () => {
+    expect(() =>
+      parseProfileForm({
+        slug: 'eve-tokenboard',
+        displayName: 'Eve',
+        timezone: 'Mars/Base'
+      })
+    ).toThrow()
+  })
+
   test('updates profile after checking slug ownership', async () => {
     const sqlStatements: string[] = []
     const bindings: unknown[][] = []
@@ -72,6 +82,7 @@ describe('settings service', () => {
 
     expect(sqlStatements[0]).toContain('SELECT user_id as userId FROM profiles')
     expect(sqlStatements[1]).toContain('UPDATE profiles')
+    expect(sqlStatements[1]).toContain("timezone_source = 'user'")
     expect(bindings[0]).toEqual(['eve-tokenboard', 'user_1'])
     expect(bindings[1]).toEqual([
       'eve-tokenboard',
@@ -96,7 +107,9 @@ describe('settings service', () => {
                   displayName: 'Eve',
                   timezone: 'Asia/Hong_Kong',
                   isPublic: 1,
-                  participatesInLeaderboards: 1
+                  participatesInLeaderboards: 1,
+                  createdAt: '2026-04-29T10:00:00.000Z',
+                  updatedAt: '2026-04-29T10:00:00.000Z'
                 }
               }
             }
@@ -120,6 +133,73 @@ describe('settings service', () => {
     expect(settings.publicMarkdown).toBe(
       '[![TokenBoard](https://tokenboard.example.com/api/public/eve-tokenboard.svg)](https://tokenboard.example.com)'
     )
+    expect(settings.shouldUseBrowserTimezoneDefault).toBe(false)
+  })
+
+  test('marks default UTC profiles as browser-timezone default candidates', async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return {
+                  slug: 'eve-tokenboard',
+                  displayName: 'Eve',
+                  timezone: 'UTC',
+                  isPublic: 0,
+                  participatesInLeaderboards: 0,
+                  timezoneSource: 'default',
+                  createdAt: '2026-04-29T10:00:00.000Z',
+                  updatedAt: '2026-04-29T10:00:00.000Z'
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const settings = await getProfileSettings(
+      db,
+      'user_1',
+      'https://tokenboard.example.com'
+    )
+
+    expect(settings.shouldUseBrowserTimezoneDefault).toBe(true)
+  })
+
+  test('does not mark user-saved UTC profiles for browser timezone autofill', async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return {
+                  slug: 'eve-tokenboard',
+                  displayName: 'Eve',
+                  timezone: 'UTC',
+                  timezoneSource: 'user',
+                  isPublic: 0,
+                  participatesInLeaderboards: 0,
+                  createdAt: '2026-04-29T10:00:00.000Z',
+                  updatedAt: '2026-04-29T10:00:00.000Z'
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const settings = await getProfileSettings(
+      db,
+      'user_1',
+      'https://tokenboard.example.com'
+    )
+
+    expect(settings.shouldUseBrowserTimezoneDefault).toBe(false)
   })
 
   test('uses the profile display name for dashboard labels', async () => {

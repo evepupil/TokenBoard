@@ -71,7 +71,14 @@ function ProfileSettingsForm(props: { profile: ProfileSettings }) {
       <ProfileSlugInput profile={props.profile} />
       <Label>
         时区
-        <Input name="timezone" value={props.profile.timezone} required />
+        <Input
+          name="timezone"
+          value={props.profile.timezone}
+          required
+          data-timezone-input="true"
+          data-timezone-default={props.profile.timezone}
+          data-timezone-autofill={props.profile.shouldUseBrowserTimezoneDefault ? 'true' : 'false'}
+        />
       </Label>
       <ProfileCheckbox name="isPublic" checked={props.profile.isPublic} title="公开 JSON / SVG">
         允许任何人通过公开链接查看你的聚合统计。
@@ -137,7 +144,7 @@ function CopyBlock(props: { label: string; value: string; targetId: string }) {
       <div class="relative">
         <button
           type="button"
-          class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
+          class="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] shadow-sm transition hover:border-lime-300/50 hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-lime-300/30"
           data-copy-target={props.targetId}
           aria-label={`复制 ${props.label}`}
           title={`复制 ${props.label}`}

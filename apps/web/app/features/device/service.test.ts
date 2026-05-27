@@ -113,6 +113,28 @@ describe('pairDevice', () => {
     ).rejects.toBeInstanceOf(ApiError)
   })
 
+  test('rejects invalid device timezones before pairing', async () => {
+    const { repository } = createRepository({
+      async findUsablePairingCode() {
+        throw new Error('pairing should not be queried')
+      }
+    })
+
+    await expect(
+      pairDevice(
+        repository,
+        { pairingCode: 'dev-pairing-code', timezone: 'Mars/Base' },
+        {
+          now: () => '2026-04-28T10:00:00.000Z',
+          endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+          randomId: () => 'device-fixture',
+          randomToken: () => 'upload-token-fixture',
+          hash: async (value) => `hash:${value}`
+        }
+      )
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+  })
+
   test('rejects a pairing code that was consumed by another request', async () => {
     const { repository } = createRepository({
       async consumePairingCode() {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createAuth } from './auth'
-import { ensureProfile, getOptionalUser, verifyUploadToken } from './middleware'
+import { ensureProfile, getOptionalUser, requireUser, verifyUploadToken } from './middleware'
 
 vi.mock('./auth', () => ({
   createAuth: vi.fn()
@@ -72,6 +72,62 @@ describe('getOptionalUser', () => {
       image: null
     })
     expect(getSession).toHaveBeenCalledWith({ headers: raw.headers })
+  })
+})
+
+describe('requireUser', () => {
+  beforeEach(() => {
+    mockedCreateAuth.mockReset()
+  })
+
+  test('creates a missing profile with the browser timezone cookie', async () => {
+    const bindings: unknown[][] = []
+    mockedCreateAuth.mockReturnValue({
+      api: {
+        getSession: vi.fn(async () => ({
+          user: {
+            id: 'user_12345678',
+            email: 'user@example.com',
+            name: 'Token User',
+            image: null
+          }
+        }))
+      }
+    } as never)
+
+    const raw = new Request('https://tokenboard.example/dashboard', {
+      headers: {
+        cookie: 'better-auth-session_token=abc; tokenboard-timezone=Asia%2FShanghai'
+      }
+    })
+
+    await requireUser({
+      env: {
+        DB: {
+          prepare() {
+            return {
+              bind(...values: unknown[]) {
+                bindings.push(values)
+                return {
+                  async run() {
+                    return { success: true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      req: {
+        header(name: string) {
+          expect(name).toBe('cookie')
+          return raw.headers.get('cookie')
+        },
+        raw
+      }
+    } as never)
+
+    expect(bindings[0][3]).toBe('Asia/Shanghai')
   })
 })
 
@@ -151,12 +207,14 @@ describe('verifyUploadToken', () => {
 })
 
 describe('ensureProfile', () => {
-  test('creates new profiles as public leaderboard participants by default', async () => {
+  test('creates new profiles as private by default', async () => {
     const bindings: unknown[][] = []
     const db = {
       prepare(sql: string) {
         expect(sql).toContain('INSERT INTO profiles')
-        expect(sql).toContain("VALUES (?, ?, ?, 'UTC', 1, 1, ?, ?)")
+        expect(sql).toContain('VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)')
+        expect(sql).toContain("WHERE profiles.timezone_source = 'default'")
+        expect(sql).toContain("excluded.timezone_source = 'browser'")
         return {
           bind(...values: unknown[]) {
             bindings.push(values)
@@ -181,6 +239,47 @@ describe('ensureProfile', () => {
       'USER123456789',
       'eve-user1234',
       'Eve',
+      'UTC',
+      'default',
+      expect.any(String),
+      expect.any(String)
+    ])
+  })
+
+  test('uses a valid browser timezone when creating a profile', async () => {
+    const bindings: unknown[][] = []
+    const db = {
+      prepare() {
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async run() {
+                return { success: true }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await ensureProfile(
+      db,
+      {
+        id: 'USER123456789',
+        email: 'eve@example.com',
+        name: 'Eve',
+        image: null
+      },
+      'Asia/Shanghai'
+    )
+
+    expect(bindings[0]).toEqual([
+      'USER123456789',
+      'eve-user1234',
+      'Eve',
+      'Asia/Shanghai',
+      'browser',
       expect.any(String),
       expect.any(String)
     ])

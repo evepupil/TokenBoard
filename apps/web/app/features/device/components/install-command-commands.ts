@@ -57,6 +57,7 @@ function createInstallPromptIntro() {
     '- 只有用户明确要求跳过首次同步时，才允许添加 --skip-initial-sync。',
     '- 默认安装 Codex 和 Claude Code notifier hooks，用于本机会话结束后的近实时增量同步。',
     '- 只有用户明确要求不安装 hooks 时，才允许添加 --skip-hook；后续可单独运行 install-hook.mjs --source all 补装。',
+    '- setup 命令已经带有网页检测或表单确认的 --timezone；不要改成其它时区，除非用户明确要求。',
     '- 执行 setup 前必须先向用户确认每日任务触发时间：默认是 09:00,12:00,18:00,23:00；如果用户要自定义，只接受 24 小时制 HH:MM 逗号分隔列表。',
     '- 根据用户确认的时间把 setup 命令中的 --schedule-times 参数替换为实际值，不要让用户手工创建定时任务。'
   ]

@@ -9,7 +9,8 @@ type AppNavProps = {
 }
 
 const repositoryUrl = 'https://github.com/evepupil/TokenBoard'
-const iconButtonClass = 'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+const iconButtonClass = 'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+const signOutButtonClass = 'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
 
 export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
@@ -46,7 +47,7 @@ export function AppNav(props: AppNavProps) {
         {isAuthenticated ? null : <NavLink href="/auth/sign-in">登录</NavLink>}
         {isAuthenticated ? (
           <form class="md:hidden" method="post" action="/auth/sign-out">
-            <button class="rounded-xl border border-[var(--app-border)] px-3 py-2 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]" type="submit">退出登录</button>
+            <button class={signOutButtonClass} type="submit">退出登录</button>
           </form>
         ) : null}
       </div>
@@ -57,7 +58,7 @@ export function AppNav(props: AppNavProps) {
         <RepositoryLink />
         {isAuthenticated ? (
           <form method="post" action="/auth/sign-out">
-            <button class="rounded-xl border border-[var(--app-border)] px-3 py-2 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]" type="submit">退出登录</button>
+            <button class={signOutButtonClass} type="submit">退出登录</button>
           </form>
         ) : null}
       </div>
@@ -69,7 +70,7 @@ function NavLink(props: { href: string; active?: boolean; children: string }) {
   return (
     <a
       class={cn(
-        'rounded-xl px-3 py-2 font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
+        'rounded-xl px-4 py-3 font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
         props.active && 'bg-lime-300 text-stone-950 shadow-sm shadow-lime-950/10 hover:bg-lime-300 hover:text-stone-950'
       )}
       href={props.href}

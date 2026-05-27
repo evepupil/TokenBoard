@@ -1,10 +1,18 @@
 ﻿import { ApiError } from '../../lib/errors'
+import { defaultTimezone } from '../../lib/timezone'
 import { publicProfileSchema, type PublicProfileInput } from './schema'
+
+export const profileTimezoneSource = {
+  default: 'default',
+  browser: 'browser',
+  user: 'user'
+} as const
 
 export type ProfileSettings = PublicProfileInput & {
   publicJsonUrl: string
   publicSvgUrl: string
   publicMarkdown: string
+  shouldUseBrowserTimezoneDefault?: boolean
 }
 
 type ProfileRow = {
@@ -13,6 +21,9 @@ type ProfileRow = {
   timezone: string
   isPublic: number | boolean
   participatesInLeaderboards: number | boolean
+  timezoneSource?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 type ProfileDisplayNameRow = {
@@ -52,8 +63,11 @@ export async function getProfileSettings(
           slug,
           display_name as displayName,
           timezone,
+          COALESCE(timezone_source, 'default') as timezoneSource,
           is_public as isPublic,
-          participates_in_leaderboards as participatesInLeaderboards
+          participates_in_leaderboards as participatesInLeaderboards,
+          created_at as createdAt,
+          updated_at as updatedAt
         FROM profiles
         WHERE user_id = ?
         LIMIT 1
@@ -108,6 +122,7 @@ export async function updateProfileSettings(
           slug = ?,
           display_name = ?,
           timezone = ?,
+          timezone_source = 'user',
           is_public = ?,
           participates_in_leaderboards = ?,
           updated_at = ?
@@ -139,6 +154,9 @@ function toProfileSettings(row: ProfileRow, origin: string): ProfileSettings {
 
   return {
     ...profile,
+    shouldUseBrowserTimezoneDefault:
+      profile.timezone === defaultTimezone &&
+      (row.timezoneSource ?? profileTimezoneSource.default) === profileTimezoneSource.default,
     publicJsonUrl: `${origin}/api/public/${profile.slug}.json`,
     publicSvgUrl,
     publicMarkdown: `[![TokenBoard](${publicSvgUrl})](${origin})`

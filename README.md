@@ -16,6 +16,12 @@ TokenBoard skill. The skill runs `setup.mjs`, exchanges the short-lived pairing 
 token, installs the collector, creates the daily schedule, installs lightweight notifier hooks, and
 runs the first sync.
 
+The web app detects the browser's IANA timezone with `Intl.DateTimeFormat().resolvedOptions()`.
+New profiles use that timezone when it is available and valid, with `UTC` as the fallback. Existing
+profiles are not silently reinterpreted as browser-detected values. The install prompt uses the
+timezone shown in the install form and passes it through `--timezone`, so the generated setup
+command follows the user's current browser timezone unless they edit it.
+
 The collector uploads aggregate token counts only. It does not upload prompts, completions, file
 contents, or raw conversation logs.
 
@@ -35,6 +41,11 @@ Collector compatibility:
 full-history initial sync unless `--skip-initial-sync` is set. The default schedule is
 `09:00,12:00,18:00,23:00`, and custom schedules must be passed as
 `--schedule-times HH:MM,HH:MM`.
+
+When setup skips the initial full sync, or runs an explicitly bounded initial sync with `--since`,
+it warms hook cursors before installing notifier hooks. This prevents the first hook event from
+silently backfilling the historical sessions that setup intentionally skipped. A normal full-history
+initial sync does not need that warm step.
 
 Notifier hook installation is recommended but optional. Pass `--skip-hook` to setup when the user
 does not want Codex or Claude Code config changed during initial install. Hooks can be installed
@@ -66,6 +77,8 @@ Notifier hooks:
 - The hook parser reads only usage counters, model names, and timestamps from session JSONL files
   to identify affected dates. Uploaded snapshots are still produced by a narrow `ccusage`
   reconciliation window for those dates.
+- Hook-triggered syncs do not run the auto-upgrade path. They only enqueue and reconcile local
+  usage so session-end hooks stay lightweight and cannot mutate the collector checkout.
 
 Daily and manual sync default to a 7-day local-time lookback window. Use `--since all` only for
 explicit backfills. For large Codex histories, set `TOKENBOARD_CODEX_BATCH_SIZE=200` during full
@@ -73,10 +86,19 @@ history scans. If a Codex session file disappears while the collector is copying
 that file is skipped with a stderr warning and the rest of the Codex source continues. Other copy
 errors still fail visibly.
 
+Daily and manual sync run a lightweight upgrade first by default. The upgrade updates the local
+collector checkout and installed skill from the configured repo, then continues with collection.
+Use `--skip-upgrade`, `TOKENBOARD_SKIP_UPGRADE=1`, or `TOKENBOARD_AUTO_UPGRADE=0` only for
+troubleshooting. Run `node skills/tokenboard/scripts/upgrade.mjs` for a manual upgrade without
+syncing.
+
 Scheduled runs write logs to `~/.tokenboard/logs/daily-sync.out.log` and
 `~/.tokenboard/logs/daily-sync.err.log`. Rotated logs are capped at 1 MiB and kept for 7 days.
 
 ## Development
+
+Node.js 22 or newer is required. The web workspace uses Wrangler 4.95, and that
+version no longer supports older Node.js runtimes.
 
 ```bash
 pnpm install
@@ -99,6 +121,9 @@ deploys use the ignored `apps/web/wrangler.production.jsonc` file so public sour
 deployment-specific D1 ids or domains. Run the D1 migrations as part of every server rollout. The
 current compatibility path depends on the device and snapshot-hash schema migrations, including
 `device_id` on upload tokens and `snapshot_hash` on `daily_usage`.
+
+`pnpm run deploy` validates that `apps/web/wrangler.production.jsonc` exists and does not contain
+placeholder route, auth URL, or D1 values before it builds or deploys.
 
 ## Package Managers
 
@@ -136,6 +161,12 @@ Remove only the installed schedule:
 
 ```bash
 node skills/tokenboard/scripts/uninstall.mjs
+```
+
+Remove the local config file and installed notifier hooks, while keeping the collector checkout:
+
+```bash
+node skills/tokenboard/scripts/uninstall.mjs --remove-config
 ```
 
 Remove the schedule, notifier hooks, collector checkout, and local config directory:

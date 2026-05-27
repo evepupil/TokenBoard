@@ -155,7 +155,7 @@ function SegmentedControl(props: {
         ) : (
           <a
             class={cn(
-              'inline-flex h-auto items-center justify-center rounded-full px-3 py-1.5 text-xs font-black text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]'
+              'inline-flex min-h-11 items-center justify-center rounded-full px-4 py-2 text-xs font-black text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]'
             )}
             href={item.href}
             data-leaderboard-link="true"
