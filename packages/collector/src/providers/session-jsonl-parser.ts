@@ -17,6 +17,7 @@ type ParseContext = Omit<ParseInput, 'content'>
 
 type ParseState = {
   rows: Map<string, AggregateRow>
+  ignoredUploadSafeRows: number
   malformedRows: number
   missingCost: boolean
   unparsedTokenLikeRows: number
@@ -42,6 +43,7 @@ type UnknownRecord = Record<string, unknown>
 
 export function parseSessionJsonl(input: ParseInput): {
   snapshots: UsageSnapshot[]
+  ignoredUploadSafeRows: number
   malformedRows: number
   missingCost: boolean
   unparsedTokenLikeRows: number
@@ -64,6 +66,7 @@ export async function parseSessionJsonlLines(input: ParseLinesInput) {
 function createParseState(): ParseState {
   return {
     rows: new Map(),
+    ignoredUploadSafeRows: 0,
     malformedRows: 0,
     missingCost: false,
     unparsedTokenLikeRows: 0
@@ -79,6 +82,10 @@ function consumeLine(state: ParseState, input: ParseContext, line: string) {
     : readClaudeMetric(record, input.timezone)
   if (!metric) {
     if (isKnownCodexTokenMetadata(input.source, record)) return
+    if (isKnownClaudeSyntheticZeroUsage(input.source, record)) {
+      state.ignoredUploadSafeRows += 1
+      return
+    }
     if (hasUnparsedTokenMetricField(input.source, record)) state.unparsedTokenLikeRows += 1
     return
   }
@@ -89,6 +96,7 @@ function consumeLine(state: ParseState, input: ParseContext, line: string) {
 
 function finishParseState(state: ParseState, input: ParseContext) {
   return {
+    ignoredUploadSafeRows: state.ignoredUploadSafeRows,
     malformedRows: state.malformedRows,
     missingCost: state.missingCost,
     unparsedTokenLikeRows: state.unparsedTokenLikeRows,
@@ -128,7 +136,38 @@ function readClaudeMetric(record: UnknownRecord, timezone: string): MetricRow | 
   if (!usage || !timestamp) return null
 
   const model = readString(message, ['model', 'modelName']) || readString(record, ['model']) || 'all'
+  if (isSyntheticZeroUsage(model, usage)) return null
   return buildMetric({ record, usage, model, timestamp, timezone })
+}
+
+function isKnownClaudeSyntheticZeroUsage(source: UsageSource, record: UnknownRecord) {
+  if (source !== 'claude-code') return false
+  const message = readRecord(record.message) ?? record
+  const usage = readRecord(message.usage ?? record.usage)
+  if (!usage) return false
+
+  const model = readString(message, ['model', 'modelName']) || readString(record, ['model']) || 'all'
+  return isSyntheticZeroUsage(model, usage)
+}
+
+function isSyntheticZeroUsage(model: string, usage: UnknownRecord) {
+  if (model !== '<synthetic>') return false
+  return [
+    'input_tokens',
+    'inputTokens',
+    'output_tokens',
+    'outputTokens',
+    'cache_creation_input_tokens',
+    'cacheCreationInputTokens',
+    'cacheCreationTokens',
+    'cache_read_input_tokens',
+    'cached_input_tokens',
+    'cacheReadInputTokens',
+    'cachedInputTokens',
+    'cacheReadTokens',
+    'total_tokens',
+    'totalTokens'
+  ].every((key) => readOptionalNumber(usage, [key]) === null || readOptionalNumber(usage, [key]) === 0)
 }
 
 function buildMetric(input: {

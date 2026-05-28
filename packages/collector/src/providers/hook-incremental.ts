@@ -88,7 +88,7 @@ async function parseChangedFiles(input: HookInput, changed: Awaited<ReturnType<t
     if (parsed.snapshots.length > 0) {
       pendingUploadPaths.add(file.relativePath)
     }
-    if (file.pendingUpload && parsed.snapshots.length === 0) {
+    if (file.pendingUpload && parsed.snapshots.length === 0 && parsed.ignoredUploadSafeRows === 0) {
       pendingFilesWithoutSnapshots += 1
     }
     malformedRows += parsed.malformedRows

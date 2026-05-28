@@ -175,17 +175,18 @@ function preserveMissingCursorEntries(current: CursorState, next: CursorState, s
 export function updateCursorFile(
   cursor: CursorState,
   file: Pick<ChangedSessionFile, 'relativePath' | 'size' | 'mtimeMs' | 'sha256'>,
-  parsed: { snapshots: UsageSnapshot[]; missingCost: boolean },
+  parsed: { snapshots: UsageSnapshot[]; missingCost: boolean; ignoredUploadSafeRows?: number },
   updatedAt = new Date().toISOString()
 ) {
   const prior = cursor.files[file.relativePath]
+  const safeIgnoredPending = Boolean(prior?.pendingUpload && parsed.snapshots.length === 0 && parsed.ignoredUploadSafeRows)
   cursor.files[file.relativePath] = {
     size: file.size,
     mtimeMs: file.mtimeMs,
     sha256: file.sha256,
     snapshots: parsed.snapshots.map((snapshot) => stripCollectedAt(snapshot)),
     missingCost: parsed.missingCost,
-    pendingUpload: prior?.pendingUpload || undefined,
+    pendingUpload: safeIgnoredPending ? undefined : prior?.pendingUpload || undefined,
     updatedAt
   }
 }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test, vi } from 'vitest'
@@ -268,6 +268,240 @@ describe('Claude hook sync collection', () => {
           sessionCount: 1
         })
       ])
+    } finally {
+      vi.unstubAllEnvs()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('ignores Claude synthetic zero-usage rows before reconciliation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-claude-hook-'))
+    const claudeHome = join(root, 'claude')
+    const stateDir = join(root, 'state')
+    const syntheticFile = join(claudeHome, 'projects', 'project-a', 'failed.jsonl')
+    const usageFile = join(claudeHome, 'projects', 'project-a', 'session.jsonl')
+    const calls: string[][] = []
+
+    vi.stubEnv('TOKENBOARD_HOOK_MODE', '1')
+    vi.stubEnv('TOKENBOARD_STATE_DIR', stateDir)
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeHome)
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+
+    try {
+      await writeJsonl(syntheticFile, [
+        {
+          type: 'assistant',
+          timestamp: '2026-05-22T02:00:00.000Z',
+          message: {
+            model: '<synthetic>',
+            usage: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+              total_tokens: 0
+            }
+          }
+        }
+      ])
+      await writeJsonl(usageFile, [
+        {
+          type: 'assistant',
+          timestamp: '2026-05-22T03:00:00.000Z',
+          message: {
+            model: 'claude-haiku-4-5',
+            usage: {
+              input_tokens: 8,
+              output_tokens: 13
+            }
+          }
+        }
+      ])
+
+      const snapshots = await collectClaudeCodeUsage({
+        timezone: 'Asia/Shanghai',
+        collectedAt: '2026-05-22T10:00:00.000Z',
+        async runner(_command, args) {
+          calls.push(args)
+          if (args.includes('session')) {
+            return {
+              data: [
+                {
+                  sessionId: 's1',
+                  lastActivity: '2026-05-22T03:00:00.000Z',
+                  modelBreakdowns: {
+                    'claude-haiku-4-5': {
+                      inputTokens: 8,
+                      outputTokens: 13
+                    }
+                  }
+                }
+              ]
+            }
+          }
+          return {
+            data: [
+              {
+                date: '2026-05-22',
+                breakdown: {
+                  'claude-haiku-4-5': {
+                    inputTokens: 8,
+                    outputTokens: 13,
+                    totalTokens: 21,
+                    costUSD: 0.12
+                  }
+                }
+              }
+            ]
+          }
+        }
+      })
+
+      expect(calls).toHaveLength(2)
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          source: 'claude-code',
+          usageDate: '2026-05-22',
+          model: 'claude-haiku-4-5',
+          totalTokens: 21
+        })
+      ])
+    } finally {
+      vi.unstubAllEnvs()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('recovers pending Claude synthetic zero-usage rows after parser upgrades', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-claude-hook-'))
+    const claudeHome = join(root, 'claude')
+    const stateDir = join(root, 'state')
+    const syntheticFile = join(claudeHome, 'projects', 'project-a', 'failed.jsonl')
+    const usageFile = join(claudeHome, 'projects', 'project-a', 'session.jsonl')
+    const calls: string[][] = []
+
+    vi.stubEnv('TOKENBOARD_HOOK_MODE', '1')
+    vi.stubEnv('TOKENBOARD_STATE_DIR', stateDir)
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeHome)
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+
+    try {
+      await writeJsonl(syntheticFile, [
+        {
+          type: 'assistant',
+          timestamp: '2026-05-22T02:00:00.000Z',
+          message: {
+            model: '<synthetic>',
+            usage: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 0,
+              total_tokens: 0
+            }
+          }
+        }
+      ])
+      const syntheticStat = await stat(syntheticFile)
+      await mkdir(stateDir, { recursive: true })
+      await writeFile(join(stateDir, 'claude-code-cursor.json'), `${JSON.stringify({
+        version: 1,
+        source: 'claude-code',
+        files: {
+          'project-a/failed.jsonl': {
+            size: syntheticStat.size,
+            mtimeMs: syntheticStat.mtimeMs,
+            sha256: 'previous-parser-hash',
+            snapshots: [
+              {
+                source: 'claude-code',
+                usageDate: '2026-05-22',
+                timezone: 'Asia/Shanghai',
+                model: '<synthetic>',
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 0,
+                totalTokens: 0,
+                costUsd: 0,
+                sessionCount: 1
+              }
+            ],
+            missingCost: false,
+            pendingUpload: true,
+            updatedAt: '2026-05-22T10:00:00.000Z'
+          }
+        }
+      }, null, 2)}\n`)
+      await writeJsonl(usageFile, [
+        {
+          type: 'assistant',
+          timestamp: '2026-05-22T03:00:00.000Z',
+          message: {
+            model: 'claude-haiku-4-5',
+            usage: {
+              input_tokens: 8,
+              output_tokens: 13
+            }
+          }
+        }
+      ])
+
+      const snapshots = await collectClaudeCodeUsage({
+        timezone: 'Asia/Shanghai',
+        collectedAt: '2026-05-22T10:00:00.000Z',
+        async runner(_command, args) {
+          calls.push(args)
+          if (args.includes('session')) {
+            return {
+              data: [
+                {
+                  sessionId: 's1',
+                  lastActivity: '2026-05-22T03:00:00.000Z',
+                  modelBreakdowns: {
+                    'claude-haiku-4-5': {
+                      inputTokens: 8,
+                      outputTokens: 13
+                    }
+                  }
+                }
+              ]
+            }
+          }
+          return {
+            data: [
+              {
+                date: '2026-05-22',
+                breakdown: {
+                  'claude-haiku-4-5': {
+                    inputTokens: 8,
+                    outputTokens: 13,
+                    totalTokens: 21,
+                    costUSD: 0.12
+                  }
+                }
+              }
+            ]
+          }
+        }
+      })
+
+      expect(calls).toHaveLength(2)
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          source: 'claude-code',
+          usageDate: '2026-05-22',
+          model: 'claude-haiku-4-5',
+          totalTokens: 21
+        })
+      ])
+
+      await clearPendingUploadCursors({ stateDir, source: 'claude-code' })
+      const cursor = JSON.parse(await readFile(join(stateDir, 'claude-code-cursor.json'), 'utf8'))
+      expect(cursor.files['project-a/failed.jsonl'].snapshots).toEqual([])
+      expect(cursor.files['project-a/failed.jsonl'].pendingUpload).toBeUndefined()
     } finally {
       vi.unstubAllEnvs()
       await rm(root, { recursive: true, force: true })

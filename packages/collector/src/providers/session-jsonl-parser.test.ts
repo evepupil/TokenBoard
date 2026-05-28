@@ -30,6 +30,7 @@ describe('parseSessionJsonl', () => {
     })
 
     expect(snapshots).toEqual({
+      ignoredUploadSafeRows: 0,
       malformedRows: 0,
       missingCost: false,
       unparsedTokenLikeRows: 0,
@@ -77,6 +78,7 @@ describe('parseSessionJsonl', () => {
     })
 
     expect(snapshots).toEqual({
+      ignoredUploadSafeRows: 0,
       malformedRows: 0,
       missingCost: false,
       unparsedTokenLikeRows: 0,
@@ -123,6 +125,39 @@ describe('parseSessionJsonl', () => {
 
     expect(parsed.snapshots).toEqual([])
     expect(parsed.unparsedTokenLikeRows).toBe(0)
+    expect(JSON.stringify(parsed)).not.toContain('do not upload')
+  })
+
+  test('ignores Claude synthetic zero-usage assistant rows', () => {
+    const parsed = parseSessionJsonl({
+      source: 'claude-code',
+      timezone: 'Asia/Shanghai',
+      collectedAt: '2026-05-22T10:00:00.000Z',
+      sessionId: 'claude-session',
+      content: `${JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-05-22T02:00:00.000Z',
+        message: {
+          model: '<synthetic>',
+          content: [{ type: 'text', text: 'do not upload' }],
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            total_tokens: 0
+          }
+        }
+      })}\n`
+    })
+
+    expect(parsed).toEqual({
+      ignoredUploadSafeRows: 1,
+      malformedRows: 0,
+      missingCost: false,
+      unparsedTokenLikeRows: 0,
+      snapshots: []
+    })
     expect(JSON.stringify(parsed)).not.toContain('do not upload')
   })
 

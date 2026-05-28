@@ -38,7 +38,7 @@ test('setup does not warm hook cursors after a full initial sync', () => {
 test('setup hook cursor warm command uses all sources', () => {
   assert.deepEqual(
     buildWarmHookCursorArgs({ packageManager: 'pnpm' }),
-    ['--mode', 'warm-hooks', '--source', 'all', '--package-manager', 'pnpm']
+    ['--mode', 'warm-hooks', '--source', 'all', '--skip-upgrade', '--package-manager', 'pnpm']
   )
 })
 

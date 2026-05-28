@@ -20,7 +20,7 @@ export function shouldWarmHookCursorsBeforeInstall(flags = {}) {
 }
 
 export function buildWarmHookCursorArgs({ packageManager } = {}) {
-  const args = ['--mode', 'warm-hooks', '--source', 'all']
+  const args = ['--mode', 'warm-hooks', '--source', 'all', '--skip-upgrade']
   if (typeof packageManager === 'string' && packageManager.trim()) {
     args.push('--package-manager', packageManager)
   }
