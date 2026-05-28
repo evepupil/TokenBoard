@@ -142,14 +142,24 @@ pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --co
 pnpm run deploy
 ```
 
+For Cloudflare Workers Builds or other Git-based CI, do not commit
+`wrangler.production.jsonc`. Set these build variables instead, and the deploy script will generate
+the ignored production config before validation:
+
+- `TOKENBOARD_PUBLIC_ORIGIN`, for example `https://tokenboard.example.com`
+- `TOKENBOARD_ROUTE_PATTERN`, for example `tokenboard.example.com`
+- `TOKENBOARD_D1_DATABASE_ID`
+- `TOKENBOARD_D1_DATABASE_NAME`, optional and defaults to `tokenboard`
+
 The tracked `apps/web/wrangler.jsonc` is local-only and contains placeholder bindings. Production
 deploys use the ignored `apps/web/wrangler.production.jsonc` file so public source does not contain
 deployment-specific D1 ids or domains. Run the D1 migrations as part of every server rollout. The
 current compatibility path depends on the device and snapshot-hash schema migrations, including
 `device_id` on upload tokens and `snapshot_hash` on `daily_usage`.
 
-`pnpm run deploy` validates that `apps/web/wrangler.production.jsonc` exists and does not contain
-placeholder route, auth URL, or D1 values before it builds or deploys.
+`pnpm run deploy` generates `apps/web/wrangler.production.jsonc` from CI variables when the file is
+missing, then validates that it does not contain placeholder route, auth URL, or D1 values before it
+builds or deploys.
 
 ## Package Managers
 

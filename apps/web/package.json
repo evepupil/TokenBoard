@@ -5,7 +5,7 @@
     "dev": "vite",
     "build": "vite build --mode client && vite build",
     "preview": "wrangler dev",
-    "deploy": "node scripts/check-production-config.mjs && pnpm run build && wrangler deploy --config wrangler.production.jsonc",
+    "deploy": "node scripts/prepare-production-config.mjs && node scripts/check-production-config.mjs && pnpm run build && wrangler deploy --config wrangler.production.jsonc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
