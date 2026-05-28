@@ -45,16 +45,16 @@ describe('pairDevice', () => {
     const result = await createPairingCode(repository, 'seed-user', {
       now: () => new Date('2026-04-28T10:00:00.000Z'),
       randomId: () => 'pair_123',
-      randomToken: () => 'tb_pair_secret',
+      randomToken: () => 'pairing-token-fixture',
       hash: async (value) => `hash:${value}`
     })
 
     expect(result).toEqual({
-      pairingCode: 'tb_pair_secret',
+      pairingCode: 'pairing-token-fixture',
       expiresAt: '2026-04-28T10:30:00.000Z'
     })
     expect(calls).toEqual([
-      'pair:seed-user:hash:tb_pair_secret:2026-04-28T10:30:00.000Z'
+      'pair:seed-user:hash:pairing-token-fixture:2026-04-28T10:30:00.000Z'
     ])
   })
 
@@ -72,22 +72,22 @@ describe('pairDevice', () => {
       {
         now: () => '2026-04-28T10:00:00.000Z',
         endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-        randomId: () => 'id_123',
-        randomToken: () => 'tb_upload_secret',
+        randomId: () => 'device-fixture',
+        randomToken: () => 'upload-token-fixture',
         hash: async (value) => `hash:${value}`
       }
     )
 
     expect(result).toEqual({
       endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-      uploadToken: 'tb_upload_secret',
-      deviceId: 'dev_id_123',
+      uploadToken: 'upload-token-fixture',
+      deviceId: 'dev_device-fixture',
       timezone: 'Asia/Shanghai'
     })
     expect(calls).toEqual([
       'find:hash:dev-pairing-code:2026-04-28T10:00:00.000Z',
       'consume:pair_1:2026-04-28T10:00:00.000Z',
-      'create:seed-user:Codex Desktop:hash:tb_upload_secret'
+      'create:seed-user:Codex Desktop:hash:upload-token-fixture'
     ])
   })
 
@@ -105,12 +105,34 @@ describe('pairDevice', () => {
         {
           now: () => '2026-04-28T10:00:00.000Z',
           endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-          randomId: () => 'id_123',
-          randomToken: () => 'tb_upload_secret',
+          randomId: () => 'device-fixture',
+          randomToken: () => 'upload-token-fixture',
           hash: async (value) => `hash:${value}`
         }
       )
     ).rejects.toBeInstanceOf(ApiError)
+  })
+
+  test('rejects invalid device timezones before pairing', async () => {
+    const { repository } = createRepository({
+      async findUsablePairingCode() {
+        throw new Error('pairing should not be queried')
+      }
+    })
+
+    await expect(
+      pairDevice(
+        repository,
+        { pairingCode: 'dev-pairing-code', timezone: 'Mars/Base' },
+        {
+          now: () => '2026-04-28T10:00:00.000Z',
+          endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+          randomId: () => 'device-fixture',
+          randomToken: () => 'upload-token-fixture',
+          hash: async (value) => `hash:${value}`
+        }
+      )
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
   test('rejects a pairing code that was consumed by another request', async () => {
@@ -127,8 +149,8 @@ describe('pairDevice', () => {
         {
           now: () => '2026-04-28T10:00:00.000Z',
           endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-          randomId: () => 'id_123',
-          randomToken: () => 'tb_upload_secret',
+          randomId: () => 'device-fixture',
+          randomToken: () => 'upload-token-fixture',
           hash: async (value) => `hash:${value}`
         }
       )

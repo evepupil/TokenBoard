@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { buildSyncInvocation } from './sync.mjs'
 import { buildDefaultSince, readSince } from './sync-options.mjs'
 
 test('buildDefaultSince returns compact local date for the lookback window', () => {
@@ -108,4 +109,58 @@ test('sync script forwards resolved since to all collectors', () => {
 
   assert.match(source, /TOKENBOARD_SINCE:\s*since/)
   assert.match(source, /TOKENBOARD_DEFAULT_SINCE:\s*since/)
+})
+
+test('hook sync forwards hook mode and state directory to the collector', () => {
+  const invocation = buildSyncInvocation({
+    flags: { hook: true, source: 'codex' },
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo'
+    },
+    homeDir: '/home/user',
+    nodePath: '/usr/local/bin/node',
+    pathEnv: '/usr/bin'
+  })
+
+  assert.equal(invocation.env.TOKENBOARD_HOOK_MODE, '1')
+  assert.equal(invocation.env.TOKENBOARD_STATE_DIR, '/home/user/.tokenboard')
+})
+
+test('hook sync preserves an explicit TokenBoard state directory', () => {
+  const invocation = buildSyncInvocation({
+    flags: { hook: true, source: 'codex' },
+    env: { TOKENBOARD_STATE_DIR: '/custom/tokenboard' },
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo'
+    },
+    homeDir: '/home/user',
+    nodePath: '/usr/local/bin/node',
+    pathEnv: '/usr/bin'
+  })
+
+  assert.equal(invocation.env.TOKENBOARD_HOOK_MODE, '1')
+  assert.equal(invocation.env.TOKENBOARD_STATE_DIR, '/custom/tokenboard')
+})
+
+test('scheduled sync enables strict source error reporting', () => {
+  const invocation = buildSyncInvocation({
+    flags: { scheduled: true, source: 'all' },
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo'
+    },
+    homeDir: '/home/user',
+    nodePath: '/usr/local/bin/node',
+    pathEnv: '/usr/bin'
+  })
+
+  assert.equal(invocation.env.TOKENBOARD_FAIL_ON_SOURCE_ERROR, '1')
 })

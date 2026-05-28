@@ -1,7 +1,14 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
 import { runJsonCommand, type CommandRunner } from '../command'
 import { normalizeCcusageDailyJson } from '../normalize-ccusage'
-import { resolvePackageRunner } from '../package-runner'
+import { resolvePackageRunner, type PackageRunner } from '../package-runner'
+import {
+  assertHookReconciliationSnapshots,
+  collectHookIncremental,
+  isHookMode
+} from './hook-incremental'
 
 export type CollectUsageOptions = {
   timezone?: string
@@ -17,31 +24,98 @@ export async function collectClaudeCodeUsage(
 ): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
   const packageRunner = resolvePackageRunner()
+  const collectedAt = options.collectedAt ?? new Date().toISOString()
+
+  if (isHookMode()) {
+    return collectClaudeHookUsage({
+      runner,
+      packageRunner,
+      options,
+      collectedAt
+    })
+  }
+
   const rangeArgs = buildRangeArgs({
     since: process.env.TOKENBOARD_SINCE || process.env.TOKENBOARD_DEFAULT_SINCE || '',
     until: process.env.TOKENBOARD_UNTIL || ''
   })
-  const json = await runner(
-    packageRunner.command,
-    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'daily', '--json', '--breakdown', ...rangeArgs]),
+
+  return collectClaudeCcusageRange({
+    runner,
+    packageRunner,
+    rangeArgs,
+    options,
+    collectedAt,
+    env: process.env
+  })
+}
+
+async function collectClaudeHookUsage(input: {
+  runner: CommandRunner
+  packageRunner: PackageRunner
+  options: CollectUsageOptions
+  collectedAt: string
+}) {
+  const claudeHome = readClaudeHome()
+  const timezone = input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  const incremental = await collectHookIncremental({
+    source: 'claude-code',
+    sessionsDir: join(claudeHome, 'projects'),
+    cursorName: 'claude-code-cursor.json',
+    timezone,
+    collectedAt: input.collectedAt
+  })
+
+  if (!incremental.changed) {
+    return []
+  }
+
+  const snapshots = await collectClaudeCcusageRange({
+    runner: input.runner,
+    packageRunner: input.packageRunner,
+    rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
+    options: input.options,
+    collectedAt: input.collectedAt,
+    env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, CLAUDE_HOME: claudeHome }
+  })
+  assertHookReconciliationSnapshots({
+    sourceLabel: 'Claude',
+    expectedDates: incremental.changedDates,
+    expectedKeys: incremental.changedKeys,
+    snapshots
+  })
+  return snapshots
+}
+
+async function collectClaudeCcusageRange(input: {
+  runner: CommandRunner
+  packageRunner: PackageRunner
+  rangeArgs: string[]
+  options: CollectUsageOptions
+  collectedAt: string
+  env: NodeJS.ProcessEnv
+}) {
+  const json = await input.runner(
+    input.packageRunner.command,
+    input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'daily', '--json', '--breakdown', ...input.rangeArgs]),
     packageCommandOptions({
-      env: process.env,
-      stderr: options.stderr
+      env: input.env,
+      stderr: input.options.stderr
     })
   )
-  const sessions = await runner(
-    packageRunner.command,
-    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'session', '--json', ...rangeArgs]),
+  const sessions = await input.runner(
+    input.packageRunner.command,
+    input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['claude', 'session', '--json', ...input.rangeArgs]),
     packageCommandOptions({
-      env: process.env,
-      stderr: options.stderr
+      env: input.env,
+      stderr: input.options.stderr
     })
   )
 
   return normalizeCcusageDailyJson(json, {
     source: 'claude-code',
-    timezone: options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-    collectedAt: options.collectedAt,
+    timezone: input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    collectedAt: input.collectedAt,
     sessions
   })
 }
@@ -77,4 +151,12 @@ function buildRangeArgs(options: { since?: string; until?: string }) {
     args.push('--until', options.until)
   }
   return args
+}
+
+function withTimezoneArgs(args: string[], timezone: string) {
+  return [...args, '--timezone', timezone]
+}
+
+function readClaudeHome() {
+  return process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || join(homedir(), '.claude')
 }

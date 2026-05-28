@@ -76,6 +76,9 @@ if (isMain()) {
 }
 
 export function shouldRunUpgrade({ flags = {}, env = process.env } = {}) {
+  if (flags.hook === true) {
+    return false
+  }
   if (flags['skip-upgrade'] === true) {
     return false
   }
@@ -123,7 +126,14 @@ export function buildSyncInvocation({
       TOKENBOARD_SOURCE: source,
       TOKENBOARD_PACKAGE_MANAGER: packageManager,
       TOKENBOARD_SINCE: since,
-      TOKENBOARD_DEFAULT_SINCE: since
+      TOKENBOARD_DEFAULT_SINCE: since,
+      ...(flags.scheduled === true ? {
+        TOKENBOARD_FAIL_ON_SOURCE_ERROR: '1'
+      } : {}),
+      ...(flags.hook === true ? {
+        TOKENBOARD_HOOK_MODE: '1',
+        TOKENBOARD_STATE_DIR: env.TOKENBOARD_STATE_DIR || env.TOKENBOARD_CONFIG_DIR || join(homeDir, '.tokenboard')
+      } : {})
     }
   }
 }

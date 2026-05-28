@@ -11,7 +11,7 @@ import {
 
 test('rotates scheduled logs over the size limit and removes expired rotations', () => {
   const logDir = mkdtempSync(join(tmpdir(), 'tokenboard-logs-'))
-  const now = new Date('2026-05-13T09:00:00+08:00')
+  const now = localDate(2026, 5, 13, 9, 0, 0)
   const expired = join(logDir, 'daily-sync.out.log.20260501000000')
 
   writeFileSync(join(logDir, 'daily-sync.out.log'), 'x'.repeat(11))
@@ -76,7 +76,7 @@ test('scheduled flag enables log management without scheduler environment variab
 
 test('rotated log names do not overwrite existing archives in the same second', () => {
   const logDir = mkdtempSync(join(tmpdir(), 'tokenboard-logs-'))
-  const now = new Date('2026-05-13T09:00:00+08:00')
+  const now = localDate(2026, 5, 13, 9, 0, 0)
 
   writeFileSync(join(logDir, 'daily-sync.err.log'), 'first-over-limit')
   rotateScheduledLogs({
@@ -135,7 +135,7 @@ test('rotates logs by reading only the retained tail bytes', () => {
 
   rotateScheduledLogs({
     logDir: '/tmp/tokenboard-logs',
-    now: new Date('2026-05-13T09:00:00+08:00'),
+    now: localDate(2026, 5, 13, 9, 0, 0),
     maxBytes: 10,
     retentionDays: 7,
     fileSystem
@@ -181,9 +181,13 @@ test('ignores log rotation races when another process already moved the active f
 
   assert.doesNotThrow(() => rotateScheduledLogs({
     logDir: '/tmp/tokenboard-logs',
-    now: new Date('2026-05-13T09:00:00+08:00'),
+    now: localDate(2026, 5, 13, 9, 0, 0),
     maxBytes: 10,
     retentionDays: 7,
     fileSystem
   }))
 })
+
+function localDate(year, month, day, hour, minute, second) {
+  return new Date(year, month - 1, day, hour, minute, second)
+}

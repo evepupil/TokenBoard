@@ -1,5 +1,8 @@
 import { createClient } from 'honox/client'
+import { initCustomSelects } from './components/ui/custom-select-client'
+import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
 import { copyTextToClipboard } from './lib/clipboard'
+import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 
 createClient()
 
@@ -36,9 +39,50 @@ function initTheme() {
 }
 
 initTheme()
+initBrowserTimezone()
+initTimezoneInputs()
 
 initCopyButtons()
 initAppNavigation()
+initCustomSelects()
+initPublicCardPreview()
+
+function initBrowserTimezone() {
+  const timezone = detectBrowserTimezone()
+  if (!timezone) return
+
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${timezoneCookieName}=${encodeURIComponent(timezone)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`
+}
+
+function initTimezoneInputs() {
+  const timezone = detectBrowserTimezone()
+  if (!timezone) return
+
+  document.querySelectorAll<HTMLInputElement>('[data-timezone-input]').forEach((input) => {
+    const mode = input.dataset.timezoneAutofill
+    if (mode !== 'true' && mode !== 'always') return
+    if (mode === 'always') {
+      input.value = timezone
+      return
+    }
+
+    const initialValue = input.dataset.timezoneDefault?.trim() || input.defaultValue.trim()
+    const currentValue = input.value.trim()
+    if (currentValue && currentValue !== 'UTC' && initialValue !== 'UTC') return
+
+    input.value = timezone
+  })
+}
+
+function detectBrowserTimezone() {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return isValidTimezone(timezone) ? timezone : null
+  } catch (_) {
+    return null
+  }
+}
 
 function initCopyButtons() {
   document.addEventListener('click', async (event) => {
@@ -212,6 +256,8 @@ async function replaceDocument(pageUrl: URL, pushState: boolean) {
     document.body.innerHTML = nextBody.innerHTML
     if (pushState) window.history.pushState({}, '', resolvedUrl)
     document.title = nextDocument.title || document.title
+    initTimezoneInputs()
+    refreshPublicCardPreview()
     syncScroll(resolvedUrl)
   } catch (_) {
     window.location.href = pageUrl.toString()

@@ -65,7 +65,8 @@ function installWindows(runtime, scheduleTimes) {
     scriptPath: runtime.scriptPath,
     packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
     pathEnv: runtime.env.PATH || 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
-    homeDir: runtime.homeDir
+    homeDir: runtime.homeDir,
+    configDir: runtime.configDir
   }))
   for (const task of buildWindowsTaskDefinitions({
     nodePath: runtime.nodePath,
@@ -73,6 +74,7 @@ function installWindows(runtime, scheduleTimes) {
     packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
     pathEnv: runtime.env.PATH || 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
     homeDir: runtime.homeDir,
+    configDir: runtime.configDir,
     taskCommand: `"${wrapperPath}"`,
     scheduleTimes
   })) {
@@ -109,6 +111,7 @@ function installMac(runtime, scheduleTimes) {
     packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
     pathEnv: runtime.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     homeDir: runtime.homeDir,
+    configDir: runtime.configDir,
     logDir,
     scheduleTimes
   }))
@@ -133,6 +136,7 @@ function installLinux(runtime, scheduleTimes) {
     packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
     pathEnv: runtime.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     homeDir: runtime.homeDir,
+    configDir: runtime.configDir,
     timezone: config.timezone,
     scheduleTimes
   })

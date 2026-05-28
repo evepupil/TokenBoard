@@ -8,13 +8,34 @@ test('uninstalls schedule only by default', () => {
   const removed = uninstallClient(harness.options)
 
   assert.deepEqual(removed, {
+    hook: false,
     schedule: true,
     collector: false,
     config: false,
     configDir: false
   })
   assert.equal(harness.scheduleCalls, 1)
+  assert.equal(harness.hookCalls, 0)
   assert.deepEqual(harness.removedPaths, [])
+})
+
+test('uninstalls hooks only when explicitly requested', () => {
+  const harness = createHarness()
+
+  const removed = uninstallClient({
+    ...harness.options,
+    argv: ['--remove-hooks']
+  })
+
+  assert.deepEqual(removed, {
+    hook: true,
+    schedule: true,
+    collector: false,
+    config: false,
+    configDir: false
+  })
+  assert.equal(harness.scheduleCalls, 1)
+  assert.equal(harness.hookCalls, 1)
 })
 
 test('removes collector and config only when explicitly requested', () => {
@@ -26,6 +47,7 @@ test('removes collector and config only when explicitly requested', () => {
   })
 
   assert.deepEqual(removed, {
+    hook: true,
     schedule: true,
     collector: true,
     config: true,
@@ -33,6 +55,27 @@ test('removes collector and config only when explicitly requested', () => {
   })
   assert.deepEqual(harness.removedPaths, [
     '/home/tokenboard/.tokenboard/TokenBoard',
+    '/home/tokenboard/.tokenboard/config.json'
+  ])
+})
+
+test('removes hooks when deleting only the config file', () => {
+  const harness = createHarness()
+
+  const removed = uninstallClient({
+    ...harness.options,
+    argv: ['--remove-config']
+  })
+
+  assert.deepEqual(removed, {
+    hook: true,
+    schedule: true,
+    collector: false,
+    config: true,
+    configDir: false
+  })
+  assert.equal(harness.hookCalls, 1)
+  assert.deepEqual(harness.removedPaths, [
     '/home/tokenboard/.tokenboard/config.json'
   ])
 })
@@ -46,6 +89,7 @@ test('removes whole config directory only when explicitly requested', () => {
   })
 
   assert.deepEqual(removed, {
+    hook: true,
     schedule: true,
     collector: false,
     config: false,
@@ -65,6 +109,7 @@ test('removes collector and config directory with all flag', () => {
   })
 
   assert.deepEqual(removed, {
+    hook: true,
     schedule: true,
     collector: true,
     config: false,
@@ -107,6 +152,7 @@ test('does not delete the config directory before the collector when they are th
   })
 
   assert.deepEqual(removed, {
+    hook: true,
     schedule: true,
     collector: false,
     config: false,
@@ -125,8 +171,17 @@ function createHarness() {
   ])
   const removedPaths = []
   const changedDirectories = []
-  const harness = {
-    scheduleCalls: 0,
+  const calls = {
+    hook: 0,
+    schedule: 0
+  }
+  return {
+    get hookCalls() {
+      return calls.hook
+    },
+    get scheduleCalls() {
+      return calls.schedule
+    },
     removedPaths,
     changedDirectories,
     options: {
@@ -141,9 +196,11 @@ function createHarness() {
         existingPaths.delete(path)
       },
       uninstallSchedule: () => {
-        harness.scheduleCalls += 1
+        calls.schedule += 1
+      },
+      uninstallHooks: () => {
+        calls.hook += 1
       }
     }
   }
-  return harness
 }

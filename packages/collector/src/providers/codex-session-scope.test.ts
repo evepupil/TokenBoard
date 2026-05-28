@@ -1,12 +1,58 @@
-import { glob, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { createCodexSessionScope, createCodexSessionScopeBatches } from './codex-session-scope'
+import { walkJsonlFiles } from './session-file-walk'
 
 describe('createCodexSessionScope', () => {
   test('returns null when no date filter is configured', async () => {
     await expect(createCodexSessionScope()).resolves.toBeNull()
+  })
+
+  test('defaults to the OS home Codex directory when env overrides are absent', async () => {
+    vi.resetModules()
+    const previousCodexHome = process.env.CODEX_HOME
+    const previousHome = process.env.HOME
+    const previousCwd = process.cwd()
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-scope-home-'))
+    const fakeHome = join(root, 'home')
+    const fakeCwd = join(root, 'cwd')
+    try {
+      await writeJsonl(join(fakeHome, '.codex', 'sessions', '2026', '05', 'home.jsonl'), [
+        tokenCountEvent('2026-05-09T04:24:07.234Z')
+      ])
+      await writeJsonl(join(fakeCwd, '.codex', 'sessions', '2026', '05', 'cwd.jsonl'), [
+        tokenCountEvent('2026-05-09T04:24:07.234Z')
+      ])
+      delete process.env.CODEX_HOME
+      delete process.env.HOME
+      process.chdir(fakeCwd)
+
+      vi.doMock('node:os', async () => ({
+        ...(await vi.importActual<typeof import('node:os')>('node:os')),
+        homedir: () => fakeHome
+      }))
+      const { createCodexSessionScope: createScopedWithMockedHome } = await import('./codex-session-scope')
+
+      const scope = await createScopedWithMockedHome({ since: 'all' })
+      expect(scope).not.toBeNull()
+      try {
+        await expect(readFile(join(scope!.codexHome, 'sessions', '2026', '05', 'home.jsonl'), 'utf8'))
+          .resolves.toContain('token_count')
+        await expect(stat(join(scope!.codexHome, 'sessions', '2026', '05', 'cwd.jsonl')))
+          .rejects.toThrow()
+      } finally {
+        await scope?.cleanup()
+      }
+    } finally {
+      process.chdir(previousCwd)
+      restoreEnv('CODEX_HOME', previousCodexHome)
+      restoreEnv('HOME', previousHome)
+      vi.doUnmock('node:os')
+      vi.resetModules()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test('selects sessions by token_count timestamp before directory date', async () => {
@@ -150,7 +196,7 @@ describe('createCodexSessionScope', () => {
       expect(scope).not.toBeNull()
       try {
         const scopedFiles = []
-        for await (const file of glob('**/*.jsonl', { cwd: join(scope!.codexHome, 'sessions') })) {
+        for await (const file of walkJsonlFiles(join(scope!.codexHome, 'sessions'))) {
           scopedFiles.push(file)
         }
         expect(scopedFiles).toHaveLength(3)
@@ -162,17 +208,19 @@ describe('createCodexSessionScope', () => {
     }
   })
 
-  test('cleans up a failed batch scope copy', async () => {
+  test.skipIf(process.platform === 'win32')('cleans up a failed batch scope copy', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
     const sandboxTmpdir = await mkdtemp(join(tmpdir(), 'tokenboard-scope-root-'))
     const previousTmpdir = process.env.TMPDIR
     process.env.TMPDIR = sandboxTmpdir
+    const brokenFile = join(codexHome, 'sessions', '2026', '05', 'broken.jsonl')
     try {
       const before = await listScopeTempDirs(sandboxTmpdir)
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', 'ok.jsonl'), [
         tokenCountEvent('2026-05-09T04:24:07.234Z')
       ])
-      await mkdir(join(codexHome, 'sessions', '2026', '05', 'broken.jsonl'))
+      await writeJsonl(brokenFile, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
+      await chmod(brokenFile, 0o000)
 
       await expect(
         collectBatches(createCodexSessionScopeBatches({ codexHome, since: 'all', batchSize: 2 }))
@@ -181,22 +229,25 @@ describe('createCodexSessionScope', () => {
       const after = await listScopeTempDirs(sandboxTmpdir)
       expect(after.filter((entry) => !before.includes(entry))).toHaveLength(0)
     } finally {
-      process.env.TMPDIR = previousTmpdir
+      restoreTmpdir(previousTmpdir)
+      await chmod(brokenFile, 0o600).catch(() => {})
       await rm(codexHome, { recursive: true, force: true })
       await rm(sandboxTmpdir, { recursive: true, force: true })
     }
   })
 
-  test('fails visibly when an active session candidate cannot be read', async () => {
+  test.skipIf(process.platform === 'win32')('fails visibly when an active session candidate cannot be read', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
+    const unreadable = join(codexHome, 'sessions', '2026', '05', 'unreadable.jsonl')
     try {
-      const unreadable = join(codexHome, 'sessions', '2026', '05', 'unreadable.jsonl')
-      await mkdir(unreadable, { recursive: true })
-      await utimes(unreadable, new Date('2026-05-09T04:24:07.234Z'), new Date('2026-05-09T04:24:07.234Z'))
+      await writeJsonl(unreadable, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
+      await utimes(unreadable, new Date('2026-03-20T04:24:07.234Z'), new Date('2026-03-20T04:24:07.234Z'))
+      await chmod(unreadable, 0o000)
 
       await expect(createCodexSessionScope({ codexHome, since: '20260508' }))
         .rejects.toThrow(/Unable to read Codex session file/)
     } finally {
+      await chmod(unreadable, 0o600).catch(() => {})
       await rm(codexHome, { recursive: true, force: true })
     }
   })
@@ -222,6 +273,18 @@ function tokenCountEvent(timestamp: string) {
       }
     }
   }
+}
+
+function restoreTmpdir(value: string | undefined) {
+  restoreEnv('TMPDIR', value)
+}
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name]
+    return
+  }
+  process.env[name] = value
 }
 
 async function fileExists(file: string) {

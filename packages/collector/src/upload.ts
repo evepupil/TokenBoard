@@ -9,6 +9,7 @@ import type { CollectorConfig } from './config'
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>
 
 const snapshotBatchSize = 500
+const transientFetchAttempts = 3
 
 export type ExistingSnapshotHash = UsageSnapshotKey & {
   snapshotHash: string
@@ -96,7 +97,7 @@ async function fetchExistingSnapshotHashes(
     return { existing: [] }
   }
 
-  const response = await fetcher(`${config.endpoint}/check`, {
+  const response = await fetchWithRetries(fetcher, `${config.endpoint}/check`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${config.uploadToken}`,
@@ -125,7 +126,7 @@ async function uploadSnapshotBatch(
   snapshots: UsageSnapshot[],
   fetcher: Fetcher
 ) {
-  const response = await fetcher(config.endpoint, {
+  const response = await fetchWithRetries(fetcher, config.endpoint, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${config.uploadToken}`,
@@ -148,4 +149,16 @@ function chunkSnapshots(snapshots: UsageSnapshot[], size: number) {
     batches.push(snapshots.slice(index, index + size))
   }
   return batches
+}
+
+async function fetchWithRetries(fetcher: Fetcher, url: string, init: RequestInit) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < transientFetchAttempts; attempt += 1) {
+    try {
+      return await fetcher(url, init)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
 }

@@ -52,11 +52,14 @@ export function buildUpgradePlan({
           { command: 'git', args: ['clone', '--depth', '1', repoUrl, collectorDir], options: {} }
         ]
 
-  steps.push({
-    command: 'copy',
-    args: [joinForPlatform(collectorDir, 'skills', 'tokenboard', platform), skillDir],
-    options: { recursive: true, force: true }
-  })
+  const collectorSkillDir = joinForPlatform(collectorDir, 'skills', 'tokenboard', platform)
+  if (!samePath(collectorSkillDir, skillDir)) {
+    steps.push({
+      command: 'copy',
+      args: [collectorSkillDir, skillDir],
+      options: { recursive: true, force: true }
+    })
+  }
 
   steps.push({
     command: corepackCommand(platform),
@@ -77,36 +80,44 @@ export function runUpgrade({
   mkdir = mkdirSync,
   readDir = readdirSync,
   remove = rmSync,
+  readConfigFile = readConfig,
+  mergeConfigFile = mergeConfig,
+  configDirectory = defaultConfigDir(),
   log = console.log
 } = {}) {
-  const config = readConfig()
+  const config = readConfigFile()
   const repoUrl = resolveRepoUrl({ flags, env, config })
   const packageManager = readPackageManager(flags, config)
   const collector = config.collectorDir || defaultCollectorDir()
   const skillDir = flags['skill-dir'] || env.TOKENBOARD_SKILL_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..')
+  const collectorExists = exists(collector)
+  const collectorIsGitRepo = exists(join(collector, '.git'))
 
   try {
     for (const step of buildUpgradePlan({
       collectorDir: collector,
       skillDir,
-      configDir: defaultConfigDir(),
+      configDir: configDirectory,
       repoUrl,
       packageManager,
-      collectorExists: exists(collector),
-      collectorIsGitRepo: exists(join(collector, '.git')),
-      workDir: join(defaultConfigDir(), 'upgrade-work'),
+      collectorExists,
+      collectorIsGitRepo,
+      workDir: join(configDirectory, 'upgrade-work'),
       platform
     })) {
       runStep(step, { spawn, copy, remove, platform })
     }
   } catch (error) {
+    if (collectorExists && collectorIsGitRepo) {
+      throw error
+    }
     log(`TokenBoard git upgrade failed, trying archive fallback: ${errorMessage(error)}`)
     runArchiveFallback({
       archiveUrl: resolveArchiveUrl({ flags, env, config, repoUrl }),
       collectorDir: collector,
       skillDir,
       packageManager,
-      workDir: join(defaultConfigDir(), 'upgrade-work'),
+      workDir: join(configDirectory, 'upgrade-work'),
       platform,
       spawn,
       copy,
@@ -116,7 +127,7 @@ export function runUpgrade({
     })
   }
 
-  mergeConfig({
+  mergeConfigFile({
     collectorDir: collector,
     repoUrl,
     packageManager,

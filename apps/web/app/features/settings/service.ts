@@ -1,10 +1,30 @@
-﻿import { ApiError } from '../../lib/errors'
+import { ApiError } from '../../lib/errors'
+import { defaultTimezone } from '../../lib/timezone'
+import {
+  parsePublicCardConfig,
+  parsePublicCardConfigForm,
+  stringifyPublicCardConfig,
+  type PublicCardConfig
+} from '../public-card/config'
 import { publicProfileSchema, type PublicProfileInput } from './schema'
+
+export const profileTimezoneSource = {
+  default: 'default',
+  browser: 'browser',
+  user: 'user'
+} as const
 
 export type ProfileSettings = PublicProfileInput & {
   publicJsonUrl: string
   publicSvgUrl: string
   publicMarkdown: string
+  publicCardConfig: PublicCardConfig
+  shouldUseBrowserTimezoneDefault?: boolean
+}
+
+export type ProfilePageInput = {
+  profile: PublicProfileInput
+  publicCardConfig: PublicCardConfig | null
 }
 
 type ProfileRow = {
@@ -13,6 +33,10 @@ type ProfileRow = {
   timezone: string
   isPublic: number | boolean
   participatesInLeaderboards: number | boolean
+  publicCardConfig?: string | null
+  timezoneSource?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 type ProfileDisplayNameRow = {
@@ -40,6 +64,13 @@ export function parseProfileForm(form: Record<string, unknown>): PublicProfileIn
   })
 }
 
+export function parseProfilePageForm(form: Record<string, unknown>): ProfilePageInput {
+  return {
+    profile: parseProfileForm(form),
+    publicCardConfig: parsePublicCardConfigForm(form)
+  }
+}
+
 export async function getProfileSettings(
   db: D1Database,
   userId: string,
@@ -52,8 +83,12 @@ export async function getProfileSettings(
           slug,
           display_name as displayName,
           timezone,
+          COALESCE(timezone_source, 'default') as timezoneSource,
+          public_card_config as publicCardConfig,
           is_public as isPublic,
-          participates_in_leaderboards as participatesInLeaderboards
+          participates_in_leaderboards as participatesInLeaderboards,
+          created_at as createdAt,
+          updated_at as updatedAt
         FROM profiles
         WHERE user_id = ?
         LIMIT 1
@@ -108,6 +143,7 @@ export async function updateProfileSettings(
           slug = ?,
           display_name = ?,
           timezone = ?,
+          timezone_source = 'user',
           is_public = ?,
           participates_in_leaderboards = ?,
           updated_at = ?
@@ -120,6 +156,53 @@ export async function updateProfileSettings(
       input.timezone,
       isPublic ? 1 : 0,
       input.participatesInLeaderboards ? 1 : 0,
+      now,
+      userId
+    )
+    .run()
+}
+
+export async function updateProfilePageSettings(
+  db: D1Database,
+  userId: string,
+  input: ProfilePageInput,
+  now = new Date().toISOString()
+) {
+  const conflict = await db
+    .prepare('SELECT user_id as userId FROM profiles WHERE slug = ? AND user_id <> ? LIMIT 1')
+    .bind(input.profile.slug, userId)
+    .first<{ userId: string }>()
+
+  if (conflict) {
+    throw new ApiError('BAD_REQUEST', 'Slug is already taken', 400)
+  }
+
+  const isPublic = input.profile.isPublic || input.profile.participatesInLeaderboards
+  const cardConfig = input.publicCardConfig ? stringifyPublicCardConfig(input.publicCardConfig) : null
+
+  await db
+    .prepare(
+      `
+        UPDATE profiles
+        SET
+          slug = ?,
+          display_name = ?,
+          timezone = ?,
+          timezone_source = 'user',
+          public_card_config = ?,
+          is_public = ?,
+          participates_in_leaderboards = ?,
+          updated_at = ?
+        WHERE user_id = ?
+      `
+    )
+    .bind(
+      input.profile.slug,
+      input.profile.displayName,
+      input.profile.timezone,
+      cardConfig,
+      isPublic ? 1 : 0,
+      input.profile.participatesInLeaderboards ? 1 : 0,
       now,
       userId
     )
@@ -139,8 +222,12 @@ function toProfileSettings(row: ProfileRow, origin: string): ProfileSettings {
 
   return {
     ...profile,
+    publicCardConfig: parsePublicCardConfig(row.publicCardConfig),
+    shouldUseBrowserTimezoneDefault:
+      profile.timezone === defaultTimezone &&
+      (row.timezoneSource ?? profileTimezoneSource.default) === profileTimezoneSource.default,
     publicJsonUrl: `${origin}/api/public/${profile.slug}.json`,
     publicSvgUrl,
-    publicMarkdown: `[![TokenBoard](${publicSvgUrl})](https://tokenboard.chaosyn.com)`
+    publicMarkdown: `[![TokenBoard](${publicSvgUrl})](${origin})`
   }
 }

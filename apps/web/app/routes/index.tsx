@@ -14,7 +14,7 @@ export default createRoute(async (c) => {
         <div class="absolute left-8 top-8 h-24 w-24 rounded-full bg-lime-300 blur-3xl" />
         <div class="relative z-10">
           <p class="text-sm font-black uppercase tracking-[0.45em] text-[var(--app-muted)]">TokenBoard</p>
-          <h1 class="mt-8 max-w-4xl text-6xl font-black leading-[0.9] tracking-tight md:text-8xl">
+          <h1 class="mt-8 max-w-4xl text-5xl font-black leading-[0.95] tracking-tight md:text-8xl">
             为分享而生的 AI 用量面板。
           </h1>
           <p class="mt-6 max-w-2xl text-lg leading-8 text-[var(--app-muted)]">

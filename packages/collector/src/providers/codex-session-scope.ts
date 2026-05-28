@@ -1,10 +1,10 @@
 import { createReadStream } from 'node:fs'
-import { cp, glob, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { cp, mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
+import { walkJsonlFiles } from './session-file-walk'
 const CODEX_SESSIONS_DIR = 'sessions'
-const JSONL_GLOB = '**/*.jsonl'
 
 type CodexSessionScopeOptions = {
   codexHome?: string
@@ -15,10 +15,7 @@ type CodexSessionScopeOptions = {
   onMissingSessionFile?: (sessionPath: string) => void
 }
 
-export type CodexSessionScope = {
-  codexHome: string
-  cleanup: () => Promise<void>
-}
+export type CodexSessionScope = { codexHome: string; cleanup: () => Promise<void> }
 
 export async function createCodexSessionScope(
   options: CodexSessionScopeOptions = {}
@@ -89,7 +86,7 @@ async function prepareSessionScan(options: CodexSessionScopeOptions = {}) {
     return null
   }
 
-  const sourceCodexHome = resolve(options.codexHome || process.env.CODEX_HOME || join(process.env.HOME || '', '.codex'))
+  const sourceCodexHome = resolve(options.codexHome || process.env.CODEX_HOME || join(homedir(), '.codex'))
   const sourceSessionsDir = join(sourceCodexHome, CODEX_SESSIONS_DIR)
   const directory = await stat(sourceSessionsDir).catch(() => null)
   if (!directory?.isDirectory()) {
@@ -108,7 +105,7 @@ async function* iterateMatchingSessionFiles(scan: {
   includeAll: boolean
   filter: { since?: Date; until?: Date; now: Date }
 }) {
-  for await (const file of glob(JSONL_GLOB, { cwd: scan.sourceSessionsDir })) {
+  for await (const file of walkJsonlFiles(scan.sourceSessionsDir)) {
     const absoluteFile = isAbsolute(file) ? file : join(scan.sourceSessionsDir, file)
     if (!scan.includeAll && !(await isActiveSessionFile(absoluteFile, scan.filter))) {
       continue

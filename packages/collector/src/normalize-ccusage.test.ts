@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import { normalizeCcusageDailyJson } from './normalize-ccusage'
+import {
+  codexDisplayDateDailyInput,
+  multiModelSessionCountInput,
+  multiModelSessionRows
+} from './normalize-ccusage-test-helpers'
 
 const collectedAt = '2026-04-28T10:00:00.000Z'
 
@@ -155,32 +160,7 @@ describe('normalizeCcusageDailyJson', () => {
 
   test('normalizes codex rows with display dates and models object', () => {
     const snapshots = normalizeCcusageDailyJson(
-      {
-        daily: [
-          {
-            date: 'Apr 28, 2026',
-            inputTokens: 63578474,
-            cachedInputTokens: 58842240,
-            outputTokens: 250965,
-            totalTokens: 63829439,
-            costUSD: 18.860285,
-            models: {
-              'gpt-5.4': {
-                inputTokens: 6663074,
-                cachedInputTokens: 4871680,
-                outputTokens: 45372,
-                totalTokens: 6708446
-              },
-              'gpt-5.5': {
-                inputTokens: 56915400,
-                cachedInputTokens: 53970560,
-                outputTokens: 205593,
-                totalTokens: 57120993
-              }
-            }
-          }
-        ]
-      },
+      codexDisplayDateDailyInput(),
       { source: 'codex', timezone: 'Asia/Shanghai', collectedAt }
     )
 
@@ -209,7 +189,33 @@ describe('normalizeCcusageDailyJson', () => {
     expect(snapshots[0].costUsd + snapshots[1].costUsd).toBeCloseTo(18.860285)
   })
 
-  test('merges session counts by date and primary model', () => {
+  test('does not double-count sessions that used multiple models', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      multiModelSessionCountInput(),
+      {
+        source: 'claude-code',
+        timezone: 'Asia/Shanghai',
+        collectedAt,
+        sessions: multiModelSessionRows()
+      }
+    )
+
+    expect(snapshots).toMatchObject([
+      {
+        usageDate: '2026-04-28',
+        model: 'claude-sonnet',
+        sessionCount: 1
+      },
+      {
+        usageDate: '2026-04-28',
+        model: 'claude-opus',
+        sessionCount: 2
+      }
+    ])
+    expect(snapshots.reduce((total, snapshot) => total + snapshot.sessionCount, 0)).toBe(3)
+  })
+
+  test('does not fall back to per-model daily session counts when session rows are provided', () => {
     const snapshots = normalizeCcusageDailyJson(
       {
         data: [
@@ -218,13 +224,15 @@ describe('normalizeCcusageDailyJson', () => {
             modelBreakdowns: [
               {
                 modelName: 'claude-sonnet',
-                inputTokens: 100,
-                outputTokens: 10
+                inputTokens: 30,
+                outputTokens: 3,
+                sessionCount: 1
               },
               {
                 modelName: 'claude-opus',
-                inputTokens: 200,
-                outputTokens: 20
+                inputTokens: 40,
+                outputTokens: 4,
+                sessionCount: 1
               }
             ]
           }
@@ -238,21 +246,15 @@ describe('normalizeCcusageDailyJson', () => {
           data: [
             {
               sessionId: 's1',
-              lastActivity: '2026-04-28T10:00:00.000Z',
+              lastActivity: '2026-04-28T12:00:00.000Z',
               modelBreakdowns: {
                 'claude-sonnet': {
-                  inputTokens: 100,
-                  outputTokens: 10
-                }
-              }
-            },
-            {
-              sessionId: 's2',
-              lastActivity: '2026-04-28T11:00:00.000Z',
-              modelBreakdowns: {
+                  inputTokens: 30,
+                  outputTokens: 3
+                },
                 'claude-opus': {
-                  inputTokens: 200,
-                  outputTokens: 20
+                  inputTokens: 40,
+                  outputTokens: 4
                 }
               }
             }
@@ -263,15 +265,124 @@ describe('normalizeCcusageDailyJson', () => {
 
     expect(snapshots).toMatchObject([
       {
-        usageDate: '2026-04-28',
         model: 'claude-sonnet',
-        sessionCount: 1
+        sessionCount: 0
       },
       {
-        usageDate: '2026-04-28',
         model: 'claude-opus',
         sessionCount: 1
       }
     ])
+    expect(snapshots.reduce((total, snapshot) => total + snapshot.sessionCount, 0)).toBe(1)
+  })
+
+  test('matches session counts to daily rows using the report timezone', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        data: [
+          {
+            date: '2026-04-28',
+            modelBreakdowns: [
+              {
+                modelName: 'claude-opus',
+                inputTokens: 40,
+                outputTokens: 4
+              }
+            ]
+          }
+        ]
+      },
+      {
+        source: 'claude-code',
+        timezone: 'Asia/Shanghai',
+        collectedAt,
+        sessions: {
+          data: [
+            {
+              sessionId: 's1',
+              lastActivity: '2026-04-27T16:10:00.000Z',
+              modelBreakdowns: {
+                'claude-opus': {
+                  inputTokens: 40,
+                  outputTokens: 4
+                }
+              }
+            }
+          ]
+        }
+      }
+    )
+
+    expect(snapshots[0]).toMatchObject({
+      usageDate: '2026-04-28',
+      model: 'claude-opus',
+      sessionCount: 1
+    })
+  })
+
+  test('treats an explicitly empty session result as authoritative', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        data: [
+          {
+            date: '2026-04-28',
+            modelBreakdowns: [
+              {
+                modelName: 'claude-opus',
+                inputTokens: 40,
+                outputTokens: 4,
+                sessionCount: 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        source: 'claude-code',
+        timezone: 'Asia/Shanghai',
+        collectedAt,
+        sessions: { data: [] }
+      }
+    )
+
+    expect(snapshots[0]).toMatchObject({
+      model: 'claude-opus',
+      sessionCount: 0
+    })
+  })
+
+  test('does not crash on session rows with empty model breakdowns', () => {
+    const snapshots = normalizeCcusageDailyJson(
+      {
+        data: [
+          {
+            date: '2026-04-28',
+            model: 'all',
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0
+          }
+        ]
+      },
+      {
+        source: 'claude-code',
+        timezone: 'Asia/Shanghai',
+        collectedAt,
+        sessions: {
+          data: [
+            {
+              sessionId: 's1',
+              lastActivity: '2026-04-28T10:00:00.000Z',
+              modelBreakdowns: []
+            }
+          ]
+        }
+      }
+    )
+
+    expect(snapshots[0]).toMatchObject({
+      model: 'all',
+      sessionCount: 1
+    })
   })
 })

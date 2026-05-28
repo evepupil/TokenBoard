@@ -8,6 +8,7 @@ describe('collectClaudeCodeUsage', () => {
 
   test('runs ccusage daily json with breakdown and normalizes the output', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
     const snapshots = await collectClaudeCodeUsage({
       timezone: 'Asia/Shanghai',
       collectedAt: '2026-04-28T10:00:00.000Z',
@@ -69,6 +70,7 @@ describe('collectClaudeCodeUsage', () => {
   test('uses configured since window', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', 'npm')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
     vi.stubEnv('TOKENBOARD_SINCE', '20260509')
 
     await collectClaudeCodeUsage({
@@ -118,6 +120,7 @@ describe('collectClaudeCodeUsage', () => {
   test('allows explicit full scan without passing all to ccusage', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
     vi.stubEnv('TOKENBOARD_SINCE', 'all')
     vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '20260509')
 

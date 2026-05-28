@@ -68,6 +68,7 @@ test('builds Windows bun sync invocation with bun executable', () => {
 
 test('sync runs upgrade by default and supports skip flag', () => {
   assert.equal(shouldRunUpgrade({ flags: {}, env: {} }), true)
+  assert.equal(shouldRunUpgrade({ flags: { hook: true }, env: {} }), false)
   assert.equal(shouldRunUpgrade({ flags: { 'skip-upgrade': true }, env: {} }), false)
   assert.equal(shouldRunUpgrade({ flags: {}, env: { TOKENBOARD_SKIP_UPGRADE: '1' } }), false)
   assert.equal(shouldRunUpgrade({ flags: {}, env: { TOKENBOARD_AUTO_UPGRADE: '0' } }), false)

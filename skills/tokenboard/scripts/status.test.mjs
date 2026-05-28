@@ -14,7 +14,8 @@ test('status includes configured schedule times', () => {
         packageManager: 'bun',
         collectorDir: '/home/user/.tokenboard/TokenBoard',
         scheduleTimes: ['06:00', '09:00']
-      }
+      },
+      hooks: { notifyHandler: 'installed', codex: 'installed', claudeCode: 'not-installed' }
     }),
     {
       configured: true,
@@ -25,7 +26,12 @@ test('status includes configured schedule times', () => {
       source: 'all',
       packageManager: 'bun',
       collectorDir: '/home/user/.tokenboard/TokenBoard',
-      scheduleTimes: ['06:00', '09:00']
+      scheduleTimes: ['06:00', '09:00'],
+      hooks: {
+        notifyHandler: 'installed',
+        codex: 'installed',
+        claudeCode: 'not-installed'
+      }
     }
   )
 })

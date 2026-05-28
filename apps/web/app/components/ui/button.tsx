@@ -13,10 +13,10 @@ const buttonVariants = cva(
         destructive: 'bg-red-400 text-stone-950 hover:bg-red-300'
       },
       size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-8 px-3 text-xs',
+        default: 'h-11 px-4 py-2',
+        sm: 'h-11 px-3 text-xs',
         lg: 'h-12 px-5 text-base',
-        icon: 'h-10 w-10'
+        icon: 'h-11 w-11'
       }
     },
     defaultVariants: {
@@ -29,6 +29,8 @@ const buttonVariants = cva(
 type ButtonProps = VariantProps<typeof buttonVariants> & {
   class?: string
   type?: 'button' | 'submit' | 'reset'
+  name?: string
+  value?: string
   disabled?: boolean
   children?: Child
 }

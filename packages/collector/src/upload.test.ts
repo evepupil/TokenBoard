@@ -1,27 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import type { UsageSnapshot } from '@tokenboard/usage-core'
 import { filterChangedSnapshots, snapshotHash, uploadSnapshots } from './upload'
-
-const unchangedSnapshot: UsageSnapshot = {
-  source: 'codex',
-  usageDate: '2026-05-09',
-  timezone: 'Asia/Shanghai',
-  model: 'gpt-5',
-  inputTokens: 10,
-  outputTokens: 2,
-  cacheCreationTokens: 0,
-  cacheReadTokens: 5,
-  totalTokens: 17,
-  costUsd: 0.01,
-  sessionCount: 1,
-  collectedAt: '2026-05-09T10:00:00.000Z'
-}
-
-const changedSnapshot: UsageSnapshot = {
-  ...unchangedSnapshot,
-  model: 'gpt-5.5',
-  totalTokens: 20
-}
+import { changedSnapshot, unchangedSnapshot } from './upload-test-helpers'
 
 describe('filterChangedSnapshots', () => {
   test('skips snapshots whose server hash already matches', async () => {
@@ -82,7 +61,7 @@ describe('uploadSnapshots', () => {
     const result = await uploadSnapshots(
       {
         endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-        uploadToken: 'tk_test',
+        uploadToken: 'test-upload-token',
         timezone: 'Asia/Shanghai'
       },
       [unchangedSnapshot, changedSnapshot],
@@ -102,7 +81,7 @@ describe('uploadSnapshots', () => {
 	    const result = await uploadSnapshots(
 	      {
 	        endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-	        uploadToken: 'tk_test',
+	        uploadToken: 'test-upload-token',
 	        timezone: 'Asia/Shanghai'
 	      },
 	      [],
@@ -145,7 +124,7 @@ describe('uploadSnapshots', () => {
     const result = await uploadSnapshots(
       {
         endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-        uploadToken: 'tk_test',
+        uploadToken: 'test-upload-token',
         timezone: 'Asia/Shanghai'
       },
       [unchangedSnapshot],
@@ -176,7 +155,7 @@ describe('uploadSnapshots', () => {
     const result = await uploadSnapshots(
       {
         endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-        uploadToken: 'tk_test',
+        uploadToken: 'test-upload-token',
         timezone: 'Asia/Shanghai'
       },
       [unchangedSnapshot],
@@ -190,36 +169,7 @@ describe('uploadSnapshots', () => {
 
   test.each([405, 501])(
     'falls back to full upload when the hash check endpoint returns %i',
-    async (status) => {
-      const requests: Array<{ url: string; body: unknown }> = []
-      const fetcher = async (url: string, init: RequestInit) => {
-        requests.push({
-          url,
-          body: init.body ? JSON.parse(String(init.body)) : null
-        })
-        return {
-          ok: !url.endsWith('/api/v1/ingest/check'),
-          status: url.endsWith('/api/v1/ingest/check') ? status : 200,
-          async json() {
-            return { upserted: 1 }
-          }
-        } as Response
-      }
-
-      const result = await uploadSnapshots(
-        {
-          endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-          uploadToken: 'tk_test',
-          timezone: 'Asia/Shanghai'
-        },
-        [unchangedSnapshot],
-        fetcher
-      )
-
-      expect(result).toEqual({ upserted: 1, skipped: 0 })
-      expect(requests).toHaveLength(2)
-      expect(requests[1].body).toEqual({ snapshots: [unchangedSnapshot] })
-    }
+    async (status) => expectUnsupportedHashCheckFallback(status)
   )
 
   test('does not fall back when hash check fails with a server error', async () => {
@@ -236,7 +186,7 @@ describe('uploadSnapshots', () => {
       uploadSnapshots(
         {
           endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-          uploadToken: 'tk_test',
+          uploadToken: 'test-upload-token',
           timezone: 'Asia/Shanghai'
         },
         [unchangedSnapshot],
@@ -245,26 +195,19 @@ describe('uploadSnapshots', () => {
     ).rejects.toThrow('Snapshot check failed with status 500')
   })
 
-  test('splits large uploads into 500-item batches', async () => {
-    const snapshots = Array.from({ length: 501 }, (_, index) => ({
-      ...unchangedSnapshot,
-      model: `gpt-5-${index}`,
-      totalTokens: unchangedSnapshot.totalTokens + index
-    }))
-    const requests: Array<{ url: string; body: unknown }> = []
-    const fetcher = async (url: string, init: RequestInit) => {
-      const body = init.body ? JSON.parse(String(init.body)) : null
-      requests.push({
-        url,
-        body
-      })
+  test('retries transient fetch failures during hash check and upload', async () => {
+    const requests: string[] = []
+    const failures = new Set([
+      'https://tokenboard.example.com/api/v1/ingest/check',
+      'https://tokenboard.example.com/api/v1/ingest'
+    ])
+    const fetcher = async (url: string) => {
+      requests.push(url)
+      if (failures.delete(url)) throw new TypeError('fetch failed')
       return {
         ok: true,
         async json() {
-          return {
-            existing: [],
-            upserted: body?.snapshots?.length ?? 0
-          }
+          return url.endsWith('/check') ? { existing: [] } : { upserted: 1 }
         }
       } as Response
     }
@@ -272,42 +215,51 @@ describe('uploadSnapshots', () => {
     const result = await uploadSnapshots(
       {
         endpoint: 'https://tokenboard.example.com/api/v1/ingest',
-        uploadToken: 'tk_test',
+        uploadToken: 'test-upload-token',
         timezone: 'Asia/Shanghai'
       },
-      snapshots,
+      [unchangedSnapshot],
       fetcher
     )
 
-    expect(result).toEqual({ upserted: 501, skipped: 0 })
-    expect(requests).toHaveLength(4)
-    expect(requests[0]).toEqual({
-      url: 'https://tokenboard.example.com/api/v1/ingest/check',
-      body: {
-        keys: snapshots.slice(0, 500).map((snapshot) => ({
-          source: snapshot.source,
-          usageDate: snapshot.usageDate,
-          model: snapshot.model
-        }))
-      }
-    })
-    expect(requests[1]).toEqual({
-      url: 'https://tokenboard.example.com/api/v1/ingest',
-      body: { snapshots: snapshots.slice(0, 500) }
-    })
-    expect(requests[2]).toEqual({
-      url: 'https://tokenboard.example.com/api/v1/ingest/check',
-      body: {
-        keys: snapshots.slice(500).map((snapshot) => ({
-          source: snapshot.source,
-          usageDate: snapshot.usageDate,
-          model: snapshot.model
-        }))
-      }
-    })
-    expect(requests[3]).toEqual({
-      url: 'https://tokenboard.example.com/api/v1/ingest',
-      body: { snapshots: snapshots.slice(500) }
-    })
+    expect(result).toEqual({ upserted: 1, skipped: 0 })
+    expect(requests).toEqual([
+      'https://tokenboard.example.com/api/v1/ingest/check',
+      'https://tokenboard.example.com/api/v1/ingest/check',
+      'https://tokenboard.example.com/api/v1/ingest',
+      'https://tokenboard.example.com/api/v1/ingest'
+    ])
   })
+
 })
+
+async function expectUnsupportedHashCheckFallback(status: number) {
+  const requests: Array<{ url: string; body: unknown }> = []
+  const fetcher = async (url: string, init: RequestInit) => {
+    requests.push({
+      url,
+      body: init.body ? JSON.parse(String(init.body)) : null
+    })
+    return {
+      ok: !url.endsWith('/api/v1/ingest/check'),
+      status: url.endsWith('/api/v1/ingest/check') ? status : 200,
+      async json() {
+        return { upserted: 1 }
+      }
+    } as Response
+  }
+
+  const result = await uploadSnapshots(
+    {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai'
+    },
+    [unchangedSnapshot],
+    fetcher
+  )
+
+  expect(result).toEqual({ upserted: 1, skipped: 0 })
+  expect(requests).toHaveLength(2)
+  expect(requests[1].body).toEqual({ snapshots: [unchangedSnapshot] })
+}

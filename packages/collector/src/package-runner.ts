@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 export type PackageRunner = {
   command: string
   runPackageArgs(packageName: string, binaryName: string, packageArgs: string[]): string[]
@@ -5,8 +9,23 @@ export type PackageRunner = {
 
 export function resolvePackageRunner(
   packageManager = process.env.TOKENBOARD_PACKAGE_MANAGER,
-  platform = process.platform
+  platform = process.platform,
+  fileExists: (path: string) => boolean = existsSync
 ): PackageRunner {
+  const forcePackageRunner = Boolean(process.env.TOKENBOARD_FORCE_PACKAGE_RUNNER)
+  const forcedCcusage = process.env.TOKENBOARD_CCUSAGE_BIN
+  if (!forcePackageRunner && forcedCcusage) {
+    if (!fileExists(forcedCcusage)) {
+      throw new Error(`TOKENBOARD_CCUSAGE_BIN does not exist: ${forcedCcusage}`)
+    }
+    return createLocalCcusageRunner(forcedCcusage)
+  }
+
+  const localCcusage = resolveLocalCcusageBin(platform)
+  if (!forcePackageRunner && fileExists(localCcusage)) {
+    return createLocalCcusageRunner(localCcusage)
+  }
+
   if (packageManager === 'bun') {
     return {
       command: process.env.TOKENBOARD_BUNX_BIN || 'bunx',
@@ -42,6 +61,18 @@ export function resolvePackageRunner(
   }
 }
 
+function createLocalCcusageRunner(command: string): PackageRunner {
+  return {
+    command,
+    runPackageArgs: (_packageName, _binaryName, packageArgs) => packageArgs
+  }
+}
+
 function packageCommand(command: string, platform: string) {
   return platform === 'win32' ? `${command}.cmd` : command
+}
+
+function resolveLocalCcusageBin(platform: string) {
+  const packageDir = dirname(dirname(fileURLToPath(import.meta.url)))
+  return join(packageDir, 'node_modules', '.bin', packageCommand('ccusage', platform))
 }

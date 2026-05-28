@@ -1,14 +1,21 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
 import { runJsonCommand, type CommandRunner } from '../command'
 import { normalizeCcusageDailyJson } from '../normalize-ccusage'
 import { resolvePackageRunner, type PackageRunner } from '../package-runner'
+import { packageCommandOptions, readDailyTimeoutMs, readSessionTimeoutMs } from './codex-command-options'
 import { createCodexSessionScopeBatches, type CodexSessionScope } from './codex-session-scope'
+import { applyCodexSubagentUsageCorrections } from './codex-subagent-usage'
+import {
+  assertHookReconciliationSnapshots,
+  collectHookIncremental,
+  isHookMode
+} from './hook-incremental'
+import { mergeSnapshots } from './session-cursor'
 
 const DEFAULT_CODEX_BATCH_SIZE = 200
 const MAX_CODEX_BATCH_SIZE = 1000
-const DEFAULT_DAILY_TIMEOUT_MS = 900_000
-const DEFAULT_SESSION_TIMEOUT_MS = 900_000
-const DEFAULT_PACKAGE_COMMAND_RETRIES = 2
 
 export type CollectCodexUsageOptions = {
   timezone?: string
@@ -23,61 +30,155 @@ export async function collectCodexUsage(
 ): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
   const packageRunner = resolvePackageRunner()
+  const collectedAt = options.collectedAt ?? new Date().toISOString()
+  if (isHookMode()) {
+    return collectCodexHookUsage({
+      runner,
+      packageRunner,
+      options,
+      collectedAt
+    })
+  }
+
   const since = readSince()
   const until = process.env.TOKENBOARD_UNTIL
   const rangeArgs = buildRangeArgs({ since, until })
-  const collectedAt = options.collectedAt ?? new Date().toISOString()
-  const snapshots: UsageSnapshot[] = []
   const usesScopedScan = since === 'all' || Boolean(since) || Boolean(until)
-
   if (usesScopedScan) {
-    for await (const scope of createCodexSessionScopeBatches({
-      codexHome: options.codexHome,
+    return collectScopedCodexUsage({
+      runner,
+      packageRunner,
+      rangeArgs,
       since,
       until,
-      batchSize: readBatchSize(),
-      onMissingSessionFile: (sessionPath) =>
-        options.stderr?.(`Skipping Codex session file that disappeared before copy: ${sessionPath}`)
-    })) {
-      snapshots.push(...(await collectScopedBatch({
-        runner,
-        packageRunner,
-        rangeArgs,
-        scope,
-        options,
-        collectedAt
-      })))
-    }
-
-    return mergeSnapshots(snapshots)
+      options,
+      collectedAt
+    })
   }
 
-  const json = await runner(
-    packageRunner.command,
-    packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...rangeArgs]),
+  const env = options.codexHome
+    ? { ...process.env, CODEX_HOME: options.codexHome }
+    : process.env
+  return collectCodexCcusageRange({
+    runner,
+    packageRunner,
+    rangeArgs,
+    options,
+    collectedAt,
+    env
+  })
+}
+
+async function collectScopedCodexUsage(input: {
+  runner: CommandRunner
+  packageRunner: PackageRunner
+  rangeArgs: string[]
+  since?: string
+  until?: string
+  options: CollectCodexUsageOptions
+  collectedAt: string
+}) {
+  const snapshots: UsageSnapshot[] = []
+  for await (const scope of createCodexSessionScopeBatches({
+    codexHome: input.options.codexHome,
+    since: input.since,
+    until: input.until,
+    batchSize: readBatchSize(),
+    onMissingSessionFile: (sessionPath) =>
+      input.options.stderr?.(`Skipping Codex session file that disappeared before copy: ${sessionPath}`)
+  })) {
+    snapshots.push(...(await collectScopedBatch({
+      runner: input.runner,
+      packageRunner: input.packageRunner,
+      rangeArgs: input.rangeArgs,
+      scope,
+      options: input.options,
+      collectedAt: input.collectedAt
+    })))
+  }
+
+  return mergeSnapshots(snapshots)
+}
+
+async function collectCodexHookUsage(input: {
+  runner: CommandRunner
+  packageRunner: PackageRunner
+  options: CollectCodexUsageOptions
+  collectedAt: string
+}) {
+  const codexHome = resolveCodexHome(input.options.codexHome)
+  const timezone = input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  const incremental = await collectHookIncremental({
+    source: 'codex',
+    sessionsDir: join(codexHome, 'sessions'),
+    cursorName: 'codex-cursor.json',
+    timezone,
+    collectedAt: input.collectedAt
+  })
+
+  if (!incremental.changed) {
+    return []
+  }
+
+  const snapshots = await collectCodexCcusageRange({
+    runner: input.runner,
+    packageRunner: input.packageRunner,
+    rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
+    options: input.options,
+    collectedAt: input.collectedAt,
+    env: { ...process.env, CODEX_HOME: codexHome }
+  })
+  assertHookReconciliationSnapshots({
+    sourceLabel: 'Codex',
+    expectedDates: incremental.changedDates,
+    expectedKeys: incremental.changedKeys,
+    snapshots
+  })
+  return snapshots
+}
+
+async function collectCodexCcusageRange(input: {
+  runner: CommandRunner
+  packageRunner: PackageRunner
+  rangeArgs: string[]
+  options: CollectCodexUsageOptions
+  collectedAt: string
+  env: NodeJS.ProcessEnv
+  correctionCodexHome?: string
+}) {
+  const json = await input.runner(
+    input.packageRunner.command,
+    input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...input.rangeArgs]),
     packageCommandOptions({
-      env: process.env,
+      env: input.env,
       timeoutMs: readDailyTimeoutMs(),
-      stderr: options.stderr
+      stderr: input.options.stderr
     })
   )
   const sessions = await collectSessionCounts({
-    runner,
-    command: packageRunner.command,
-    args: packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...rangeArgs]),
+    runner: input.runner,
+    command: input.packageRunner.command,
+    args: input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...input.rangeArgs]),
     options: packageCommandOptions({
-      env: process.env,
+      env: input.env,
       timeoutMs: readSessionTimeoutMs(),
-      stderr: options.stderr
+      stderr: input.options.stderr
     }),
-    stderr: options.stderr
+    stderr: input.options.stderr
   })
 
-  return normalizeCcusageDailyJson(json, {
+  const snapshots = normalizeCcusageDailyJson(json, {
     source: 'codex',
-    timezone: options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-    collectedAt,
+    timezone: input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    collectedAt: input.collectedAt,
     sessions
+  })
+  return applyCodexSubagentUsageCorrections({
+    snapshots,
+    sessions,
+    codexHome: input.correctionCodexHome ?? input.env.CODEX_HOME ?? resolveCodexHome(input.options.codexHome),
+    timezone: input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    stderr: input.options.stderr
   })
 }
 
@@ -91,32 +192,14 @@ async function collectScopedBatch(input: {
 }) {
   try {
     const env = { ...process.env, CODEX_HOME: input.scope.codexHome }
-    const json = await input.runner(
-      input.packageRunner.command,
-      input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'daily', '--json', ...input.rangeArgs]),
-      packageCommandOptions({
-        env,
-        timeoutMs: readDailyTimeoutMs(),
-        stderr: input.options.stderr
-      })
-    )
-    const sessions = await collectSessionCounts({
+    return await collectCodexCcusageRange({
       runner: input.runner,
-      command: input.packageRunner.command,
-      args: input.packageRunner.runPackageArgs('ccusage@latest', 'ccusage', ['codex', 'session', '--json', ...input.rangeArgs]),
-      options: packageCommandOptions({
-        env,
-        timeoutMs: readSessionTimeoutMs(),
-        stderr: input.options.stderr
-      }),
-      stderr: input.options.stderr
-    })
-
-    return normalizeCcusageDailyJson(json, {
-      source: 'codex',
-      timezone: input.options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+      packageRunner: input.packageRunner,
+      rangeArgs: input.rangeArgs,
+      options: input.options,
       collectedAt: input.collectedAt,
-      sessions
+      env,
+      correctionCodexHome: input.scope.codexHome
     })
   } finally {
     await input.scope.cleanup()
@@ -148,47 +231,6 @@ async function collectSessionCounts({
   }
 }
 
-function packageCommandOptions({
-  env,
-  timeoutMs,
-  stderr = console.error
-}: {
-  env: NodeJS.ProcessEnv
-  timeoutMs: number
-  stderr?: (line: string) => void
-}) {
-  return {
-    env,
-    timeoutMs,
-    retries: readPackageCommandRetries(),
-    onRetry: stderr
-  }
-}
-
-function readPackageCommandRetries() {
-  const value = Number.parseInt(process.env.TOKENBOARD_PACKAGE_COMMAND_RETRIES || '', 10)
-  if (Number.isFinite(value) && value >= 0) {
-    return value
-  }
-  return DEFAULT_PACKAGE_COMMAND_RETRIES
-}
-
-function readDailyTimeoutMs() {
-  const value = Number.parseInt(process.env.TOKENBOARD_CODEX_DAILY_TIMEOUT_MS || '', 10)
-  if (Number.isFinite(value) && value > 0) {
-    return value
-  }
-  return DEFAULT_DAILY_TIMEOUT_MS
-}
-
-function readSessionTimeoutMs() {
-  const value = Number.parseInt(process.env.TOKENBOARD_CODEX_SESSION_TIMEOUT_MS || '', 10)
-  if (Number.isFinite(value) && value > 0) {
-    return value
-  }
-  return DEFAULT_SESSION_TIMEOUT_MS
-}
-
 function buildRangeArgs(options: { since?: string; until?: string }) {
   const args: string[] = []
   if (options.since && options.since !== 'all') {
@@ -200,9 +242,17 @@ function buildRangeArgs(options: { since?: string; until?: string }) {
   return args
 }
 
+function withTimezoneArgs(args: string[], timezone: string) {
+  return [...args, '--timezone', timezone]
+}
+
 function readSince() {
   const since = process.env.TOKENBOARD_SINCE || process.env.TOKENBOARD_DEFAULT_SINCE || ''
   return since || ''
+}
+
+function resolveCodexHome(value?: string) {
+  return value || process.env.CODEX_HOME || join(homedir(), '.codex')
 }
 
 function readBatchSize() {
@@ -211,36 +261,6 @@ function readBatchSize() {
     return DEFAULT_CODEX_BATCH_SIZE
   }
   return Math.min(Math.floor(value), MAX_CODEX_BATCH_SIZE)
-}
-
-function mergeSnapshots(snapshots: UsageSnapshot[]) {
-  const rows = new Map<string, UsageSnapshot>()
-  for (const snapshot of snapshots) {
-    const key = [
-      snapshot.source,
-      snapshot.usageDate,
-      snapshot.timezone,
-      snapshot.model
-    ].join('\0')
-    const current = rows.get(key)
-    if (!current) {
-      rows.set(key, { ...snapshot })
-      continue
-    }
-
-    current.inputTokens += snapshot.inputTokens
-    current.outputTokens += snapshot.outputTokens
-    current.cacheCreationTokens += snapshot.cacheCreationTokens
-    current.cacheReadTokens += snapshot.cacheReadTokens
-    current.totalTokens += snapshot.totalTokens
-    current.costUsd += snapshot.costUsd
-    current.sessionCount += snapshot.sessionCount
-  }
-
-  return [...rows.values()].sort((left, right) =>
-    left.usageDate.localeCompare(right.usageDate) ||
-    left.model.localeCompare(right.model)
-  )
 }
 
 function errorMessage(error: unknown) {

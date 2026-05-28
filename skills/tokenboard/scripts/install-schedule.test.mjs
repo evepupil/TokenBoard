@@ -32,6 +32,23 @@ test('installs macOS LaunchAgent through an isolated launchctl harness', () => {
   }
 })
 
+test('installed schedules preserve a custom TokenBoard config directory', () => {
+  const harness = createHarness('darwin')
+  try {
+    installSchedule({
+      ...harness.options,
+      argv: ['--schedule-times', '08:15']
+    })
+
+    const plistPath = join(harness.homeDir, 'Library', 'LaunchAgents', 'com.tokenboard.daily-sync.plist')
+    const plist = readFileSync(plistPath, 'utf8')
+
+    assert.match(plist, new RegExp(`<key>TOKENBOARD_CONFIG_DIR<\\/key>\\s+<string>${escapeRegExp(harness.options.configDir)}<\\/string>`))
+  } finally {
+    harness.cleanup()
+  }
+})
+
 test('installs Linux user systemd timer through an isolated systemd harness', () => {
   const harness = createHarness('linux')
   try {
@@ -43,7 +60,7 @@ test('installs Linux user systemd timer through an isolated systemd harness', ()
     const unitDir = join(harness.homeDir, '.config', 'systemd', 'user')
     const service = readFileSync(join(unitDir, 'tokenboard-daily-sync.service'), 'utf8')
     const timer = readFileSync(join(unitDir, 'tokenboard-daily-sync.timer'), 'utf8')
-    assert.match(service, /Environment=TOKENBOARD_PACKAGE_MANAGER=pnpm/)
+    assert.match(service, /Environment="TOKENBOARD_PACKAGE_MANAGER=pnpm"/)
     assert.match(timer, /OnCalendar=08:15/)
     assert.match(timer, /OnCalendar=21:45/)
     assert.doesNotMatch(timer, /OnCalendar=09:00/)
@@ -156,4 +173,8 @@ function createHarness(platform) {
 
 function commandLine(call) {
   return [call.command, ...call.args].join(' ')
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')
 }

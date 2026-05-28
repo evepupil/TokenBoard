@@ -1,5 +1,6 @@
 import { ApiError } from '../../lib/errors'
 import { randomId, randomToken, sha256Hex } from '../../lib/crypto'
+import { defaultTimezone, parseTimezone } from '../../lib/timezone'
 import type { DevicePairRequest } from './schema'
 
 export type PairingCodeRecord = {
@@ -202,6 +203,11 @@ export async function pairDevice(
   request: DevicePairRequest,
   deps: PairDeviceDeps
 ) {
+  const timezone = request.timezone ? parseTimezone(request.timezone) : defaultTimezone
+  if (!timezone) {
+    throw new ApiError('BAD_REQUEST', 'Invalid timezone', 400)
+  }
+
   const now = deps.now()
   const pairingCodeHash = await deps.hash(request.pairingCode)
   const pairingCode = await repository.findUsablePairingCode(pairingCodeHash, now)
@@ -233,6 +239,6 @@ export async function pairDevice(
     endpoint: deps.endpoint,
     uploadToken,
     deviceId,
-    timezone: request.timezone ?? 'UTC'
+    timezone
   }
 }

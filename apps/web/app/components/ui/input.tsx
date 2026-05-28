@@ -9,6 +9,9 @@ export function Input(props: {
   autocomplete?: string
   required?: boolean
   minLength?: number
+  'data-timezone-input'?: string
+  'data-timezone-default'?: string
+  'data-timezone-autofill'?: string
 }) {
   const { class: className, ...rest } = props
   return <input class={cn('mt-2 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-4 py-3 text-[var(--app-text)] outline-none transition placeholder:text-[var(--app-subtle)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20', className)} {...rest} />

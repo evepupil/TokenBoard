@@ -4,11 +4,17 @@ import { fileURLToPath } from 'node:url'
 import { hostname, platform } from 'node:os'
 import { parseArgs, readPackageManager, writeConfig } from './config.mjs'
 import { dailyScheduleTimes, parseScheduleTimes } from './schedule.mjs'
-import { buildInitialSyncArgs, buildInstallCollectorArgs } from './setup-options.mjs'
+import {
+  buildInitialSyncArgs,
+  buildInstallCollectorArgs,
+  buildWarmHookCursorArgs,
+  readSetupBaseUrl,
+  shouldWarmHookCursorsBeforeInstall
+} from './setup-options.mjs'
 
 const flags = parseArgs(process.argv.slice(2))
 const pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
-const baseUrl = String(flags['base-url'] || process.env.TOKENBOARD_BASE_URL || 'https://tokenboard.chaosyn.com').replace(/\/$/, '')
+const baseUrl = readSetupBaseUrl({ flags })
 const timezone = flags.timezone || process.env.TOKENBOARD_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone
 const deviceName = flags['device-name'] || `${hostname()} ${platform()}`
 const packageManager = readPackageManager(flags)
@@ -16,6 +22,10 @@ const scheduleTimes = parseScheduleTimes(flags['schedule-times'] || process.env.
 
 if (!pairingCode) {
   console.error('Missing --pairing-code')
+  process.exit(1)
+}
+if (!baseUrl) {
+  console.error('Missing --base-url or TOKENBOARD_BASE_URL')
   process.exit(1)
 }
 
@@ -90,4 +100,27 @@ if (!flags['skip-initial-sync']) {
     }
   )
   if (sync.status !== 0) process.exit(sync.status ?? 1)
+}
+
+if (shouldWarmHookCursorsBeforeInstall(flags)) {
+  const warm = spawnSync(
+    process.execPath,
+    [
+      scriptPath('./sync.mjs'),
+      ...buildWarmHookCursorArgs({ packageManager })
+    ],
+    {
+      stdio: 'inherit'
+    }
+  )
+  if (warm.status !== 0) process.exit(warm.status ?? 1)
+}
+
+if (!flags['skip-hook']) {
+  const hook = spawnSync(process.execPath, [
+    scriptPath('./install-hook.mjs')
+  ], {
+    stdio: 'inherit'
+  })
+  if (hook.status !== 0) process.exit(hook.status ?? 1)
 }

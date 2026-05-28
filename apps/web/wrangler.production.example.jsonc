@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tokenboard",
+  "main": "./dist/index.js",
+  "compatibility_date": "2026-04-28",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./dist"
+  },
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "<your-tokenboard-domain>",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://<your-tokenboard-domain>"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tokenboard",
+      "database_id": "<your-d1-database-id>",
+      "migrations_dir": "db/migrations"
+    }
+  ]
+}

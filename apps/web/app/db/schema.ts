@@ -58,12 +58,14 @@ export const profiles = sqliteTable('profiles', {
   slug: text('slug').notNull().unique(),
   displayName: text('display_name').notNull(),
   timezone: text('timezone').notNull().default('UTC'),
-  isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(true),
+  timezoneSource: text('timezone_source').notNull().default('default'),
+  publicCardConfig: text('public_card_config'),
+  isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
   participatesInLeaderboards: integer('participates_in_leaderboards', {
     mode: 'boolean'
   })
     .notNull()
-    .default(true),
+    .default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
 })

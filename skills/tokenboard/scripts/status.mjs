@@ -2,8 +2,9 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { configPath, readConfig } from './config.mjs'
+import { hookStatus } from './hooks.mjs'
 
-export function buildStatus({ configPath, config }) {
+export function buildStatus({ configPath, config, hooks = hookStatus() }) {
   return {
     configured: true,
     configPath,
@@ -13,7 +14,8 @@ export function buildStatus({ configPath, config }) {
     source: config.source,
     packageManager: config.packageManager || 'pnpm',
     collectorDir: config.collectorDir,
-    scheduleTimes: Array.isArray(config.scheduleTimes) ? config.scheduleTimes : []
+    scheduleTimes: Array.isArray(config.scheduleTimes) ? config.scheduleTimes : [],
+    hooks
   }
 }
 

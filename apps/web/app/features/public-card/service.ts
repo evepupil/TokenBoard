@@ -3,6 +3,7 @@ import { ApiError } from '../../lib/errors'
 import { toIsoDate } from '../../lib/time'
 import { canShowPublicProfile } from '../settings/service'
 import { dedupedDailyUsageCte } from '../usage/deduped-daily-usage'
+import { parsePublicCardConfig, type PublicCardConfig } from './config'
 import { renderUsageCardSvg } from './svg'
 
 export type PublicUsageProfile = {
@@ -15,6 +16,7 @@ export type PublicUsageProfile = {
   todayCostUsd: number
   monthTokens: number
   monthCostUsd: number
+  publicCardConfig: PublicCardConfig
   sourceSplit: Array<{ source: UsageSource; totalTokens: number }>
   topModels: Array<{ model: string; totalTokens: number; costUsd: number }>
 }
@@ -25,6 +27,7 @@ type ProfileRow = {
   displayName: string
   timezone: string
   isPublic: number | boolean
+  publicCardConfig?: string | null
 }
 
 type TotalsRow = {
@@ -49,6 +52,7 @@ export async function getPublicUsageProfile(
           slug,
           display_name as displayName,
           timezone,
+          public_card_config as publicCardConfig,
           is_public as isPublic
         FROM profiles
         WHERE slug = ?
@@ -78,6 +82,7 @@ export async function getPublicUsageProfile(
     todayCostUsd: Number(totals?.todayCostUsd ?? 0),
     monthTokens: Number(totals?.monthTokens ?? 0),
     monthCostUsd: Number(totals?.monthCostUsd ?? 0),
+    publicCardConfig: parsePublicCardConfig(profile.publicCardConfig),
     sourceSplit,
     topModels
   }
@@ -106,20 +111,29 @@ export async function getPublicUsageJson(db: D1Database, slug: string, now = new
   }
 }
 
-export async function getPublicUsageCard(db: D1Database, slug: string, now = new Date()) {
+export async function getPublicUsageCard(
+  db: D1Database,
+  slug: string,
+  now = new Date(),
+  publicUrl = 'TokenBoard'
+) {
   const profile = await getPublicUsageProfile(db, slug, now)
   return renderUsageCardSvg({
     displayName: profile.displayName,
+    publicUrl,
     totalTokens: profile.totalTokens,
     totalCostUsd: profile.totalCostUsd,
     monthTokens: profile.monthTokens,
-    monthCostUsd: profile.monthCostUsd
-  })
+    monthCostUsd: profile.monthCostUsd,
+    todayTokens: profile.todayTokens,
+    todayCostUsd: profile.todayCostUsd
+  }, profile.publicCardConfig)
 }
 
 export function getEmptyPublicCard() {
   return renderUsageCardSvg({
     displayName: 'TokenBoard',
+    publicUrl: 'TokenBoard',
     totalTokens: 0,
     totalCostUsd: 0,
     monthTokens: 0,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildUpgradePlan, resolveArchiveUrl, resolveRepoUrl } from './upgrade.mjs'
+import { buildUpgradePlan, resolveArchiveUrl, resolveRepoUrl, runUpgrade } from './upgrade.mjs'
 
 test('updates collector and installed skill from the collector checkout', () => {
   assert.deepEqual(
@@ -29,6 +29,37 @@ test('updates collector and installed skill from the collector checkout', () => 
         command: 'copy',
         args: ['/home/user/.tokenboard/TokenBoard/skills/tokenboard', '/home/user/.codex/skills/tokenboard'],
         options: { recursive: true, force: true }
+      },
+      {
+        command: 'corepack',
+        args: ['pnpm', 'install', '--frozen-lockfile'],
+        options: { cwd: '/home/user/.tokenboard/TokenBoard' }
+      }
+    ]
+  )
+})
+
+test('does not copy the installed skill onto itself', () => {
+  assert.deepEqual(
+    buildUpgradePlan({
+      collectorDir: '/home/user/.tokenboard/TokenBoard',
+      skillDir: '/home/user/.tokenboard/TokenBoard/skills/tokenboard',
+      repoUrl: 'https://github.com/example/TokenBoard.git',
+      packageManager: 'pnpm',
+      collectorExists: true,
+      collectorIsGitRepo: true,
+      platform: 'linux'
+    }),
+    [
+      {
+        command: 'git',
+        args: ['remote', 'set-url', 'origin', 'https://github.com/example/TokenBoard.git'],
+        options: { cwd: '/home/user/.tokenboard/TokenBoard' }
+      },
+      {
+        command: 'git',
+        args: ['pull', '--ff-only'],
+        options: { cwd: '/home/user/.tokenboard/TokenBoard' }
       },
       {
         command: 'corepack',
@@ -68,6 +99,44 @@ test('clones collector before installing skill when collector is missing', () =>
         options: { cwd: '/home/user/.tokenboard/TokenBoard' }
       }
     ]
+  )
+})
+
+test('does not archive-replace an existing git checkout after git upgrade fails', () => {
+  const calls = []
+  assert.throws(
+    () => runUpgrade({
+      flags: {},
+      env: {
+        TOKENBOARD_CONFIG_DIR: '/home/user/.tokenboard',
+        TOKENBOARD_COLLECTOR_DIR: '/home/user/.tokenboard/TokenBoard'
+      },
+      readConfigFile: () => ({
+        collectorDir: '/home/user/.tokenboard/TokenBoard',
+        repoUrl: 'https://github.com/example/TokenBoard.git',
+        packageManager: 'pnpm'
+      }),
+      mergeConfigFile: (...args) => calls.push({ command: 'mergeConfig', args }),
+      configDirectory: '/home/user/.tokenboard',
+      exists: (path) =>
+        path === '/home/user/.tokenboard/TokenBoard' ||
+        path === '/home/user/.tokenboard/TokenBoard/.git',
+      spawn: (command, args) => {
+        calls.push({ command, args })
+        return { status: command === 'git' && args[0] === 'pull' ? 1 : 0 }
+      },
+      copy: (...args) => calls.push({ command: 'copy', args }),
+      mkdir: (...args) => calls.push({ command: 'mkdir', args }),
+      readDir: () => [],
+      remove: (...args) => calls.push({ command: 'remove', args }),
+      log: () => {}
+    }),
+    /git failed with exit code 1/
+  )
+
+  assert.deepEqual(
+    calls.map((call) => call.command),
+    ['git', 'git']
   )
 })
 

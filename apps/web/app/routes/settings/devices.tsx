@@ -15,20 +15,16 @@ import {
 import { jsonError } from '../../lib/http'
 
 export const GET = createRoute(async (c) => {
-  try {
-    const user = await requireUser(c)
-    const devices = await listUserDevices(c.env.DB, user.id)
-    return c.render(
-      <DevicesPage
-        devices={devices}
-        email={user.email}
-        saved={c.req.query('saved') === '1'}
-        revoked={c.req.query('revoked') === '1'}
-      />
-    )
-  } catch (error) {
-    return jsonError(c, error)
-  }
+  const user = await requireUser(c)
+  const devices = await listUserDevices(c.env.DB, user.id)
+  return c.render(
+    <DevicesPage
+      devices={devices}
+      email={user.email}
+      saved={c.req.query('saved') === '1'}
+      revoked={c.req.query('revoked') === '1'}
+    />
+  )
 })
 
 export const POST = createRoute(async (c) => {
@@ -73,90 +69,135 @@ function DevicesPage(props: {
       <AppNav active="devices" email={props.email} />
 
       <section class="mx-auto flex max-w-6xl flex-col gap-5">
-        <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
-          <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p class="text-sm font-black uppercase tracking-[0.24em] text-lime-300">Devices</p>
-              <h1 class="mt-3 text-4xl font-black tracking-tight">设备管理</h1>
-              <p class="mt-2 text-sm text-[var(--app-muted)]">
-                查看采集器设备、同步状态，并停用不再使用的上传 token。
-              </p>
-            </div>
-            <LinkButton href="/settings/install">连接新设备</LinkButton>
-          </div>
-        </header>
-
-        {props.saved ? (
-          <p class="rounded-md border border-lime-300/30 bg-lime-300/10 p-3 text-sm text-lime-100">设备名称已更新。</p>
-        ) : null}
-        {props.revoked ? (
-          <p class="rounded-md border border-lime-300/30 bg-lime-300/10 p-3 text-sm text-lime-100">设备 token 已停用。</p>
-        ) : null}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>已连接设备</CardTitle>
-            <CardDescription>停用设备只会阻止后续上传，历史用量会继续保留。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {props.devices.length > 0 ? (
-              <div class="overflow-x-auto">
-                <Table class="min-w-[900px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>设备</TableHead>
-                      <TableHead>Platform</TableHead>
-                      <TableHead>最近同步</TableHead>
-                      <TableHead>创建时间</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {props.devices.map((device) => (
-                      <TableRow>
-                        <TableCell class="min-w-64">
-                          <form method="post" class="flex items-center gap-2">
-                            <input type="hidden" name="action" value="rename" />
-                            <input type="hidden" name="deviceId" value={device.id} />
-                            <Input class="mt-0 h-10 py-2" name="name" value={device.name} required minLength={1} />
-                            <Button type="submit" variant="secondary" size="sm">保存</Button>
-                          </form>
-                        </TableCell>
-                        <TableCell>{device.platform}</TableCell>
-                        <TableCell>{device.lastSyncedAt ?? '从未同步'}</TableCell>
-                        <TableCell>{device.createdAt}</TableCell>
-                        <TableCell>
-                          <DeviceStatus device={device} />
-                        </TableCell>
-                        <TableCell>
-                          <form method="post">
-                            <input type="hidden" name="action" value="revoke" />
-                            <input type="hidden" name="deviceId" value={device.id} />
-                            <Button
-                              type="submit"
-                              variant="destructive"
-                              size="sm"
-                              disabled={device.activeTokenCount <= 0}
-                            >
-                              停用
-                            </Button>
-                          </form>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <div class="rounded-xl border border-dashed border-[var(--app-border)] p-6 text-sm text-[var(--app-muted)]">
-                还没有连接设备。
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <DevicesHeader />
+        <DevicePageFlash saved={props.saved} revoked={props.revoked} />
+        <DevicesCard devices={props.devices} />
       </section>
     </main>
+  )
+}
+
+function DevicesHeader() {
+  return (
+    <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+      <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p class="text-sm font-black uppercase tracking-[0.24em] text-lime-300">Devices</p>
+          <h1 class="mt-3 text-4xl font-black tracking-tight">设备管理</h1>
+          <p class="mt-2 text-sm text-[var(--app-muted)]">
+            查看采集器设备、同步状态，并停用不再使用的上传 token。
+          </p>
+        </div>
+        <LinkButton href="/settings/install">连接新设备</LinkButton>
+      </div>
+    </header>
+  )
+}
+
+function DevicePageFlash(props: { saved: boolean; revoked: boolean }) {
+  return (
+    <>
+      {props.saved ? (
+        <p class="rounded-md border border-lime-300/30 bg-lime-300/10 p-3 text-sm text-lime-100">设备名称已更新。</p>
+      ) : null}
+      {props.revoked ? (
+        <p class="rounded-md border border-lime-300/30 bg-lime-300/10 p-3 text-sm text-lime-100">设备 token 已停用。</p>
+      ) : null}
+    </>
+  )
+}
+
+function DevicesCard(props: { devices: UserDevice[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>已连接设备</CardTitle>
+        <CardDescription>停用设备只会阻止后续上传，历史用量会继续保留。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {props.devices.length > 0 ? <DevicesTable devices={props.devices} /> : <DevicesEmptyState />}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DevicesTable(props: { devices: UserDevice[] }) {
+  return (
+    <div class="overflow-x-auto">
+      <Table class="min-w-[900px]">
+        <DevicesTableHeader />
+        <TableBody>
+          {props.devices.map((device) => (
+            <DeviceRow device={device} />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function DevicesTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead>设备</TableHead>
+        <TableHead>Platform</TableHead>
+        <TableHead>最近同步</TableHead>
+        <TableHead>创建时间</TableHead>
+        <TableHead>状态</TableHead>
+        <TableHead>操作</TableHead>
+      </TableRow>
+    </TableHeader>
+  )
+}
+
+function DeviceRow(props: { device: UserDevice }) {
+  return (
+    <TableRow>
+      <TableCell class="min-w-64">
+        <DeviceRenameForm device={props.device} />
+      </TableCell>
+      <TableCell>{props.device.platform}</TableCell>
+      <TableCell>{props.device.lastSyncedAt ?? '从未同步'}</TableCell>
+      <TableCell>{props.device.createdAt}</TableCell>
+      <TableCell>
+        <DeviceStatus device={props.device} />
+      </TableCell>
+      <TableCell>
+        <DeviceRevokeForm device={props.device} />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function DeviceRenameForm(props: { device: UserDevice }) {
+  return (
+    <form method="post" class="flex items-center gap-2">
+      <input type="hidden" name="action" value="rename" />
+      <input type="hidden" name="deviceId" value={props.device.id} />
+      <Input class="mt-0 h-10 py-2" name="name" value={props.device.name} required minLength={1} />
+      <Button type="submit" variant="secondary" size="sm">保存</Button>
+    </form>
+  )
+}
+
+function DeviceRevokeForm(props: { device: UserDevice }) {
+  return (
+    <form method="post">
+      <input type="hidden" name="action" value="revoke" />
+      <input type="hidden" name="deviceId" value={props.device.id} />
+      <Button type="submit" variant="destructive" size="sm" disabled={props.device.activeTokenCount <= 0}>
+        停用
+      </Button>
+    </form>
+  )
+}
+
+function DevicesEmptyState() {
+  return (
+    <div class="rounded-xl border border-dashed border-[var(--app-border)] p-6 text-sm text-[var(--app-muted)]">
+      还没有连接设备。
+    </div>
   )
 }
 

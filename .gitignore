@@ -5,8 +5,9 @@ dist/
 .env
 .env.*
 !.env.example
+apps/web/wrangler.*.jsonc
+!apps/web/wrangler.production.example.jsonc
 *.local
 *.log
 coverage/
 .turbo/
-

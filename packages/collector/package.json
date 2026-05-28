@@ -16,7 +16,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@tokenboard/usage-core": "workspace:*"
+    "@tokenboard/usage-core": "workspace:*",
+    "ccusage": "^20.0.3"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

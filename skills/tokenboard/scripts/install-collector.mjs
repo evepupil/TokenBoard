@@ -45,7 +45,6 @@ export function buildInstallCollectorPlan({ dir, repoUrl, packageManager, exists
     args: ['pnpm', 'install', '--frozen-lockfile'],
     options: { cwd: dir }
   })
-
   return steps
 }
 

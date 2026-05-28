@@ -61,11 +61,17 @@ input[type='radio'],
 input[type='date'],
 input[type='time'],
 input[type='datetime-local'],
-input[type='file'],
-label:has(input[type='checkbox']),
-label:has(input[type='radio']) {
+input[type='file'] {
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
+}
+
+@supports selector(label:has(input)) {
+  label:has(input[type='checkbox']),
+  label:has(input[type='radio']) {
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+  }
 }
 
 button {
@@ -113,10 +119,15 @@ a[aria-disabled='true'],
 [role='tab'][aria-disabled='true'],
 select:disabled,
 input:disabled,
-label:has(input:disabled),
 button[data-copy-target]:disabled,
 button[data-copy-target][aria-disabled='true'] {
   cursor: not-allowed;
+}
+
+@supports selector(label:has(input)) {
+  label:has(input:disabled) {
+    cursor: not-allowed;
+  }
 }
 
 .app-toast-viewport {

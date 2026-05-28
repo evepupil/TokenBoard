@@ -12,6 +12,7 @@ export function buildWindowsTaskArgs({
   packageManager = 'pnpm',
   pathEnv = 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
   homeDir = '',
+  configDir,
   taskCommand,
   taskName = windowsTaskName(dailyScheduleTimes[0]),
   startTime = dailyScheduleTimes[0]
@@ -21,7 +22,8 @@ export function buildWindowsTaskArgs({
     scriptPath,
     packageManager,
     pathEnv,
-    homeDir
+    homeDir,
+    configDir
   })
   return [
     '/Create',
@@ -43,6 +45,7 @@ export function buildWindowsTaskDefinitions({
   packageManager = 'pnpm',
   pathEnv = 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
   homeDir = '',
+  configDir,
   taskCommand,
   scheduleTimes = dailyScheduleTimes
 }) {
@@ -54,6 +57,7 @@ export function buildWindowsTaskDefinitions({
       packageManager,
       pathEnv,
       homeDir,
+      configDir,
       taskCommand,
       taskName: windowsTaskName(startTime),
       startTime
@@ -61,12 +65,14 @@ export function buildWindowsTaskDefinitions({
   }))
 }
 
-export function buildWindowsTaskScript({ nodePath, scriptPath, packageManager, pathEnv, homeDir }) {
+export function buildWindowsTaskScript({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir }) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath, delimiter: ';' })
-  const logDir = joinForDelimiter(homeDir, '.tokenboard', 'logs', ';')
+  const stateDir = configDir || tokenboardDirForDelimiter(homeDir, ';')
+  const logDir = joinForDelimiter(stateDir, 'logs', '', ';').replace(/[\\/]$/, '')
   const syncCommand = `${quoteWindowsArg(nodePath)} ${quoteWindowsArg(scriptPath)} --mode sync --source all --scheduled`
   return [
     '@echo off',
+    `set "TOKENBOARD_CONFIG_DIR=${escapeWindowsCmdValue(stateDir)}"`,
     `set "TOKENBOARD_PACKAGE_MANAGER=${escapeWindowsCmdValue(packageManager)}"`,
     'set "TOKENBOARD_SCHEDULED_SYNC=1"',
     `set "TOKENBOARD_LOG_DIR=${escapeWindowsCmdValue(logDir)}"`,
@@ -76,11 +82,13 @@ export function buildWindowsTaskScript({ nodePath, scriptPath, packageManager, p
   ].join('\r\n')
 }
 
-export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, pathEnv, homeDir }) {
+export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir }) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath, delimiter: ';' })
-  const logDir = joinForDelimiter(homeDir, '.tokenboard', 'logs', ';')
+  const stateDir = configDir || tokenboardDirForDelimiter(homeDir, ';')
+  const logDir = joinForDelimiter(stateDir, 'logs', '', ';').replace(/[\\/]$/, '')
   const syncCommand = `${quoteWindowsArg(nodePath)} ${quoteWindowsArg(scriptPath)} --mode sync --source all --scheduled`
   const command = [
+    `set "TOKENBOARD_CONFIG_DIR=${escapeWindowsCmdValue(stateDir)}"`,
     `set "TOKENBOARD_PACKAGE_MANAGER=${escapeWindowsCmdValue(packageManager)}"`,
     'set "TOKENBOARD_SCHEDULED_SYNC=1"',
     `set "TOKENBOARD_LOG_DIR=${escapeWindowsCmdValue(logDir)}"`,
@@ -91,45 +99,17 @@ export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, 
   return `cmd.exe /d /s /c ${quoteWindowsArg(command)}`
 }
 
-export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager, pathEnv, homeDir, logDir, scheduleTimes = dailyScheduleTimes }) {
+export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir, logDir, scheduleTimes = dailyScheduleTimes }) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath })
-  const intervals = scheduleTimes.map((time) => {
-    const [hour, minute] = parseScheduleTime(time)
-    return `\t\t<dict>
-\t\t\t<key>Hour</key>
-\t\t\t<integer>${hour}</integer>
-\t\t\t<key>Minute</key>
-\t\t\t<integer>${minute}</integer>
-\t\t</dict>`
-  }).join('\n')
-
+  const stateDir = configDir || `${homeDir.replace(/\/$/, '')}/.tokenboard`
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-\t<key>EnvironmentVariables</key>
-\t<dict>
-\t\t<key>PATH</key>
-\t\t<string>${escapeXml(normalizedPath)}</string>
-\t\t<key>TOKENBOARD_PACKAGE_MANAGER</key>
-\t\t<string>${escapeXml(packageManager)}</string>
-\t\t<key>TOKENBOARD_SCHEDULED_SYNC</key>
-\t\t<string>1</string>
-\t\t<key>TOKENBOARD_LOG_DIR</key>
-\t\t<string>${escapeXml(logDir)}</string>
-\t</dict>
+${buildMacEnvironment({ normalizedPath, stateDir, packageManager, logDir })}
 \t<key>Label</key>
 \t<string>${launchAgentLabel}</string>
-\t<key>ProgramArguments</key>
-\t<array>
-\t\t<string>${escapeXml(nodePath)}</string>
-\t\t<string>${escapeXml(scriptPath)}</string>
-\t\t<string>--mode</string>
-\t\t<string>sync</string>
-\t\t<string>--source</string>
-\t\t<string>all</string>
-\t\t<string>--scheduled</string>
-\t</array>
+${buildMacProgramArguments({ nodePath, scriptPath })}
 \t<key>RunAtLoad</key>
 \t<false/>
 \t<key>StandardErrorPath</key>
@@ -138,15 +118,57 @@ export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager,
 \t<string>${escapeXml(`${logDir}/daily-sync.out.log`)}</string>
 \t<key>StartCalendarInterval</key>
 \t<array>
-${intervals}
+${buildMacCalendarIntervals(scheduleTimes)}
 \t</array>
 </dict>
 </plist>
 `
 }
 
-export function buildLinuxSystemdUnits({ nodePath, scriptPath, packageManager, pathEnv, homeDir, timezone, scheduleTimes = dailyScheduleTimes }) {
+function buildMacEnvironment({ normalizedPath, stateDir, packageManager, logDir }) {
+  return `\t<key>EnvironmentVariables</key>
+\t<dict>
+\t\t<key>PATH</key>
+\t\t<string>${escapeXml(normalizedPath)}</string>
+\t\t<key>TOKENBOARD_CONFIG_DIR</key>
+\t\t<string>${escapeXml(stateDir)}</string>
+\t\t<key>TOKENBOARD_PACKAGE_MANAGER</key>
+\t\t<string>${escapeXml(packageManager)}</string>
+\t\t<key>TOKENBOARD_SCHEDULED_SYNC</key>
+\t\t<string>1</string>
+\t\t<key>TOKENBOARD_LOG_DIR</key>
+\t\t<string>${escapeXml(logDir)}</string>
+\t</dict>`
+}
+
+function buildMacProgramArguments({ nodePath, scriptPath }) {
+  return `\t<key>ProgramArguments</key>
+\t<array>
+\t\t<string>${escapeXml(nodePath)}</string>
+\t\t<string>${escapeXml(scriptPath)}</string>
+\t\t<string>--mode</string>
+\t\t<string>sync</string>
+\t\t<string>--source</string>
+\t\t<string>all</string>
+\t\t<string>--scheduled</string>
+\t</array>`
+}
+
+function buildMacCalendarIntervals(scheduleTimes) {
+  return scheduleTimes.map((time) => {
+    const [hour, minute] = parseScheduleTime(time)
+    return `\t\t<dict>
+\t\t\t<key>Hour</key>
+\t\t\t<integer>${hour}</integer>
+\t\t\t<key>Minute</key>
+\t\t\t<integer>${minute}</integer>
+\t\t</dict>`
+  }).join('\n')
+}
+
+export function buildLinuxSystemdUnits({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir, timezone, scheduleTimes = dailyScheduleTimes }) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath })
+  const stateDir = configDir || `${homeDir.replace(/\/$/, '')}/.tokenboard`
   const timezoneSuffix = typeof timezone === 'string' && timezone.length > 0 ? ` ${timezone}` : ''
   return {
     service: `[Unit]
@@ -154,11 +176,12 @@ Description=TokenBoard daily sync
 
 [Service]
 Type=oneshot
-Environment=TOKENBOARD_PACKAGE_MANAGER=${packageManager}
-Environment=TOKENBOARD_SCHEDULED_SYNC=1
-Environment=TOKENBOARD_LOG_DIR=${joinForDelimiter(homeDir, '.tokenboard', 'logs', ':')}
-Environment=PATH=${normalizedPath}
-ExecStart=${nodePath} ${scriptPath} --mode sync --source all --scheduled
+Environment=${quoteSystemdValue(`TOKENBOARD_CONFIG_DIR=${stateDir}`)}
+Environment=${quoteSystemdValue(`TOKENBOARD_PACKAGE_MANAGER=${packageManager}`)}
+Environment=${quoteSystemdValue('TOKENBOARD_SCHEDULED_SYNC=1')}
+Environment=${quoteSystemdValue(`TOKENBOARD_LOG_DIR=${stateDir}/logs`)}
+Environment=${quoteSystemdValue(`PATH=${normalizedPath}`)}
+ExecStart=${quoteSystemdArg(nodePath)} ${quoteSystemdArg(scriptPath)} --mode sync --source all --scheduled
 `,
     timer: `[Unit]
 Description=Run TokenBoard daily sync
@@ -211,6 +234,14 @@ function escapeXml(value) {
     .replaceAll("'", '&apos;')
 }
 
+function quoteSystemdValue(value) {
+  return `"${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"`
+}
+
+function quoteSystemdArg(value) {
+  return quoteSystemdValue(value)
+}
+
 export function normalizePathEnv({ pathEnv, homeDir, nodePath, delimiter = ':' }) {
   const paths = pathEnv.split(delimiter).filter(Boolean)
   prependOnce(paths, dirnameForDelimiter(nodePath, delimiter))
@@ -241,12 +272,18 @@ function joinForDelimiter(base, first, second, delimiter) {
   return [base.replace(/[\\/]$/, ''), first, second].join(separator)
 }
 
+function tokenboardDirForDelimiter(homeDir, delimiter) {
+  const separator = delimiter === ';' ? '\\' : '/'
+  return [homeDir.replace(/[\\/]$/, ''), '.tokenboard'].join(separator)
+}
+
 function quoteWindowsArg(value) {
   return `"${String(value)}"`
 }
 
 function escapeWindowsCmdValue(value) {
   return String(value)
+    .replaceAll('%', '%%')
     .replaceAll('^', '^^')
     .replaceAll('&', '^&')
     .replaceAll('|', '^|')

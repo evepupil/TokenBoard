@@ -13,7 +13,7 @@ import {
 test('builds the Windows scheduled task shape with time-suffixed names', () => {
   const args = buildWindowsTaskArgs({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
   })
 
   assert.deepEqual(args.slice(0, 7), [
@@ -36,7 +36,7 @@ test('builds the Windows scheduled task shape with time-suffixed names', () => {
 test('builds Windows scheduled task definitions for every daily sync time', () => {
   const tasks = buildWindowsTaskDefinitions({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
   })
 
   assert.deepEqual(
@@ -52,19 +52,19 @@ test('builds Windows scheduled task definitions for every daily sync time', () =
 test('builds macOS LaunchAgent plist for every daily sync time', () => {
   const plist = buildMacLaunchAgentPlist({
     nodePath: '/opt/homebrew/bin/node',
-    scriptPath: '/Users/mison/.tokenboard/TokenBoard/skills/tokenboard/scripts/sync.mjs',
+    scriptPath: '/Users/tokenboard/.tokenboard/TokenBoard/skills/tokenboard/scripts/sync.mjs',
     packageManager: 'pnpm',
     pathEnv: '/usr/bin:/bin',
-    homeDir: '/Users/mison',
-    logDir: '/Users/mison/.tokenboard/logs'
+    homeDir: '/Users/tokenboard',
+    logDir: '/Users/tokenboard/.tokenboard/logs'
   })
 
   assert.match(plist, /<string>com\.tokenboard\.daily-sync<\/string>/)
   assert.match(plist, /<string>pnpm<\/string>/)
   assert.match(plist, /<key>TOKENBOARD_SCHEDULED_SYNC<\/key>\s+<string>1<\/string>/)
-  assert.match(plist, /<key>TOKENBOARD_LOG_DIR<\/key>\s+<string>\/Users\/mison\/.tokenboard\/logs<\/string>/)
-  assert.match(plist, /<string>\/Users\/mison\/.tokenboard\/logs\/daily-sync\.out\.log<\/string>/)
-  assert.match(plist, /<string>\/Users\/mison\/.tokenboard\/logs\/daily-sync\.err\.log<\/string>/)
+  assert.match(plist, /<key>TOKENBOARD_LOG_DIR<\/key>\s+<string>\/Users\/tokenboard\/.tokenboard\/logs<\/string>/)
+  assert.match(plist, /<string>\/Users\/tokenboard\/.tokenboard\/logs\/daily-sync\.out\.log<\/string>/)
+  assert.match(plist, /<string>\/Users\/tokenboard\/.tokenboard\/logs\/daily-sync\.err\.log<\/string>/)
   assert.match(plist, /<string>--scheduled<\/string>/)
   assert.equal([...plist.matchAll(/<key>Hour<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','), '9,12,18,23')
   assert.equal([...plist.matchAll(/<key>Minute<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','), '0,0,0,0')
@@ -86,11 +86,11 @@ test('builds Linux user systemd units with pnpm available in PATH', () => {
     homeDir: '/home/tokenboard'
   })
 
-  assert.match(units.service, /Environment=TOKENBOARD_PACKAGE_MANAGER=pnpm/)
-  assert.match(units.service, /Environment=TOKENBOARD_SCHEDULED_SYNC=1/)
-  assert.match(units.service, /Environment=TOKENBOARD_LOG_DIR=\/home\/tokenboard\/.tokenboard\/logs/)
-  assert.match(units.service, /Environment=PATH=\/home\/tokenboard\/.bun\/bin:\/home\/tokenboard\/.local\/bin:\/usr\/bin:\/bin/)
-  assert.match(units.service, /ExecStart=\/usr\/bin\/node \/home\/tokenboard\/.tokenboard\/TokenBoard\/skills\/tokenboard\/scripts\/sync.mjs --mode sync --source all --scheduled/)
+  assert.match(units.service, /Environment="TOKENBOARD_PACKAGE_MANAGER=pnpm"/)
+  assert.match(units.service, /Environment="TOKENBOARD_SCHEDULED_SYNC=1"/)
+  assert.match(units.service, /Environment="TOKENBOARD_LOG_DIR=\/home\/tokenboard\/.tokenboard\/logs"/)
+  assert.match(units.service, /Environment="PATH=\/home\/tokenboard\/.bun\/bin:\/home\/tokenboard\/.local\/bin:\/usr\/bin:\/bin"/)
+  assert.match(units.service, /ExecStart="\/usr\/bin\/node" "\/home\/tokenboard\/.tokenboard\/TokenBoard\/skills\/tokenboard\/scripts\/sync.mjs" --mode sync --source all --scheduled/)
   assert.match(units.timer, /OnCalendar=09:00/)
   assert.match(units.timer, /OnCalendar=12:00/)
   assert.match(units.timer, /OnCalendar=18:00/)
@@ -117,16 +117,16 @@ test('builds schedules with custom daily sync times', () => {
   const scheduleTimes = parseScheduleTimes('08:15,21:45')
   const windowsTasks = buildWindowsTaskDefinitions({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
     scheduleTimes
   })
   const macPlist = buildMacLaunchAgentPlist({
     nodePath: '/opt/homebrew/bin/node',
-    scriptPath: '/Users/mison/.tokenboard/TokenBoard/skills/tokenboard/scripts/sync.mjs',
+    scriptPath: '/Users/tokenboard/.tokenboard/TokenBoard/skills/tokenboard/scripts/sync.mjs',
     packageManager: 'pnpm',
     pathEnv: '/usr/bin:/bin',
-    homeDir: '/Users/mison',
-    logDir: '/Users/mison/.tokenboard/logs',
+    homeDir: '/Users/tokenboard',
+    logDir: '/Users/tokenboard/.tokenboard/logs',
     scheduleTimes
   })
   const linuxUnits = buildLinuxSystemdUnits({
@@ -146,6 +146,94 @@ test('builds schedules with custom daily sync times', () => {
   assert.match(linuxUnits.timer, /OnCalendar=08:15/)
   assert.match(linuxUnits.timer, /OnCalendar=21:45/)
   assert.doesNotMatch(linuxUnits.timer, /OnCalendar=09:00/)
+})
+
+test('scheduled commands preserve a custom TokenBoard config directory', () => {
+  const windowsScript = buildWindowsTaskScript({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    scriptPath: 'C:\\TokenBoard\\sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+    homeDir: 'C:\\Users\\tokenboard',
+    configDir: 'D:\\TokenBoardState'
+  })
+  const macPlist = buildMacLaunchAgentPlist({
+    nodePath: '/opt/homebrew/bin/node',
+    scriptPath: '/repo/sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: '/usr/bin:/bin',
+    homeDir: '/Users/tokenboard',
+    configDir: '/Volumes/Data/tokenboard',
+    logDir: '/Volumes/Data/tokenboard/logs'
+  })
+  const linuxUnits = buildLinuxSystemdUnits({
+    nodePath: '/usr/bin/node',
+    scriptPath: '/repo/sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: '/usr/bin:/bin',
+    homeDir: '/home/tokenboard',
+    configDir: '/srv/tokenboard'
+  })
+
+  assert.match(windowsScript, /set "TOKENBOARD_CONFIG_DIR=D:\\TokenBoardState"/)
+  assert.match(macPlist, /<key>TOKENBOARD_CONFIG_DIR<\/key>\s+<string>\/Volumes\/Data\/tokenboard<\/string>/)
+  assert.match(linuxUnits.service, /Environment="TOKENBOARD_CONFIG_DIR=\/srv\/tokenboard"/)
+})
+
+test('Linux systemd units quote paths that contain spaces', () => {
+  const units = buildLinuxSystemdUnits({
+    nodePath: '/opt/Node Runtime/bin/node',
+    scriptPath: '/srv/TokenBoard State/TokenBoard/skills/tokenboard/scripts/sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: '/usr/bin:/bin',
+    homeDir: '/home/tokenboard',
+    configDir: '/srv/TokenBoard State'
+  })
+
+  assert.match(units.service, /Environment="TOKENBOARD_CONFIG_DIR=\/srv\/TokenBoard State"/)
+  assert.match(units.service, /Environment="TOKENBOARD_LOG_DIR=\/srv\/TokenBoard State\/logs"/)
+  assert.match(
+    units.service,
+    /ExecStart="\/opt\/Node Runtime\/bin\/node" "\/srv\/TokenBoard State\/TokenBoard\/skills\/tokenboard\/scripts\/sync\.mjs" --mode sync --source all --scheduled/
+  )
+})
+
+test('Linux systemd environment values escape percent specifiers', () => {
+  const units = buildLinuxSystemdUnits({
+    nodePath: '/usr/bin/node',
+    scriptPath: '/repo/sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: '/usr/bin:/bin',
+    homeDir: '/home/tokenboard',
+    configDir: '/srv/tokenboard%state'
+  })
+
+  assert.match(units.service, /Environment="TOKENBOARD_CONFIG_DIR=\/srv\/tokenboard%%state"/)
+  assert.match(units.service, /Environment="TOKENBOARD_LOG_DIR=\/srv\/tokenboard%%state\/logs"/)
+})
+
+test('Windows scheduled commands escape percent specifiers', () => {
+  const script = buildWindowsTaskScript({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    scriptPath: 'C:\\TokenBoard\\sync.mjs',
+    packageManager: 'pnpm%test',
+    pathEnv: 'C:\\Windows\\System32;C:\\Tools%Bin',
+    homeDir: 'C:\\Users\\tokenboard',
+    configDir: 'D:\\Token%Board'
+  })
+  const args = buildWindowsTaskArgs({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    scriptPath: 'C:\\TokenBoard\\sync.mjs',
+    packageManager: 'pnpm%test',
+    pathEnv: 'C:\\Windows\\System32;C:\\Tools%Bin',
+    homeDir: 'C:\\Users\\tokenboard',
+    configDir: 'D:\\Token%Board'
+  })
+
+  assert.match(script, /TOKENBOARD_CONFIG_DIR=D:\\Token%%Board/)
+  assert.match(script, /TOKENBOARD_PACKAGE_MANAGER=pnpm%%test/)
+  assert.match(script, /PATH=.*C:\\Tools%%Bin/)
+  assert.match(args[args.indexOf('/TR') + 1], /TOKENBOARD_CONFIG_DIR=D:\\Token%%Board/)
 })
 
 test('normalizePathEnv prepends missing local and node bin directories once', () => {
@@ -183,10 +271,10 @@ test('normalizePathEnv preserves Windows PATH separators and drive letters', () 
 test('builds Windows scheduled task command with explicit runtime environment', () => {
   const args = buildWindowsTaskArgs({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
     packageManager: 'bun',
     pathEnv: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
-    homeDir: 'C:\\Users\\mison'
+    homeDir: 'C:\\Users\\tokenboard'
   })
   const taskCommand = args[args.indexOf('/TR') + 1]
 
@@ -194,38 +282,38 @@ test('builds Windows scheduled task command with explicit runtime environment', 
   assert.doesNotMatch(taskCommand, /""TOKENBOARD_/)
   assert.match(taskCommand, /TOKENBOARD_PACKAGE_MANAGER=bun/)
   assert.match(taskCommand, /TOKENBOARD_SCHEDULED_SYNC=1/)
-  assert.match(taskCommand, /TOKENBOARD_LOG_DIR=C:\\Users\\mison\\.tokenboard\\logs/)
-  assert.match(taskCommand, /PATH=C:\\Users\\mison\\.bun\\bin;C:\\Users\\mison\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32/)
+  assert.match(taskCommand, /TOKENBOARD_LOG_DIR=C:\\Users\\tokenboard\\.tokenboard\\logs/)
+  assert.match(taskCommand, /PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32/)
   assert.match(taskCommand, /C:\\Program Files\\nodejs\\node\.exe/)
-  assert.match(taskCommand, /C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs/)
+  assert.match(taskCommand, /C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs/)
   assert.match(taskCommand, /--mode sync --source all --scheduled/)
 })
 
 test('builds Windows scheduled task args with a short wrapper command', () => {
   const args = buildWindowsTaskArgs({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
-    taskCommand: '"C:\\Users\\mison\\.tokenboard\\tokenboard-daily-sync.cmd"'
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
+    taskCommand: '"C:\\Users\\tokenboard\\.tokenboard\\tokenboard-daily-sync.cmd"'
   })
   const taskCommand = args[args.indexOf('/TR') + 1]
 
-  assert.equal(taskCommand, '"C:\\Users\\mison\\.tokenboard\\tokenboard-daily-sync.cmd"')
+  assert.equal(taskCommand, '"C:\\Users\\tokenboard\\.tokenboard\\tokenboard-daily-sync.cmd"')
   assert.ok(taskCommand.length < 261)
 })
 
 test('builds Windows scheduled sync wrapper script with explicit runtime environment', () => {
   const script = buildWindowsTaskScript({
     nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-    scriptPath: 'C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
+    scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs',
     packageManager: 'bun',
     pathEnv: 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
-    homeDir: 'C:\\Users\\mison'
+    homeDir: 'C:\\Users\\tokenboard'
   })
 
   assert.match(script, /@echo off/)
   assert.match(script, /set "TOKENBOARD_PACKAGE_MANAGER=bun"/)
   assert.match(script, /set "TOKENBOARD_SCHEDULED_SYNC=1"/)
-  assert.match(script, /set "TOKENBOARD_LOG_DIR=C:\\Users\\mison\\.tokenboard\\logs"/)
-  assert.match(script, /set "PATH=C:\\Users\\mison\\.bun\\bin;C:\\Users\\mison\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32"/)
-  assert.match(script, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\Users\\mison\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs" --mode sync --source all --scheduled/)
+  assert.match(script, /set "TOKENBOARD_LOG_DIR=C:\\Users\\tokenboard\\.tokenboard\\logs"/)
+  assert.match(script, /set "PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32"/)
+  assert.match(script, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs" --mode sync --source all --scheduled/)
 })
