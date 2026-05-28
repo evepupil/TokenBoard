@@ -6,22 +6,22 @@ import { describe, expect, test } from 'vitest'
 const packageDir = dirname(fileURLToPath(import.meta.url))
 
 describe('Wrangler deploy config', () => {
-  test('standard deploy uses the explicit production config', () => {
+  test('standard deploy uses the tracked wrangler config', () => {
     const pkg = JSON.parse(readPackageFile('package.json'))
 
     expect(pkg.scripts.deploy).toContain('scripts/check-production-config.mjs')
-    expect(pkg.scripts.deploy).toContain('wrangler deploy --config wrangler.production.jsonc')
+    expect(pkg.scripts.deploy).toContain('wrangler deploy --config wrangler.jsonc')
     expect(pkg.scripts.deploy).not.toContain('wrangler deploy"')
   })
 
-  test('tracked default config stays local-only with placeholder bindings', () => {
+  test('tracked wrangler config contains production deploy bindings', () => {
     const config = readPackageFile('wrangler.jsonc')
 
-    expect(config).toContain('Local development config')
-    expect(config).toContain('"workers_dev": true')
-    expect(config).toContain('"database_id": "00000000-0000-0000-0000-000000000000"')
-    expect(config).not.toContain('"BETTER_AUTH_URL"')
-    expect(config).not.toContain('"routes"')
+    expect(config).toContain('"workers_dev": false')
+    expect(config).toContain('"routes"')
+    expect(config).toContain('"BETTER_AUTH_URL": "https://tokenboard.chaosyn.com"')
+    expect(config).toContain('"database_id": "4af5cf99-10d9-4114-b707-f82e75f89746"')
+    expect(config).not.toContain('00000000-0000-0000-0000-000000000000')
   })
 
   test('tracked production example documents required deploy fields without private values', () => {

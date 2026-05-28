@@ -1,6 +1,5 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Local development config. Production deploys must use wrangler.production.jsonc.
   "name": "tokenboard",
   "main": "./dist/index.js",
   "compatibility_date": "2026-04-28",
@@ -10,8 +9,16 @@
   "assets": {
     "directory": "./dist"
   },
-  "workers_dev": true,
-  "vars": {},
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "tokenboard.chaosyn.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://tokenboard.chaosyn.com"
+  },
   // "kv_namespaces": [
   //   {
   //     "binding": "MY_KV_NAMESPACE",
@@ -28,7 +35,7 @@
     {
       "binding": "DB",
       "database_name": "tokenboard",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "4af5cf99-10d9-4114-b707-f82e75f89746",
       "migrations_dir": "db/migrations"
     }
   ],

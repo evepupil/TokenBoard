@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const CONFIG_FILE = 'wrangler.production.jsonc'
+const CONFIG_FILE = process.env.TOKENBOARD_WRANGLER_CONFIG || 'wrangler.jsonc'
 const EXAMPLE_FILE = 'wrangler.production.example.jsonc'
 
 const requiredFields = [

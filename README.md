@@ -136,20 +136,17 @@ pnpm build
 Deploy:
 
 ```bash
-cp apps/web/wrangler.production.example.jsonc apps/web/wrangler.production.jsonc
-# Fill route, BETTER_AUTH_URL, and D1 database_id in apps/web/wrangler.production.jsonc.
-pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc
+pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --config wrangler.jsonc
 pnpm run deploy
 ```
 
-The tracked `apps/web/wrangler.jsonc` is local-only and contains placeholder bindings. Production
-deploys use the ignored `apps/web/wrangler.production.jsonc` file so public source does not contain
-deployment-specific D1 ids or domains. Run the D1 migrations as part of every server rollout. The
+The tracked `apps/web/wrangler.jsonc` contains the production Worker route, `BETTER_AUTH_URL`, and
+D1 binding used by git-push auto deploys. Run the D1 migrations as part of every server rollout. The
 current compatibility path depends on the device and snapshot-hash schema migrations, including
 `device_id` on upload tokens and `snapshot_hash` on `daily_usage`.
 
-`pnpm run deploy` validates that `apps/web/wrangler.production.jsonc` exists and does not contain
-placeholder route, auth URL, or D1 values before it builds or deploys.
+`pnpm run deploy` validates that `apps/web/wrangler.jsonc` does not contain placeholder route, auth
+URL, or D1 values before it builds or deploys.
 
 ## Package Managers
 
