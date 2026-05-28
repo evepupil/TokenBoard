@@ -130,6 +130,6 @@ Scheduled runs write logs to `~/.tokenboard/logs/daily-sync.out.log` and `~/.tok
 
 ## Troubleshooting
 
-- If Node is missing, ask the user to install Node.js 20 or newer.
+- If Node is missing or older than 22.12, ask the user to install Node.js 22.12 or newer.
 - If the collector cannot reach the configured TokenBoard base URL, ask the user to configure proxy environment variables or verify the TokenBoard custom domain.
 - If pairing fails, ask the user to generate a new pairing code from TokenBoard.
