@@ -1,9 +1,12 @@
 ﻿import { describe, expect, test } from 'vitest'
+import { defaultPublicCardConfig } from '../public-card/config'
 import {
   getCanonicalPublicOrigin,
   getProfileDisplayName,
   getProfileSettings,
+  parseProfilePageForm,
   parseProfileForm,
+  updateProfilePageSettings,
   updateProfileSettings
 } from './service'
 
@@ -43,6 +46,31 @@ describe('settings service', () => {
         timezone: 'Mars/Base'
       })
     ).toThrow()
+  })
+
+  test('parses profile page form with public card config', () => {
+    expect(parseProfilePageForm({
+      slug: 'eve-tokenboard',
+      displayName: 'Eve',
+      timezone: 'Asia/Hong_Kong',
+      isPublic: 'on',
+      cardLanguage: 'en',
+      cardTheme: 'light',
+      cardMetric1: 'todayTokens',
+      cardMetric2: 'totalCost'
+    })).toMatchObject({
+      profile: {
+        slug: 'eve-tokenboard',
+        displayName: 'Eve',
+        timezone: 'Asia/Hong_Kong',
+        isPublic: true
+      },
+      publicCardConfig: {
+        language: 'en',
+        theme: 'light',
+        metrics: ['todayTokens', 'totalCost']
+      }
+    })
   })
 
   test('updates profile after checking slug ownership', async () => {
@@ -133,7 +161,43 @@ describe('settings service', () => {
     expect(settings.publicMarkdown).toBe(
       '[![TokenBoard](https://tokenboard.example.com/api/public/eve-tokenboard.svg)](https://tokenboard.example.com)'
     )
+    expect(settings.publicCardConfig).toEqual(defaultPublicCardConfig)
     expect(settings.shouldUseBrowserTimezoneDefault).toBe(false)
+  })
+
+  test('reads stored public card config from profile settings', async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return {
+                  slug: 'eve-tokenboard',
+                  displayName: 'Eve',
+                  timezone: 'UTC',
+                  publicCardConfig: JSON.stringify({
+                    language: 'en',
+                    theme: 'light',
+                    metrics: ['todayTokens', 'totalCost']
+                  }),
+                  isPublic: 1,
+                  participatesInLeaderboards: 1
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const settings = await getProfileSettings(db, 'user_1', 'https://tokenboard.example.com')
+
+    expect(settings.publicCardConfig).toMatchObject({
+      language: 'en',
+      theme: 'light',
+      metrics: ['todayTokens', 'totalCost']
+    })
   })
 
   test('marks default UTC profiles as browser-timezone default candidates', async () => {
@@ -286,6 +350,104 @@ describe('settings service', () => {
       '2026-04-29T10:00:00.000Z',
       'user_1'
     ])
+  })
+
+  test('updates profile and card settings together', async () => {
+    const sqlStatements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                return null
+              },
+              async run() {
+                return { success: true }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await updateProfilePageSettings(
+      db,
+      'user_1',
+      {
+        profile: {
+          slug: 'eve-tokenboard',
+          displayName: 'Eve',
+          timezone: 'UTC',
+          isPublic: false,
+          participatesInLeaderboards: true
+        },
+        publicCardConfig: {
+          ...defaultPublicCardConfig,
+          language: 'en',
+          metrics: ['todayTokens']
+        }
+      },
+      '2026-04-29T10:00:00.000Z'
+    )
+
+    expect(sqlStatements[1]).toContain('public_card_config = ?')
+    expect(bindings[1]).toEqual([
+      'eve-tokenboard',
+      'Eve',
+      'UTC',
+      JSON.stringify({
+        ...defaultPublicCardConfig,
+        language: 'en',
+        metrics: ['todayTokens']
+      }),
+      1,
+      1,
+      '2026-04-29T10:00:00.000Z',
+      'user_1'
+    ])
+  })
+
+  test('clears card config when resetting to defaults', async () => {
+    const bindings: unknown[][] = []
+    const db = {
+      prepare() {
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                return null
+              },
+              async run() {
+                return { success: true }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await updateProfilePageSettings(
+      db,
+      'user_1',
+      {
+        profile: {
+          slug: 'eve-tokenboard',
+          displayName: 'Eve',
+          timezone: 'UTC',
+          isPublic: true,
+          participatesInLeaderboards: false
+        },
+        publicCardConfig: null
+      },
+      '2026-04-29T10:00:00.000Z'
+    )
+
+    expect(bindings[1][3]).toBeNull()
   })
 
   test('rejects a slug owned by another user', async () => {

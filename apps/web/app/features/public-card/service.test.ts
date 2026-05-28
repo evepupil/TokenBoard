@@ -36,6 +36,7 @@ describe('public card service', () => {
                     slug: 'eve',
                     displayName: 'Eve',
                     timezone: 'Asia/Hong_Kong',
+                    publicCardConfig: null,
                     isPublic: 1
                   }
                 }
@@ -97,6 +98,19 @@ describe('public card service', () => {
                     slug: 'eve',
                     displayName: 'Eve & Co',
                     timezone: 'UTC',
+                    publicCardConfig: JSON.stringify({
+                      language: 'en',
+                      theme: 'light',
+                      title: 'Custom Usage',
+                      subtitle: 'Open stats',
+                      showPublicUrl: false,
+                      glow: {
+                        enabled: false,
+                        intensity: 0.2,
+                        position: 'center'
+                      },
+                      metrics: ['todayTokens', 'totalCost']
+                    }),
                     isPublic: 1
                   }
                 }
@@ -126,17 +140,14 @@ describe('public card service', () => {
       'https://tokenboard.example.com'
     )
 
-    expect(svg).toContain('TokenBoard 统计')
-    expect(svg).toContain('https://tokenboard.example.com')
-    expect(svg).toContain('总 token')
-    expect(svg).toContain('1,234,567')
-    expect(svg).toContain('总额度')
+    expect(svg).toContain('Custom Usage')
+    expect(svg).toContain('Open stats')
+    expect(svg).not.toContain('https://tokenboard.example.com')
+    expect(svg).toContain('Today Tokens')
+    expect(svg).toContain('100')
+    expect(svg).toContain('Total Cost')
     expect(svg).toContain('$42.50')
-    expect(svg).toContain('本月 token')
-    expect(svg).toContain('89,012')
-    expect(svg).toContain('本月额度')
-    expect(svg).toContain('$6.78')
-    expect(svg).toContain('Eve &amp; Co')
+    expect(svg).not.toContain('Monthly Tokens')
     expect(svg).toContain('card-logo-panel')
     expect(svg).toContain('card-logo-lime')
     expect(svg).toContain('M130 118H282V164H229V382H181V164H130V118Z')
@@ -155,6 +166,7 @@ describe('public card service', () => {
                   slug: 'eve',
                   displayName: 'Eve',
                   timezone: 'UTC',
+                  publicCardConfig: null,
                   isPublic: 0
                 }
               }

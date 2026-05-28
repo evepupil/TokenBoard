@@ -59,6 +59,7 @@ export const profiles = sqliteTable('profiles', {
   displayName: text('display_name').notNull(),
   timezone: text('timezone').notNull().default('UTC'),
   timezoneSource: text('timezone_source').notNull().default('default'),
+  publicCardConfig: text('public_card_config'),
   isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
   participatesInLeaderboards: integer('participates_in_leaderboards', {
     mode: 'boolean'

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createAuth } from './auth'
-import { ensureProfile, getOptionalUser, requireUser, verifyUploadToken } from './middleware'
+import {
+  ensureProfile,
+  getOptionalUser,
+  requireUser,
+  verifyUploadToken
+} from './middleware'
 
 vi.mock('./auth', () => ({
   createAuth: vi.fn()

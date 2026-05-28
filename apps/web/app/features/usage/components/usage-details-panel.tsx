@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide'
 import { Badge } from '../../../components/ui/badge'
 import { Button, LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
+import { CustomSelect } from '../../../components/ui/custom-select'
 import { LucideIcon } from '../../../components/ui/icon'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table'
 import { formatUsd } from '../../../lib/money'
@@ -115,7 +116,7 @@ function SourceSplit(props: {
   totalTokens: number
 }) {
   if (props.sourceSplit.length === 0) {
-    return <span class="text-[var(--app-subtle)]">无用量</span>
+    return <span class="text-[var(--app-muted)]">无用量</span>
   }
 
   return (
@@ -201,31 +202,23 @@ function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; devices:
 }
 
 function SourceFilter(props: { filters: UsageDetailsFilters }) {
-  return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
-      来源
-      <select class={filterControlClass()} name="source">
-        <option value="all" selected={props.filters.source === 'all'}>全部</option>
-        <option value="claude-code" selected={props.filters.source === 'claude-code'}>Claude Code</option>
-        <option value="codex" selected={props.filters.source === 'codex'}>Codex</option>
-      </select>
-    </label>
-  )
+  return <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-2" />
 }
 
 function DeviceFilter(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
+  const options = [
+    { value: 'all', label: '全部设备' },
+    ...props.devices.map((device) => ({ value: device.id, label: device.name }))
+  ]
+
   return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
-      设备
-      <select class={filterControlClass()} name="device">
-        <option value="all" selected={props.filters.deviceId === 'all'}>全部设备</option>
-        {props.devices.map((device) => (
-          <option value={device.id} selected={props.filters.deviceId === device.id}>
-            {device.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <CustomSelect
+      label="设备"
+      name="device"
+      value={props.filters.deviceId}
+      options={options}
+      wrapperClass="mt-2"
+    />
   )
 }
 
@@ -254,6 +247,12 @@ function filterControlClass(extra = '') {
     extra
   ].filter(Boolean).join(' ')
 }
+
+const sourceOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'claude-code', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex' }
+]
 
 function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (

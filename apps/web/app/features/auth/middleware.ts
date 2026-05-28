@@ -19,12 +19,18 @@ export type AuthenticatedUser = {
 }
 
 export async function requireUser(c: Context): Promise<SessionUser> {
+  const session = await requireSessionUser(c)
+
+  await ensureProfile(c.env.DB, session, readTimezoneCookie(c.req.header('cookie')))
+  return session
+}
+
+export async function requireSessionUser(c: Context): Promise<SessionUser> {
   const session = await getOptionalUser(c)
   if (!session) {
     throw new ApiError('UNAUTHORIZED', 'Authentication required', 401)
   }
 
-  await ensureProfile(c.env.DB, session, readTimezoneCookie(c.req.header('cookie')))
   return session
 }
 

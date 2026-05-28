@@ -1,4 +1,6 @@
 import { createClient } from 'honox/client'
+import { initCustomSelects } from './components/ui/custom-select-client'
+import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
 import { copyTextToClipboard } from './lib/clipboard'
 import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 
@@ -42,6 +44,8 @@ initTimezoneInputs()
 
 initCopyButtons()
 initAppNavigation()
+initCustomSelects()
+initPublicCardPreview()
 
 function initBrowserTimezone() {
   const timezone = detectBrowserTimezone()
@@ -253,6 +257,7 @@ async function replaceDocument(pageUrl: URL, pushState: boolean) {
     if (pushState) window.history.pushState({}, '', resolvedUrl)
     document.title = nextDocument.title || document.title
     initTimezoneInputs()
+    refreshPublicCardPreview()
     syncScroll(resolvedUrl)
   } catch (_) {
     window.location.href = pageUrl.toString()

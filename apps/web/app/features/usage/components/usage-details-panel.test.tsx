@@ -50,5 +50,47 @@ describe('UsageDetailsPanel', () => {
     expect(html).not.toContain('lg:min-w-[900px]')
     expect(html).not.toContain('&rsaquo;')
     expect(html).not.toContain('>›<')
+    expect(html).not.toContain('<select')
+    expect(html).toContain('data-custom-select="true"')
+    expect(html).toContain('data-custom-select-menu="true"')
+    expect(html).toContain('name="source"')
+    expect(html).toContain('name="device"')
+  })
+
+  test('renders empty source split text with readable muted contrast', async () => {
+    const html = await renderToString(
+      <UsageDetailsPanel
+        devices={[]}
+        filters={{
+          source: 'all',
+          startDate: '2026-04-26',
+          endDate: '2026-05-25',
+          deviceId: 'all',
+          modelQuery: ''
+        }}
+        details={{
+          summary: {
+            totalTokens: 0,
+            costUsd: 0,
+            sessionCount: 0,
+            activeDays: 0
+          },
+          dailyRows: [
+            {
+              usageDate: '2026-05-25',
+              totalTokens: 0,
+              costUsd: 0,
+              sessionCount: 0,
+              sourceSplit: [],
+              modelRows: []
+            }
+          ],
+          modelRows: []
+        }}
+      />
+    )
+
+    expect(html).toContain('text-[var(--app-muted)]">无用量')
+    expect(html).not.toContain('text-[var(--app-subtle)]">无用量')
   })
 })

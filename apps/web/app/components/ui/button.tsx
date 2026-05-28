@@ -29,6 +29,8 @@ const buttonVariants = cva(
 type ButtonProps = VariantProps<typeof buttonVariants> & {
   class?: string
   type?: 'button' | 'submit' | 'reset'
+  name?: string
+  value?: string
   disabled?: boolean
   children?: Child
 }

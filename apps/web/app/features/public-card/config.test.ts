@@ -1,0 +1,82 @@
+import { describe, expect, test } from 'vitest'
+import {
+  defaultPublicCardConfig,
+  parsePublicCardConfig,
+  parsePublicCardConfigForm,
+  stringifyPublicCardConfig
+} from './config'
+
+describe('public card config', () => {
+  test('uses default config for empty stored values', () => {
+    expect(parsePublicCardConfig(null)).toEqual(defaultPublicCardConfig)
+    expect(parsePublicCardConfig('')).toEqual(defaultPublicCardConfig)
+  })
+
+  test('parses stored config with defaults and unique metric order', () => {
+    expect(parsePublicCardConfig(JSON.stringify({
+      language: 'en',
+      theme: 'light',
+      metrics: ['todayTokens', 'todayTokens', 'totalCost']
+    }))).toMatchObject({
+      language: 'en',
+      theme: 'light',
+      layout: 'balanced',
+      metrics: ['todayTokens', 'totalCost']
+    })
+  })
+
+  test('parses form slots as metric enablement and order', () => {
+    expect(parsePublicCardConfigForm({
+      cardLanguage: 'en',
+      cardTheme: 'light',
+      cardLayout: 'compact',
+      cardTitle: 'Usage',
+      cardSubtitle: 'Latest stats',
+      cardShowPublicUrl: 'on',
+      cardGlowEnabled: 'on',
+      cardGlowIntensity: '0.5',
+      cardGlowPosition: 'center',
+      cardMetric1: 'todayTokens',
+      cardMetric2: '',
+      cardMetric3: 'totalCost',
+      cardMetric4: 'todayTokens'
+    })).toEqual({
+      language: 'en',
+      theme: 'light',
+      layout: 'compact',
+      title: 'Usage',
+      subtitle: 'Latest stats',
+      showPublicUrl: true,
+      glow: {
+        enabled: true,
+        intensity: 0.5,
+        position: 'center'
+      },
+      metrics: ['todayTokens', 'totalCost']
+    })
+  })
+
+  test('returns null when resetting to defaults', () => {
+    expect(parsePublicCardConfigForm({ cardAction: 'reset' })).toBeNull()
+  })
+
+  test('allows all metric slots to be hidden', () => {
+    expect(parsePublicCardConfigForm({
+      cardMetric1: '',
+      cardMetric2: '',
+      cardMetric3: '',
+      cardMetric4: '',
+      cardMetric5: '',
+      cardMetric6: ''
+    })?.metrics).toEqual([])
+  })
+
+  test('stringifies only normalized config', () => {
+    expect(JSON.parse(stringifyPublicCardConfig({
+      ...defaultPublicCardConfig,
+      metrics: ['totalTokens', 'totalTokens', 'todayCost']
+    }))).toMatchObject({
+      metrics: ['totalTokens', 'todayCost']
+    })
+  })
+})
