@@ -8,11 +8,16 @@ const packageDir = dirname(fileURLToPath(import.meta.url))
 describe('Wrangler deploy config', () => {
   test('standard deploy uses the tracked wrangler config', () => {
     const pkg = JSON.parse(readPackageFile('package.json'))
+    const deployScript = pkg.scripts.deploy
 
-    expect(pkg.scripts.deploy).toContain('scripts/check-production-config.mjs')
-    expect(pkg.scripts.deploy).toContain('wrangler d1 migrations apply DB --remote --config wrangler.jsonc')
-    expect(pkg.scripts.deploy).toContain('wrangler deploy --config wrangler.jsonc')
-    expect(pkg.scripts.deploy).not.toContain('wrangler deploy"')
+    expect(deployScript).toContain('scripts/check-production-config.mjs')
+    expect(deployScript).toContain('pnpm run build')
+    expect(deployScript).toContain('wrangler d1 migrations apply DB --remote --config wrangler.jsonc')
+    expect(deployScript).toContain('wrangler deploy --config wrangler.jsonc')
+    expect(deployScript).not.toContain('wrangler deploy"')
+    expect(deployScript.indexOf('scripts/check-production-config.mjs')).toBeLessThan(deployScript.indexOf('pnpm run build'))
+    expect(deployScript.indexOf('pnpm run build')).toBeLessThan(deployScript.indexOf('wrangler d1 migrations apply DB --remote --config wrangler.jsonc'))
+    expect(deployScript.indexOf('wrangler d1 migrations apply DB --remote --config wrangler.jsonc')).toBeLessThan(deployScript.indexOf('wrangler deploy --config wrangler.jsonc'))
   })
 
   test('tracked wrangler config contains production deploy bindings', () => {

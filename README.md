@@ -106,8 +106,8 @@ Deploy manually:
 pnpm run deploy
 ```
 
-`pnpm run deploy` validates the production config, applies pending remote D1 migrations, builds,
-and deploys the Worker.
+`pnpm run deploy` validates the production config, builds the Worker, applies pending remote D1
+migrations, and deploys.
 
 For Cloudflare Workers Builds, set the production deploy command to the same script so migrations
 run in the deploy path:
