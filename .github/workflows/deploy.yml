@@ -1,4 +1,4 @@
-name: CI and Deploy
+name: CI and D1 Migrations
 
 on:
   pull_request:
@@ -42,8 +42,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-  deploy:
-    name: Deploy production
+  migrate:
+    name: Apply D1 migrations
     if: github.event_name == 'push'
     needs: test
     runs-on: ubuntu-latest
@@ -78,6 +78,3 @@ jobs:
 
       - name: Apply D1 migrations
         run: pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --config wrangler.jsonc
-
-      - name: Deploy Worker
-        run: pnpm run deploy
