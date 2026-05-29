@@ -36,7 +36,7 @@ function UsageDetailsHeader(props: { filters: UsageDetailsFilters; devices: User
       <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <Badge>详情</Badge>
-          <h1 class="mt-3 text-4xl font-black tracking-tight">每日用量详情</h1>
+          <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">每日用量详情</h1>
           <p class="mt-2 text-sm text-[var(--app-muted)]">
             {usageDetailsSubtitle(props.filters, props.selectedDevice)}
           </p>
@@ -103,11 +103,23 @@ function DailySummaryRowHeader(props: { row: UsageDetails['dailyRows'][number] }
         </span>
         {props.row.usageDate}
       </span>
-      <span>{formatInteger(props.row.totalTokens)}</span>
-      <span>{formatUsd(props.row.costUsd)}</span>
-      <span>{formatInteger(props.row.sessionCount)}</span>
-      <SourceSplit sourceSplit={props.row.sourceSplit} totalTokens={props.row.totalTokens} />
+      <MobileValue label="Tokens">{formatInteger(props.row.totalTokens)}</MobileValue>
+      <MobileValue label="费用">{formatUsd(props.row.costUsd)}</MobileValue>
+      <MobileValue label="Sessions">{formatInteger(props.row.sessionCount)}</MobileValue>
+      <div class="grid gap-1 md:block">
+        <span class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">来源</span>
+        <SourceSplit sourceSplit={props.row.sourceSplit} totalTokens={props.row.totalTokens} />
+      </div>
     </summary>
+  )
+}
+
+function MobileValue(props: { label: string; children: string }) {
+  return (
+    <span class="grid gap-1 md:block">
+      <span class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">{props.label}</span>
+      <span>{props.children}</span>
+    </span>
   )
 }
 
@@ -195,8 +207,8 @@ function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; devices:
       <DateFilter label="开始日期" name="startDate" value={props.filters.startDate} />
       <DateFilter label="结束日期" name="endDate" value={props.filters.endDate} />
       <ModelFilter value={props.filters.modelQuery} />
-      <Button class="mt-7 h-11" type="submit">应用</Button>
-      <LinkButton class="mt-7 h-11" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
+      <Button class="h-11 w-full sm:mt-7" type="submit">应用</Button>
+      <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
     </form>
   )
 }
@@ -258,7 +270,7 @@ function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (
     <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
       <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-3 text-3xl font-black tracking-tight">{props.value}</p>
+      <p class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{props.value}</p>
     </div>
   )
 }

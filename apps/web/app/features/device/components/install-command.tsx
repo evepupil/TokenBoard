@@ -50,10 +50,10 @@ export function InstallCommand(props: InstallCommandProps) {
 
 function InstallCommandHeader() {
   return (
-    <header class="relative overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[radial-gradient(circle_at_90%_10%,rgba(190,242,100,.2),transparent_28%),var(--app-panel)] p-6 shadow-xl shadow-black/10">
+    <header class="relative overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[radial-gradient(circle_at_90%_10%,rgba(190,242,100,.2),transparent_28%),var(--app-panel)] p-5 shadow-xl shadow-black/10 sm:p-6">
       <div class="absolute -right-16 -top-16 h-40 w-40 rounded-full border border-lime-300/20" />
       <p class="app-accent-text text-sm font-black uppercase tracking-[0.28em]">TokenBoard Collector</p>
-      <h1 class="mt-4 text-4xl font-black tracking-tight">连接这台机器</h1>
+      <h1 class="mt-4 text-3xl font-black tracking-tight sm:text-4xl">连接这台机器</h1>
       <p class="mt-3 max-w-2xl text-sm leading-6 text-[var(--app-muted)]">
         生成一个短期有效的配对提示词，把它粘贴给 Codex 或 Claude Code，让本地 agent 用终端命令安装采集器并配置每日同步。
       </p>
@@ -76,7 +76,7 @@ function InstallTimezoneForm(props: { timezone: string }) {
         />
       </label>
       <button
-        class="mt-4 min-h-11 rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-black text-stone-950 transition hover:bg-lime-200"
+        class="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-black text-stone-950 transition hover:bg-lime-200 sm:w-auto"
         type="submit"
       >
         生成安装提示词

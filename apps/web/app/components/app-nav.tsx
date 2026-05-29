@@ -16,7 +16,7 @@ export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
 
   return (
-    <nav class="mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-4 py-3 text-[var(--app-text)] shadow-xl shadow-black/10 backdrop-blur md:flex-row md:items-center md:justify-between">
+    <nav class="mx-auto mb-6 flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-3 py-3 text-[var(--app-text)] shadow-xl shadow-black/10 backdrop-blur sm:px-4 xl:flex-row xl:items-center xl:justify-between">
       <div class="flex items-center justify-between gap-3">
         <a class="group flex items-center gap-3" href={isAuthenticated ? '/dashboard' : '/'}>
           <img
@@ -31,28 +31,30 @@ export function AppNav(props: AppNavProps) {
             <span class="block text-xs text-[var(--app-muted)]">AI token 使用统计</span>
           </span>
         </a>
-        <div class="flex items-center gap-2 md:hidden">
+        <div class="flex items-center gap-2 xl:hidden">
           <ThemeToggle />
           <RepositoryLink />
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 text-sm">
-        {isAuthenticated ? <NavLink href="/dashboard" active={props.active === 'dashboard'}>控制台</NavLink> : null}
-        {isAuthenticated ? <NavLink href="/dashboard/details" active={props.active === 'details'}>详情</NavLink> : null}
-        <NavLink href="/leaderboards" active={props.active === 'leaderboards'}>排行榜</NavLink>
-        {isAuthenticated ? <NavLink href="/settings/install" active={props.active === 'install'}>安装采集器</NavLink> : null}
-        {isAuthenticated ? <NavLink href="/settings/devices" active={props.active === 'devices'}>设备</NavLink> : null}
-        {isAuthenticated ? <NavLink href="/settings/profile" active={props.active === 'profile'}>公开资料</NavLink> : null}
-        {isAuthenticated ? null : <NavLink href="/auth/sign-in">登录</NavLink>}
-        {isAuthenticated ? (
-          <form class="md:hidden" method="post" action="/auth/sign-out">
-            <button class={signOutButtonClass} type="submit">退出登录</button>
-          </form>
-        ) : null}
+      <div class="app-scrollbar-none -mx-3 overflow-x-auto px-3 xl:mx-0 xl:overflow-visible xl:px-0" data-app-nav-scroll="true">
+        <div class="flex min-w-max items-center gap-2 text-sm xl:min-w-0">
+          {isAuthenticated ? <NavLink href="/dashboard" active={props.active === 'dashboard'}>控制台</NavLink> : null}
+          {isAuthenticated ? <NavLink href="/dashboard/details" active={props.active === 'details'}>详情</NavLink> : null}
+          <NavLink href="/leaderboards" active={props.active === 'leaderboards'}>排行榜</NavLink>
+          {isAuthenticated ? <NavLink href="/settings/install" active={props.active === 'install'}>安装采集器</NavLink> : null}
+          {isAuthenticated ? <NavLink href="/settings/devices" active={props.active === 'devices'}>设备</NavLink> : null}
+          {isAuthenticated ? <NavLink href="/settings/profile" active={props.active === 'profile'}>公开资料</NavLink> : null}
+          {isAuthenticated ? null : <NavLink href="/auth/sign-in">登录</NavLink>}
+          {isAuthenticated ? (
+            <form class="xl:hidden" method="post" action="/auth/sign-out">
+              <button class={signOutButtonClass} type="submit">退出登录</button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
-      <div class="hidden items-center gap-2 md:flex">
+      <div class="hidden items-center gap-2 xl:flex">
         {props.email ? <span class="max-w-48 truncate text-xs text-[var(--app-muted)]">{props.email}</span> : null}
         <ThemeToggle />
         <RepositoryLink />

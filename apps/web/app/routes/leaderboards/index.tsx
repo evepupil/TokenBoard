@@ -12,7 +12,7 @@ export default createRoute(async (c) => {
   const entries = await getLeaderboard(c.env.DB, { period, metric })
 
   return c.render(
-    <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
       <title>排行榜 - TokenBoard</title>
       <AppNav active="leaderboards" email={user?.email} isAuthenticated={Boolean(user)} />
       <LeaderboardPanel entries={entries} period={period} metric={metric} />

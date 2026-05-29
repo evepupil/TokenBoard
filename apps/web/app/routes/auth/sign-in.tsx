@@ -18,14 +18,14 @@ export const POST = createRoute((c) => forwardGithubSignIn(c))
 
 function AuthScreen(props: { hasError: boolean }) {
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-5 py-6 text-[var(--app-text)]">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
       <title>登录 - TokenBoard</title>
       <AppNav isAuthenticated={false} />
       <section class="mx-auto grid min-h-[calc(100vh-7rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <div class="relative overflow-hidden rounded-xl border border-lime-200/10 bg-[radial-gradient(circle_at_20%_10%,rgba(190,242,100,.22),transparent_32%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-8 shadow-2xl shadow-black/30">
+        <div class="relative overflow-hidden rounded-xl border border-lime-200/10 bg-[radial-gradient(circle_at_20%_10%,rgba(190,242,100,.22),transparent_32%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-5 shadow-2xl shadow-black/30 sm:p-8">
           <div class="absolute -right-20 top-12 h-56 w-56 rounded-full border border-lime-300/20" />
           <p class="app-accent-text text-sm font-semibold uppercase tracking-[0.35em]">TokenBoard</p>
-          <h1 class="mt-8 max-w-xl text-5xl font-black leading-none tracking-tight text-[var(--app-text)] md:text-7xl">
+          <h1 class="mt-8 max-w-xl text-4xl font-black leading-none tracking-tight text-[var(--app-text)] sm:text-5xl md:text-7xl">
             你的 AI token 驾驶舱。
           </h1>
           <p class="mt-6 max-w-lg text-base leading-7 text-[var(--app-muted)]">

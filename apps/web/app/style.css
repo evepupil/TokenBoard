@@ -38,6 +38,15 @@ body {
   color: var(--app-text);
 }
 
+.app-scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.app-scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 .app-accent-text {
   color: #d9f99d;
 }

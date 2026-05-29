@@ -33,9 +33,9 @@ function LeaderboardPanelHeader(props: {
     <CardHeader class="flex-col gap-4 border-b border-[var(--app-border)] md:flex-row md:items-end md:justify-between">
       <div>
         <Badge>排行榜</Badge>
-        <h1 class="mt-3 text-4xl font-black tracking-tight">{props.title}</h1>
+        <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">{props.title}</h1>
       </div>
-      <div class="flex flex-col gap-2 sm:flex-row">
+      <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
         <SegmentedControl items={periodItems(props.period, props.metric)} />
         <SegmentedControl items={metricItems(props.period, props.metric)} />
       </div>
@@ -152,14 +152,14 @@ function SegmentedControl(props: {
   items: Array<{ label: string; href: string; active: boolean }>
 }) {
   return (
-    <div class="flex rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)]">
+    <div class="grid grid-cols-2 rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)] sm:flex">
       {props.items.map((item) =>
         item.active ? (
-          <Badge>{item.label}</Badge>
+          <Badge class="w-full justify-center sm:w-auto">{item.label}</Badge>
         ) : (
           <a
             class={cn(
-              'inline-flex min-h-11 items-center justify-center rounded-full px-4 py-2 text-xs font-black text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]'
+              'inline-flex min-h-11 w-full items-center justify-center rounded-full px-4 py-2 text-xs font-black text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)] sm:w-auto'
             )}
             href={item.href}
             data-leaderboard-link="true"

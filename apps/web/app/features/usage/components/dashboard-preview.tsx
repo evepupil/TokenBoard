@@ -21,16 +21,16 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <Badge>控制台</Badge>
-            <h1 class="mt-3 text-4xl font-black tracking-tight md:text-5xl">
+            <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
               {props.userName ? `${props.userName} 的 token 面板` : 'AI token 使用面板'}
             </h1>
             <p class="mt-3 text-sm text-[var(--app-muted)]">
               最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / <a class="app-accent-link font-bold text-[var(--app-text)] underline decoration-lime-300/50 underline-offset-4" href="/settings/devices">设备数：{props.summary.deviceCount}</a>
             </p>
           </div>
-          <div class="flex flex-wrap gap-3">
-            <LinkButton variant="secondary" href="/dashboard/details">查看详情</LinkButton>
-            <LinkButton href="/settings/install">连接设备</LinkButton>
+          <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard/details">查看详情</LinkButton>
+            <LinkButton class="w-full sm:w-auto" href="/settings/install">连接设备</LinkButton>
           </div>
         </div>
       </header>
@@ -123,7 +123,7 @@ function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (
     <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
       <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-3 text-3xl font-black tracking-tight">{props.value}</p>
+      <p class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{props.value}</p>
     </div>
   )
 }

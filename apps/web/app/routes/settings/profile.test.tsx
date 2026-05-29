@@ -36,6 +36,7 @@ describe('ProfilePage layout', () => {
     expect(html).toContain('README SVG 预览')
     expect(html).toContain('data-public-card-preview="true"')
     expect(html).toContain('data-public-card-public-url="https://tokenboard.example/api/public/example-long-public-slug.svg"')
+    expect(html).toContain('w-full sm:w-auto')
     expect(html).toContain('>公开</span>')
     expect(html).toContain('README 卡片外观')
     expect(html).toContain('name="cardLanguage"')

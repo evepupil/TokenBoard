@@ -24,6 +24,7 @@ describe('LeaderboardPanel', () => {
     expect(html).toContain('data-leaderboard-desktop-table="true"')
     expect(html).toContain('Example User')
     expect(html).toContain('123,456')
+    expect(html).toContain('grid grid-cols-2 rounded-full')
   })
 
   test('renders an empty state that is not constrained by the desktop table', async () => {

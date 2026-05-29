@@ -9,4 +9,13 @@ describe('AppNav', () => {
     expect(html).toContain('src="/logo.svg"')
     expect(html).toContain('alt="TokenBoard"')
   })
+
+  test('keeps authenticated mobile navigation in a horizontal scroll rail', async () => {
+    const html = await renderToString(<AppNav active="dashboard" email="user@example.com" />)
+
+    expect(html).toContain('data-app-nav-scroll="true"')
+    expect(html).toContain('overflow-x-auto')
+    expect(html).toContain('xl:overflow-visible')
+    expect(html).toContain('min-w-max')
+  })
 })

@@ -146,13 +146,13 @@ export function PublicCardConfigEditor(props: {
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-3 pt-1">
-        <Button type="submit">保存设置</Button>
-        <Button type="submit" variant="secondary" name="cardAction" value="reset">
+      <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:flex-wrap">
+        <Button class="w-full sm:w-auto" type="submit">保存设置</Button>
+        <Button class="w-full sm:w-auto" type="submit" variant="secondary" name="cardAction" value="reset">
           <LucideIcon icon={RotateCcw} size={16} />
           还原默认卡片
         </Button>
-        <LinkButton variant="secondary" href="/dashboard">返回控制台</LinkButton>
+        <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard">返回控制台</LinkButton>
       </div>
     </div>
   )
