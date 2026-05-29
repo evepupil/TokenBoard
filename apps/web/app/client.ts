@@ -1,6 +1,7 @@
 import { createClient } from 'honox/client'
 import { initCustomSelects } from './components/ui/custom-select-client'
 import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
+import { leaderboardDocumentTitle } from './features/leaderboards/title'
 import { copyTextToClipboard } from './lib/clipboard'
 import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 
@@ -269,9 +270,10 @@ async function replaceDocument(pageUrl: URL, pushState: boolean) {
 function syncDocumentTitle(pageUrl: URL) {
   if (pageUrl.pathname !== '/leaderboards') return
 
-  const period = pageUrl.searchParams.get('period') === 'monthly' ? '每月' : '每日'
-  const metric = pageUrl.searchParams.get('metric') === 'cost' ? '费用' : 'token'
-  document.title = `${period}${metric}排行榜 - TokenBoard`
+  document.title = leaderboardDocumentTitle({
+    period: pageUrl.searchParams.get('period'),
+    metric: pageUrl.searchParams.get('metric')
+  })
 }
 
 function syncScroll(pageUrl: URL) {

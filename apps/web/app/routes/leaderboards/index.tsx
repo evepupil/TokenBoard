@@ -4,6 +4,7 @@ import { getOptionalUser } from '../../features/auth/middleware'
 import { LeaderboardPanel } from '../../features/leaderboards/components/leaderboard-panel'
 import { leaderboardMetricSchema, leaderboardPeriodSchema } from '../../features/leaderboards/schema'
 import { getLeaderboard } from '../../features/leaderboards/service'
+import { leaderboardDocumentTitle } from '../../features/leaderboards/title'
 
 export default createRoute(async (c) => {
   const user = await getOptionalUser(c)
@@ -13,7 +14,7 @@ export default createRoute(async (c) => {
 
   return c.render(
     <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
-      <title>排行榜 - TokenBoard</title>
+      <title>{leaderboardDocumentTitle({ period, metric })}</title>
       <AppNav active="leaderboards" email={user?.email} isAuthenticated={Boolean(user)} />
       <LeaderboardPanel entries={entries} period={period} metric={metric} />
     </main>
