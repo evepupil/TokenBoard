@@ -14,8 +14,10 @@ export type UsageSummaryInput = {
 
 export type UsageSummary = {
   todayTokens: number
+  todayTokensWithoutCacheRead: number
   todayCostUsd: number
   monthTokens: number
+  monthTokensWithoutCacheRead: number
   monthCostUsd: number
   lastSyncedAt: string | null
   deviceCount: number
@@ -49,6 +51,7 @@ export type UsageDetailsInput = {
 export type UsageDetailsDailyRow = {
   usageDate: string
   totalTokens: number
+  totalTokensWithoutCacheRead: number
   costUsd: number
   sessionCount: number
   sourceSplit: Array<{
@@ -67,6 +70,7 @@ export type UsageDetailsModelRow = {
   cacheCreationTokens: number
   cacheReadTokens: number
   totalTokens: number
+  totalTokensWithoutCacheRead: number
   costUsd: number
   sessionCount: number
 }
@@ -74,6 +78,7 @@ export type UsageDetailsModelRow = {
 export type UsageDetails = {
   summary: {
     totalTokens: number
+    totalTokensWithoutCacheRead: number
     costUsd: number
     sessionCount: number
     activeDays: number
@@ -84,8 +89,10 @@ export type UsageDetails = {
 
 type SummaryRow = {
   todayTokens: number | null
+  todayTokensWithoutCacheRead: number | null
   todayCostUsd: number | null
   monthTokens: number | null
+  monthTokensWithoutCacheRead: number | null
   monthCostUsd: number | null
   lastSyncedAt: string | null
   deviceCount: number | null
@@ -110,8 +117,10 @@ export async function getUsageSummary(
         )
         SELECT
           COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date = params.today THEN deduped_daily_usage.total_tokens ELSE 0 END), 0) as todayTokens,
+          COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date = params.today THEN deduped_daily_usage.input_tokens + deduped_daily_usage.output_tokens + deduped_daily_usage.cache_creation_tokens ELSE 0 END), 0) as todayTokensWithoutCacheRead,
           COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date = params.today THEN deduped_daily_usage.cost_usd ELSE 0 END), 0) as todayCostUsd,
           COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date >= params.month_start THEN deduped_daily_usage.total_tokens ELSE 0 END), 0) as monthTokens,
+          COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date >= params.month_start THEN deduped_daily_usage.input_tokens + deduped_daily_usage.output_tokens + deduped_daily_usage.cache_creation_tokens ELSE 0 END), 0) as monthTokensWithoutCacheRead,
           COALESCE(SUM(CASE WHEN deduped_daily_usage.usage_date >= params.month_start THEN deduped_daily_usage.cost_usd ELSE 0 END), 0) as monthCostUsd,
           device_stats.lastSyncedAt as lastSyncedAt,
           COALESCE(device_stats.deviceCount, 0) as deviceCount
@@ -140,8 +149,10 @@ export async function getUsageSummary(
 
   return {
     todayTokens: Number(summary?.todayTokens ?? 0),
+    todayTokensWithoutCacheRead: Number(summary?.todayTokensWithoutCacheRead ?? 0),
     todayCostUsd: Number(summary?.todayCostUsd ?? 0),
     monthTokens: Number(summary?.monthTokens ?? 0),
+    monthTokensWithoutCacheRead: Number(summary?.monthTokensWithoutCacheRead ?? 0),
     monthCostUsd: Number(summary?.monthCostUsd ?? 0),
     lastSyncedAt: summary?.lastSyncedAt ?? null,
     deviceCount: Number(summary?.deviceCount ?? 0),
@@ -206,6 +217,7 @@ export async function getUsageDetails(
           usage_date as usageDate,
           source,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(cost_usd), 0) as costUsd,
           COALESCE(SUM(session_count), 0) as sessionCount
         FROM ${usageTable}
@@ -234,6 +246,7 @@ export async function getUsageDetails(
       usageDate: string
       source: UsageSource
       totalTokens: number
+      totalTokensWithoutCacheRead: number
       costUsd: number
       sessionCount: number
     }>()
@@ -251,6 +264,7 @@ export async function getUsageDetails(
           COALESCE(SUM(cache_creation_tokens), 0) as cacheCreationTokens,
           COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(cost_usd), 0) as costUsd,
           COALESCE(SUM(session_count), 0) as sessionCount
         FROM ${usageTable}
@@ -286,6 +300,7 @@ export async function getUsageDetails(
     cacheCreationTokens: Number(row.cacheCreationTokens),
     cacheReadTokens: Number(row.cacheReadTokens),
     totalTokens: Number(row.totalTokens),
+    totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
     costUsd: Number(row.costUsd),
     sessionCount: Number(row.sessionCount)
   }))
@@ -296,6 +311,7 @@ export async function getUsageDetails(
       usageDate: row.usageDate,
       source: row.source,
       totalTokens: Number(row.totalTokens),
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
       costUsd: Number(row.costUsd),
       sessionCount: Number(row.sessionCount)
     })),
@@ -305,6 +321,7 @@ export async function getUsageDetails(
   return {
     summary: {
       totalTokens: dailyRows.reduce((total, row) => total + row.totalTokens, 0),
+      totalTokensWithoutCacheRead: dailyRows.reduce((total, row) => total + row.totalTokensWithoutCacheRead, 0),
       costUsd: roundMetric(dailyRows.reduce((total, row) => total + row.costUsd, 0)),
       sessionCount: dailyRows.reduce((total, row) => total + row.sessionCount, 0),
       activeDays: dailyRows.filter((row) => row.totalTokens > 0).length
@@ -321,6 +338,7 @@ function buildDailyDetails(
     usageDate: string
     source: UsageSource
     totalTokens: number
+    totalTokensWithoutCacheRead: number
     costUsd: number
     sessionCount: number
   }>,
@@ -332,6 +350,7 @@ function buildDailyDetails(
     byDate.set(usageDate, {
       usageDate,
       totalTokens: 0,
+      totalTokensWithoutCacheRead: 0,
       costUsd: 0,
       sessionCount: 0,
       sourceSplit: [],
@@ -344,6 +363,7 @@ function buildDailyDetails(
     if (!daily) continue
 
     daily.totalTokens += row.totalTokens
+    daily.totalTokensWithoutCacheRead += row.totalTokensWithoutCacheRead
     daily.costUsd = roundMetric(daily.costUsd + row.costUsd)
     daily.sessionCount += row.sessionCount
     daily.sourceSplit.push({

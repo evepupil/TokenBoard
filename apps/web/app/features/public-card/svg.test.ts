@@ -5,10 +5,13 @@ const input = {
   displayName: 'Eve',
   publicUrl: 'https://tokenboard.example/api/public/eve.svg',
   totalTokens: 1234567,
+  totalTokensWithoutCacheRead: 345678,
   totalCostUsd: 42.5,
   monthTokens: 89012,
+  monthTokensWithoutCacheRead: 45678,
   monthCostUsd: 6.78,
   todayTokens: 1200,
+  todayTokensWithoutCacheRead: 860,
   todayCostUsd: 0.2
 }
 
@@ -49,5 +52,19 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('fill="#365314"')
     expect(svg).not.toContain('fill="url(#glow)"')
     expect(svg).not.toContain('Total Tokens')
+  })
+
+  test('renders metrics that exclude cache-read tokens', () => {
+    const svg = renderUsageCardSvg(input, {
+      language: 'en',
+      metrics: ['totalTokensWithoutCacheRead', 'monthTokensWithoutCacheRead', 'todayTokensWithoutCacheRead']
+    })
+
+    expect(svg).toContain('No Cache Read')
+    expect(svg).toContain('Monthly No Cache Read')
+    expect(svg).toContain('Today No Cache Read')
+    expect(svg).toContain('345,678')
+    expect(svg).toContain('45,678')
+    expect(svg).toContain('860')
   })
 })

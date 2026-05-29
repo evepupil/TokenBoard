@@ -7,6 +7,7 @@ import {
   publicCardGlowPositions,
   publicCardLanguages,
   publicCardLayouts,
+  publicCardMetricSlotCount,
   publicCardMetrics,
   publicCardThemes,
   type PublicCardConfig,
@@ -16,10 +17,13 @@ import { renderUsageCardSvg, type UsageCardInput } from '../svg'
 
 const metricLabels: Record<PublicCardMetric, string> = {
   totalTokens: '总 token',
+  totalTokensWithoutCacheRead: '总量不含缓存读',
   totalCost: '总费用',
   monthTokens: '本月 token',
+  monthTokensWithoutCacheRead: '本月不含缓存读',
   monthCost: '本月费用',
   todayTokens: '今日 token',
+  todayTokensWithoutCacheRead: '今日不含缓存读',
   todayCost: '今日费用'
 }
 
@@ -140,7 +144,7 @@ export function PublicCardConfigEditor(props: {
       <div>
         <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">指标顺序</p>
         <div class="grid gap-2 sm:grid-cols-2">
-          {publicCardMetrics.map((_, index) => (
+          {Array.from({ length: publicCardMetricSlotCount }, (_, index) => (
             <MetricSlot index={index} value={props.config.metrics[index] ?? ''} />
           ))}
         </div>

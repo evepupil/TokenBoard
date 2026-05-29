@@ -26,6 +26,7 @@ describe('UsageDetailsPanel', () => {
         details={{
           summary: {
             totalTokens: 123456,
+            totalTokensWithoutCacheRead: 120000,
             costUsd: 42.31,
             sessionCount: 12,
             activeDays: 3
@@ -34,6 +35,7 @@ describe('UsageDetailsPanel', () => {
             {
               usageDate: '2026-05-25',
               totalTokens: 123456,
+              totalTokensWithoutCacheRead: 120000,
               costUsd: 42.31,
               sessionCount: 12,
               sourceSplit: [{ source: 'codex', totalTokens: 123456 }],
@@ -73,6 +75,7 @@ describe('UsageDetailsPanel', () => {
         details={{
           summary: {
             totalTokens: 0,
+            totalTokensWithoutCacheRead: 0,
             costUsd: 0,
             sessionCount: 0,
             activeDays: 0
@@ -81,6 +84,7 @@ describe('UsageDetailsPanel', () => {
             {
               usageDate: '2026-05-25',
               totalTokens: 0,
+              totalTokensWithoutCacheRead: 0,
               costUsd: 0,
               sessionCount: 0,
               sourceSplit: [],

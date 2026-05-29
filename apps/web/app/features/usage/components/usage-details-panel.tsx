@@ -18,8 +18,9 @@ export function UsageDetailsPanel(props: { details: UsageDetails; filters: Usage
     <section class="mx-auto flex max-w-6xl flex-col gap-5">
       <UsageDetailsHeader filters={props.filters} devices={props.devices} selectedDevice={selectedDevice} />
 
-      <div class="grid gap-3 md:grid-cols-4">
+      <div class="grid gap-3 md:grid-cols-5">
         <Metric label="范围 tokens" value={formatInteger(props.details.summary.totalTokens)} tone="lime" />
+        <Metric label="不含缓存读" value={formatInteger(props.details.summary.totalTokensWithoutCacheRead)} />
         <Metric label="范围费用" value={formatUsd(props.details.summary.costUsd)} />
         <Metric label="Sessions" value={formatInteger(props.details.summary.sessionCount)} />
         <Metric label="活跃天数" value={formatInteger(props.details.summary.activeDays)} />
@@ -75,9 +76,10 @@ function DailySummaryCard(props: { dailyRows: UsageDetails['dailyRows'] }) {
 
 function DailySummaryHeader() {
   return (
-    <div class="hidden grid-cols-[1.1fr_1fr_0.8fr_0.7fr_1.2fr] gap-3 px-4 text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:grid">
+    <div class="hidden grid-cols-[1.1fr_1fr_1fr_0.8fr_0.7fr_1.2fr] gap-3 px-4 text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:grid">
       <span>日期</span>
       <span>Tokens</span>
+      <span>不含缓存读</span>
       <span>费用</span>
       <span>Sessions</span>
       <span>来源</span>
@@ -96,7 +98,7 @@ function DailySummaryRow(props: { row: UsageDetails['dailyRows'][number] }) {
 
 function DailySummaryRowHeader(props: { row: UsageDetails['dailyRows'][number] }) {
   return (
-    <summary class="grid cursor-pointer list-none gap-3 p-4 text-sm md:grid-cols-[1.1fr_1fr_0.8fr_0.7fr_1.2fr] md:items-center">
+    <summary class="grid cursor-pointer list-none gap-3 p-4 text-sm md:grid-cols-[1.1fr_1fr_1fr_0.8fr_0.7fr_1.2fr] md:items-center">
       <span class="flex items-center gap-2 font-bold">
         <span class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--app-border)] text-[var(--app-muted)] transition group-open:rotate-90">
           <LucideIcon icon={ChevronRight} size={14} />
@@ -104,6 +106,7 @@ function DailySummaryRowHeader(props: { row: UsageDetails['dailyRows'][number] }
         {props.row.usageDate}
       </span>
       <MobileValue label="Tokens">{formatInteger(props.row.totalTokens)}</MobileValue>
+      <MobileValue label="不含缓存读">{formatInteger(props.row.totalTokensWithoutCacheRead)}</MobileValue>
       <MobileValue label="费用">{formatUsd(props.row.costUsd)}</MobileValue>
       <MobileValue label="Sessions">{formatInteger(props.row.sessionCount)}</MobileValue>
       <div class="grid gap-1 md:block">
@@ -147,7 +150,7 @@ function DailyModelRows(props: { rows: UsageDetails['dailyRows'][number]['modelR
     <div class="border-t border-[var(--app-border)] p-4">
       {props.rows.length > 0 ? (
         <div class="overflow-x-auto">
-          <Table class="min-w-[920px]">
+          <Table class="min-w-[1020px]">
             <DailyModelRowsHeader />
             <DailyModelRowsBody rows={props.rows} />
           </Table>
@@ -171,6 +174,7 @@ function DailyModelRowsHeader() {
         <TableHead>Output</TableHead>
         <TableHead>Cache 写入</TableHead>
         <TableHead>Cache 读取</TableHead>
+        <TableHead>不含缓存读</TableHead>
         <TableHead>Total</TableHead>
         <TableHead>费用</TableHead>
       </TableRow>
@@ -191,6 +195,7 @@ function DailyModelRowsBody(props: { rows: UsageDetails['dailyRows'][number]['mo
           <TableCell>{formatInteger(modelRow.outputTokens)}</TableCell>
           <TableCell>{formatInteger(modelRow.cacheCreationTokens)}</TableCell>
           <TableCell>{formatInteger(modelRow.cacheReadTokens)}</TableCell>
+          <TableCell>{formatInteger(modelRow.totalTokensWithoutCacheRead)}</TableCell>
           <TableCell class="font-bold">{formatInteger(modelRow.totalTokens)}</TableCell>
           <TableCell>{formatUsd(modelRow.costUsd)}</TableCell>
         </TableRow>

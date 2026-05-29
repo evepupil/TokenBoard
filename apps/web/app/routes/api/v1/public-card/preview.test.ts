@@ -30,7 +30,7 @@ describe('public card preview route', () => {
             theme: 'light',
             title: 'Usage <script>',
             subtitle: 'Public "preview"',
-            metrics: ['todayTokens', 'todayCost']
+            metrics: ['todayTokensWithoutCacheRead', 'todayCost']
           }
         }))
       }
@@ -45,7 +45,8 @@ describe('public card preview route', () => {
     expect(db.prepare).not.toHaveBeenCalled()
     expect(response.headers.get('content-type')).toBe('image/svg+xml; charset=utf-8')
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(svg).toContain('Today Tokens')
+    expect(svg).toContain('Today No Cache Read')
+    expect(svg).toContain('860')
     expect(svg).toContain('Usage &lt;script&gt;')
     expect(svg).toContain('Public &quot;preview&quot;')
     expect(svg).not.toContain('<script>')

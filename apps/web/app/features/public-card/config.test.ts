@@ -86,4 +86,12 @@ describe('public card config', () => {
       metrics: ['totalTokens', 'todayCost']
     })
   })
+
+  test('keeps card metric slots separate from available metric choices', () => {
+    expect(parsePublicCardConfigForm({
+      cardMetric1: 'totalTokensWithoutCacheRead',
+      cardMetric6: 'todayTokensWithoutCacheRead',
+      cardMetric7: 'monthTokensWithoutCacheRead'
+    })?.metrics).toEqual(['totalTokensWithoutCacheRead', 'todayTokensWithoutCacheRead'])
+  })
 })

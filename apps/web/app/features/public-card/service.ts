@@ -11,10 +11,13 @@ export type PublicUsageProfile = {
   displayName: string
   timezone: string
   totalTokens: number
+  totalTokensWithoutCacheRead: number
   totalCostUsd: number
   todayTokens: number
+  todayTokensWithoutCacheRead: number
   todayCostUsd: number
   monthTokens: number
+  monthTokensWithoutCacheRead: number
   monthCostUsd: number
   publicCardConfig: PublicCardConfig
   sourceSplit: Array<{ source: UsageSource; totalTokens: number }>
@@ -32,10 +35,13 @@ type ProfileRow = {
 
 type TotalsRow = {
   totalTokens: number | null
+  totalTokensWithoutCacheRead: number | null
   totalCostUsd: number | null
   todayTokens: number | null
+  todayTokensWithoutCacheRead: number | null
   todayCostUsd: number | null
   monthTokens: number | null
+  monthTokensWithoutCacheRead: number | null
   monthCostUsd: number | null
 }
 
@@ -77,10 +83,13 @@ export async function getPublicUsageProfile(
     displayName: profile.displayName,
     timezone: profile.timezone,
     totalTokens: Number(totals?.totalTokens ?? 0),
+    totalTokensWithoutCacheRead: Number(totals?.totalTokensWithoutCacheRead ?? 0),
     totalCostUsd: Number(totals?.totalCostUsd ?? 0),
     todayTokens: Number(totals?.todayTokens ?? 0),
+    todayTokensWithoutCacheRead: Number(totals?.todayTokensWithoutCacheRead ?? 0),
     todayCostUsd: Number(totals?.todayCostUsd ?? 0),
     monthTokens: Number(totals?.monthTokens ?? 0),
+    monthTokensWithoutCacheRead: Number(totals?.monthTokensWithoutCacheRead ?? 0),
     monthCostUsd: Number(totals?.monthCostUsd ?? 0),
     publicCardConfig: parsePublicCardConfig(profile.publicCardConfig),
     sourceSplit,
@@ -96,14 +105,17 @@ export async function getPublicUsageJson(db: D1Database, slug: string, now = new
     timezone: profile.timezone,
     total: {
       tokens: profile.totalTokens,
+      tokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
       costUsd: profile.totalCostUsd
     },
     today: {
       tokens: profile.todayTokens,
+      tokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
       costUsd: profile.todayCostUsd
     },
     month: {
       tokens: profile.monthTokens,
+      tokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
       costUsd: profile.monthCostUsd
     },
     sourceSplit: profile.sourceSplit,
@@ -122,10 +134,13 @@ export async function getPublicUsageCard(
     displayName: profile.displayName,
     publicUrl,
     totalTokens: profile.totalTokens,
+    totalTokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
     totalCostUsd: profile.totalCostUsd,
     monthTokens: profile.monthTokens,
+    monthTokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
     monthCostUsd: profile.monthCostUsd,
     todayTokens: profile.todayTokens,
+    todayTokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
     todayCostUsd: profile.todayCostUsd
   }, profile.publicCardConfig)
 }
@@ -135,8 +150,10 @@ export function getEmptyPublicCard() {
     displayName: 'TokenBoard',
     publicUrl: 'TokenBoard',
     totalTokens: 0,
+    totalTokensWithoutCacheRead: 0,
     totalCostUsd: 0,
     monthTokens: 0,
+    monthTokensWithoutCacheRead: 0,
     monthCostUsd: 0
   })
 }
@@ -162,16 +179,19 @@ async function getPublicTotals(db: D1Database, userId: string, today: string, mo
         WITH ${dedupedDailyUsageCte}
         SELECT
           COALESCE(SUM(total_tokens), 0) as totalTokens,
+          COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(cost_usd), 0) as totalCostUsd,
           COALESCE(SUM(CASE WHEN usage_date = ? THEN total_tokens ELSE 0 END), 0) as todayTokens,
+          COALESCE(SUM(CASE WHEN usage_date = ? THEN input_tokens + output_tokens + cache_creation_tokens ELSE 0 END), 0) as todayTokensWithoutCacheRead,
           COALESCE(SUM(CASE WHEN usage_date = ? THEN cost_usd ELSE 0 END), 0) as todayCostUsd,
           COALESCE(SUM(CASE WHEN usage_date >= ? THEN total_tokens ELSE 0 END), 0) as monthTokens,
+          COALESCE(SUM(CASE WHEN usage_date >= ? THEN input_tokens + output_tokens + cache_creation_tokens ELSE 0 END), 0) as monthTokensWithoutCacheRead,
           COALESCE(SUM(CASE WHEN usage_date >= ? THEN cost_usd ELSE 0 END), 0) as monthCostUsd
         FROM deduped_daily_usage
         WHERE user_id = ?
       `
     )
-    .bind(today, today, monthStart, monthStart, userId)
+    .bind(today, today, today, monthStart, monthStart, monthStart, userId)
     .first<TotalsRow>()
 }
 

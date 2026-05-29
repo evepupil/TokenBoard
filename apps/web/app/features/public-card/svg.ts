@@ -9,10 +9,13 @@ export type UsageCardInput = {
   displayName: string
   publicUrl: string
   totalTokens: number
+  totalTokensWithoutCacheRead?: number
   totalCostUsd: number
   monthTokens: number
+  monthTokensWithoutCacheRead?: number
   monthCostUsd: number
   todayTokens?: number
+  todayTokensWithoutCacheRead?: number
   todayCostUsd?: number
 }
 
@@ -142,10 +145,13 @@ function labels(language: PublicCardConfig['language']) {
       title: 'TokenBoard Stats',
       metrics: {
         totalTokens: 'Total Tokens',
+        totalTokensWithoutCacheRead: 'No Cache Read',
         totalCost: 'Total Cost',
         monthTokens: 'Monthly Tokens',
+        monthTokensWithoutCacheRead: 'Monthly No Cache Read',
         monthCost: 'Monthly Cost',
         todayTokens: 'Today Tokens',
+        todayTokensWithoutCacheRead: 'Today No Cache Read',
         todayCost: 'Today Cost'
       } satisfies Record<PublicCardMetric, string>
     }
@@ -155,10 +161,13 @@ function labels(language: PublicCardConfig['language']) {
     title: 'TokenBoard 统计',
     metrics: {
       totalTokens: '总 token',
+      totalTokensWithoutCacheRead: '总量不含缓存读',
       totalCost: '总额度',
       monthTokens: '本月 token',
+      monthTokensWithoutCacheRead: '本月不含缓存读',
       monthCost: '本月额度',
       todayTokens: '今日 token',
+      todayTokensWithoutCacheRead: '今日不含缓存读',
       todayCost: '今日额度'
     } satisfies Record<PublicCardMetric, string>
   }
@@ -172,10 +181,13 @@ function subtitleText(input: UsageCardInput, config: PublicCardConfig) {
 function metricValue(input: UsageCardInput, metric: PublicCardMetric) {
   const values = {
     totalTokens: formatInteger(input.totalTokens),
+    totalTokensWithoutCacheRead: formatInteger(input.totalTokensWithoutCacheRead ?? input.totalTokens),
     totalCost: formatUsd(input.totalCostUsd),
     monthTokens: formatInteger(input.monthTokens),
+    monthTokensWithoutCacheRead: formatInteger(input.monthTokensWithoutCacheRead ?? input.monthTokens),
     monthCost: formatUsd(input.monthCostUsd),
     todayTokens: formatInteger(input.todayTokens ?? 0),
+    todayTokensWithoutCacheRead: formatInteger(input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0),
     todayCost: formatUsd(input.todayCostUsd ?? 0)
   } satisfies Record<PublicCardMetric, string>
   return values[metric]

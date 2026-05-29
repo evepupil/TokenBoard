@@ -35,10 +35,12 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         </div>
       </header>
 
-      <div class="grid gap-3 md:grid-cols-4">
+      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="今日 tokens" value={formatInteger(props.summary.todayTokens)} tone="lime" />
+        <Metric label="今日不含缓存读" value={formatInteger(props.summary.todayTokensWithoutCacheRead)} />
         <Metric label="今日费用" value={formatUsd(props.summary.todayCostUsd)} />
         <Metric label="本月 tokens" value={formatInteger(props.summary.monthTokens)} />
+        <Metric label="本月不含缓存读" value={formatInteger(props.summary.monthTokensWithoutCacheRead)} />
         <Metric label="本月费用" value={formatUsd(props.summary.monthCostUsd)} />
       </div>
 

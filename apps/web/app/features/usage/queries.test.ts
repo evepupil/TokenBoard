@@ -16,8 +16,10 @@ describe('getUsageSummary', () => {
                 if (sql.includes('COUNT(*) as deviceCount')) {
                   return {
                     todayTokens: 300,
+                    todayTokensWithoutCacheRead: 220,
                     todayCostUsd: 0.42,
                     monthTokens: 1200,
+                    monthTokensWithoutCacheRead: 900,
                     monthCostUsd: 1.7,
                     lastSyncedAt: '2026-04-28T08:00:00.000Z',
                     deviceCount: 2
@@ -48,8 +50,10 @@ describe('getUsageSummary', () => {
 
     expect(summary).toEqual({
       todayTokens: 300,
+      todayTokensWithoutCacheRead: 220,
       todayCostUsd: 0.42,
       monthTokens: 1200,
+      monthTokensWithoutCacheRead: 900,
       monthCostUsd: 1.7,
       lastSyncedAt: '2026-04-28T08:00:00.000Z',
       deviceCount: 2,
@@ -134,6 +138,7 @@ describe('getUsageDetails', () => {
                         cacheCreationTokens: 60,
                         cacheReadTokens: 100,
                         totalTokens: 340,
+                        totalTokensWithoutCacheRead: 240,
                         costUsd: 0.34,
                         sessionCount: 3
                       }
@@ -147,6 +152,7 @@ describe('getUsageDetails', () => {
                       usageDate: '2026-04-27',
                       source: 'claude-code',
                       totalTokens: 120,
+                      totalTokensWithoutCacheRead: 100,
                       costUsd: 0.12,
                       sessionCount: 2
                     },
@@ -154,6 +160,7 @@ describe('getUsageDetails', () => {
                       usageDate: '2026-04-29',
                       source: 'claude-code',
                       totalTokens: 340,
+                      totalTokensWithoutCacheRead: 240,
                       costUsd: 0.34,
                       sessionCount: 3
                     }
@@ -177,6 +184,7 @@ describe('getUsageDetails', () => {
 
     expect(details.summary).toEqual({
       totalTokens: 460,
+      totalTokensWithoutCacheRead: 340,
       costUsd: 0.46,
       sessionCount: 5,
       activeDays: 2
@@ -185,6 +193,7 @@ describe('getUsageDetails', () => {
       {
         usageDate: '2026-04-27',
         totalTokens: 120,
+        totalTokensWithoutCacheRead: 100,
         costUsd: 0.12,
         sessionCount: 2,
         sourceSplit: [{ source: 'claude-code', totalTokens: 120 }],
@@ -193,6 +202,7 @@ describe('getUsageDetails', () => {
       {
         usageDate: '2026-04-28',
         totalTokens: 0,
+        totalTokensWithoutCacheRead: 0,
         costUsd: 0,
         sessionCount: 0,
         sourceSplit: [],
@@ -201,6 +211,7 @@ describe('getUsageDetails', () => {
       {
         usageDate: '2026-04-29',
         totalTokens: 340,
+        totalTokensWithoutCacheRead: 240,
         costUsd: 0.34,
         sessionCount: 3,
         sourceSplit: [{ source: 'claude-code', totalTokens: 340 }],
@@ -214,6 +225,7 @@ describe('getUsageDetails', () => {
             cacheCreationTokens: 60,
             cacheReadTokens: 100,
             totalTokens: 340,
+            totalTokensWithoutCacheRead: 240,
             costUsd: 0.34,
             sessionCount: 3
           }
@@ -230,6 +242,7 @@ describe('getUsageDetails', () => {
         cacheCreationTokens: 60,
         cacheReadTokens: 100,
         totalTokens: 340,
+        totalTokensWithoutCacheRead: 240,
         costUsd: 0.34,
         sessionCount: 3
       }
@@ -295,6 +308,7 @@ describe('getUsageDetails', () => {
                         cacheCreationTokens: 0,
                         cacheReadTokens: 0,
                         totalTokens,
+                        totalTokensWithoutCacheRead: totalTokens,
                         costUsd,
                         sessionCount: 1
                       }
@@ -308,6 +322,7 @@ describe('getUsageDetails', () => {
                       usageDate: '2026-04-29',
                       source: 'codex',
                       totalTokens,
+                      totalTokensWithoutCacheRead: totalTokens,
                       costUsd,
                       sessionCount: 1
                     }
@@ -330,6 +345,7 @@ describe('getUsageDetails', () => {
 
     expect(details.summary).toEqual({
       totalTokens: 100,
+      totalTokensWithoutCacheRead: 100,
       costUsd: 1,
       sessionCount: 1,
       activeDays: 1

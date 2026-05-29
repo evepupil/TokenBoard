@@ -70,6 +70,7 @@ export function usageDetailsToCsv(details: UsageDetails) {
     'output_tokens',
     'cache_creation_tokens',
     'cache_read_tokens',
+    'total_tokens_without_cache_read',
     'total_tokens',
     'cost_usd',
     'session_count'
@@ -83,6 +84,7 @@ export function usageDetailsToCsv(details: UsageDetails) {
     row.outputTokens,
     row.cacheCreationTokens,
     row.cacheReadTokens,
+    row.totalTokensWithoutCacheRead,
     row.totalTokens,
     row.costUsd,
     row.sessionCount

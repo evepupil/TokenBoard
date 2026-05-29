@@ -43,10 +43,13 @@ describe('public card service', () => {
 
                 return {
                   totalTokens: 1200,
+                  totalTokensWithoutCacheRead: 900,
                   totalCostUsd: 3.75,
                   todayTokens: 100,
+                  todayTokensWithoutCacheRead: 70,
                   todayCostUsd: 0.2,
                   monthTokens: 500,
+                  monthTokensWithoutCacheRead: 380,
                   monthCostUsd: 1.5
                 }
               },
@@ -69,15 +72,15 @@ describe('public card service', () => {
       slug: 'eve',
       displayName: 'Eve',
       timezone: 'Asia/Hong_Kong',
-      total: { tokens: 1200, costUsd: 3.75 },
-      today: { tokens: 100, costUsd: 0.2 },
-      month: { tokens: 500, costUsd: 1.5 },
+      total: { tokens: 1200, tokensWithoutCacheRead: 900, costUsd: 3.75 },
+      today: { tokens: 100, tokensWithoutCacheRead: 70, costUsd: 0.2 },
+      month: { tokens: 500, tokensWithoutCacheRead: 380, costUsd: 1.5 },
       sourceSplit: [{ source: 'codex', totalTokens: 300 }],
       topModels: [{ model: 'gpt-5.4', totalTokens: 500, costUsd: 1.5 }]
     })
     expect(JSON.stringify(result)).not.toContain('internal-user-id')
     expect(bindings[0]).toEqual(['eve'])
-    expect(bindings[1]).toEqual(['2026-04-29', '2026-04-29', '2026-04-01', '2026-04-01', 'internal-user-id'])
+    expect(bindings[1]).toEqual(['2026-04-29', '2026-04-29', '2026-04-29', '2026-04-01', '2026-04-01', '2026-04-01', 'internal-user-id'])
     for (const sql of sqlStatements.slice(1)) {
       expect(sql).toContain('deduped_daily_usage')
       expect(sql).toContain("device_id <> 'legacy'")
@@ -117,10 +120,13 @@ describe('public card service', () => {
 
                 return {
                   totalTokens: 1234567,
+                  totalTokensWithoutCacheRead: 345678,
                   totalCostUsd: 42.5,
                   todayTokens: 100,
+                  todayTokensWithoutCacheRead: 70,
                   todayCostUsd: 0.2,
                   monthTokens: 89012,
+                  monthTokensWithoutCacheRead: 45678,
                   monthCostUsd: 6.78
                 }
               },

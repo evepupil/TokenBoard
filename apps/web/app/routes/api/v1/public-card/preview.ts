@@ -16,10 +16,13 @@ export const POST = createRoute(async (c) => {
       displayName,
       publicUrl,
       totalTokens: 1234567,
+      totalTokensWithoutCacheRead: 345678,
       totalCostUsd: 42.5,
       monthTokens: 89012,
+      monthTokensWithoutCacheRead: 45678,
       monthCostUsd: 6.78,
       todayTokens: 1200,
+      todayTokensWithoutCacheRead: 860,
       todayCostUsd: 0.2
     }, config)
 
