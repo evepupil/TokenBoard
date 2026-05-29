@@ -30,4 +30,30 @@ describe('getLeaderboard', () => {
     expect(bindings[0]).toEqual(['2026-04-01', '2026-05-01', 50])
     expect(sqlStatements[0]).toContain('ORDER BY costUsd DESC, totalTokens DESC')
   })
+
+  test('accepts the no-cache-read token leaderboard metric', async () => {
+    const sqlStatements: string[] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind() {
+            return {
+              async all() {
+                return { results: [] }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await getLeaderboard(
+      db,
+      { period: 'daily', metric: 'tokens-without-cache-read' },
+      new Date('2026-04-29T10:00:00.000Z')
+    )
+
+    expect(sqlStatements[0]).toContain('ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC, costUsd DESC')
+  })
 })

@@ -18,6 +18,7 @@ function createDb() {
                     slug: 'eve-tokenboard',
                     displayName: 'Eve',
                     totalTokens: 1000,
+                    totalTokensWithoutCacheRead: 750,
                     costUsd: 2.5
                   }
                 ]
@@ -50,6 +51,7 @@ describe('listLeaderboard', () => {
         slug: 'eve-tokenboard',
         displayName: 'Eve',
         totalTokens: 1000,
+        totalTokensWithoutCacheRead: 750,
         costUsd: 2.5
       }
     ])
@@ -74,5 +76,21 @@ describe('listLeaderboard', () => {
     })
 
     expect(sqlStatements[0]).toContain('ORDER BY costUsd DESC, totalTokens DESC')
+  })
+
+  test('lists leaderboard ordered by tokens without cache reads', async () => {
+    const { db, sqlStatements } = createDb()
+
+    await listLeaderboard(db, {
+      period: 'monthly',
+      metric: 'tokens-without-cache-read',
+      startDate: '2026-04-01',
+      endDateExclusive: '2026-05-01',
+      limit: 20
+    })
+
+    expect(sqlStatements[0]).toContain('totalTokensWithoutCacheRead')
+    expect(sqlStatements[0]).toContain('deduped_daily_usage.input_tokens + deduped_daily_usage.output_tokens + deduped_daily_usage.cache_creation_tokens')
+    expect(sqlStatements[0]).toContain('ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC, costUsd DESC')
   })
 })

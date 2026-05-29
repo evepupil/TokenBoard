@@ -5,14 +5,16 @@ import { cn } from '../../../lib/cn'
 import { formatUsd } from '../../../lib/money'
 import type { LeaderboardEntry } from '../queries'
 
+type LeaderboardMetric = 'tokens' | 'tokens-without-cache-read' | 'cost'
+
 export type LeaderboardPanelProps = {
   entries: LeaderboardEntry[]
   period: 'daily' | 'monthly'
-  metric: 'tokens' | 'cost'
+  metric: LeaderboardMetric
 }
 
 export function LeaderboardPanel(props: LeaderboardPanelProps) {
-  const title = `${props.period === 'monthly' ? '每月' : '每日'}${props.metric === 'cost' ? '费用' : ' token'}排名`
+  const title = `${props.period === 'monthly' ? '每月' : '每日'}${metricTitle(props.metric)}排名`
 
   return (
     <div data-leaderboard-panel="true">
@@ -27,7 +29,7 @@ export function LeaderboardPanel(props: LeaderboardPanelProps) {
 function LeaderboardPanelHeader(props: {
   title: string
   period: 'daily' | 'monthly'
-  metric: 'tokens' | 'cost'
+  metric: LeaderboardMetric
 }) {
   return (
     <CardHeader class="flex-col gap-4 border-b border-[var(--app-border)] md:flex-row md:items-end md:justify-between">
@@ -67,16 +69,21 @@ function LeaderboardPanelContent(props: { entries: LeaderboardEntry[] }) {
   )
 }
 
-function periodItems(period: 'daily' | 'monthly', metric: 'tokens' | 'cost') {
+function periodItems(period: 'daily' | 'monthly', metric: LeaderboardMetric) {
   return [
     { label: '每日', href: leaderboardHref('daily', metric), active: period === 'daily' },
     { label: '每月', href: leaderboardHref('monthly', metric), active: period === 'monthly' }
   ]
 }
 
-function metricItems(period: 'daily' | 'monthly', metric: 'tokens' | 'cost') {
+function metricItems(period: 'daily' | 'monthly', metric: LeaderboardMetric) {
   return [
     { label: 'Tokens', href: leaderboardHref(period, 'tokens'), active: metric === 'tokens' },
+    {
+      label: '不含缓存读',
+      href: leaderboardHref(period, 'tokens-without-cache-read'),
+      active: metric === 'tokens-without-cache-read'
+    },
     { label: '费用', href: leaderboardHref(period, 'cost'), active: metric === 'cost' }
   ]
 }
@@ -97,6 +104,10 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
           <dd class="mt-1 font-black">{formatInteger(props.entry.totalTokens)}</dd>
         </div>
         <div>
+          <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">不含缓存读</dt>
+          <dd class="mt-1 font-black">{formatInteger(props.entry.totalTokensWithoutCacheRead)}</dd>
+        </div>
+        <div>
           <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">费用</dt>
           <dd class="mt-1 font-black">{formatUsd(props.entry.costUsd)}</dd>
         </div>
@@ -114,6 +125,7 @@ function LeaderboardTable(props: { entries: LeaderboardEntry[] }) {
             <TableHead>排名</TableHead>
             <TableHead>用户</TableHead>
             <TableHead>Tokens</TableHead>
+            <TableHead>不含缓存读</TableHead>
             <TableHead>费用</TableHead>
           </TableRow>
         </TableHeader>
@@ -125,6 +137,7 @@ function LeaderboardTable(props: { entries: LeaderboardEntry[] }) {
               </TableCell>
               <TableCell>{entry.displayName}</TableCell>
               <TableCell class="font-bold">{formatInteger(entry.totalTokens)}</TableCell>
+              <TableCell class="font-bold">{formatInteger(entry.totalTokensWithoutCacheRead)}</TableCell>
               <TableCell class="rounded-r-xl text-[var(--app-muted)]">
                 {formatUsd(entry.costUsd)}
               </TableCell>
@@ -144,7 +157,13 @@ function formatInteger(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
 }
 
-function leaderboardHref(period: 'daily' | 'monthly', metric: 'tokens' | 'cost') {
+function metricTitle(metric: LeaderboardMetric) {
+  if (metric === 'cost') return '费用'
+  if (metric === 'tokens-without-cache-read') return '不含缓存读 token'
+  return ' token'
+}
+
+function leaderboardHref(period: 'daily' | 'monthly', metric: LeaderboardMetric) {
   return `/leaderboards?period=${period}&metric=${metric}`
 }
 
@@ -152,7 +171,10 @@ function SegmentedControl(props: {
   items: Array<{ label: string; href: string; active: boolean }>
 }) {
   return (
-    <div class="grid grid-cols-2 rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)] sm:flex">
+    <div class={cn(
+      'grid rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)] sm:flex',
+      props.items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'
+    )}>
       {props.items.map((item) =>
         item.active ? (
           <Badge class="w-full justify-center sm:w-auto">{item.label}</Badge>

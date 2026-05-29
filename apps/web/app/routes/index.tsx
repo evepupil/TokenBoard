@@ -28,9 +28,9 @@ export default createRoute(async (c) => {
         <div class="relative z-10 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-5 text-[var(--app-text)] shadow-2xl shadow-black/15">
           <div class="grid gap-3 sm:grid-cols-2">
             <Metric label="今日 tokens" value="128,420" />
+            <Metric label="不含缓存读" value="97,850" />
             <Metric label="本月费用" value="$42.31" />
             <Metric label="主要模型" value="gpt-5.4" />
-            <Metric label="连续同步" value="18 天" />
           </div>
           <div class="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
             <div class="mb-4 flex items-center justify-between text-sm">

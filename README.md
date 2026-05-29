@@ -50,7 +50,8 @@ the settings page.
 
 Public JSON includes both total token counts and `tokensWithoutCacheRead`, which is calculated as
 `input_tokens + output_tokens + cache_creation_tokens`. The same no-cache-read metrics can be shown
-on README SVG cards for total, monthly, or daily usage.
+on README SVG cards for total, monthly, or daily usage. Leaderboards can rank by total tokens,
+tokens without cache reads, or cost.
 
 ## Collector Behavior
 
