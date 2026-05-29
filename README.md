@@ -7,6 +7,7 @@ aggregates to Cloudflare Workers + D1, and shows usage stats on a hosted dashboa
 
 - Claude Code and Codex usage collection through a local collector.
 - Daily dashboard, details, CSV export, public JSON, README SVG cards, and leaderboards.
+- Total-token and no-cache-read token views across dashboard, exports, public APIs, cards, and rankings.
 - Device-aware upload tokens with compatibility for legacy tokens.
 - Lightweight notifier hooks for near-real-time sync after Codex or Claude Code sessions.
 - Private by default: prompts, completions, raw logs, local paths, and upload tokens are not uploaded.
@@ -49,9 +50,8 @@ and reset to defaults. Invalid stored card config falls back to the default card
 the settings page.
 
 Public JSON includes both total token counts and `tokensWithoutCacheRead`, which is calculated as
-`input_tokens + output_tokens + cache_creation_tokens`. The same no-cache-read metrics can be shown
-on README SVG cards for total, monthly, or daily usage. Leaderboards can rank by total tokens,
-tokens without cache reads, or cost.
+`input_tokens + output_tokens + cache_creation_tokens`. Dashboard source splits, details, CSV export,
+README SVG cards, and leaderboards can use the same no-cache-read token view.
 
 ## Collector Behavior
 
