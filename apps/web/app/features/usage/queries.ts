@@ -147,7 +147,7 @@ export async function getUsageSummary(
         WHERE user_id = ?
           AND usage_date >= ?
         GROUP BY source
-        ORDER BY totalTokens DESC
+        ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC
       `
     )
     .bind(input.userId, input.monthStart)

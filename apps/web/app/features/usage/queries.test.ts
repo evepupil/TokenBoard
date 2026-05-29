@@ -67,6 +67,11 @@ describe('getUsageSummary', () => {
     expect(sqlStatements[0]).toContain('daily_usage')
     expect(sqlStatements[0]).toContain('deduped_daily_usage')
     expect(sqlStatements[1]).toContain('deduped_daily_usage')
+    expect(sqlStatements[0]).toContain(
+      'deduped_daily_usage.input_tokens + deduped_daily_usage.output_tokens + deduped_daily_usage.cache_creation_tokens'
+    )
+    expect(sqlStatements[1]).toContain('input_tokens + output_tokens + cache_creation_tokens')
+    expect(sqlStatements[1]).toContain('ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC')
     expect(sqlStatements[0]).toContain('LEFT JOIN device_stats')
   })
 })
@@ -109,6 +114,7 @@ describe('getDailyUsageTrend', () => {
     ])
     expect(bindings[0]).toEqual(['user_1', '2026-04-27', '2026-04-29'])
     expect(sqlStatements[0]).toContain('deduped_daily_usage')
+    expect(sqlStatements[0]).toContain('SUM(input_tokens + output_tokens + cache_creation_tokens)')
     expect(sqlStatements[0]).toContain('GROUP BY usage_date')
     expect(sqlStatements[0]).toContain('ORDER BY usage_date ASC')
   })
@@ -272,9 +278,11 @@ describe('getUsageDetails', () => {
       ]
     ])
     expect(sqlStatements[0]).toContain('GROUP BY usage_date, source')
+    expect(sqlStatements[0]).toContain('SUM(input_tokens + output_tokens + cache_creation_tokens)')
     expect(sqlStatements[0]).toContain('device_id')
     expect(sqlStatements[0]).toContain('lower(model)')
     expect(sqlStatements[1]).toContain('GROUP BY usage_date, source, model')
+    expect(sqlStatements[1]).toContain('SUM(input_tokens + output_tokens + cache_creation_tokens)')
     expect(sqlStatements[1]).toContain('device_id')
     expect(sqlStatements[1]).toContain('lower(model)')
     expect(sqlStatements[0]).not.toContain('deduped_daily_usage')
