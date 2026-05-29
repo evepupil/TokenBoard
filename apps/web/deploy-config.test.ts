@@ -10,6 +10,7 @@ describe('Wrangler deploy config', () => {
     const pkg = JSON.parse(readPackageFile('package.json'))
 
     expect(pkg.scripts.deploy).toContain('scripts/check-production-config.mjs')
+    expect(pkg.scripts.deploy).toContain('wrangler d1 migrations apply DB --remote --config wrangler.jsonc')
     expect(pkg.scripts.deploy).toContain('wrangler deploy --config wrangler.jsonc')
     expect(pkg.scripts.deploy).not.toContain('wrangler deploy"')
   })

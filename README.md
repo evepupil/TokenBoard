@@ -103,20 +103,34 @@ pnpm build
 Deploy manually:
 
 ```bash
-pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --config wrangler.jsonc
 pnpm run deploy
 ```
 
-Production `master` pushes run GitHub Actions checks and D1 migrations before Cloudflare's
-git-connected Worker build serves the new code. Configure these GitHub repository secrets under
-`Settings` -> `Secrets and variables` -> `Actions`:
+`pnpm run deploy` validates the production config, applies pending remote D1 migrations, builds,
+and deploys the Worker.
+
+For Cloudflare Workers Builds, set the production deploy command to the same script so migrations
+run in the deploy path:
+
+```bash
+pnpm --filter @tokenboard/web run deploy
+```
+
+If the Workers Build root directory is `apps/web`, use:
+
+```bash
+pnpm run deploy
+```
+
+Production `master` pushes also run GitHub Actions checks and D1 migrations as an audit trail.
+Configure these GitHub repository secrets under `Settings` -> `Secrets and variables` -> `Actions`:
 
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard account ID, or `wrangler whoami`.
 - `CLOUDFLARE_API_TOKEN`: Cloudflare `My Profile` -> `API Tokens` token with D1 edit access for
   the target account.
 
 The workflow does not deploy the Worker. If Cloudflare git builds are not enabled, run
-`pnpm run deploy` manually after migrations pass.
+`pnpm run deploy` manually.
 
 `pnpm run deploy` validates that `apps/web/wrangler.jsonc` does not contain placeholder route,
 auth URL, or D1 values before building or deploying.
