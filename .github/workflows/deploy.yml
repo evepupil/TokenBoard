@@ -42,8 +42,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-  migrate:
-    name: Apply D1 migrations
+  deploy:
+    name: Deploy Worker
     if: github.event_name == 'push'
     needs: test
     runs-on: ubuntu-latest
@@ -56,6 +56,10 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TOKENBOARD_WRANGLER_CONFIG: wrangler.production.ci.jsonc
+      TOKENBOARD_WORKER_ROUTE: ${{ vars.TOKENBOARD_WORKER_ROUTE }}
+      BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
 
     steps:
       - name: Checkout
@@ -76,5 +80,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Create production Wrangler config
+        working-directory: apps/web
+        run: node scripts/write-production-config.mjs wrangler.production.example.jsonc "$TOKENBOARD_WRANGLER_CONFIG"
+
+      - name: Validate production Wrangler config
+        working-directory: apps/web
+        run: node scripts/check-production-config.mjs
+
+      - name: Build Worker
+        working-directory: apps/web
+        run: pnpm run build
+
       - name: Apply D1 migrations
-        run: pnpm --filter @tokenboard/web exec wrangler d1 migrations apply DB --remote --config wrangler.jsonc
+        working-directory: apps/web
+        run: pnpm exec wrangler d1 migrations apply DB --remote --config "$TOKENBOARD_WRANGLER_CONFIG"
+
+      - name: Deploy Worker
+        working-directory: apps/web
+        run: pnpm exec wrangler deploy --config "$TOKENBOARD_WRANGLER_CONFIG"

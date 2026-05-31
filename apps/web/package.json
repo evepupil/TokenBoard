@@ -5,7 +5,7 @@
     "dev": "vite",
     "build": "vite build --mode client && vite build",
     "preview": "wrangler dev",
-    "deploy": "node scripts/check-production-config.mjs && pnpm run build && pnpm exec wrangler d1 migrations apply DB --remote --config wrangler.jsonc && wrangler deploy --config wrangler.jsonc",
+    "deploy": "node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
