@@ -4,20 +4,6 @@ import { resolve } from 'node:path'
 const CONFIG_FILE = process.env.TOKENBOARD_WRANGLER_CONFIG?.trim() || 'wrangler.production.jsonc'
 const EXAMPLE_FILE = 'wrangler.production.example.jsonc'
 
-const requiredFields = [
-  ['triggers.crons', /"crons"\s*:\s*\[/],
-  ['workers_dev: false', /"workers_dev"\s*:\s*false/],
-  ['routes', /"routes"\s*:/],
-  ['BETTER_AUTH_URL', /"BETTER_AUTH_URL"\s*:/],
-  ['d1_databases', /"d1_databases"\s*:/],
-  ['database_id', /"database_id"\s*:/]
-]
-
-const placeholderPatterns = [
-  /<your-[^>]+>/,
-  /00000000-0000-0000-0000-000000000000/
-]
-
 const configPath = resolve(CONFIG_FILE)
 
 if (!existsSync(configPath)) {
@@ -25,30 +11,131 @@ if (!existsSync(configPath)) {
 }
 
 const content = readFileSync(configPath, 'utf8')
+const config = parseJsoncConfig(content)
 
-for (const [field, pattern] of requiredFields) {
-  if (!pattern.test(content)) {
-    fail(`${CONFIG_FILE} is missing ${field}.`)
+if (hasPlaceholderValue(config)) {
+  fail(`${CONFIG_FILE} still contains placeholder values.`)
+}
+
+if (config.workers_dev !== false) {
+  fail(`${CONFIG_FILE} is missing workers_dev: false.`)
+}
+
+validateProductionAuthUrl(readRequiredString(config.vars?.BETTER_AUTH_URL, 'vars.BETTER_AUTH_URL'))
+validateProductionRoute(readRequiredString(firstRoute(config).pattern, 'routes[0].pattern'))
+validateProductionDatabaseId(readRequiredString(d1Database(config).database_id, 'd1_databases[DB].database_id'))
+validateRequiredCronTrigger(config)
+
+function parseJsoncConfig(value) {
+  try {
+    return JSON.parse(stripJsonc(value))
+  } catch (error) {
+    fail(`${CONFIG_FILE} must be valid JSONC: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-for (const pattern of placeholderPatterns) {
-  if (pattern.test(content)) {
-    fail(`${CONFIG_FILE} still contains placeholder values.`)
+function stripJsonc(value) {
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]
+    const next = value[index + 1]
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+    if (char === '/' && next === '/') {
+      while (index < value.length && value[index] !== '\n') index += 1
+      result += '\n'
+      continue
+    }
+    if (char === '/' && next === '*') {
+      index += 2
+      while (index < value.length && !(value[index] === '*' && value[index + 1] === '/')) index += 1
+      index += 1
+      continue
+    }
+    result += char
   }
+  return stripTrailingCommas(result)
 }
 
-validateProductionAuthUrl(extractStringField('BETTER_AUTH_URL'))
-validateProductionRoute(extractStringField('pattern'))
-validateProductionDatabaseId(extractStringField('database_id'))
-validateRequiredCronTrigger()
+function stripTrailingCommas(value) {
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]
+    if (inString) {
+      result += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      result += char
+      continue
+    }
+    if (char === ',') {
+      let nextIndex = index + 1
+      while (/\s/.test(value[nextIndex] ?? '')) nextIndex += 1
+      if (value[nextIndex] === '}' || value[nextIndex] === ']') continue
+    }
+    result += char
+  }
+  return result
+}
 
-function extractStringField(field) {
-  const match = content.match(new RegExp(`"${field}"\\s*:\\s*"([^"]*)"`))
-  if (!match) {
+function hasPlaceholderValue(value) {
+  if (typeof value === 'string') {
+    return /<your-[^>]+>/.test(value) || value === '00000000-0000-0000-0000-000000000000'
+  }
+  if (Array.isArray(value)) return value.some(hasPlaceholderValue)
+  if (value && typeof value === 'object') {
+    return Object.values(value).some(hasPlaceholderValue)
+  }
+  return false
+}
+
+function readRequiredString(value, field) {
+  if (typeof value !== 'string' || !value.trim()) {
     fail(`${CONFIG_FILE} is missing ${field}.`)
   }
-  return match[1].trim()
+  return value.trim()
+}
+
+function firstRoute(config) {
+  if (!Array.isArray(config.routes) || config.routes.length === 0 || !config.routes[0]) {
+    fail(`${CONFIG_FILE} is missing routes.`)
+  }
+  return config.routes[0]
+}
+
+function d1Database(config) {
+  if (!Array.isArray(config.d1_databases) || config.d1_databases.length === 0) {
+    fail(`${CONFIG_FILE} is missing d1_databases.`)
+  }
+  const database = config.d1_databases.find((item) => item?.binding === 'DB') ?? config.d1_databases[0]
+  return database
 }
 
 function validateProductionAuthUrl(value) {
@@ -83,8 +170,8 @@ function validateProductionDatabaseId(value) {
   }
 }
 
-function validateRequiredCronTrigger() {
-  if (!/"crons"\s*:\s*\[[\s\S]*"\*\/15 \* \* \* \*"[\s\S]*\]/.test(content)) {
+function validateRequiredCronTrigger(config) {
+  if (!Array.isArray(config.triggers?.crons) || !config.triggers.crons.includes('*/15 * * * *')) {
     fail(`${CONFIG_FILE} triggers.crons must include */15 * * * * for scheduled webhook delivery.`)
   }
 }

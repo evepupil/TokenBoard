@@ -1,7 +1,7 @@
 import { decryptSecret } from './crypto'
 import { buildWebhookPayload } from './adapters'
 import type { WebhookEnv } from './config'
-import { requireEncryptionKey } from './config'
+import { parseProviderWebhookUrl, requireEncryptionKey } from './config'
 import { getDailyTokenReport } from './report-queries'
 import type { DueWebhookSubscription } from './queries'
 
@@ -16,9 +16,13 @@ export async function sendWebhookRequest(input: {
   fetcher: Fetcher
 }) {
   const encryptionKey = requireEncryptionKey(input.env)
+  const webhookUrl = parseProviderWebhookUrl(
+    input.subscription.provider,
+    await decryptSecret(input.subscription.webhookUrlEncrypted, encryptionKey)
+  )
   const payload = await buildWebhookPayload({
     provider: input.subscription.provider,
-    webhookUrl: await decryptSecret(input.subscription.webhookUrlEncrypted, encryptionKey),
+    webhookUrl: webhookUrl.toString(),
     signingSecret: input.subscription.signingSecretEncrypted
       ? await decryptSecret(input.subscription.signingSecretEncrypted, encryptionKey)
       : null,

@@ -32,7 +32,8 @@ describe('Wrangler deploy config', () => {
     expect(deploymentScript).toContain('wrangler.production.ci.jsonc')
     expect(deploymentScript).toContain('scripts/write-production-config.mjs')
     expect(deploymentScript).toContain('scripts/check-production-config.mjs')
-    expect(deploymentScript).toContain("'pnpm', ['run', 'build']")
+    expect(deploymentScript).toContain("runPnpm(['run', 'build'])")
+    expect(deploymentScript).toContain("process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'")
     expect(deploymentScript).toContain("'d1', 'migrations', 'apply', 'DB'")
     expect(deploymentScript).toContain("'deploy', '--config'")
     expect(productionCheckScript).toContain("|| 'wrangler.production.jsonc'")
@@ -284,6 +285,33 @@ describe('Wrangler deploy config', () => {
         expect(result.status).not.toBe(0)
         expect(result.stderr).toContain('custom domain host')
       }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker ignores misleading JSONC comments', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-commented-config-'))
+    const outputFile = join(tempDir, 'wrangler.production.commented.jsonc')
+
+    try {
+      const content = readPackageFile('wrangler.production.example.jsonc')
+        .replace('{', '{\n  // "workers_dev": true,\n  // "pattern": "localhost",\n  // "database_id": "00000000-0000-0000-0000-000000000000",')
+        .replace('"pattern": "<your-tokenboard-domain>"', '"pattern": "tokenboard.example.com"')
+        .replace('"BETTER_AUTH_URL": "https://<your-tokenboard-domain>"', '"BETTER_AUTH_URL": "https://tokenboard.example.com"')
+        .replace('"database_id": "<your-d1-database-id>"', '"database_id": "11111111-1111-4111-8111-111111111111"')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_WRANGLER_CONFIG: outputFile
+        }
+      })
+
+      expect(result.status).toBe(0)
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }

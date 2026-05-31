@@ -70,6 +70,23 @@ describe('webhook client', () => {
       }), { status: 200 })
     })).rejects.toThrow('Webhook returned application code 310000: sign not match')
   })
+
+  test('rejects decrypted webhook URLs outside the selected provider allowlist before fetch', async () => {
+    const encryptedUrl = await encryptSecret('https://example.com/webhook', testEncryptionKey)
+    let called = false
+
+    await expect(sendWebhookRequest({
+      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+      subscription: subscriptionRow(encryptedUrl, 'wecom'),
+      report: dailyReport(),
+      now: new Date('2026-04-29T01:30:00.000Z'),
+      fetcher: async () => {
+        called = true
+        return new Response('{}', { status: 200 })
+      }
+    })).rejects.toThrow('Webhook URL host or path is not supported')
+    expect(called).toBe(false)
+  })
 })
 
 function dailyReport(): DailyTokenReport {
