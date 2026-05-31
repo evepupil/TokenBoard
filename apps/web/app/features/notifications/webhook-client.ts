@@ -51,18 +51,20 @@ function assertWebhookBusinessResponse(text: string) {
   if (!text.trim()) return
   try {
     const data = JSON.parse(text) as {
-      errcode?: number
-      code?: number
-      StatusCode?: number
-      statusCode?: number
-      errmsg?: string
-      msg?: string
-      StatusMessage?: string
-      statusMessage?: string
+      errcode?: unknown
+      errorcode?: unknown
+      code?: unknown
+      StatusCode?: unknown
+      statusCode?: unknown
+      errmsg?: unknown
+      msg?: unknown
+      StatusMessage?: unknown
+      statusMessage?: unknown
+      message?: unknown
     }
-    const code = firstNumber(data.errcode, data.code, data.StatusCode, data.statusCode)
-    if (code !== null && code !== 0) {
-      throw new Error(`Webhook returned application code ${code}: ${data.errmsg ?? data.msg ?? data.StatusMessage ?? data.statusMessage ?? 'unknown error'}`)
+    const code = firstCode(data.errcode, data.errorcode, data.code, data.StatusCode, data.statusCode)
+    if (code !== null && code.value !== 0) {
+      throw new Error(`Webhook returned application code ${code.raw}: ${firstString(data.errmsg, data.msg, data.StatusMessage, data.statusMessage, data.message) ?? 'unknown error'}`)
     }
   } catch (error) {
     if (error instanceof SyntaxError) return
@@ -70,9 +72,21 @@ function assertWebhookBusinessResponse(text: string) {
   }
 }
 
-function firstNumber(...values: Array<unknown>) {
+function firstCode(...values: Array<unknown>) {
   for (const value of values) {
-    if (typeof value === 'number') return value
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return { value, raw: String(value) }
+    }
+    if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+      return { value: Number(value.trim()), raw: value.trim() }
+    }
+  }
+  return null
+}
+
+function firstString(...values: Array<unknown>) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value
   }
   return null
 }

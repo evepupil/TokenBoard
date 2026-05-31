@@ -42,7 +42,7 @@ function NotificationsHeader() {
       <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Notifications</p>
       <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">通知 Webhook</h1>
       <p class="mt-2 text-sm text-[var(--app-muted)]">
-        按本地时间推送当日 token 日报，可用于企微、钉钉、飞书群机器人。
+        按本地时间推送当日 token 日报，可用于企微、钉钉、飞书和 Lark 群机器人。
       </p>
     </header>
   )
@@ -246,7 +246,7 @@ function ProviderSelect() {
       options={[
         { value: 'wecom', label: '企微' },
         { value: 'dingtalk', label: '钉钉' },
-        { value: 'feishu', label: '飞书' }
+        { value: 'feishu', label: '飞书 / Lark' }
       ]}
     />
   )
@@ -270,6 +270,6 @@ function CreateChecks(props: { disabled: boolean }) {
 function providerLabel(provider: string) {
   if (provider === 'wecom') return '企微'
   if (provider === 'dingtalk') return '钉钉'
-  if (provider === 'feishu') return '飞书'
+  if (provider === 'feishu') return '飞书 / Lark'
   return provider
 }

@@ -38,6 +38,38 @@ describe('webhook client', () => {
 
     expect(response.status).toBe(200)
   })
+
+  test('accepts DingTalk string zero business status', async () => {
+    const encryptedUrl = await encryptSecret('https://oapi.dingtalk.com/robot/send?access_token=test', testEncryptionKey)
+
+    const response = await sendWebhookRequest({
+      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+      subscription: subscriptionRow(encryptedUrl, 'dingtalk'),
+      report: dailyReport(),
+      now: new Date('2026-04-29T01:30:00.000Z'),
+      fetcher: async () => new Response(JSON.stringify({
+        errcode: '0',
+        errmsg: 'ok'
+      }), { status: 200 })
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  test('rejects DingTalk string business failures returned with HTTP 200', async () => {
+    const encryptedUrl = await encryptSecret('https://oapi.dingtalk.com/robot/send?access_token=test', testEncryptionKey)
+
+    await expect(sendWebhookRequest({
+      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+      subscription: subscriptionRow(encryptedUrl, 'dingtalk'),
+      report: dailyReport(),
+      now: new Date('2026-04-29T01:30:00.000Z'),
+      fetcher: async () => new Response(JSON.stringify({
+        errcode: '310000',
+        errmsg: 'sign not match'
+      }), { status: 200 })
+    })).rejects.toThrow('Webhook returned application code 310000: sign not match')
+  })
 })
 
 function dailyReport(): DailyTokenReport {

@@ -85,6 +85,20 @@ Supported webhook hosts are restricted to official bot endpoints:
 - DingTalk: `https://oapi.dingtalk.com/robot/send?...`
 - Feishu/Lark: `https://open.feishu.cn/open-apis/bot/v2/hook/...` or `https://open.larksuite.com/open-apis/bot/v2/hook/...`
 
+Provider notes:
+
+- WeCom uses the official `markdown` payload shape and requires the `key` query token.
+- DingTalk uses the official `markdown` payload shape and requires the `access_token` query token.
+  If the bot enables signing, paste the `SEC...` secret into `signing secret`; TokenBoard appends
+  `timestamp` and `sign` to the webhook URL.
+- Feishu and Lark use the official `interactive` card payload with `schema: "2.0"`. If signing is
+  enabled, paste the bot secret into `signing secret`; TokenBoard includes `timestamp` and `sign` in
+  the request body.
+- Provider responses are checked for both HTTP failures and business error codes such as `errcode`,
+  `code`, `StatusCode`, and `statusCode`.
+- Keep daily reports concise. WeCom markdown is limited to 4096 bytes, Feishu/Lark requests are
+  limited to 20 KB, and DingTalk custom bots are rate-limited per bot.
+
 ## Collector Behavior
 
 Sync entry points:
