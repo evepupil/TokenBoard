@@ -76,6 +76,10 @@ openssl rand -base64 32
 pnpm --filter @tokenboard/web exec wrangler secret put WEBHOOK_ENCRYPTION_KEY
 ```
 
+Also configure the production auth secrets required by Better Auth and GitHub OAuth, such as
+`BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, and `GITHUB_CLIENT_SECRET`, using `wrangler secret put`
+or the Cloudflare dashboard before first deploy.
+
 Create a group bot in WeCom, DingTalk, or Feishu/Lark, copy its webhook URL into TokenBoard, and
 copy the bot signing secret into `signing secret` when that platform's security mode requires one.
 
