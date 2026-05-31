@@ -6,12 +6,15 @@ const input = {
   publicUrl: 'https://tokenboard.example/api/public/eve.svg',
   totalTokens: 1234567,
   totalTokensWithoutCacheRead: 345678,
+  totalCacheReadRate: 0.72,
   totalCostUsd: 42.5,
   monthTokens: 89012,
   monthTokensWithoutCacheRead: 45678,
+  monthCacheReadRate: 0.49,
   monthCostUsd: 6.78,
   todayTokens: 1200,
   todayTokensWithoutCacheRead: 860,
+  todayCacheReadRate: 0.28,
   todayCostUsd: 0.2
 }
 
@@ -66,5 +69,19 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('345,678')
     expect(svg).toContain('45,678')
     expect(svg).toContain('860')
+  })
+
+  test('renders cache read rate metrics', () => {
+    const svg = renderUsageCardSvg(input, {
+      language: 'en',
+      metrics: ['totalCacheReadRate', 'monthCacheReadRate', 'todayCacheReadRate']
+    })
+
+    expect(svg).toContain('Cache Read Rate')
+    expect(svg).toContain('Monthly Cache Read')
+    expect(svg).toContain('Today Cache Read')
+    expect(svg).toContain('72%')
+    expect(svg).toContain('49%')
+    expect(svg).toContain('28%')
   })
 })

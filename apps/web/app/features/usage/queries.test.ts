@@ -51,15 +51,17 @@ describe('getUsageSummary', () => {
     expect(summary).toEqual({
       todayTokens: 300,
       todayTokensWithoutCacheRead: 220,
+      todayCacheReadRate: 80 / 300,
       todayCostUsd: 0.42,
       monthTokens: 1200,
       monthTokensWithoutCacheRead: 900,
+      monthCacheReadRate: 300 / 1200,
       monthCostUsd: 1.7,
       lastSyncedAt: '2026-04-28T08:00:00.000Z',
       deviceCount: 2,
       sourceSplit: [
-        { source: 'claude-code', totalTokens: 800, totalTokensWithoutCacheRead: 650 },
-        { source: 'codex', totalTokens: 400, totalTokensWithoutCacheRead: 250 }
+        { source: 'claude-code', totalTokens: 800, totalTokensWithoutCacheRead: 650, cacheReadRate: 150 / 800 },
+        { source: 'codex', totalTokens: 400, totalTokensWithoutCacheRead: 250, cacheReadRate: 150 / 400 }
       ]
     })
     expect(bindings[0]).toEqual(['seed-user', '2026-04-28', '2026-04-01'])
@@ -108,9 +110,9 @@ describe('getDailyUsageTrend', () => {
     })
 
     expect(trend).toEqual([
-      { usageDate: '2026-04-27', totalTokens: 120, totalTokensWithoutCacheRead: 100, costUsd: 0.12 },
-      { usageDate: '2026-04-28', totalTokens: 0, totalTokensWithoutCacheRead: 0, costUsd: 0 },
-      { usageDate: '2026-04-29', totalTokens: 340, totalTokensWithoutCacheRead: 240, costUsd: 0.34 }
+      { usageDate: '2026-04-27', totalTokens: 120, totalTokensWithoutCacheRead: 100, cacheReadRate: 20 / 120, costUsd: 0.12 },
+      { usageDate: '2026-04-28', totalTokens: 0, totalTokensWithoutCacheRead: 0, cacheReadRate: 0, costUsd: 0 },
+      { usageDate: '2026-04-29', totalTokens: 340, totalTokensWithoutCacheRead: 240, cacheReadRate: 100 / 340, costUsd: 0.34 }
     ])
     expect(bindings[0]).toEqual(['user_1', '2026-04-27', '2026-04-29'])
     expect(sqlStatements[0]).toContain('deduped_daily_usage')
@@ -142,7 +144,7 @@ describe('getUsageDetails', () => {
                         inputTokens: 100,
                         outputTokens: 80,
                         cacheCreationTokens: 60,
-                        cacheReadTokens: 100,
+                        cacheReadTokens: 60,
                         totalTokens: 340,
                         totalTokensWithoutCacheRead: 240,
                         costUsd: 0.34,
@@ -191,6 +193,7 @@ describe('getUsageDetails', () => {
     expect(details.summary).toEqual({
       totalTokens: 460,
       totalTokensWithoutCacheRead: 340,
+      cacheReadRate: 120 / 460,
       costUsd: 0.46,
       sessionCount: 5,
       activeDays: 2
@@ -200,15 +203,17 @@ describe('getUsageDetails', () => {
         usageDate: '2026-04-27',
         totalTokens: 120,
         totalTokensWithoutCacheRead: 100,
+        cacheReadRate: 20 / 120,
         costUsd: 0.12,
         sessionCount: 2,
-        sourceSplit: [{ source: 'claude-code', totalTokens: 120, totalTokensWithoutCacheRead: 100 }],
+        sourceSplit: [{ source: 'claude-code', totalTokens: 120, totalTokensWithoutCacheRead: 100, cacheReadRate: 20 / 120 }],
         modelRows: []
       },
       {
         usageDate: '2026-04-28',
         totalTokens: 0,
         totalTokensWithoutCacheRead: 0,
+        cacheReadRate: 0,
         costUsd: 0,
         sessionCount: 0,
         sourceSplit: [],
@@ -218,9 +223,10 @@ describe('getUsageDetails', () => {
         usageDate: '2026-04-29',
         totalTokens: 340,
         totalTokensWithoutCacheRead: 240,
+        cacheReadRate: 100 / 340,
         costUsd: 0.34,
         sessionCount: 3,
-        sourceSplit: [{ source: 'claude-code', totalTokens: 340, totalTokensWithoutCacheRead: 240 }],
+        sourceSplit: [{ source: 'claude-code', totalTokens: 340, totalTokensWithoutCacheRead: 240, cacheReadRate: 100 / 340 }],
         modelRows: [
           {
             usageDate: '2026-04-29',
@@ -229,9 +235,10 @@ describe('getUsageDetails', () => {
             inputTokens: 100,
             outputTokens: 80,
             cacheCreationTokens: 60,
-            cacheReadTokens: 100,
+            cacheReadTokens: 60,
             totalTokens: 340,
             totalTokensWithoutCacheRead: 240,
+            cacheReadRate: 100 / 340,
             costUsd: 0.34,
             sessionCount: 3
           }
@@ -246,9 +253,10 @@ describe('getUsageDetails', () => {
         inputTokens: 100,
         outputTokens: 80,
         cacheCreationTokens: 60,
-        cacheReadTokens: 100,
+        cacheReadTokens: 60,
         totalTokens: 340,
         totalTokensWithoutCacheRead: 240,
+        cacheReadRate: 100 / 340,
         costUsd: 0.34,
         sessionCount: 3
       }
@@ -354,6 +362,7 @@ describe('getUsageDetails', () => {
     expect(details.summary).toEqual({
       totalTokens: 100,
       totalTokensWithoutCacheRead: 100,
+      cacheReadRate: 0,
       costUsd: 1,
       sessionCount: 1,
       activeDays: 1

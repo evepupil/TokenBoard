@@ -52,6 +52,7 @@ describe('listLeaderboard', () => {
         displayName: 'Eve',
         totalTokens: 1000,
         totalTokensWithoutCacheRead: 750,
+        cacheReadRate: 0.25,
         costUsd: 2.5
       }
     ])

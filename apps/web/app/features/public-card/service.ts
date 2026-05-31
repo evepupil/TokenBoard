@@ -3,6 +3,7 @@ import { ApiError } from '../../lib/errors'
 import { toIsoDate } from '../../lib/time'
 import { canShowPublicProfile } from '../settings/service'
 import { dedupedDailyUsageCte } from '../usage/deduped-daily-usage'
+import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
 import { parsePublicCardConfig, type PublicCardConfig } from './config'
 import { renderUsageCardSvg } from './svg'
 
@@ -12,16 +13,30 @@ export type PublicUsageProfile = {
   timezone: string
   totalTokens: number
   totalTokensWithoutCacheRead: number
+  totalCacheReadRate: number
   totalCostUsd: number
   todayTokens: number
   todayTokensWithoutCacheRead: number
+  todayCacheReadRate: number
   todayCostUsd: number
   monthTokens: number
   monthTokensWithoutCacheRead: number
+  monthCacheReadRate: number
   monthCostUsd: number
   publicCardConfig: PublicCardConfig
-  sourceSplit: Array<{ source: UsageSource; totalTokens: number; totalTokensWithoutCacheRead: number }>
-  topModels: Array<{ model: string; totalTokens: number; totalTokensWithoutCacheRead: number; costUsd: number }>
+  sourceSplit: Array<{
+    source: UsageSource
+    totalTokens: number
+    totalTokensWithoutCacheRead: number
+    cacheReadRate: number
+  }>
+  topModels: Array<{
+    model: string
+    totalTokens: number
+    totalTokensWithoutCacheRead: number
+    cacheReadRate: number
+    costUsd: number
+  }>
 }
 
 type ProfileRow = {
@@ -84,12 +99,24 @@ export async function getPublicUsageProfile(
     timezone: profile.timezone,
     totalTokens: Number(totals?.totalTokens ?? 0),
     totalTokensWithoutCacheRead: Number(totals?.totalTokensWithoutCacheRead ?? 0),
+    totalCacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(totals?.totalTokens ?? 0),
+      totalTokensWithoutCacheRead: Number(totals?.totalTokensWithoutCacheRead ?? 0)
+    }),
     totalCostUsd: Number(totals?.totalCostUsd ?? 0),
     todayTokens: Number(totals?.todayTokens ?? 0),
     todayTokensWithoutCacheRead: Number(totals?.todayTokensWithoutCacheRead ?? 0),
+    todayCacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(totals?.todayTokens ?? 0),
+      totalTokensWithoutCacheRead: Number(totals?.todayTokensWithoutCacheRead ?? 0)
+    }),
     todayCostUsd: Number(totals?.todayCostUsd ?? 0),
     monthTokens: Number(totals?.monthTokens ?? 0),
     monthTokensWithoutCacheRead: Number(totals?.monthTokensWithoutCacheRead ?? 0),
+    monthCacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(totals?.monthTokens ?? 0),
+      totalTokensWithoutCacheRead: Number(totals?.monthTokensWithoutCacheRead ?? 0)
+    }),
     monthCostUsd: Number(totals?.monthCostUsd ?? 0),
     publicCardConfig: parsePublicCardConfig(profile.publicCardConfig),
     sourceSplit,
@@ -106,16 +133,19 @@ export async function getPublicUsageJson(db: D1Database, slug: string, now = new
     total: {
       tokens: profile.totalTokens,
       tokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
+      cacheReadRate: profile.totalCacheReadRate,
       costUsd: profile.totalCostUsd
     },
     today: {
       tokens: profile.todayTokens,
       tokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
+      cacheReadRate: profile.todayCacheReadRate,
       costUsd: profile.todayCostUsd
     },
     month: {
       tokens: profile.monthTokens,
       tokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
+      cacheReadRate: profile.monthCacheReadRate,
       costUsd: profile.monthCostUsd
     },
     sourceSplit: profile.sourceSplit,
@@ -135,12 +165,15 @@ export async function getPublicUsageCard(
     publicUrl,
     totalTokens: profile.totalTokens,
     totalTokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
+    totalCacheReadRate: profile.totalCacheReadRate,
     totalCostUsd: profile.totalCostUsd,
     monthTokens: profile.monthTokens,
     monthTokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
+    monthCacheReadRate: profile.monthCacheReadRate,
     monthCostUsd: profile.monthCostUsd,
     todayTokens: profile.todayTokens,
     todayTokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
+    todayCacheReadRate: profile.todayCacheReadRate,
     todayCostUsd: profile.todayCostUsd
   }, profile.publicCardConfig)
 }
@@ -151,9 +184,11 @@ export function getEmptyPublicCard() {
     publicUrl: 'TokenBoard',
     totalTokens: 0,
     totalTokensWithoutCacheRead: 0,
+    totalCacheReadRate: 0,
     totalCostUsd: 0,
     monthTokens: 0,
     monthTokensWithoutCacheRead: 0,
+    monthCacheReadRate: 0,
     monthCostUsd: 0
   })
 }
@@ -217,7 +252,11 @@ async function getSourceSplit(db: D1Database, userId: string, monthStart: string
   return (rows.results ?? []).map((row) => ({
     source: row.source,
     totalTokens: Number(row.totalTokens),
-    totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+    totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+    cacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(row.totalTokens),
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+    })
   }))
 }
 
@@ -246,6 +285,10 @@ async function getTopModels(db: D1Database, userId: string, monthStart: string) 
     model: row.model,
     totalTokens: Number(row.totalTokens),
     totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+    cacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(row.totalTokens),
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+    }),
     costUsd: Number(row.costUsd)
   }))
 }

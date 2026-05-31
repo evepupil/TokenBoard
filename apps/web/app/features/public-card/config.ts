@@ -7,12 +7,15 @@ export const publicCardGlowPositions = ['top-right', 'top-left', 'center'] as co
 export const publicCardMetrics = [
   'totalTokens',
   'totalTokensWithoutCacheRead',
+  'totalCacheReadRate',
   'totalCost',
   'monthTokens',
   'monthTokensWithoutCacheRead',
+  'monthCacheReadRate',
   'monthCost',
   'todayTokens',
   'todayTokensWithoutCacheRead',
+  'todayCacheReadRate',
   'todayCost'
 ] as const
 

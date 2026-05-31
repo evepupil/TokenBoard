@@ -6,8 +6,10 @@ export function Input(props: {
   name?: string
   type?: string
   value?: string
+  placeholder?: string
   autocomplete?: string
   required?: boolean
+  disabled?: boolean
   minLength?: number
   'data-timezone-input'?: string
   'data-timezone-default'?: string

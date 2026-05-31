@@ -115,4 +115,12 @@ describe('public card config', () => {
       cardMetric7: 'monthTokensWithoutCacheRead'
     })?.metrics).toEqual(['totalTokensWithoutCacheRead', 'todayTokensWithoutCacheRead'])
   })
+
+  test('accepts cache read rate card metrics', () => {
+    expect(parsePublicCardConfigForm({
+      cardMetric1: 'totalCacheReadRate',
+      cardMetric2: 'monthCacheReadRate',
+      cardMetric3: 'todayCacheReadRate'
+    })?.metrics).toEqual(['totalCacheReadRate', 'monthCacheReadRate', 'todayCacheReadRate'])
+  })
 })

@@ -1,4 +1,5 @@
 import { dedupedDailyUsageCte } from '../usage/deduped-daily-usage'
+import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
 
 export type LeaderboardEntry = {
   rank: number
@@ -6,6 +7,7 @@ export type LeaderboardEntry = {
   displayName: string
   totalTokens: number
   totalTokensWithoutCacheRead: number
+  cacheReadRate: number
   costUsd: number
 }
 
@@ -67,6 +69,10 @@ export async function listLeaderboard(
     displayName: row.displayName,
     totalTokens: Number(row.totalTokens),
     totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+    cacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(row.totalTokens),
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+    }),
     costUsd: Number(row.costUsd)
   }))
 }

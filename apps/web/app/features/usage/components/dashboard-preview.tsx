@@ -2,6 +2,7 @@ import { Badge } from '../../../components/ui/badge'
 import { LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
 import { formatUsd } from '../../../lib/money'
+import { formatPercentRate } from '../../../lib/usage-metrics'
 import type { DashboardSummary } from '../service'
 
 export function DashboardPreview(props: { summary: DashboardSummary; userName?: string }) {
@@ -43,12 +44,14 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         </div>
       </header>
 
-      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div class="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="今日 tokens" value={formatInteger(props.summary.todayTokens)} tone="lime" />
         <Metric label="今日不含缓存读" value={formatInteger(props.summary.todayTokensWithoutCacheRead)} />
+        <Metric label="今日缓存率" value={formatPercentRate(props.summary.todayCacheReadRate)} />
         <Metric label="今日费用" value={formatUsd(props.summary.todayCostUsd)} />
         <Metric label="本月 tokens" value={formatInteger(props.summary.monthTokens)} />
         <Metric label="本月不含缓存读" value={formatInteger(props.summary.monthTokensWithoutCacheRead)} />
+        <Metric label="本月缓存率" value={formatPercentRate(props.summary.monthCacheReadRate)} />
         <Metric label="本月费用" value={formatUsd(props.summary.monthCostUsd)} />
       </div>
 
@@ -107,7 +110,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
                     </span>
                   </div>
                   <p class="mt-1 text-xs">
-                    {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 / {formatInteger(item.totalTokens)} total
+                    {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 / {formatInteger(item.totalTokens)} total / 缓存率 {formatPercentRate(item.cacheReadRate)}
                   </p>
                   <div class="mt-2 h-2 overflow-hidden rounded-full bg-[var(--app-border)]">
                     <div

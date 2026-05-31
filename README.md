@@ -7,7 +7,8 @@ aggregates to Cloudflare Workers + D1, and shows usage stats on a hosted dashboa
 
 - Claude Code and Codex usage collection through a local collector.
 - Daily dashboard, details, CSV export, public JSON, README SVG cards, and leaderboards.
-- Total-token and no-cache-read token views across dashboard, exports, public APIs, cards, and rankings.
+- Total-token, no-cache-read token, and cache-rate views across dashboard, exports, public APIs, cards, rankings, and notifications.
+- Scheduled daily token reports to WeCom, DingTalk, and Feishu webhook bots.
 - Device-aware upload tokens with compatibility for legacy tokens.
 - Lightweight notifier hooks for near-real-time sync after Codex or Claude Code sessions.
 - Private by default: prompts, completions, raw logs, local paths, and upload tokens are not uploaded.
@@ -49,9 +50,40 @@ custom title/subtitle, public URL visibility, metric ordering, hidden metrics, l
 and reset to defaults. Invalid stored card config falls back to the default card instead of breaking
 the settings page.
 
-Public JSON includes both total token counts and `tokensWithoutCacheRead`, which is calculated as
-`input_tokens + output_tokens + cache_creation_tokens`. Dashboard source splits, details, CSV export,
-README SVG cards, and leaderboards can use the same no-cache-read token view.
+Public JSON includes total token counts, `tokensWithoutCacheRead`, and `cacheReadRate`.
+`tokensWithoutCacheRead` is `input_tokens + output_tokens + cache_creation_tokens`; `cacheReadRate`
+is `(total_tokens - tokensWithoutCacheRead) / total_tokens`, or `0` when total is zero. Dashboard
+source splits, details, CSV export, README SVG cards, leaderboards, and notifications use the same
+derived cache-rate definition.
+
+## Daily Webhook Reports
+
+Authenticated users can add webhook bots from `/settings/notifications`. Each subscription stores an
+encrypted webhook URL, optional signing secret, provider, local send time, timezone, and enabled state.
+The Worker cron trigger scans due subscriptions every 15 minutes and sends that day's token report.
+
+Reports include total tokens, tokens without cache reads, cache rate, cost, sessions, source split,
+top models, and a dashboard link. Test sends are labeled as previews so they are not confused with
+scheduled daily reports. Delivery logs keep success, skipped, and failure records; failed daily
+reports retry up to three attempts before moving to the next scheduled day. Cron workers claim a
+short delivery lock before sending, process at most 50 due subscriptions per tick, and the delivery
+log has a per-day success unique key to avoid duplicate daily pushes.
+
+Before enabling webhook reports, configure a 32-byte base64 encryption key as a Worker secret:
+
+```bash
+openssl rand -base64 32
+pnpm --filter @tokenboard/web exec wrangler secret put WEBHOOK_ENCRYPTION_KEY
+```
+
+Create a group bot in WeCom, DingTalk, or Feishu/Lark, copy its webhook URL into TokenBoard, and
+copy the bot signing secret into `signing secret` when that platform's security mode requires one.
+
+Supported webhook hosts are restricted to official bot endpoints:
+
+- WeCom: `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?...`
+- DingTalk: `https://oapi.dingtalk.com/robot/send?...`
+- Feishu/Lark: `https://open.feishu.cn/open-apis/bot/v2/hook/...` or `https://open.larksuite.com/open-apis/bot/v2/hook/...`
 
 ## Collector Behavior
 
@@ -122,18 +154,37 @@ If the Workers Build root directory is `apps/web`, use:
 pnpm run deploy
 ```
 
-Production `master` pushes also run GitHub Actions checks and D1 migrations as an audit trail.
+Production `master` pushes also run GitHub Actions checks, apply D1 migrations, and deploy the
+Worker with the same generated production config.
 Configure these GitHub repository secrets under `Settings` -> `Secrets and variables` -> `Actions`:
 
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard account ID, or `wrangler whoami`.
 - `CLOUDFLARE_API_TOKEN`: Cloudflare `My Profile` -> `API Tokens` token with D1 edit access for
   the target account.
+- `D1_DATABASE_ID`: Cloudflare D1 database UUID from `Workers & Pages` -> `D1 SQL Database`, or
+  `pnpm --filter @tokenboard/web exec wrangler d1 list`.
 
-The workflow does not deploy the Worker. If Cloudflare git builds are not enabled, run
-`pnpm run deploy` manually.
+Configure these GitHub repository variables in the same `Actions` page:
 
-`pnpm run deploy` validates that `apps/web/wrangler.jsonc` does not contain placeholder route,
-auth URL, or D1 values before building or deploying.
+- `TOKENBOARD_WORKER_ROUTE`: production custom domain host, for example `tokenboard.example.com`.
+- `BETTER_AUTH_URL`: canonical production origin, for example `https://tokenboard.example.com`.
+
+GitHub Actions and clean Cloudflare Workers Builds generate an ignored `wrangler.production.ci.jsonc`
+from `wrangler.production.example.jsonc` and environment variables; tracked `wrangler.jsonc` stays
+local-preview only.
+
+`pnpm run deploy` validates the selected production Wrangler config before building or deploying. Copy
+`apps/web/wrangler.production.example.jsonc` to the ignored local
+`apps/web/wrangler.production.jsonc`, fill the route, `BETTER_AUTH_URL`, and D1 `database_id`, and
+the deploy script will validate that file before building or deploying. If that ignored private file
+is not present, `pnpm run deploy` generates `wrangler.production.ci.jsonc` from `TOKENBOARD_WORKER_ROUTE`,
+`BETTER_AUTH_URL`, and `D1_DATABASE_ID`. The preflight requires `workers_dev: false`, a production
+route, an HTTPS auth origin, a D1 UUID, and the notification cron trigger, so the local `wrangler.jsonc`
+cannot pass production validation. Use `TOKENBOARD_WRANGLER_CONFIG=<path-to-private-config>` when
+deploying with a different private config file.
+
+The production Wrangler config also includes a `*/15 * * * *` cron trigger for webhook reports. Cron
+times are UTC; user-facing report times are evaluated against each subscription's configured timezone.
 
 ## Package Managers
 

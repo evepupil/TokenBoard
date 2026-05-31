@@ -4,18 +4,22 @@ import {
   type PublicCardConfig,
   type PublicCardMetric
 } from './config'
+import { cacheReadRateFromTotals, formatPercentRate } from '../../lib/usage-metrics'
 
 export type UsageCardInput = {
   displayName: string
   publicUrl: string
   totalTokens: number
   totalTokensWithoutCacheRead?: number
+  totalCacheReadRate?: number
   totalCostUsd: number
   monthTokens: number
   monthTokensWithoutCacheRead?: number
+  monthCacheReadRate?: number
   monthCostUsd: number
   todayTokens?: number
   todayTokensWithoutCacheRead?: number
+  todayCacheReadRate?: number
   todayCostUsd?: number
 }
 
@@ -146,12 +150,15 @@ function labels(language: PublicCardConfig['language']) {
       metrics: {
         totalTokens: 'Total Tokens',
         totalTokensWithoutCacheRead: 'No Cache Read',
+        totalCacheReadRate: 'Cache Read Rate',
         totalCost: 'Total Cost',
         monthTokens: 'Monthly Tokens',
         monthTokensWithoutCacheRead: 'Monthly No Cache Read',
+        monthCacheReadRate: 'Monthly Cache Read',
         monthCost: 'Monthly Cost',
         todayTokens: 'Today Tokens',
         todayTokensWithoutCacheRead: 'Today No Cache Read',
+        todayCacheReadRate: 'Today Cache Read',
         todayCost: 'Today Cost'
       } satisfies Record<PublicCardMetric, string>
     }
@@ -162,12 +169,15 @@ function labels(language: PublicCardConfig['language']) {
     metrics: {
       totalTokens: '总 token',
       totalTokensWithoutCacheRead: '总量不含缓存读',
+      totalCacheReadRate: '总缓存率',
       totalCost: '总额度',
       monthTokens: '本月 token',
       monthTokensWithoutCacheRead: '本月不含缓存读',
+      monthCacheReadRate: '本月缓存率',
       monthCost: '本月额度',
       todayTokens: '今日 token',
       todayTokensWithoutCacheRead: '今日不含缓存读',
+      todayCacheReadRate: '今日缓存率',
       todayCost: '今日额度'
     } satisfies Record<PublicCardMetric, string>
   }
@@ -182,12 +192,24 @@ function metricValue(input: UsageCardInput, metric: PublicCardMetric) {
   const values = {
     totalTokens: formatInteger(input.totalTokens),
     totalTokensWithoutCacheRead: formatInteger(input.totalTokensWithoutCacheRead ?? input.totalTokens),
+    totalCacheReadRate: formatPercentRate(input.totalCacheReadRate ?? cacheReadRateFromTotals({
+      totalTokens: input.totalTokens,
+      totalTokensWithoutCacheRead: input.totalTokensWithoutCacheRead ?? input.totalTokens
+    })),
     totalCost: formatUsd(input.totalCostUsd),
     monthTokens: formatInteger(input.monthTokens),
     monthTokensWithoutCacheRead: formatInteger(input.monthTokensWithoutCacheRead ?? input.monthTokens),
+    monthCacheReadRate: formatPercentRate(input.monthCacheReadRate ?? cacheReadRateFromTotals({
+      totalTokens: input.monthTokens,
+      totalTokensWithoutCacheRead: input.monthTokensWithoutCacheRead ?? input.monthTokens
+    })),
     monthCost: formatUsd(input.monthCostUsd),
     todayTokens: formatInteger(input.todayTokens ?? 0),
     todayTokensWithoutCacheRead: formatInteger(input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0),
+    todayCacheReadRate: formatPercentRate(input.todayCacheReadRate ?? cacheReadRateFromTotals({
+      totalTokens: input.todayTokens ?? 0,
+      totalTokensWithoutCacheRead: input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0
+    })),
     todayCost: formatUsd(input.todayCostUsd ?? 0)
   } satisfies Record<PublicCardMetric, string>
   return values[metric]

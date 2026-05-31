@@ -72,11 +72,11 @@ describe('public card service', () => {
       slug: 'eve',
       displayName: 'Eve',
       timezone: 'Asia/Hong_Kong',
-      total: { tokens: 1200, tokensWithoutCacheRead: 900, costUsd: 3.75 },
-      today: { tokens: 100, tokensWithoutCacheRead: 70, costUsd: 0.2 },
-      month: { tokens: 500, tokensWithoutCacheRead: 380, costUsd: 1.5 },
-      sourceSplit: [{ source: 'codex', totalTokens: 300, totalTokensWithoutCacheRead: 240 }],
-      topModels: [{ model: 'gpt-5.4', totalTokens: 500, totalTokensWithoutCacheRead: 410, costUsd: 1.5 }]
+      today: { tokens: 100, tokensWithoutCacheRead: 70, cacheReadRate: 0.3, costUsd: 0.2 },
+      total: { tokens: 1200, tokensWithoutCacheRead: 900, cacheReadRate: 0.25, costUsd: 3.75 },
+      month: { tokens: 500, tokensWithoutCacheRead: 380, cacheReadRate: 0.24, costUsd: 1.5 },
+      sourceSplit: [{ source: 'codex', totalTokens: 300, totalTokensWithoutCacheRead: 240, cacheReadRate: 0.2 }],
+      topModels: [{ model: 'gpt-5.4', totalTokens: 500, totalTokensWithoutCacheRead: 410, cacheReadRate: 0.18, costUsd: 1.5 }]
     })
     expect(JSON.stringify(result)).not.toContain('internal-user-id')
     expect(bindings[0]).toEqual(['eve'])

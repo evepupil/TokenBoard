@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader } from '../../../components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table'
 import { cn } from '../../../lib/cn'
 import { formatUsd } from '../../../lib/money'
+import { formatPercentRate } from '../../../lib/usage-metrics'
 import type { LeaderboardEntry } from '../queries'
 
 type LeaderboardMetric = 'tokens' | 'tokens-without-cache-read' | 'cost'
@@ -111,6 +112,10 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
           <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">费用</dt>
           <dd class="mt-1 font-black">{formatUsd(props.entry.costUsd)}</dd>
         </div>
+        <div>
+          <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">缓存率</dt>
+          <dd class="mt-1 font-black">{formatPercentRate(props.entry.cacheReadRate)}</dd>
+        </div>
       </dl>
     </article>
   )
@@ -126,6 +131,7 @@ function LeaderboardTable(props: { entries: LeaderboardEntry[] }) {
             <TableHead>用户</TableHead>
             <TableHead>Tokens</TableHead>
             <TableHead>不含缓存读</TableHead>
+            <TableHead>缓存率</TableHead>
             <TableHead>费用</TableHead>
           </TableRow>
         </TableHeader>
@@ -138,6 +144,7 @@ function LeaderboardTable(props: { entries: LeaderboardEntry[] }) {
               <TableCell>{entry.displayName}</TableCell>
               <TableCell class="font-bold">{formatInteger(entry.totalTokens)}</TableCell>
               <TableCell class="font-bold">{formatInteger(entry.totalTokensWithoutCacheRead)}</TableCell>
+              <TableCell class="font-bold">{formatPercentRate(entry.cacheReadRate)}</TableCell>
               <TableCell class="rounded-r-xl text-[var(--app-muted)]">
                 {formatUsd(entry.costUsd)}
               </TableCell>

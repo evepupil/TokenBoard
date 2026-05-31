@@ -5,6 +5,7 @@ import {
   optionalDedupedDailyUsageWith,
   usageTableForDeviceFilter
 } from './deduped-daily-usage'
+import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
 
 export type UsageSummaryInput = {
   userId: string
@@ -15,9 +16,11 @@ export type UsageSummaryInput = {
 export type UsageSummary = {
   todayTokens: number
   todayTokensWithoutCacheRead: number
+  todayCacheReadRate: number
   todayCostUsd: number
   monthTokens: number
   monthTokensWithoutCacheRead: number
+  monthCacheReadRate: number
   monthCostUsd: number
   lastSyncedAt: string | null
   deviceCount: number
@@ -25,6 +28,7 @@ export type UsageSummary = {
     source: UsageSource
     totalTokens: number
     totalTokensWithoutCacheRead: number
+    cacheReadRate: number
   }>
 }
 
@@ -38,6 +42,7 @@ export type DailyUsageTrendItem = {
   usageDate: string
   totalTokens: number
   totalTokensWithoutCacheRead: number
+  cacheReadRate: number
   costUsd: number
 }
 
@@ -54,12 +59,14 @@ export type UsageDetailsDailyRow = {
   usageDate: string
   totalTokens: number
   totalTokensWithoutCacheRead: number
+  cacheReadRate: number
   costUsd: number
   sessionCount: number
   sourceSplit: Array<{
     source: UsageSource
     totalTokens: number
     totalTokensWithoutCacheRead: number
+    cacheReadRate: number
   }>
   modelRows: UsageDetailsModelRow[]
 }
@@ -74,6 +81,7 @@ export type UsageDetailsModelRow = {
   cacheReadTokens: number
   totalTokens: number
   totalTokensWithoutCacheRead: number
+  cacheReadRate: number
   costUsd: number
   sessionCount: number
 }
@@ -82,6 +90,7 @@ export type UsageDetails = {
   summary: {
     totalTokens: number
     totalTokensWithoutCacheRead: number
+    cacheReadRate: number
     costUsd: number
     sessionCount: number
     activeDays: number
@@ -156,16 +165,28 @@ export async function getUsageSummary(
   return {
     todayTokens: Number(summary?.todayTokens ?? 0),
     todayTokensWithoutCacheRead: Number(summary?.todayTokensWithoutCacheRead ?? 0),
+    todayCacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(summary?.todayTokens ?? 0),
+      totalTokensWithoutCacheRead: Number(summary?.todayTokensWithoutCacheRead ?? 0)
+    }),
     todayCostUsd: Number(summary?.todayCostUsd ?? 0),
     monthTokens: Number(summary?.monthTokens ?? 0),
     monthTokensWithoutCacheRead: Number(summary?.monthTokensWithoutCacheRead ?? 0),
+    monthCacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(summary?.monthTokens ?? 0),
+      totalTokensWithoutCacheRead: Number(summary?.monthTokensWithoutCacheRead ?? 0)
+    }),
     monthCostUsd: Number(summary?.monthCostUsd ?? 0),
     lastSyncedAt: summary?.lastSyncedAt ?? null,
     deviceCount: Number(summary?.deviceCount ?? 0),
     sourceSplit: (split.results ?? []).map((row) => ({
       source: row.source,
       totalTokens: Number(row.totalTokens),
-      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+      cacheReadRate: cacheReadRateFromTotals({
+        totalTokens: Number(row.totalTokens),
+        totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+      })
     }))
   }
 }
@@ -201,6 +222,10 @@ export async function getDailyUsageTrend(
         usageDate: row.usageDate,
         totalTokens: Number(row.totalTokens),
         totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+        cacheReadRate: cacheReadRateFromTotals({
+          totalTokens: Number(row.totalTokens),
+          totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+        }),
         costUsd: Number(row.costUsd)
       }
     ])
@@ -211,6 +236,7 @@ export async function getDailyUsageTrend(
       usageDate,
       totalTokens: 0,
       totalTokensWithoutCacheRead: 0,
+      cacheReadRate: 0,
       costUsd: 0
     }
   )
@@ -315,6 +341,10 @@ export async function getUsageDetails(
     cacheReadTokens: Number(row.cacheReadTokens),
     totalTokens: Number(row.totalTokens),
     totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+    cacheReadRate: cacheReadRateFromTotals({
+      totalTokens: Number(row.totalTokens),
+      totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+    }),
     costUsd: Number(row.costUsd),
     sessionCount: Number(row.sessionCount)
   }))
@@ -326,6 +356,10 @@ export async function getUsageDetails(
       source: row.source,
       totalTokens: Number(row.totalTokens),
       totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
+      cacheReadRate: cacheReadRateFromTotals({
+        totalTokens: Number(row.totalTokens),
+        totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
+      }),
       costUsd: Number(row.costUsd),
       sessionCount: Number(row.sessionCount)
     })),
@@ -336,6 +370,10 @@ export async function getUsageDetails(
     summary: {
       totalTokens: dailyRows.reduce((total, row) => total + row.totalTokens, 0),
       totalTokensWithoutCacheRead: dailyRows.reduce((total, row) => total + row.totalTokensWithoutCacheRead, 0),
+      cacheReadRate: cacheReadRateFromTotals({
+        totalTokens: dailyRows.reduce((total, row) => total + row.totalTokens, 0),
+        totalTokensWithoutCacheRead: dailyRows.reduce((total, row) => total + row.totalTokensWithoutCacheRead, 0)
+      }),
       costUsd: roundMetric(dailyRows.reduce((total, row) => total + row.costUsd, 0)),
       sessionCount: dailyRows.reduce((total, row) => total + row.sessionCount, 0),
       activeDays: dailyRows.filter((row) => row.totalTokens > 0).length
@@ -353,6 +391,7 @@ function buildDailyDetails(
     source: UsageSource
     totalTokens: number
     totalTokensWithoutCacheRead: number
+    cacheReadRate: number
     costUsd: number
     sessionCount: number
   }>,
@@ -365,6 +404,7 @@ function buildDailyDetails(
       usageDate,
       totalTokens: 0,
       totalTokensWithoutCacheRead: 0,
+      cacheReadRate: 0,
       costUsd: 0,
       sessionCount: 0,
       sourceSplit: [],
@@ -378,12 +418,17 @@ function buildDailyDetails(
 
     daily.totalTokens += row.totalTokens
     daily.totalTokensWithoutCacheRead += row.totalTokensWithoutCacheRead
+    daily.cacheReadRate = cacheReadRateFromTotals({
+      totalTokens: daily.totalTokens,
+      totalTokensWithoutCacheRead: daily.totalTokensWithoutCacheRead
+    })
     daily.costUsd = roundMetric(daily.costUsd + row.costUsd)
     daily.sessionCount += row.sessionCount
     daily.sourceSplit.push({
       source: row.source,
       totalTokens: row.totalTokens,
-      totalTokensWithoutCacheRead: row.totalTokensWithoutCacheRead
+      totalTokensWithoutCacheRead: row.totalTokensWithoutCacheRead,
+      cacheReadRate: row.cacheReadRate
     })
   }
 

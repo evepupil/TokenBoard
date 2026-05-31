@@ -18,12 +18,15 @@ import { renderUsageCardSvg, type UsageCardInput } from '../svg'
 const metricLabels: Record<PublicCardMetric, string> = {
   totalTokens: '总 token',
   totalTokensWithoutCacheRead: '总量不含缓存读',
+  totalCacheReadRate: '总缓存率',
   totalCost: '总费用',
   monthTokens: '本月 token',
   monthTokensWithoutCacheRead: '本月不含缓存读',
+  monthCacheReadRate: '本月缓存率',
   monthCost: '本月费用',
   todayTokens: '今日 token',
   todayTokensWithoutCacheRead: '今日不含缓存读',
+  todayCacheReadRate: '今日缓存率',
   todayCost: '今日费用'
 }
 
