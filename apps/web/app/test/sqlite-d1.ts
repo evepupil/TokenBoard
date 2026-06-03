@@ -41,6 +41,9 @@ export function runSql(dbPath: string, input: string) {
     input,
     encoding: 'utf8'
   })
+  if (result.error) {
+    throw new Error(`sqlite3 failed to start: ${result.error.message}\nSQL:\n${input}`)
+  }
   if (result.status !== 0) {
     throw new Error(`sqlite3 failed: ${result.stderr}\nSQL:\n${input}`)
   }
