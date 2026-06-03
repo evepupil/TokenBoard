@@ -8,7 +8,7 @@ export function cacheReadRateFromTotals(input: {
   totalTokensWithoutCacheRead: number
 }) {
   return cacheReadRate({
-    cacheReadTokens: input.totalTokens - input.totalTokensWithoutCacheRead,
+    cacheReadTokens: Math.max(0, input.totalTokens - input.totalTokensWithoutCacheRead),
     totalTokens: input.totalTokens
   })
 }

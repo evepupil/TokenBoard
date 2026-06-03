@@ -18,6 +18,13 @@ describe('usage metrics', () => {
     })).toBe(0)
   })
 
+  test('clamps invalid derived cache reads to zero', () => {
+    expect(cacheReadRateFromTotals({
+      totalTokens: 100,
+      totalTokensWithoutCacheRead: 120
+    })).toBe(0)
+  })
+
   test('formats whole and sub-one-percent rates', () => {
     expect(formatPercentRate(0.25)).toBe('25%')
     expect(formatPercentRate(0.004)).toBe('0.4%')
