@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { hasValidEncryptionKey, parseProviderWebhookUrl, requireEncryptionKey } from './config'
+import {
+  hasValidEncryptionKey,
+  parseProviderWebhookUrl,
+  requireEncryptionKey,
+  webhookLogRetentionDays
+} from './config'
 
 const validBase64Key = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 const validBase64UrlKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY'
@@ -61,5 +66,17 @@ describe('notification config', () => {
     expect(() => parseProviderWebhookUrl('feishu', 'https://open.larksuite.com/open-apis/bot/v2/hook/abcdef/extra')).toThrow(
       'Webhook URL host or path is not supported'
     )
+  })
+
+  test('reads webhook delivery log retention config', () => {
+    expect(webhookLogRetentionDays({})).toBe(90)
+    expect(webhookLogRetentionDays({ TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: '7' })).toBe(7)
+    expect(webhookLogRetentionDays({ TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: '365' })).toBe(365)
+  })
+
+  test.each(['', '0', '366', 'abc', '7.5'])('rejects invalid webhook log retention value %s', (value) => {
+    expect(() => webhookLogRetentionDays({
+      TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: value
+    })).toThrow('TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to 365')
   })
 })

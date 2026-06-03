@@ -2,7 +2,30 @@ import { ApiError } from '../../lib/errors'
 import type { Bindings } from '../../lib/db'
 import { webhookProviderSchema, type WebhookProvider } from './schema'
 
-export type WebhookEnv = Pick<Bindings, 'DB' | 'WEBHOOK_ENCRYPTION_KEY' | 'BETTER_AUTH_URL'>
+export type WebhookEnv = Pick<
+  Bindings,
+  | 'DB'
+  | 'WEBHOOK_ENCRYPTION_KEY'
+  | 'BETTER_AUTH_URL'
+  | 'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS'
+  | 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS'
+>
+
+export const defaultWebhookLogRetentionDays = 90
+export const maxWebhookLogRetentionDays = 365
+
+export function webhookLogRetentionDays(env: Pick<WebhookEnv, 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS'>) {
+  if (env.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS === undefined) {
+    return defaultWebhookLogRetentionDays
+  }
+  const raw = env.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS.trim()
+  if (!raw || !/^\d+$/.test(raw)) throw invalidWebhookLogRetentionError()
+  const days = Number(raw)
+  if (!Number.isSafeInteger(days) || days < 1 || days > maxWebhookLogRetentionDays) {
+    throw invalidWebhookLogRetentionError()
+  }
+  return days
+}
 
 export function requireEncryptionKey(env: Pick<WebhookEnv, 'WEBHOOK_ENCRYPTION_KEY'>) {
   const secret = env.WEBHOOK_ENCRYPTION_KEY?.trim()
@@ -89,4 +112,8 @@ function hasPathToken(url: URL, prefix: string) {
   if (!url.pathname.startsWith(prefix)) return false
   const token = url.pathname.slice(prefix.length).trim()
   return Boolean(token) && !token.includes('/')
+}
+
+function invalidWebhookLogRetentionError() {
+  return new Error(`TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to ${maxWebhookLogRetentionDays}`)
 }

@@ -1,5 +1,5 @@
 import { ApiError } from '../../lib/errors'
-import { dashboardUrl, type WebhookEnv } from './config'
+import { dashboardUrl, webhookLogRetentionDays, type WebhookEnv } from './config'
 import {
   recordDeliveryFailure,
   recordDeliverySuccess,
@@ -10,10 +10,12 @@ import {
   getWebhookSubscriptionForUser,
   hasSuccessfulDailyDelivery,
   listDueWebhookSubscriptions,
+  pruneWebhookDeliveryLogs,
   type DueWebhookSubscription
 } from './queries'
 import { getDailyTokenReport } from './report-queries'
-import { localDateInTimezone } from './time'
+import { dailyReportHistoryRetentionDays, persistDailyReportHistory } from './report-history-delivery'
+import { localDateInTimezone, localTimeInTimezone } from './time'
 import { deliveryHttpStatus, sendWebhookRequest } from './webhook-client'
 
 type Fetcher = typeof fetch
@@ -67,6 +69,8 @@ export async function runDueWebhookNotifications(input: {
   const counts = { checked: due.length, sent: 0, failed: 0, skipped: 0 }
   const fetcher = input.fetcher ?? fetch
 
+  await pruneDeliveryLogs(input.env, now)
+
   for (const subscription of due) {
     try {
       const status = await processDueSubscription({
@@ -83,6 +87,16 @@ export async function runDueWebhookNotifications(input: {
   }
 
   return counts
+}
+
+async function pruneDeliveryLogs(env: WebhookEnv, now: Date) {
+  const retentionDays = webhookLogRetentionDays(env)
+  const cutoff = new Date(now)
+  cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays)
+  await pruneWebhookDeliveryLogs({
+    db: env.DB,
+    cutoffIso: cutoff.toISOString()
+  })
 }
 
 async function processDueSubscription(input: {
@@ -131,10 +145,11 @@ async function deliverSubscription(input: {
 }) {
   const startedAt = Date.now()
   const reportDate = reportDateForDelivery(input.kind, input.subscription, input.now)
+  const scheduleSlot = scheduleSlotForDelivery(input.kind, input.subscription, reportDate)
   const attempt = input.kind === 'daily' ? input.subscription.failureCount + 1 : 1
 
   try {
-    const status = await deliverSubscriptionChecked({ ...input, reportDate, attempt, startedAt })
+    const status = await deliverSubscriptionChecked({ ...input, reportDate, scheduleSlot, attempt, startedAt })
     return { status }
   } catch (error) {
     if (error instanceof SuccessfulDeliveryPersistenceError || error instanceof LocalDeliveryStateError) {
@@ -145,6 +160,7 @@ async function deliverSubscription(input: {
       subscription: input.subscription,
       kind: input.kind,
       reportDate,
+      scheduleSlot,
       attempt,
       error: errorMessage(error),
       httpStatus: deliveryHttpStatus(error),
@@ -162,6 +178,7 @@ async function deliverSubscriptionChecked(input: {
   now: Date
   fetcher: Fetcher
   reportDate: string
+  scheduleSlot: string | null
   attempt: number
   startedAt: number
 }): Promise<DeliveryStatus> {
@@ -177,12 +194,14 @@ async function deliverSubscriptionChecked(input: {
   if (input.kind === 'test') {
     report.previewLabel = '测试预览'
   }
-
   if (input.kind === 'daily' && report.totalTokens <= 0 && !input.subscription.sendEmptyReport) {
     await markSkippedOrThrow(input, 'Empty report')
     return 'skipped'
   }
 
+  const reportHistoryRetentionDays = input.kind === 'daily'
+    ? dailyReportHistoryRetentionDays(input.env)
+    : 0
   const response = await sendWebhookRequest({ ...input, report })
   try {
     const persistence = await recordDeliverySuccess({
@@ -191,6 +210,7 @@ async function deliverSubscriptionChecked(input: {
       kind: input.kind,
       now: input.now,
       reportDate: input.reportDate,
+      scheduleSlot: input.scheduleSlot,
       attempt: input.attempt,
       httpStatus: response.status,
       durationMs: Date.now() - input.startedAt
@@ -200,6 +220,17 @@ async function deliverSubscriptionChecked(input: {
         input.subscription,
         new Error('Webhook delivery success was only partially persisted')
       )
+    }
+    if (input.kind === 'daily') {
+      if (!input.scheduleSlot) throw new Error('Missing webhook schedule slot')
+      await persistDailyReportHistory({
+        env: input.env,
+        subscription: input.subscription,
+        report,
+        scheduleSlot: input.scheduleSlot,
+        now: input.now,
+        retentionDays: reportHistoryRetentionDays
+      })
     }
   } catch (error) {
     logSuccessfulDeliveryPersistenceFailure(input.subscription, error)
@@ -214,12 +245,15 @@ async function shouldSkipAlreadyDelivered(input: {
   kind: DeliveryKind
   now: Date
   reportDate: string
+  scheduleSlot: string | null
 }) {
   if (input.kind !== 'daily') return false
+  if (!input.scheduleSlot) throw new Error('Missing webhook schedule slot')
   const delivered = await hasSuccessfulDailyDelivery({
     db: input.env.DB,
     subscriptionId: input.subscription.id,
-    reportDate: input.reportDate
+    reportDate: input.reportDate,
+    scheduleSlot: input.scheduleSlot
   })
   if (!delivered) return false
   await markSkippedOrThrow(input, 'Already delivered')
@@ -231,6 +265,7 @@ async function markSkippedOrThrow(input: {
   subscription: DueWebhookSubscription
   now: Date
   reportDate: string
+  scheduleSlot: string | null
 }, reason: string) {
   try {
     await markSubscriptionSkipped({
@@ -238,6 +273,7 @@ async function markSkippedOrThrow(input: {
       subscription: input.subscription,
       now: input.now,
       reportDate: input.reportDate,
+      scheduleSlot: input.scheduleSlot,
       reason
     })
   } catch (error) {
@@ -250,6 +286,16 @@ function reportDateForDelivery(kind: DeliveryKind, subscription: DueWebhookSubsc
     return subscription.pendingReportDate ?? localDateInTimezone(new Date(subscription.nextRunAt), subscription.timezone)
   }
   return localDateInTimezone(now, subscription.timezone)
+}
+
+function scheduleSlotForDelivery(
+  kind: DeliveryKind,
+  subscription: DueWebhookSubscription,
+  reportDate: string
+) {
+  if (kind !== 'daily') return null
+  return subscription.pendingScheduleSlot ??
+    `${reportDate}T${localTimeInTimezone(new Date(subscription.nextRunAt), subscription.timezone)}`
 }
 
 function incrementCounts(

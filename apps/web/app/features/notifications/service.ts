@@ -15,7 +15,9 @@ import {
 } from './queries'
 import {
   parseWebhookSubscriptionForm,
-  webhookScheduleTimeSchema,
+  scheduleTimesFromForm,
+  scheduleWeekdaysFromForm,
+  type WebhookSubscriptionSummary,
   type WebhookSubscriptionForm
 } from './schema'
 import { sendWebhookTest, runDueWebhookNotifications } from './delivery'
@@ -34,14 +36,18 @@ export function parseWebhookId(form: Record<string, unknown>) {
 }
 
 export function parseWebhookCreateForm(form: Record<string, unknown>) {
-  return parseWebhookSubscriptionForm(form)
+  return parseWebhookFormOrThrow(() => parseWebhookSubscriptionForm(form))
 }
 
 export function parseWebhookUpdateForm(form: Record<string, unknown>) {
+  const scheduleTimesLocal = parseWebhookFormOrThrow(() => scheduleTimesFromForm(form))
+  const scheduleWeekdays = parseWebhookFormOrThrow(() => scheduleWeekdaysFromForm(form))
   return {
     name: String(form.name ?? '').trim(),
     timezone: String(form.timezone ?? '').trim(),
-    scheduleTimeLocal: String(form.scheduleTimeLocal ?? '').trim(),
+    scheduleTimeLocal: scheduleTimesLocal[0],
+    scheduleTimesLocal,
+    scheduleWeekdays,
     sendEmptyReport: form.sendEmptyReport === 'on',
     enabled: form.enabled === 'on'
   }
@@ -71,13 +77,15 @@ export async function createWebhookSubscription(input: {
           signing_secret_encrypted,
           timezone,
           schedule_time_local,
+          schedule_times_local,
+          schedule_weekdays,
           send_empty_report,
           enabled,
           next_run_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
@@ -91,12 +99,15 @@ export async function createWebhookSubscription(input: {
       input.form.signingSecret ? await encryptSecret(input.form.signingSecret, secret) : null,
       input.form.timezone,
       input.form.scheduleTimeLocal,
+      input.form.scheduleTimesLocal.join(','),
+      input.form.scheduleWeekdays.join(','),
       input.form.sendEmptyReport ? 1 : 0,
       input.form.enabled ? 1 : 0,
       nextScheduledRunAt({
         now,
         timezone: input.form.timezone,
-        scheduleTimeLocal: input.form.scheduleTimeLocal
+        scheduleTimesLocal: input.form.scheduleTimesLocal,
+        scheduleWeekdays: input.form.scheduleWeekdays
       }),
       now.toISOString(),
       now.toISOString()
@@ -115,6 +126,16 @@ export async function updateWebhookSubscription(input: {
   const now = input.now ?? new Date()
   const existing = await getWebhookSubscriptionForUser(input.env.DB, input.userId, input.subscriptionId)
   if (!existing) throw new ApiError('NOT_FOUND', 'Webhook subscription not found', 404)
+  const resetsDeliveryState = shouldResetDeliveryState(existing, input.form)
+  const nextRunAt = resetsDeliveryState
+    ? nextScheduledRunAt({
+        now,
+        timezone: input.form.timezone,
+        scheduleTimesLocal: input.form.scheduleTimesLocal,
+        scheduleWeekdays: input.form.scheduleWeekdays
+      })
+    : null
+  const resetFlag = resetsDeliveryState ? 1 : 0
 
   await input.env.DB
     .prepare(
@@ -124,13 +145,16 @@ export async function updateWebhookSubscription(input: {
           name = ?,
           timezone = ?,
           schedule_time_local = ?,
+          schedule_times_local = ?,
+          schedule_weekdays = ?,
           send_empty_report = ?,
           enabled = ?,
-          next_run_at = ?,
-          pending_report_date = NULL,
-          locked_until = NULL,
-          locked_at = NULL,
-          failure_count = 0,
+          next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END,
+          pending_report_date = CASE WHEN ? = 1 THEN NULL ELSE pending_report_date END,
+          pending_schedule_slot = CASE WHEN ? = 1 THEN NULL ELSE pending_schedule_slot END,
+          locked_until = CASE WHEN ? = 1 THEN NULL ELSE locked_until END,
+          locked_at = CASE WHEN ? = 1 THEN NULL ELSE locked_at END,
+          failure_count = CASE WHEN ? = 1 THEN 0 ELSE failure_count END,
           updated_at = ?
         WHERE user_id = ?
           AND id = ?
@@ -140,13 +164,17 @@ export async function updateWebhookSubscription(input: {
       input.form.name,
       input.form.timezone,
       input.form.scheduleTimeLocal,
+      input.form.scheduleTimesLocal.join(','),
+      input.form.scheduleWeekdays.join(','),
       input.form.sendEmptyReport ? 1 : 0,
       input.form.enabled ? 1 : 0,
-      nextScheduledRunAt({
-        now,
-        timezone: input.form.timezone,
-        scheduleTimeLocal: input.form.scheduleTimeLocal
-      }),
+      resetFlag,
+      nextRunAt,
+      resetFlag,
+      resetFlag,
+      resetFlag,
+      resetFlag,
+      resetFlag,
       now.toISOString(),
       input.userId,
       input.subscriptionId
@@ -177,6 +205,7 @@ export async function setWebhookSubscriptionEnabled(input: {
           enabled = ?,
           next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END,
           pending_report_date = NULL,
+          pending_schedule_slot = NULL,
           locked_until = NULL,
           locked_at = NULL,
           failure_count = CASE WHEN ? = 1 THEN 0 ELSE failure_count END,
@@ -192,7 +221,8 @@ export async function setWebhookSubscriptionEnabled(input: {
       existing ? nextScheduledRunAt({
         now,
         timezone: existing.timezone,
-        scheduleTimeLocal: existing.scheduleTimeLocal
+        scheduleTimesLocal: existing.scheduleTimesLocal,
+        scheduleWeekdays: existing.scheduleWeekdays
       }) : null,
       input.enabled ? 1 : 0,
       input.enabled ? 1 : 0,
@@ -218,10 +248,39 @@ function validateUpdateForm(form: ReturnType<typeof parseWebhookUpdateForm>) {
   if (form.name.length < 1 || form.name.length > 80) {
     throw new ApiError('BAD_REQUEST', 'Invalid webhook name', 400)
   }
-  if (!webhookScheduleTimeSchema.safeParse(form.scheduleTimeLocal).success) {
+  if (form.scheduleTimesLocal.length < 1) {
     throw new ApiError('BAD_REQUEST', 'Invalid schedule time', 400)
   }
   if (!isValidTimezone(form.timezone)) {
     throw new ApiError('BAD_REQUEST', 'Invalid timezone', 400)
+  }
+}
+
+function shouldResetDeliveryState(
+  existing: WebhookSubscriptionSummary,
+  form: ReturnType<typeof parseWebhookUpdateForm>
+) {
+  return existing.enabled !== form.enabled
+    || existing.timezone !== form.timezone
+    || !sameStringList(existing.scheduleTimesLocal, form.scheduleTimesLocal)
+    || !sameNumberList(existing.scheduleWeekdays, form.scheduleWeekdays)
+}
+
+function sameStringList(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function sameNumberList(left: number[], right: number[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function parseWebhookFormOrThrow<T>(parser: () => T) {
+  try {
+    return parser()
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Invalid schedule')) {
+      throw new ApiError('BAD_REQUEST', error.message, 400)
+    }
+    throw error
   }
 }

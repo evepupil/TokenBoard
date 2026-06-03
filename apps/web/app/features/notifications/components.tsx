@@ -3,12 +3,22 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
 import { CustomSelect } from '../../components/ui/custom-select'
 import { Input, Label } from '../../components/ui/input'
+import { DailyReportHistoryCard } from './report-history-card'
+import type { DailyReportHistoryItem } from './report-history'
+import {
+  ScheduleTimeFields,
+  ScheduleWeekdayFields,
+  defaultScheduleWeekdayValues,
+  scheduleRuleLabel
+} from './schedule-fields'
 import type { WebhookSubscriptionSummary } from './schema'
 
 export function NotificationsPage(props: {
   email: string
   timezone: string
   subscriptions: WebhookSubscriptionSummary[]
+  reportHistory: DailyReportHistoryItem[]
+  reportHistoryRetentionDays: number
   saved: boolean
   tested: boolean
   testFailed: boolean
@@ -31,6 +41,10 @@ export function NotificationsPage(props: {
           <SubscriptionsCard subscriptions={props.subscriptions} />
           <CreateSubscriptionCard timezone={props.timezone} disabled={!props.encryptionConfigured} />
         </div>
+        <DailyReportHistoryCard
+          reportHistory={props.reportHistory}
+          retentionDays={props.reportHistoryRetentionDays}
+        />
       </section>
     </main>
   )
@@ -118,10 +132,8 @@ function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
         时区
         <Input name="timezone" value={props.subscription.timezone} required />
       </Label>
-      <Label>
-        推送时间
-        <Input name="scheduleTimeLocal" type="time" value={props.subscription.scheduleTimeLocal} required />
-      </Label>
+      <ScheduleTimeFields scheduleTimesLocal={props.subscription.scheduleTimesLocal} />
+      <ScheduleWeekdayFields scheduleWeekdays={props.subscription.scheduleWeekdays} />
       <SubscriptionChecks subscription={props.subscription} />
       <SubscriptionMeta subscription={props.subscription} />
       <SubscriptionActions subscription={props.subscription} />
@@ -132,7 +144,7 @@ function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
 function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <>
-      <label class="mt-7 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+      <label class="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
         <input type="checkbox" name="sendEmptyReport" checked={props.subscription.sendEmptyReport} />
         空日报也发送
       </label>
@@ -147,6 +159,7 @@ function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary })
 function SubscriptionMeta(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <dl class="grid gap-2 text-xs text-[var(--app-muted)] md:col-span-2 sm:grid-cols-2">
+      <Meta label="推送规则" value={scheduleRuleLabel(props.subscription)} />
       <Meta label="下次推送" value={props.subscription.nextRunAt} />
       <Meta label="最近成功" value={props.subscription.lastSuccessAt ?? '无'} />
       <Meta label="最近失败" value={props.subscription.lastFailureAt ?? '无'} />
@@ -221,17 +234,15 @@ function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) 
         <Input name="webhookUrl" type="url" placeholder="https://..." required disabled={props.disabled} />
       </Label>
       <Label>
-        加签 secret
+        加签 secret (钉钉、飞书 / Lark 启用加签时填写)
         <Input name="signingSecret" type="password" autocomplete="new-password" disabled={props.disabled} />
       </Label>
       <Label>
         时区
         <Input name="timezone" value={props.timezone} required disabled={props.disabled} />
       </Label>
-      <Label>
-        推送时间
-        <Input name="scheduleTimeLocal" type="time" value="09:00" required disabled={props.disabled} />
-      </Label>
+      <ScheduleTimeFields scheduleTimesLocal={['18:00']} disabled={props.disabled} />
+      <ScheduleWeekdayFields scheduleWeekdays={defaultScheduleWeekdayValues()} disabled={props.disabled} />
       <CreateChecks disabled={props.disabled} />
       <Button class="w-full" type="submit" disabled={props.disabled}>保存 Webhook</Button>
     </form>

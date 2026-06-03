@@ -1,6 +1,6 @@
 import { randomId } from '../../lib/crypto'
-import { insertDeliveryLog, type DueWebhookSubscription } from './queries'
-import { nextScheduledRunAt } from './time'
+import { insertDeliveryLog, prepareDeliveryLog, type DueWebhookSubscription } from './queries'
+import { nextScheduledRunAt, zonedTimeToUtc } from './time'
 
 type DeliveryKind = 'daily' | 'test'
 
@@ -14,54 +14,61 @@ export async function recordDeliverySuccess(input: {
   kind: DeliveryKind
   now: Date
   reportDate: string
+  scheduleSlot: string | null
   attempt: number
   httpStatus: number
   durationMs: number
 }) {
-  const stateRequired = input.kind === 'daily'
-  let statePersisted = !stateRequired
-  let logPersisted = false
-  const errors: unknown[] = []
-
-  for (let attempt = 1; attempt <= successPersistenceAttempts; attempt += 1) {
-    if (!statePersisted) {
-      try {
-        await markSubscriptionSuccess(input.db, input.subscription, input.now)
-        statePersisted = true
-      } catch (error) {
-        errors.push(error)
-      }
-    }
-
-    if (!logPersisted) {
-      try {
-        await insertDeliveryLog({
-          db: input.db,
-          id: randomId('whl'),
-          subscriptionId: input.subscription.id,
-          userId: input.subscription.userId,
-          reportDate: input.reportDate,
-          kind: input.kind,
-          status: 'success',
-          httpStatus: input.httpStatus,
-          attempt: input.attempt,
-          durationMs: input.durationMs,
-          createdAt: input.now.toISOString(),
-          ignoreDuplicateDailySuccess: input.kind === 'daily'
-        })
-        logPersisted = true
-      } catch (error) {
-        errors.push(error)
-      }
-    }
-
-    if (statePersisted && logPersisted) return { complete: true }
+  if (input.kind !== 'daily') {
+    await insertDeliveryLog(successDeliveryLogInput(input))
+    return { complete: true }
   }
 
-  if (stateRequired && (statePersisted || logPersisted)) return { complete: false }
+  const errors: unknown[] = []
+  for (let attempt = 1; attempt <= successPersistenceAttempts; attempt += 1) {
+    try {
+      const results = await input.db.batch([
+        prepareDeliveryLog(successDeliveryLogInput(input)),
+        prepareSubscriptionSuccess(input.db, input.subscription, input.now, input.scheduleSlot)
+      ])
+      assertBatchSucceeded(results)
+      assertClaimedUpdate(results[1])
+      return { complete: true }
+    } catch (error) {
+      errors.push(error)
+    }
+  }
 
   if (errors.length === 1) throw errors[0]
   throw new AggregateError(errors, 'Failed to persist webhook delivery success')
+}
+
+function successDeliveryLogInput(input: {
+  db: D1Database
+  subscription: DueWebhookSubscription
+  kind: DeliveryKind
+  now: Date
+  reportDate: string
+  scheduleSlot: string | null
+  attempt: number
+  httpStatus: number
+  durationMs: number
+}) {
+  return {
+    db: input.db,
+    id: randomId('whl'),
+    subscriptionId: input.subscription.id,
+    userId: input.subscription.userId,
+    reportDate: input.reportDate,
+    scheduleSlot: input.scheduleSlot,
+    kind: input.kind,
+    status: 'success' as const,
+    httpStatus: input.httpStatus,
+    attempt: input.attempt,
+    durationMs: input.durationMs,
+    createdAt: input.now.toISOString(),
+    ignoreDuplicateDailySuccess: input.kind === 'daily'
+  }
 }
 
 export async function recordDeliveryFailure(input: {
@@ -69,6 +76,7 @@ export async function recordDeliveryFailure(input: {
   subscription: DueWebhookSubscription
   kind: DeliveryKind
   reportDate: string
+  scheduleSlot: string | null
   attempt: number
   error: string
   httpStatus: number | null
@@ -81,6 +89,7 @@ export async function recordDeliveryFailure(input: {
     subscriptionId: input.subscription.id,
     userId: input.subscription.userId,
     reportDate: input.reportDate,
+    scheduleSlot: input.scheduleSlot,
     kind: input.kind,
     status: 'failure',
     httpStatus: input.httpStatus,
@@ -102,6 +111,7 @@ export async function markSubscriptionSkipped(input: {
   subscription: DueWebhookSubscription
   now: Date
   reportDate: string
+  scheduleSlot: string | null
   reason: string
 }) {
   await insertDeliveryLog({
@@ -110,6 +120,7 @@ export async function markSubscriptionSkipped(input: {
     subscriptionId: input.subscription.id,
     userId: input.subscription.userId,
     reportDate: input.reportDate,
+    scheduleSlot: input.scheduleSlot,
     kind: 'daily',
     status: 'skipped',
     attempt: input.subscription.failureCount + 1,
@@ -117,13 +128,14 @@ export async function markSubscriptionSkipped(input: {
     durationMs: 0,
     createdAt: input.now.toISOString()
   })
-  await markSubscriptionSkippedState(input.db, input.subscription, input.now)
+  await markSubscriptionSkippedState(input.db, input.subscription, input.now, input.scheduleSlot)
 }
 
 async function markSubscriptionFailure(input: {
   db: D1Database
   subscription: DueWebhookSubscription
   reportDate: string
+  scheduleSlot: string | null
   attempt: number
   error: string
   now: Date
@@ -136,6 +148,7 @@ async function markSubscriptionFailure(input: {
         SET
           next_run_at = ?,
           pending_report_date = ?,
+          pending_schedule_slot = ?,
           locked_until = NULL,
           locked_at = NULL,
           failure_count = ?,
@@ -149,6 +162,7 @@ async function markSubscriptionFailure(input: {
     .bind(
       nextRunAfterFailure(input, shouldRetry),
       shouldRetry ? input.reportDate : null,
+      shouldRetry ? input.subscription.pendingScheduleSlot ?? input.scheduleSlot : null,
       shouldRetry ? input.attempt : 0,
       input.now.toISOString(),
       input.error,
@@ -160,14 +174,30 @@ async function markSubscriptionFailure(input: {
   assertClaimedUpdate(result)
 }
 
-async function markSubscriptionSuccess(db: D1Database, subscription: DueWebhookSubscription, now: Date) {
-  const result = await db
+async function markSubscriptionSuccess(
+  db: D1Database,
+  subscription: DueWebhookSubscription,
+  now: Date,
+  scheduleSlot: string | null
+) {
+  const result = await prepareSubscriptionSuccess(db, subscription, now, scheduleSlot).run()
+  assertClaimedUpdate(result)
+}
+
+function prepareSubscriptionSuccess(
+  db: D1Database,
+  subscription: DueWebhookSubscription,
+  now: Date,
+  scheduleSlot: string | null
+) {
+  return db
     .prepare(
       `
         UPDATE webhook_subscriptions
         SET
           next_run_at = ?,
           pending_report_date = NULL,
+          pending_schedule_slot = NULL,
           locked_until = NULL,
           locked_at = NULL,
           failure_count = 0,
@@ -179,24 +209,35 @@ async function markSubscriptionSuccess(db: D1Database, subscription: DueWebhookS
       `
     )
     .bind(
-      nextScheduledRunAt({
-        now,
-        timezone: subscription.timezone,
-        scheduleTimeLocal: subscription.scheduleTimeLocal
-      }),
+      nextRunAfterClearedPending(subscription, now, scheduleSlot),
       now.toISOString(),
       now.toISOString(),
       subscription.id,
       subscription.lockedAt
     )
-    .run()
-  assertClaimedUpdate(result)
+}
+
+function nextRunAfterClearedPending(
+  subscription: DueWebhookSubscription,
+  now: Date,
+  scheduleSlot: string | null
+) {
+  if (subscription.pendingScheduleSlot && subscription.failureCount === 0) {
+    return subscription.nextRunAt
+  }
+  return nextScheduledRunAt({
+    now: scheduledSlotDate(subscription, scheduleSlot) ?? now,
+    timezone: subscription.timezone,
+    scheduleTimesLocal: subscription.scheduleTimesLocal,
+    scheduleWeekdays: subscription.scheduleWeekdays
+  })
 }
 
 async function markSubscriptionSkippedState(
   db: D1Database,
   subscription: DueWebhookSubscription,
-  now: Date
+  now: Date,
+  scheduleSlot: string | null
 ) {
   const result = await db
     .prepare(
@@ -205,6 +246,7 @@ async function markSubscriptionSkippedState(
         SET
           next_run_at = ?,
           pending_report_date = NULL,
+          pending_schedule_slot = NULL,
           locked_until = NULL,
           locked_at = NULL,
           failure_count = 0,
@@ -215,11 +257,7 @@ async function markSubscriptionSkippedState(
       `
     )
     .bind(
-      nextScheduledRunAt({
-        now,
-        timezone: subscription.timezone,
-        scheduleTimeLocal: subscription.scheduleTimeLocal
-      }),
+      nextRunAfterClearedPending(subscription, now, scheduleSlot),
       now.toISOString(),
       subscription.id,
       subscription.lockedAt
@@ -256,6 +294,7 @@ async function markSubscriptionTestFailure(input: {
 
 function nextRunAfterFailure(input: {
   subscription: DueWebhookSubscription
+  scheduleSlot: string | null
   attempt: number
   now: Date
 }, shouldRetry: boolean) {
@@ -263,14 +302,33 @@ function nextRunAfterFailure(input: {
     return addMinutes(input.now, retryDelayMinutes[input.attempt - 1] ?? retryDelayMinutes.at(-1) ?? 30).toISOString()
   }
   return nextScheduledRunAt({
-    now: input.now,
+    now: scheduledSlotDate(input.subscription, input.scheduleSlot) ?? input.now,
     timezone: input.subscription.timezone,
-    scheduleTimeLocal: input.subscription.scheduleTimeLocal
+    scheduleTimesLocal: input.subscription.scheduleTimesLocal,
+    scheduleWeekdays: input.subscription.scheduleWeekdays
   })
+}
+
+function scheduledSlotDate(subscription: DueWebhookSubscription, scheduleSlot: string | null) {
+  if (!scheduleSlot) return null
+  const match = scheduleSlot.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/)
+  if (!match) return null
+  return zonedTimeToUtc(match[1], match[2], subscription.timezone)
 }
 
 function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60 * 1000)
+}
+
+function assertBatchSucceeded(results: D1Result<unknown>[]) {
+  const batchResults = results as Array<{ success?: boolean; error?: string }>
+  const failedIndex = batchResults.findIndex((result) => result.success === false)
+  if (failedIndex < 0) return
+
+  const error = batchResults[failedIndex]?.error
+  throw new Error(
+    `D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`
+  )
 }
 
 function assertClaimedUpdate(result: D1Result<unknown>) {

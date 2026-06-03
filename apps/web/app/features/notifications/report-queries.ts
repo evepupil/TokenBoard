@@ -1,5 +1,5 @@
-import { dedupedDailyUsageCte, tokensWithoutCacheReadSql } from '../usage/deduped-daily-usage'
 import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
+import { effectiveDailyUsageSummaryWith } from '../usage/deduped-daily-usage'
 import type { DailyTokenReport } from './adapters'
 
 type ReportTotalsRow = {
@@ -66,18 +66,19 @@ function readReportTotals(input: {
   return input.db
     .prepare(
       `
-        WITH ${dedupedDailyUsageCte}
+        WITH ${effectiveDailyUsageSummaryWith({
+          dailyUsageFilter: 'daily_usage.user_id = ? AND daily_usage.usage_date = ?',
+          summaryFilter: 'daily_usage_summary.user_id = ? AND daily_usage_summary.usage_date = ?'
+        })}
         SELECT
           COALESCE(SUM(total_tokens), 0) as totalTokens,
-          COALESCE(SUM(${tokensWithoutCacheReadSql()}), 0) as totalTokensWithoutCacheRead,
+          COALESCE(SUM(total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(cost_usd), 0) as costUsd,
           COALESCE(SUM(session_count), 0) as sessionCount
-        FROM deduped_daily_usage
-        WHERE user_id = ?
-          AND usage_date = ?
+        FROM effective_daily_usage_summary
       `
     )
-    .bind(input.userId, input.reportDate)
+    .bind(input.userId, input.reportDate, input.userId, input.reportDate)
     .first<ReportTotalsRow>()
 }
 
@@ -89,19 +90,20 @@ function readReportSourceSplit(input: {
   return input.db
     .prepare(
       `
-        WITH ${dedupedDailyUsageCte}
+        WITH ${effectiveDailyUsageSummaryWith({
+          dailyUsageFilter: 'daily_usage.user_id = ? AND daily_usage.usage_date = ?',
+          summaryFilter: 'daily_usage_summary.user_id = ? AND daily_usage_summary.usage_date = ?'
+        })}
         SELECT
           source,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
-          COALESCE(SUM(${tokensWithoutCacheReadSql()}), 0) as totalTokensWithoutCacheRead
-        FROM deduped_daily_usage
-        WHERE user_id = ?
-          AND usage_date = ?
+          COALESCE(SUM(total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead
+        FROM effective_daily_usage_summary
         GROUP BY source
         ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC
       `
     )
-    .bind(input.userId, input.reportDate)
+    .bind(input.userId, input.reportDate, input.userId, input.reportDate)
     .all<{ source: string; totalTokens: number; totalTokensWithoutCacheRead: number }>()
 }
 
@@ -113,20 +115,21 @@ function readReportTopModels(input: {
   return input.db
     .prepare(
       `
-        WITH ${dedupedDailyUsageCte}
+        WITH ${effectiveDailyUsageSummaryWith({
+          dailyUsageFilter: 'daily_usage.user_id = ? AND daily_usage.usage_date = ?',
+          summaryFilter: 'daily_usage_summary.user_id = ? AND daily_usage_summary.usage_date = ?'
+        })}
         SELECT
           model,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
-          COALESCE(SUM(${tokensWithoutCacheReadSql()}), 0) as totalTokensWithoutCacheRead,
+          COALESCE(SUM(total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(cost_usd), 0) as costUsd
-        FROM deduped_daily_usage
-        WHERE user_id = ?
-          AND usage_date = ?
+        FROM effective_daily_usage_summary
         GROUP BY model
         ORDER BY totalTokensWithoutCacheRead DESC, totalTokens DESC
         LIMIT 5
       `
     )
-    .bind(input.userId, input.reportDate)
+    .bind(input.userId, input.reportDate, input.userId, input.reportDate)
     .all<{ model: string; totalTokens: number; totalTokensWithoutCacheRead: number; costUsd: number }>()
 }

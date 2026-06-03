@@ -2,6 +2,11 @@ import { createRoute } from 'honox/factory'
 import { requireUser } from '../../features/auth/middleware'
 import { NotificationsPage } from '../../features/notifications/components'
 import {
+  dailyReportHistoryRetentionDays,
+  listDailyReportHistory
+} from '../../features/notifications/report-history'
+import { scheduleTimeSlotCount } from '../../features/notifications/schedule-fields'
+import {
   createWebhookSubscription,
   deleteWebhookSubscription,
   hasValidEncryptionKey,
@@ -25,9 +30,15 @@ export const GET = createRoute(async (c) => {
     configuredOrigin: c.env.BETTER_AUTH_URL,
     requestOrigin: new URL(c.req.url).origin
   })
-  const [profile, subscriptions] = await Promise.all([
+  const reportHistoryRetentionDays = dailyReportHistoryRetentionDays(c.env)
+  const [profile, subscriptions, reportHistory] = await Promise.all([
     getProfileSettings(c.env.DB, user.id, publicOrigin),
-    listWebhookSubscriptions(c.env.DB, user.id)
+    listWebhookSubscriptions(c.env.DB, user.id),
+    listDailyReportHistory({
+      db: c.env.DB,
+      userId: user.id,
+      limit: reportHistoryRetentionDays * scheduleTimeSlotCount
+    })
   ])
 
   return c.render(
@@ -35,6 +46,8 @@ export const GET = createRoute(async (c) => {
       email={user.email}
       timezone={profile.timezone}
       subscriptions={subscriptions}
+      reportHistory={reportHistory}
+      reportHistoryRetentionDays={reportHistoryRetentionDays}
       saved={c.req.query('saved') === '1'}
       tested={c.req.query('tested') === '1'}
       testFailed={c.req.query('testFailed') === '1'}
@@ -46,7 +59,7 @@ export const GET = createRoute(async (c) => {
 export const POST = createRoute(async (c) => {
   try {
     const user = await requireUser(c)
-    const form = await c.req.parseBody()
+    const form = await c.req.parseBody({ all: true })
     const action = parseWebhookAction(form)
     const subscriptionId = parseWebhookId(form)
 

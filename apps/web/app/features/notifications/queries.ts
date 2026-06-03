@@ -1,10 +1,28 @@
 import type { ClaimedWebhookSubscription, WebhookProvider, WebhookSubscriptionSummary } from './schema'
+import { normalizeScheduleTimes, normalizeScheduleWeekdays } from './time'
+
+type WebhookSubscriptionRow = Omit<
+  WebhookSubscriptionSummary,
+  'provider' | 'scheduleTimesLocal' | 'scheduleWeekdays'
+> & {
+  provider: string
+  scheduleTimesLocal?: string | string[] | null
+  scheduleWeekdays?: string | number[] | null
+}
 
 export type WebhookSubscriptionSecretRow = ClaimedWebhookSubscription & {
   userId: string
   displayName: string
   webhookUrlEncrypted: string
   signingSecretEncrypted: string | null
+}
+
+type WebhookSubscriptionSecretDbRow = WebhookSubscriptionRow & {
+  userId: string
+  displayName: string
+  webhookUrlEncrypted: string
+  signingSecretEncrypted: string | null
+  lockedAt: string | null
 }
 
 export type DueWebhookSubscription = WebhookSubscriptionSecretRow
@@ -24,10 +42,13 @@ export async function listWebhookSubscriptions(
           webhook_url_masked as webhookUrlMasked,
           timezone,
           schedule_time_local as scheduleTimeLocal,
+          schedule_times_local as scheduleTimesLocal,
+          schedule_weekdays as scheduleWeekdays,
           send_empty_report as sendEmptyReport,
           enabled,
           next_run_at as nextRunAt,
           pending_report_date as pendingReportDate,
+          pending_schedule_slot as pendingScheduleSlot,
           failure_count as failureCount,
           last_success_at as lastSuccessAt,
           last_failure_at as lastFailureAt,
@@ -40,7 +61,7 @@ export async function listWebhookSubscriptions(
       `
     )
     .bind(userId)
-    .all<WebhookSubscriptionSummary>()
+    .all<WebhookSubscriptionRow>()
 
   return (rows.results ?? []).map(normalizeSubscriptionSummary)
 }
@@ -65,10 +86,13 @@ export async function getWebhookSubscriptionForUser(
           webhook_subscriptions.signing_secret_encrypted as signingSecretEncrypted,
           webhook_subscriptions.timezone,
           webhook_subscriptions.schedule_time_local as scheduleTimeLocal,
+          webhook_subscriptions.schedule_times_local as scheduleTimesLocal,
+          webhook_subscriptions.schedule_weekdays as scheduleWeekdays,
           webhook_subscriptions.send_empty_report as sendEmptyReport,
           webhook_subscriptions.enabled,
           webhook_subscriptions.next_run_at as nextRunAt,
           webhook_subscriptions.pending_report_date as pendingReportDate,
+          webhook_subscriptions.pending_schedule_slot as pendingScheduleSlot,
           webhook_subscriptions.locked_at as lockedAt,
           webhook_subscriptions.failure_count as failureCount,
           webhook_subscriptions.last_success_at as lastSuccessAt,
@@ -84,7 +108,7 @@ export async function getWebhookSubscriptionForUser(
       `
     )
     .bind(userId, subscriptionId)
-    .first<WebhookSubscriptionSecretRow>()
+    .first<WebhookSubscriptionSecretDbRow>()
 
   return row ? normalizeSecretRow(row) : null
 }
@@ -109,10 +133,13 @@ export async function listDueWebhookSubscriptions(
           webhook_subscriptions.signing_secret_encrypted as signingSecretEncrypted,
           webhook_subscriptions.timezone,
           webhook_subscriptions.schedule_time_local as scheduleTimeLocal,
+          webhook_subscriptions.schedule_times_local as scheduleTimesLocal,
+          webhook_subscriptions.schedule_weekdays as scheduleWeekdays,
           webhook_subscriptions.send_empty_report as sendEmptyReport,
           webhook_subscriptions.enabled,
           webhook_subscriptions.next_run_at as nextRunAt,
           webhook_subscriptions.pending_report_date as pendingReportDate,
+          webhook_subscriptions.pending_schedule_slot as pendingScheduleSlot,
           webhook_subscriptions.locked_at as lockedAt,
           webhook_subscriptions.failure_count as failureCount,
           webhook_subscriptions.last_success_at as lastSuccessAt,
@@ -133,7 +160,7 @@ export async function listDueWebhookSubscriptions(
       `
     )
     .bind(nowIso, nowIso, limit)
-    .all<DueWebhookSubscription>()
+    .all<WebhookSubscriptionSecretDbRow>()
 
   return (rows.results ?? []).map(normalizeSecretRow)
 }
@@ -178,6 +205,7 @@ export async function hasSuccessfulDailyDelivery(input: {
   db: D1Database
   subscriptionId: string
   reportDate: string
+  scheduleSlot: string
 }) {
   const row = await input.db
     .prepare(
@@ -186,12 +214,13 @@ export async function hasSuccessfulDailyDelivery(input: {
         FROM webhook_delivery_logs
         WHERE subscription_id = ?
           AND report_date = ?
+          AND schedule_slot = ?
           AND kind = 'daily'
           AND status = 'success'
         LIMIT 1
       `
     )
-    .bind(input.subscriptionId, input.reportDate)
+    .bind(input.subscriptionId, input.reportDate, input.scheduleSlot)
     .first<{ id: string }>()
 
   return Boolean(row)
@@ -203,6 +232,7 @@ export async function insertDeliveryLog(input: {
   subscriptionId: string
   userId: string
   reportDate: string
+  scheduleSlot?: string | null
   kind: 'daily' | 'test'
   status: 'success' | 'failure' | 'skipped'
   httpStatus?: number | null
@@ -212,7 +242,26 @@ export async function insertDeliveryLog(input: {
   createdAt: string
   ignoreDuplicateDailySuccess?: boolean
 }) {
-  await input.db
+  await prepareDeliveryLog(input).run()
+}
+
+export function prepareDeliveryLog(input: {
+  db: D1Database
+  id: string
+  subscriptionId: string
+  userId: string
+  reportDate: string
+  scheduleSlot?: string | null
+  kind: 'daily' | 'test'
+  status: 'success' | 'failure' | 'skipped'
+  httpStatus?: number | null
+  attempt: number
+  error?: string | null
+  durationMs: number
+  createdAt: string
+  ignoreDuplicateDailySuccess?: boolean
+}) {
+  return input.db
     .prepare(
       `
         INSERT INTO webhook_delivery_logs (
@@ -220,6 +269,7 @@ export async function insertDeliveryLog(input: {
           subscription_id,
           user_id,
           report_date,
+          schedule_slot,
           kind,
           status,
           http_status,
@@ -228,8 +278,8 @@ export async function insertDeliveryLog(input: {
           duration_ms,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ${input.ignoreDuplicateDailySuccess ? "ON CONFLICT(subscription_id, report_date, kind) WHERE status = 'success' AND kind = 'daily' DO NOTHING" : ''}
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ${input.ignoreDuplicateDailySuccess ? "ON CONFLICT(subscription_id, report_date, kind, schedule_slot) WHERE status = 'success' AND kind = 'daily' AND schedule_slot IS NOT NULL DO NOTHING" : ''}
       `
     )
     .bind(
@@ -237,6 +287,7 @@ export async function insertDeliveryLog(input: {
       input.subscriptionId,
       input.userId,
       input.reportDate,
+      input.scheduleSlot ?? null,
       input.kind,
       input.status,
       input.httpStatus ?? null,
@@ -245,10 +296,19 @@ export async function insertDeliveryLog(input: {
       input.durationMs,
       input.createdAt
     )
+}
+
+export async function pruneWebhookDeliveryLogs(input: {
+  db: D1Database
+  cutoffIso: string
+}) {
+  await input.db
+    .prepare('DELETE FROM webhook_delivery_logs WHERE created_at < ?')
+    .bind(input.cutoffIso)
     .run()
 }
 
-function normalizeSecretRow(row: WebhookSubscriptionSecretRow): WebhookSubscriptionSecretRow {
+function normalizeSecretRow(row: WebhookSubscriptionSecretDbRow): WebhookSubscriptionSecretRow {
   return {
     ...normalizeSubscriptionSummary(row),
     lockedAt: row.lockedAt ?? null,
@@ -259,13 +319,18 @@ function normalizeSecretRow(row: WebhookSubscriptionSecretRow): WebhookSubscript
   }
 }
 
-function normalizeSubscriptionSummary(row: WebhookSubscriptionSummary): WebhookSubscriptionSummary {
+function normalizeSubscriptionSummary(row: WebhookSubscriptionRow): WebhookSubscriptionSummary {
+  const scheduleTimesLocal = normalizeScheduleTimes(row.scheduleTimesLocal ?? row.scheduleTimeLocal)
   return {
     ...row,
     provider: row.provider as WebhookProvider,
+    scheduleTimeLocal: scheduleTimesLocal[0],
+    scheduleTimesLocal,
+    scheduleWeekdays: normalizeScheduleWeekdays(row.scheduleWeekdays),
     sendEmptyReport: Boolean(row.sendEmptyReport),
     enabled: Boolean(row.enabled),
     pendingReportDate: row.pendingReportDate ?? null,
+    pendingScheduleSlot: row.pendingScheduleSlot ?? null,
     failureCount: Number(row.failureCount ?? 0),
     lastSuccessAt: row.lastSuccessAt ?? null,
     lastFailureAt: row.lastFailureAt ?? null,
