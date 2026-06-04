@@ -1,5 +1,11 @@
 import { ApiError } from '../../lib/errors'
-import { dashboardUrl, webhookLogRetentionDays, type WebhookEnv } from './config'
+import {
+  dashboardUrl,
+  shouldPruneWebhookDeliveryLogs,
+  webhookCronBatchSize,
+  webhookLogRetentionDays,
+  type WebhookEnv
+} from './config'
 import {
   recordDeliveryFailure,
   recordDeliverySuccess,
@@ -16,13 +22,13 @@ import {
 import { getDailyTokenReport } from './report-queries'
 import { dailyReportHistoryRetentionDays, persistDailyReportHistory } from './report-history-delivery'
 import { localDateInTimezone, localTimeInTimezone } from './time'
+import { usageSummaryStrictMode } from '../usage/deduped-daily-usage'
 import { deliveryHttpStatus, sendWebhookRequest } from './webhook-client'
 
 type Fetcher = typeof fetch
 type DeliveryKind = 'daily' | 'test'
 type DeliveryStatus = 'success' | 'failure' | 'skipped'
 
-const maxCronBatchSize = 50
 const lockLeaseMinutes = 10
 
 class SuccessfulDeliveryPersistenceError extends Error {
@@ -65,11 +71,13 @@ export async function runDueWebhookNotifications(input: {
   fetcher?: Fetcher
 }) {
   const now = input.now ?? new Date()
-  const due = await listDueWebhookSubscriptions(input.env.DB, now.toISOString(), input.limit ?? maxCronBatchSize)
+  const due = await listDueWebhookSubscriptions(input.env.DB, now.toISOString(), input.limit ?? webhookCronBatchSize(input.env))
   const counts = { checked: due.length, sent: 0, failed: 0, skipped: 0 }
   const fetcher = input.fetcher ?? fetch
 
-  await pruneDeliveryLogs(input.env, now)
+  if (shouldPruneWebhookDeliveryLogs(now)) {
+    await pruneDeliveryLogs(input.env, now)
+  }
 
   for (const subscription of due) {
     try {
@@ -189,7 +197,8 @@ async function deliverSubscriptionChecked(input: {
     displayName: input.subscription.displayName,
     reportDate: input.reportDate,
     timezone: input.subscription.timezone,
-    dashboardUrl: dashboardUrl(input.env)
+    dashboardUrl: dashboardUrl(input.env),
+    summaryStrict: usageSummaryStrictMode(input.env)
   })
   if (input.kind === 'test') {
     report.previewLabel = '测试预览'

@@ -155,13 +155,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -200,6 +195,7 @@ describe('notification service', () => {
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
     const statements: string[] = []
     const bindings: unknown[][] = []
+    const reportDateBindings: unknown[][] = []
     const fetchCalls: Array<{ url: string; body: string; signal: unknown }> = []
     const db = {
       prepare(sql: string) {
@@ -207,16 +203,12 @@ describe('notification service', () => {
         return {
           bind(...values: unknown[]) {
             bindings.push(values)
+            if (sql.includes('usage_date = ?')) reportDateBindings.push(values)
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -224,20 +216,6 @@ describe('notification service', () => {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
                     results: [dueSubscriptionRow(encryptedUrl)]
-                  }
-                }
-                if (sql.includes('GROUP BY source')) {
-                  return {
-                    results: [
-                      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
-                    ]
-                  }
-                }
-                if (sql.includes('GROUP BY model')) {
-                  return {
-                    results: [
-                      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
-                    ]
                   }
                 }
                 return { results: [] }
@@ -279,8 +257,17 @@ describe('notification service', () => {
     expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('locked_at = ?'))).toBe(true)
     expect(bindings.some((values) => values.includes('2026-04-23'))).toBe(true)
     expect(bindings.some((values) => values.includes('user_1') && values.includes('2026-04-29'))).toBe(true)
-    expect(bindings.some((values) => values.includes('[{"source":"codex","totalTokens":1200,"totalTokensWithoutCacheRead":900,"cacheReadRate":0.25}]'))).toBe(true)
-    expect(bindings.some((values) => values.includes('[{"model":"gpt-5","totalTokens":1200,"totalTokensWithoutCacheRead":900,"cacheReadRate":0.25,"costUsd":1.23}]'))).toBe(true)
+    expect(reportDateBindings).toEqual([
+      ['user_1', '2026-04-29', 'user_1', '2026-04-29']
+    ])
+    expect(historyJsonValues(bindings)).toEqual({
+      sourceSplit: [
+        { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.25 }
+      ],
+      topModels: [
+        { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.25, costUsd: 1.23 }
+      ]
+    })
     expect(bindings.some((values) => values.includes('sub_1') && values.includes('2026-04-29T01:31:00.000Z'))).toBe(true)
     expect(bindings.flat()).toContain('2026-04-30T01:30:00.000Z')
   })
@@ -299,13 +286,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -316,20 +298,6 @@ describe('notification service', () => {
                       scheduleTimesLocal: ['09:30', '18:00'],
                       nextRunAt: '2026-04-29T01:30:00.000Z'
                     })]
-                  }
-                }
-                if (sql.includes('GROUP BY source')) {
-                  return {
-                    results: [
-                      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
-                    ]
-                  }
-                }
-                if (sql.includes('GROUP BY model')) {
-                  return {
-                    results: [
-                      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
-                    ]
                   }
                 }
                 return { results: [] }
@@ -380,13 +348,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -446,13 +409,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -515,13 +473,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -590,13 +543,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -610,20 +558,6 @@ describe('notification service', () => {
                       failureCount: 0,
                       nextRunAt: '2026-04-29T10:00:00.000Z'
                     })]
-                  }
-                }
-                if (sql.includes('GROUP BY source')) {
-                  return {
-                    results: [
-                      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
-                    ]
-                  }
-                }
-                if (sql.includes('GROUP BY model')) {
-                  return {
-                    results: [
-                      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
-                    ]
                   }
                 }
                 return { results: [] }
@@ -672,13 +606,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -692,20 +621,6 @@ describe('notification service', () => {
                       failureCount: 2,
                       nextRunAt: '2026-04-29T02:00:00.000Z'
                     })]
-                  }
-                }
-                if (sql.includes('GROUP BY source')) {
-                  return {
-                    results: [
-                      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
-                    ]
-                  }
-                }
-                if (sql.includes('GROUP BY model')) {
-                  return {
-                    results: [
-                      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
-                    ]
                   }
                 }
                 return { results: [] }
@@ -762,13 +677,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -841,13 +751,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -924,13 +829,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -996,13 +896,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -1071,13 +966,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -1114,13 +1004,11 @@ describe('notification service', () => {
 
     expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
     expect(reportDateBindings).toEqual([
-      ['user_1', '2026-04-29', 'user_1', '2026-04-29'],
-      ['user_1', '2026-04-29', 'user_1', '2026-04-29'],
       ['user_1', '2026-04-29', 'user_1', '2026-04-29']
     ])
   })
 
-  test('prunes old webhook delivery logs before processing due notifications', async () => {
+  test('prunes old webhook delivery logs during the daily prune window', async () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
     const pruneBindings: unknown[][] = []
@@ -1138,7 +1026,7 @@ describe('notification service', () => {
               },
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
+                if (sql.includes('sessionCount')) {
                   return {
                     totalTokens: 0,
                     totalTokensWithoutCacheRead: 0,
@@ -1164,11 +1052,45 @@ describe('notification service', () => {
         BETTER_AUTH_URL: 'https://tokenboard.example.com',
         TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: '7'
       },
-      now: new Date('2026-04-29T16:01:00.000Z'),
+      now: new Date('2026-04-29T00:00:00.000Z'),
       fetcher: async () => new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
     })
 
-    expect(pruneBindings).toEqual([['2026-04-22T16:01:00.000Z']])
+    expect(pruneBindings).toEqual([['2026-04-22T00:00:00.000Z']])
+  })
+
+  test('skips webhook delivery log pruning outside the daily prune window', async () => {
+    const secret = testEncryptionKey
+    const pruneBindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            if (sql.includes('DELETE FROM webhook_delivery_logs')) pruneBindings.push(values)
+            return {
+              async all() {
+                if (sql.includes('FROM webhook_subscriptions')) return { results: [] }
+                return { results: [] }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const result = await runDueWebhookNotifications({
+      env: {
+        DB: db,
+        WEBHOOK_ENCRYPTION_KEY: secret,
+        BETTER_AUTH_URL: 'https://tokenboard.example.com',
+        TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: '7'
+      },
+      now: new Date('2026-04-29T01:00:00.000Z'),
+      fetcher: async () => new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
+    })
+
+    expect(result).toEqual({ checked: 0, sent: 0, failed: 0, skipped: 0 })
+    expect(pruneBindings).toEqual([])
   })
 
   test('does not send when another cron worker already claimed the subscription', async () => {
@@ -1227,13 +1149,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -1506,7 +1423,7 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
+                if (sql.includes('sessionCount')) {
                   return {
                     totalTokens: 0,
                     totalTokensWithoutCacheRead: 0,
@@ -1571,7 +1488,7 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
+                if (sql.includes('sessionCount')) {
                   return {
                     totalTokens: 0,
                     totalTokensWithoutCacheRead: 0,
@@ -1641,13 +1558,8 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
-                  return {
-                    totalTokens: 1200,
-                    totalTokensWithoutCacheRead: 900,
-                    costUsd: 1.23,
-                    sessionCount: 4
-                  }
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
                 }
                 return null
               },
@@ -1693,7 +1605,7 @@ describe('notification service', () => {
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
-                if (sql.includes('SUM(session_count)')) {
+                if (sql.includes('sessionCount')) {
                   return {
                     totalTokens: 0,
                     totalTokensWithoutCacheRead: 0,
@@ -1780,6 +1692,33 @@ function dueSubscriptionRow(
     createdAt: '2026-04-28T00:00:00.000Z',
     updatedAt: '2026-04-28T00:00:00.000Z',
     ...overrides
+  }
+}
+
+function reportTotalsRow() {
+  return {
+    totalTokens: 1200,
+    totalTokensWithoutCacheRead: 900,
+    costUsd: 1.23,
+    sessionCount: 4,
+    sourceSplit: JSON.stringify([
+      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
+    ]),
+    topModels: JSON.stringify([
+      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
+    ])
+  }
+}
+
+function historyJsonValues(bindings: unknown[][]) {
+  const historyBindings = bindings.find((values) =>
+    values.includes('https://tokenboard.example.com/dashboard') &&
+    values.includes('2026-04-29T01:31:00.000Z')
+  )
+  if (!historyBindings) throw new Error('Missing daily report history bindings')
+  return {
+    sourceSplit: JSON.parse(String(historyBindings[12])),
+    topModels: JSON.parse(String(historyBindings[13]))
   }
 }
 

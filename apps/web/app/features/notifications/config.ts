@@ -8,11 +8,15 @@ export type WebhookEnv = Pick<
   | 'WEBHOOK_ENCRYPTION_KEY'
   | 'BETTER_AUTH_URL'
   | 'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS'
+  | 'TOKENBOARD_USAGE_SUMMARY_STRICT'
+  | 'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE'
   | 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS'
 >
 
 export const defaultWebhookLogRetentionDays = 90
 export const maxWebhookLogRetentionDays = 365
+export const defaultWebhookCronBatchSize = 5
+export const maxWebhookCronBatchSize = 5
 
 export function webhookLogRetentionDays(env: Pick<WebhookEnv, 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS'>) {
   if (env.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS === undefined) {
@@ -25,6 +29,23 @@ export function webhookLogRetentionDays(env: Pick<WebhookEnv, 'TOKENBOARD_WEBHOO
     throw invalidWebhookLogRetentionError()
   }
   return days
+}
+
+export function webhookCronBatchSize(env: Pick<WebhookEnv, 'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE'>) {
+  if (env.TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE === undefined) {
+    return defaultWebhookCronBatchSize
+  }
+  const raw = env.TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE.trim()
+  if (!raw || !/^\d+$/.test(raw)) throw invalidWebhookCronBatchSizeError()
+  const size = Number(raw)
+  if (!Number.isSafeInteger(size) || size < 1 || size > maxWebhookCronBatchSize) {
+    throw invalidWebhookCronBatchSizeError()
+  }
+  return size
+}
+
+export function shouldPruneWebhookDeliveryLogs(now: Date) {
+  return now.getUTCHours() === 0
 }
 
 export function requireEncryptionKey(env: Pick<WebhookEnv, 'WEBHOOK_ENCRYPTION_KEY'>) {
@@ -116,4 +137,8 @@ function hasPathToken(url: URL, prefix: string) {
 
 function invalidWebhookLogRetentionError() {
   return new Error(`TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to ${maxWebhookLogRetentionDays}`)
+}
+
+function invalidWebhookCronBatchSizeError() {
+  return new Error(`TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE must be an integer from 1 to ${maxWebhookCronBatchSize}`)
 }
