@@ -1,3 +1,10 @@
+---
+title: TokenBoard
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # TokenBoard
 
 TokenBoard is a hosted AI token usage dashboard for Claude Code and Codex. A local collector
@@ -207,3 +214,13 @@ Production config validation requires:
 
 Cron times are UTC. User-facing report times are evaluated against each subscription's configured
 timezone.
+
+## HuggingFace Space Preview
+
+The root `Dockerfile` is for a HuggingFace Space Docker preview. It runs the Worker through Wrangler
+local mode with a local D1 database and applies `apps/web/db/migrations` on container start. This is a
+deployment preview for UI, route, and Worker behavior checks; production remains Cloudflare Workers +
+remote D1.
+
+The container listens on `PORT` and defaults to `7860`, which matches HuggingFace Spaces. Preview
+state is stored under `/data/wrangler` unless `TOKENBOARD_WRANGLER_PERSIST_DIR` is set.

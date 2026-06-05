@@ -1,0 +1,16 @@
+.git
+.wrangler
+**/.wrangler
+**/dist
+**/node_modules
+**/*.log
+**/*.tmp
+.DS_Store
+.env
+.env.*
+**/.env
+**/.env.*
+**/.dev.vars
+apps/web/wrangler.production.jsonc
+apps/web/wrangler.production.private.jsonc
+apps/web/wrangler.production.ci.jsonc
