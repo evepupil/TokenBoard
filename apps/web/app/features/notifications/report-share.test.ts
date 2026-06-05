@@ -56,6 +56,28 @@ describe('daily report sharing', () => {
     expect(report).toBeNull()
   })
 
+  test('does not let the owner read a report outside the retention window', async () => {
+    const db = statementDb({
+      rows: [{
+        ...historyRow(),
+        ownerUserId: 'user_1',
+        reportDate: '2026-04-23',
+        shareEnabled: 0,
+        shareRevokedAt: '2026-04-30T00:00:00.000Z'
+      }]
+    })
+
+    const report = await getDailyReportHistoryById({
+      db,
+      id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      viewerUserId: 'user_1',
+      retentionDays: 7,
+      now: new Date('2026-04-30T00:00:00.000Z')
+    })
+
+    expect(report).toBeNull()
+  })
+
   test('lets the owner read a private history row by id', async () => {
     const db = statementDb({
       rows: [{

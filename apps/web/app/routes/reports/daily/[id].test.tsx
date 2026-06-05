@@ -104,6 +104,23 @@ describe('daily report share route', () => {
     expect(html).toContain('退出登录')
   })
 
+  test('passes the configured report history retention window', async () => {
+    mockedGetDailyReportHistoryById.mockResolvedValue(reportItem() as never)
+    const context = pageContext('drr_dddddddddddddddddddddddddddddddd', undefined, {
+      TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+    })
+
+    await GET[0](context as never, async () => undefined)
+
+    expect(mockedGetDailyReportHistoryById).toHaveBeenCalledWith({
+      db: context.env.DB,
+      id: 'drr_dddddddddddddddddddddddddddddddd',
+      viewerUserId: null,
+      retentionDays: 7,
+      now: new Date('2026-04-30T00:00:00.000Z')
+    })
+  })
+
   test('keeps the logged-in nav when a private report id is not readable', async () => {
     mockedGetOptionalUser.mockResolvedValue({
       id: 'user_1',
@@ -123,11 +140,11 @@ describe('daily report share route', () => {
   })
 })
 
-function pageContext(id: string, cookie?: string) {
+function pageContext(id: string, cookie?: string, env?: Record<string, unknown>) {
   let statusCode = 200
   const headers = new Headers()
   return {
-    env: { DB: {} },
+    env: { DB: {}, ...env },
     req: {
       param: vi.fn(() => ({ id })),
       header: vi.fn((name: string) => (name === 'cookie' ? cookie ?? null : null)),

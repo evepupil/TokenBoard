@@ -75,13 +75,16 @@ Supported webhook hosts:
 | Lark | `https://open.larksuite.com/open-apis/bot/v2/hook/...` |
 
 Reports include totals, tokens without cache reads, cache rate, cost, sessions, source split, top
-models, and a link to that report's snapshot page when daily report sharing is enabled. Test sends are
-labeled as previews. Scheduled sends are deduped by subscription, report date, and schedule slot;
-failures retry up to three attempts before moving to the next slot.
+models, and a link to that report's aggregate snapshot page when daily report sharing is enabled.
+Test sends are labeled as previews. Scheduled sends are deduped by subscription, report date, and
+schedule slot; failures retry up to three attempts before moving to the next slot.
 
 Daily report history stores only aggregate snapshots. Users can disable unauthenticated access for
-report links or revoke a single report link from `/settings/notifications`. Retention defaults to 30
-days and can be configured with `TOKENBOARD_DAILY_REPORT_HISTORY_DAYS`.
+all report links or revoke a single report link from `/settings/notifications`. Owners can still view
+their own unexpired private or revoked snapshots while signed in. Anonymous `/reports/daily/:id`
+reads require the global sharing switch, an unrevoked report link, and a report date inside the
+configured retention window. Retention defaults to 30 days and can be configured with
+`TOKENBOARD_DAILY_REPORT_HISTORY_DAYS`.
 
 ## Collector Behavior
 

@@ -10,8 +10,17 @@
 - Reviewer P2 follow-up for sqlite JSON output containing bracket characters inside string values.
 - Reviewer P2 follow-up for cleanup of shared report history rows used by another successful delivery.
 - Reviewer P2 follow-up for enforcing daily report history retention on shared report reads.
+- Cleanup follow-up for delivery helper export scope, core retention route tests, and README behavior notes.
 
 ## Commands
+
+```bash
+pnpm --filter @tokenboard/web test -- app/features/notifications/report-history-delivery.test.ts app/features/notifications/report-share.test.ts 'app/routes/reports/daily/[id].test.tsx'
+```
+
+Exit code: 0
+
+Result: 52 test files passed, 350 tests passed.
 
 ```bash
 pnpm --filter @tokenboard/web test -- app/features/notifications/report-history.sqlite.test.ts app/test/sqlite-d1.test.ts
@@ -83,7 +92,7 @@ pnpm test
 
 Exit code: 0
 
-Result: `packages/usage-core` 2 tests passed, `packages/collector` 141 tests passed, `apps/web` 348 tests passed.
+Result: `packages/usage-core` 2 tests passed, `packages/collector` 141 tests passed, `apps/web` 350 tests passed.
 
 ```bash
 pnpm --filter @tokenboard/web build
@@ -128,4 +137,5 @@ Result: no whitespace errors.
 - Reviewer P2 found that cleanup could delete a report history row already used by another successful subscription. Cleanup now deletes only when no matching daily success log exists for the row's user, report date, and schedule slot.
 - Reviewer P2 found that stale daily report history rows could remain publicly readable after the configured retention window. Shared report reads now bind a retention cutoff and reject rows with `report_date` before that cutoff before rendering.
 - Final Claude and Gemini read-only reviews of the staged diff found no discrete defects requiring author fixes.
+- Cleanup narrowed private delivery helpers back to file scope, added tests for owner retention enforcement, route retention configuration, and existing-share cleanup no-op behavior, and updated README sharing semantics.
 - Files touched by the new sqlite contract and delivery/share helpers are under the 300 line repository limit.

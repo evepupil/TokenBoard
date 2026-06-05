@@ -3,15 +3,12 @@ import type { WebhookEnv } from './config'
 import { errorMessage } from './delivery-helpers'
 import type { DueWebhookSubscription } from './queries'
 import {
-  dailyReportHistoryRetentionDays,
   prepareDailyReportHistoryShare,
   pruneExpiredDailyReportHistory,
   saveDailyReportHistory
 } from './report-history'
 
-export { dailyReportHistoryRetentionDays }
-
-export async function persistDailyReportHistory(input: {
+async function persistDailyReportHistory(input: {
   env: WebhookEnv
   subscription: DueWebhookSubscription
   report: DailyTokenReport
@@ -69,7 +66,7 @@ export function persistDeliveredDailyReportHistory(input: {
   })
 }
 
-export function pruneDailyReportHistory(input: {
+function pruneDailyReportHistory(input: {
   env: WebhookEnv
   subscription: DueWebhookSubscription
   report: DailyTokenReport
@@ -83,7 +80,7 @@ export function pruneDailyReportHistory(input: {
   })
 }
 
-export function deleteDailyReportHistoryShare(input: {
+function deleteDailyReportHistoryShare(input: {
   env: WebhookEnv
   userId: string
   id: string
@@ -109,7 +106,7 @@ export function deleteDailyReportHistoryShare(input: {
     .run()
 }
 
-export function canShareDailyReportLink(
+function canShareDailyReportLink(
   subscription: Pick<DueWebhookSubscription, 'dailyReportShareEnabled'>,
   share: { shareRevokedAt?: string | null }
 ) {

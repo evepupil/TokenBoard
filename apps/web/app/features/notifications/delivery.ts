@@ -14,10 +14,10 @@ import {
   type DueWebhookSubscription
 } from './queries'
 import { getDailyTokenReport } from './report-queries'
+import { dailyReportHistoryRetentionDays } from './report-history'
 import {
   canSendDailyReportLink,
   cleanupNewDailyReportHistoryShare,
-  dailyReportHistoryRetentionDays,
   prepareDailyReportHistoryForDelivery,
   persistDeliveredDailyReportHistory,
   pruneDailyReportHistoryAfterDelivery,

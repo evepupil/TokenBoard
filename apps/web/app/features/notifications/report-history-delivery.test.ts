@@ -1,21 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import {
   canSendDailyReportLink,
-  canShareDailyReportLink,
-  deleteDailyReportHistoryShare
+  cleanupNewDailyReportHistoryShare
 } from './report-history-delivery'
 
 describe('daily report history delivery helpers', () => {
-  test('allows share links only while global sharing is enabled and the report is not revoked', () => {
-    expect(canShareDailyReportLink({ dailyReportShareEnabled: true }, { shareRevokedAt: null })).toBe(true)
-    expect(canShareDailyReportLink({ dailyReportShareEnabled: false }, { shareRevokedAt: null })).toBe(false)
-    expect(canShareDailyReportLink({
-      dailyReportShareEnabled: true
-    }, {
-      shareRevokedAt: '2026-04-30T00:00:00.000Z'
-    })).toBe(false)
-  })
-
   test('sends report links to webhooks only when the URL is absolute HTTPS', () => {
     const subscription = { dailyReportShareEnabled: true }
 
@@ -30,6 +19,14 @@ describe('daily report history delivery helpers', () => {
     expect(canSendDailyReportLink(subscription, {
       reportUrl: 'http://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       shareRevokedAt: null
+    })).toBe(false)
+    expect(canSendDailyReportLink({ dailyReportShareEnabled: false }, {
+      reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      shareRevokedAt: null
+    })).toBe(false)
+    expect(canSendDailyReportLink(subscription, {
+      reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      shareRevokedAt: '2026-04-30T00:00:00.000Z'
     })).toBe(false)
   })
 
@@ -52,10 +49,15 @@ describe('daily report history delivery helpers', () => {
       }
     } as unknown as D1Database
 
-    await deleteDailyReportHistoryShare({
+    await cleanupNewDailyReportHistoryShare({
       env: { DB: db } as never,
-      userId: 'user_1',
-      id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      subscription: { id: 'sub_1', userId: 'user_1' } as never,
+      share: {
+        id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        isNew: true,
+        shareRevokedAt: null
+      }
     })
 
     expect(statementSql).toContain('DELETE FROM daily_report_history')
@@ -63,5 +65,28 @@ describe('daily report history delivery helpers', () => {
     expect(statementSql).toContain('FROM webhook_delivery_logs')
     expect(statementSql).toContain("webhook_delivery_logs.status = 'success'")
     expect(statementBindings).toEqual(['user_1', 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])
+  })
+
+  test('does not delete existing report history rows during cleanup', async () => {
+    let prepareCalled = false
+    const db = {
+      prepare() {
+        prepareCalled = true
+        throw new Error('cleanup should not run')
+      }
+    } as unknown as D1Database
+
+    await cleanupNewDailyReportHistoryShare({
+      env: { DB: db } as never,
+      subscription: { id: 'sub_1', userId: 'user_1' } as never,
+      share: {
+        id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        isNew: false,
+        shareRevokedAt: null
+      }
+    })
+
+    expect(prepareCalled).toBe(false)
   })
 })
