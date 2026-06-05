@@ -5,18 +5,22 @@ import {
   dailyReportHistoryRetentionDays,
   listDailyReportHistory
 } from '../../features/notifications/report-history'
+import { getDailyReportShareSettings } from '../../features/notifications/report-share'
 import { scheduleTimeSlotCount } from '../../features/notifications/schedule-fields'
 import {
   createWebhookSubscription,
   deleteWebhookSubscription,
   hasValidEncryptionKey,
   listWebhookSubscriptions,
+  parseDailyReportId,
   parseWebhookAction,
   parseWebhookCreateForm,
   parseWebhookId,
   parseWebhookUpdateForm,
+  revokeDailyReportShare,
   sendWebhookTest,
   setWebhookSubscriptionEnabled,
+  updateDailyReportShareSettings,
   updateWebhookSubscription
 } from '../../features/notifications/service'
 import { getCanonicalPublicOrigin, getProfileSettings } from '../../features/settings/service'
@@ -31,13 +35,17 @@ export const GET = createRoute(async (c) => {
     requestOrigin: new URL(c.req.url).origin
   })
   const reportHistoryRetentionDays = dailyReportHistoryRetentionDays(c.env)
-  const [profile, subscriptions, reportHistory] = await Promise.all([
+  const [profile, subscriptions, reportHistory, shareSettings] = await Promise.all([
     getProfileSettings(c.env.DB, user.id, publicOrigin),
     listWebhookSubscriptions(c.env.DB, user.id),
     listDailyReportHistory({
       db: c.env.DB,
       userId: user.id,
       limit: reportHistoryRetentionDays * scheduleTimeSlotCount
+    }),
+    getDailyReportShareSettings({
+      db: c.env.DB,
+      userId: user.id
     })
   ])
 
@@ -47,6 +55,7 @@ export const GET = createRoute(async (c) => {
       timezone={profile.timezone}
       subscriptions={subscriptions}
       reportHistory={reportHistory}
+      dailyReportShareEnabled={shareSettings.dailyReportShareEnabled}
       reportHistoryRetentionDays={reportHistoryRetentionDays}
       saved={c.req.query('saved') === '1'}
       tested={c.req.query('tested') === '1'}
@@ -61,6 +70,25 @@ export const POST = createRoute(async (c) => {
     const user = await requireUser(c)
     const form = await c.req.parseBody({ all: true })
     const action = parseWebhookAction(form)
+
+    if (action === 'update-share-settings') {
+      await updateDailyReportShareSettings({
+        db: c.env.DB,
+        userId: user.id,
+        enabled: form.dailyReportShareEnabled === 'on'
+      })
+      return c.redirect('/settings/notifications?saved=1', 303)
+    }
+
+    if (action === 'revoke-report-share') {
+      await revokeDailyReportShare({
+        db: c.env.DB,
+        userId: user.id,
+        reportId: parseDailyReportId(form)
+      })
+      return c.redirect('/settings/notifications?saved=1', 303)
+    }
+
     const subscriptionId = parseWebhookId(form)
 
     if (action === 'create') {

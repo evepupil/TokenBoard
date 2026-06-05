@@ -23,9 +23,13 @@ import {
 import { sendWebhookTest, runDueWebhookNotifications } from './delivery'
 import { nextScheduledRunAt } from './time'
 
-export { listWebhookSubscriptions }
-export { sendWebhookTest, runDueWebhookNotifications }
-export { hasValidEncryptionKey }
+export { listWebhookSubscriptions, sendWebhookTest, runDueWebhookNotifications, hasValidEncryptionKey }
+export {
+  getDailyReportShareSettings,
+  parseDailyReportId,
+  revokeDailyReportShare,
+  updateDailyReportShareSettings
+} from './report-share'
 
 export function parseWebhookAction(form: Record<string, unknown>) {
   return String(form.action ?? '')

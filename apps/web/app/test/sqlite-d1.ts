@@ -1,6 +1,5 @@
+import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
-
-const sqliteJsonColumns = new Set(['sourceSplit', 'topModels'])
 
 type SqliteRow = Record<string, unknown>
 
@@ -52,21 +51,21 @@ export function runSql(dbPath: string, input: string) {
 }
 
 function runPreparedSql(dbPath: string, sql: string, bindings: unknown[]) {
-  const parameterCommands = bindings.map((value, index) =>
-    `.parameter set ?${index + 1} ${formatSqliteParameter(value)}`
-  )
+  const parameterCommands = bindings.map((value, index) => parameterInsertSql(index, value))
   const output = runSql(dbPath, [
     '.mode json',
     '.parameter init',
+    'DELETE FROM temp.sqlite_parameters;',
     ...parameterCommands,
     sql
   ].join('\n'))
 
   if (!output.trim()) return []
-  return parseRows(JSON.parse(output) as SqliteRow[])
+  return parseRows(parseSqliteJsonRows(output))
 }
 
 function wrapFirstQuery(sql: string) {
+  if (/\bRETURNING\b/i.test(sql)) return sql
   return `SELECT * FROM (${sql}) LIMIT 1`
 }
 
@@ -79,12 +78,57 @@ function parseRows(rows: SqliteRow[]) {
       return parsed
     }
     for (const [key, value] of entries) {
-      parsed[key] = sqliteJsonColumns.has(key) && typeof value === 'string'
-        ? JSON.parse(value)
-        : value
+      parsed[key] = value
     }
     return parsed
   })
+}
+
+function parseSqliteJsonRows(output: string) {
+  return sqliteJsonResultSets(output).flatMap((json) => JSON.parse(json) as SqliteRow[])
+}
+
+function sqliteJsonResultSets(output: string) {
+  const resultSets: string[] = []
+  let start = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < output.length; index += 1) {
+    const char = output[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\' && inString) {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+    if (char === '[') {
+      if (depth === 0) start = index
+      depth += 1
+    }
+    if (char === ']') {
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        resultSets.push(output.slice(start, index + 1))
+        start = -1
+      }
+    }
+  }
+  return resultSets
+}
+
+function parameterInsertSql(index: number, value: unknown) {
+  return [
+    'INSERT INTO temp.sqlite_parameters(key, value)',
+    `VALUES('?${index + 1}', ${formatSqliteParameter(value)});`
+  ].join(' ')
 }
 
 function formatSqliteParameter(value: unknown) {
@@ -94,12 +138,9 @@ function formatSqliteParameter(value: unknown) {
   if (typeof value !== 'string') {
     throw new Error(`Unsupported sqlite test binding type: ${typeof value}`)
   }
-  if (!/^[A-Za-z0-9_./:@ -]+$/.test(value)) {
-    throw new Error(`Unsupported sqlite test binding value: ${value}`)
-  }
   return sqlParameterStringLiteral(value)
 }
 
 function sqlParameterStringLiteral(value: string) {
-  return `"${`'${value.replaceAll("'", "''")}'`.replaceAll('"', '""')}"`
+  return `CAST(X'${Buffer.from(value, 'utf8').toString('hex')}' AS TEXT)`
 }

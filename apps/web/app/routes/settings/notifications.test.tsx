@@ -9,6 +9,7 @@ describe('NotificationsPage', () => {
         email="user@example.com"
         timezone="Asia/Shanghai"
         reportHistory={[]}
+        dailyReportShareEnabled={true}
         reportHistoryRetentionDays={30}
         saved={false}
         tested={false}
@@ -58,6 +59,7 @@ describe('NotificationsPage', () => {
         email="user@example.com"
         timezone="UTC"
         reportHistory={[]}
+        dailyReportShareEnabled={true}
         reportHistoryRetentionDays={30}
         saved={false}
         tested={false}
@@ -77,6 +79,7 @@ describe('NotificationsPage', () => {
         email="user@example.com"
         timezone="UTC"
         reportHistory={[]}
+        dailyReportShareEnabled={true}
         reportHistoryRetentionDays={30}
         saved={false}
         tested={false}
@@ -96,6 +99,7 @@ describe('NotificationsPage', () => {
         email="user@example.com"
         timezone="UTC"
         reportHistoryRetentionDays={7}
+        dailyReportShareEnabled={true}
         saved={false}
         tested={false}
         testFailed={false}
@@ -103,7 +107,7 @@ describe('NotificationsPage', () => {
         subscriptions={[]}
         reportHistory={[
           {
-            id: 'drr_1',
+            id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             displayName: 'Example',
             reportDate: '2026-04-29',
             scheduleSlot: '2026-04-29T18:00',
@@ -114,6 +118,8 @@ describe('NotificationsPage', () => {
             cacheReadRate: 0.25,
             costUsd: 1.23,
             sessionCount: 4,
+            reportUrl: '/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            shareRevokedAt: null,
             sourceSplit: [
               {
                 source: 'codex',
@@ -147,5 +153,31 @@ describe('NotificationsPage', () => {
     expect(html).toContain('25%')
     expect(html).toContain('$1.23')
     expect(html).toContain('gpt-5')
+    expect(html).toContain('href="/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
+    expect(html).toContain('name="reportId" value="drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
+    expect(html).toContain('value="revoke-report-share"')
+    expect(html).toContain('查看')
+  })
+
+  test('renders daily report share settings', async () => {
+    const html = await renderToString(
+      <NotificationsPage
+        email="user@example.com"
+        timezone="UTC"
+        reportHistory={[]}
+        dailyReportShareEnabled={false}
+        reportHistoryRetentionDays={30}
+        saved={false}
+        tested={false}
+        testFailed={false}
+        encryptionConfigured={true}
+        subscriptions={[]}
+      />
+    )
+
+    expect(html).toContain('日报分享')
+    expect(html).toContain('name="dailyReportShareEnabled"')
+    expect(html).toContain('value="update-share-settings"')
+    expect(html).not.toContain('name="dailyReportShareEnabled" checked')
   })
 })

@@ -20,6 +20,7 @@ export type WebhookSubscriptionSecretRow = ClaimedWebhookSubscription & {
 type WebhookSubscriptionSecretDbRow = WebhookSubscriptionRow & {
   userId: string
   displayName: string
+  dailyReportShareEnabled?: number | boolean | null
   webhookUrlEncrypted: string
   signingSecretEncrypted: string | null
   lockedAt: string | null
@@ -78,6 +79,7 @@ export async function getWebhookSubscriptionForUser(
           webhook_subscriptions.id,
           webhook_subscriptions.user_id as userId,
           profiles.display_name as displayName,
+          profiles.daily_report_share_enabled as dailyReportShareEnabled,
           webhook_subscriptions.name,
           webhook_subscriptions.provider,
           webhook_subscriptions.webhook_url_encrypted as webhookUrlEncrypted,
@@ -125,6 +127,7 @@ export async function listDueWebhookSubscriptions(
           webhook_subscriptions.id,
           webhook_subscriptions.user_id as userId,
           profiles.display_name as displayName,
+          profiles.daily_report_share_enabled as dailyReportShareEnabled,
           webhook_subscriptions.name,
           webhook_subscriptions.provider,
           webhook_subscriptions.webhook_url_encrypted as webhookUrlEncrypted,
@@ -314,6 +317,7 @@ function normalizeSecretRow(row: WebhookSubscriptionSecretDbRow): WebhookSubscri
     lockedAt: row.lockedAt ?? null,
     userId: row.userId,
     displayName: row.displayName,
+    dailyReportShareEnabled: Boolean(row.dailyReportShareEnabled),
     webhookUrlEncrypted: row.webhookUrlEncrypted,
     signingSecretEncrypted: row.signingSecretEncrypted ?? null
   }

@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { CustomSelect } from '../../components/ui/custom-select'
 import { Input, Label } from '../../components/ui/input'
 import { DailyReportHistoryCard } from './report-history-card'
-import type { DailyReportHistoryItem } from './report-history'
+import type { DailyReportHistoryItem } from './report-history-item'
 import {
   ScheduleTimeFields,
   ScheduleWeekdayFields,
@@ -18,6 +18,7 @@ export function NotificationsPage(props: {
   timezone: string
   subscriptions: WebhookSubscriptionSummary[]
   reportHistory: DailyReportHistoryItem[]
+  dailyReportShareEnabled: boolean
   reportHistoryRetentionDays: number
   saved: boolean
   tested: boolean
@@ -43,6 +44,7 @@ export function NotificationsPage(props: {
         </div>
         <DailyReportHistoryCard
           reportHistory={props.reportHistory}
+          dailyReportShareEnabled={props.dailyReportShareEnabled}
           retentionDays={props.reportHistoryRetentionDays}
         />
       </section>

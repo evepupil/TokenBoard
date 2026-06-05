@@ -2,35 +2,27 @@ import { randomId } from '../../lib/crypto'
 import type { Bindings } from '../../lib/db'
 import { toIsoDate } from '../../lib/time'
 import type { DailyTokenReport } from './adapters'
+import {
+  dailyReportUrl,
+  toDailyReportHistoryItem,
+  type DailyReportHistoryRow
+} from './report-history-item'
 
 export const defaultDailyReportHistoryDays = 30
 export const maxDailyReportHistoryDays = 31
 
 export type DailyReportHistoryEnv = Pick<Bindings, 'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS'>
+export { dailyReportUrl, type DailyReportHistoryItem, type DailyReportHistoryRow } from './report-history-item'
 
-export type DailyReportHistoryItem = DailyTokenReport & {
+type DailyReportHistorySaveRow = {
   id: string
-  scheduleSlot: string
-  generatedAt: string
-  updatedAt: string
+  shareRevokedAt?: string | null
+  isNew: boolean
 }
 
-type DailyReportHistoryRow = {
+type DailyReportHistoryShareRow = {
   id: string
-  displayName: string
-  reportDate: string
-  scheduleSlot: string
-  timezone: string
-  dashboardUrl: string
-  totalTokens: number
-  totalTokensWithoutCacheRead: number
-  cacheReadRate: number
-  costUsd: number
-  sessionCount: number
-  sourceSplit: string
-  topModels: string
-  generatedAt: string
-  updatedAt: string
+  shareRevokedAt?: string | null
 }
 
 export function dailyReportHistoryRetentionDays(env: DailyReportHistoryEnv) {
@@ -52,10 +44,64 @@ export async function saveDailyReportHistory(input: {
   report: DailyTokenReport
   scheduleSlot: string
   generatedAt: Date
+  id?: string
+  origin?: string
 }) {
+  const id = input.id ?? randomId('drr')
   const generatedAt = input.generatedAt.toISOString()
 
-  await input.db
+  const row = await insertDailyReportHistory(input, id, generatedAt)
+  const saved = row ?? await updateDailyReportHistory(input, generatedAt)
+
+  if (!saved) {
+    throw new Error('Daily report history was not persisted')
+  }
+
+  return {
+    id: saved.id,
+    reportUrl: dailyReportUrl(saved.id, input.origin),
+    isNew: saved.isNew,
+    shareRevokedAt: saved.shareRevokedAt ?? null
+  }
+}
+
+export async function prepareDailyReportHistoryShare(input: {
+  db: D1Database
+  userId: string
+  report: DailyTokenReport
+  scheduleSlot: string
+  generatedAt: Date
+  id?: string
+  origin?: string
+}) {
+  const id = input.id ?? randomId('drr')
+  const generatedAt = input.generatedAt.toISOString()
+  const row = await insertDailyReportHistory(input, id, generatedAt)
+  const share = row ?? await getDailyReportHistoryShare(input)
+
+  if (!share) {
+    throw new Error('Daily report history share was not prepared')
+  }
+
+  return {
+    id: share.id,
+    reportUrl: dailyReportUrl(share.id, input.origin),
+    isNew: Boolean(row),
+    shareRevokedAt: share.shareRevokedAt ?? null
+  }
+}
+
+async function insertDailyReportHistory(
+  input: {
+    db: D1Database
+    userId: string
+    report: DailyTokenReport
+    scheduleSlot: string
+  },
+  id: string,
+  generatedAt: string
+) {
+  const row = await input.db
     .prepare(
       `
         INSERT INTO daily_report_history (
@@ -73,27 +119,20 @@ export async function saveDailyReportHistory(input: {
           session_count,
           source_split,
           top_models,
+          share_revoked_at,
           generated_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, report_date, schedule_slot) DO UPDATE SET
-          display_name = excluded.display_name,
-          timezone = excluded.timezone,
-          dashboard_url = excluded.dashboard_url,
-          total_tokens = excluded.total_tokens,
-          total_tokens_without_cache_read = excluded.total_tokens_without_cache_read,
-          cache_read_rate = excluded.cache_read_rate,
-          cost_usd = excluded.cost_usd,
-          session_count = excluded.session_count,
-          source_split = excluded.source_split,
-          top_models = excluded.top_models,
-          generated_at = excluded.generated_at,
-          updated_at = excluded.updated_at
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, report_date, schedule_slot) DO NOTHING
+        RETURNING
+          id,
+          share_revoked_at as shareRevokedAt,
+          1 as isNew
       `
     )
     .bind(
-      randomId('drr'),
+      id,
       input.userId,
       input.report.reportDate,
       input.scheduleSlot,
@@ -107,10 +146,93 @@ export async function saveDailyReportHistory(input: {
       input.report.sessionCount,
       JSON.stringify(input.report.sourceSplit),
       JSON.stringify(input.report.topModels),
+      null,
       generatedAt,
       generatedAt
     )
-    .run()
+    .first<DailyReportHistorySaveRow>()
+
+  return row ? { ...row, isNew: Boolean(row.isNew) } : null
+}
+
+async function updateDailyReportHistory(
+  input: {
+    db: D1Database
+    userId: string
+    report: DailyTokenReport
+    scheduleSlot: string
+  },
+  generatedAt: string
+) {
+  const row = await input.db
+    .prepare(
+      `
+        UPDATE daily_report_history
+        SET
+          display_name = ?,
+          timezone = ?,
+          dashboard_url = ?,
+          total_tokens = ?,
+          total_tokens_without_cache_read = ?,
+          cache_read_rate = ?,
+          cost_usd = ?,
+          session_count = ?,
+          source_split = ?,
+          top_models = ?,
+          generated_at = ?,
+          updated_at = ?
+        WHERE user_id = ?
+          AND report_date = ?
+          AND schedule_slot = ?
+        RETURNING
+          id,
+          share_revoked_at as shareRevokedAt,
+          0 as isNew
+      `
+    )
+    .bind(
+      input.report.displayName,
+      input.report.timezone,
+      input.report.dashboardUrl,
+      input.report.totalTokens,
+      input.report.totalTokensWithoutCacheRead,
+      input.report.cacheReadRate ?? 0,
+      input.report.costUsd,
+      input.report.sessionCount,
+      JSON.stringify(input.report.sourceSplit),
+      JSON.stringify(input.report.topModels),
+      generatedAt,
+      generatedAt,
+      input.userId,
+      input.report.reportDate,
+      input.scheduleSlot
+    )
+    .first<DailyReportHistorySaveRow>()
+
+  return row ? { ...row, isNew: Boolean(row.isNew) } : null
+}
+
+async function getDailyReportHistoryShare(input: {
+  db: D1Database
+  userId: string
+  report: DailyTokenReport
+  scheduleSlot: string
+}) {
+  return input.db
+    .prepare(
+      `
+        SELECT
+          id,
+          share_revoked_at as shareRevokedAt
+        FROM daily_report_history
+        WHERE user_id = ?
+          AND report_date = ?
+          AND schedule_slot = ?
+        LIMIT 1
+      `
+    )
+    .bind(input.userId, input.report.reportDate, input.scheduleSlot)
+    .first<DailyReportHistoryShareRow>()
 }
 
 export async function listDailyReportHistory(input: {
@@ -135,11 +257,12 @@ export async function listDailyReportHistory(input: {
           session_count as sessionCount,
           source_split as sourceSplit,
           top_models as topModels,
+          share_revoked_at as shareRevokedAt,
           generated_at as generatedAt,
           updated_at as updatedAt
         FROM daily_report_history
         WHERE user_id = ?
-        ORDER BY schedule_slot DESC
+        ORDER BY generated_at DESC, schedule_slot DESC
         LIMIT ?
       `
     )
@@ -166,90 +289,6 @@ export function retentionCutoffDate(reportDate: string, retentionDays: number) {
   const cutoff = new Date(`${reportDate}T00:00:00.000Z`)
   cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays + 1)
   return toIsoDate(cutoff)
-}
-
-function toDailyReportHistoryItem(row: DailyReportHistoryRow): DailyReportHistoryItem {
-  return {
-    id: row.id,
-    displayName: row.displayName,
-    reportDate: row.reportDate,
-    scheduleSlot: row.scheduleSlot,
-    timezone: row.timezone,
-    dashboardUrl: row.dashboardUrl,
-    totalTokens: Number(row.totalTokens),
-    totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead),
-    cacheReadRate: Number(row.cacheReadRate),
-    costUsd: Number(row.costUsd),
-    sessionCount: Number(row.sessionCount),
-    sourceSplit: parseHistoryArray(row.sourceSplit, 'source_split', parseSourceSplitItem),
-    topModels: parseHistoryArray(row.topModels, 'top_models', parseTopModelItem),
-    generatedAt: row.generatedAt,
-    updatedAt: row.updatedAt
-  }
-}
-
-function parseHistoryArray<T>(
-  value: string,
-  column: string,
-  parseItem: (value: unknown, column: string) => T
-) {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(value) as unknown
-  } catch {
-    throw new Error(`Invalid daily report history ${column}`)
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error(`Invalid daily report history ${column}`)
-  }
-  return parsed.map((item) => parseItem(item, column))
-}
-
-function parseSourceSplitItem(value: unknown, column: string): DailyTokenReport['sourceSplit'][number] {
-  const item = historyRecord(value, column)
-  return {
-    source: historyString(item.source, column),
-    totalTokens: historyNumber(item.totalTokens, column),
-    totalTokensWithoutCacheRead: historyNumber(item.totalTokensWithoutCacheRead, column),
-    cacheReadRate: optionalHistoryNumber(item.cacheReadRate, column)
-  }
-}
-
-function parseTopModelItem(value: unknown, column: string): DailyTokenReport['topModels'][number] {
-  const item = historyRecord(value, column)
-  return {
-    model: historyString(item.model, column),
-    totalTokens: historyNumber(item.totalTokens, column),
-    totalTokensWithoutCacheRead: historyNumber(item.totalTokensWithoutCacheRead, column),
-    cacheReadRate: optionalHistoryNumber(item.cacheReadRate, column),
-    costUsd: historyNumber(item.costUsd, column)
-  }
-}
-
-function historyRecord(value: unknown, column: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Invalid daily report history ${column}`)
-  }
-  return value as Record<string, unknown>
-}
-
-function historyString(value: unknown, column: string) {
-  if (typeof value !== 'string') {
-    throw new Error(`Invalid daily report history ${column}`)
-  }
-  return value
-}
-
-function historyNumber(value: unknown, column: string) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`Invalid daily report history ${column}`)
-  }
-  return value
-}
-
-function optionalHistoryNumber(value: unknown, column: string) {
-  if (value === undefined) return undefined
-  return historyNumber(value, column)
 }
 
 function invalidRetentionError() {

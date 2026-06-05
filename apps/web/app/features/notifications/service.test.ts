@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { encryptSecret } from './crypto'
 import {
   createWebhookSubscription,
+  parseDailyReportId,
   parseWebhookUpdateForm,
   runDueWebhookNotifications,
   sendWebhookTest,
@@ -13,6 +14,14 @@ import type { DueWebhookSubscription } from './queries'
 const testEncryptionKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
 describe('notification service', () => {
+  test('parses only valid daily report share ids', () => {
+    expect(parseDailyReportId({
+      reportId: ' drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa '
+    })).toBe('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+
+    expect(() => parseDailyReportId({ reportId: 'drr_1' })).toThrow('Invalid daily report id')
+  })
+
   test('rejects update forms with more schedule times than the settings UI supports', () => {
     expect(() =>
       parseWebhookUpdateForm({
@@ -248,6 +257,8 @@ describe('notification service', () => {
     expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
     expect(fetchCalls[0].body).toContain('Example token 日报 2026-04-29')
     expect(fetchCalls[0].body).toContain('缓存率 25%')
+    expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_')
+    expect(fetchCalls[0].body).not.toContain('[打开 TokenBoard](https://tokenboard.example.com)')
     expect(fetchCalls[0].signal).toBeInstanceOf(AbortSignal)
     expect(statements.some((sql) => sql.includes('INSERT INTO webhook_delivery_logs'))).toBe(true)
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
@@ -503,7 +514,7 @@ describe('notification service', () => {
 
     const result = await runDueWebhookNotifications({
       env: {
-        DB: db,
+        DB: withBatch(db),
         WEBHOOK_ENCRYPTION_KEY: secret,
         BETTER_AUTH_URL: 'https://tokenboard.example.com'
       },
@@ -636,7 +647,7 @@ describe('notification service', () => {
 
     const result = await runDueWebhookNotifications({
       env: {
-        DB: db,
+        DB: withBatch(db),
         WEBHOOK_ENCRYPTION_KEY: secret,
         BETTER_AUTH_URL: 'https://tokenboard.example.com',
         TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
@@ -707,7 +718,7 @@ describe('notification service', () => {
 
     const result = await runDueWebhookNotifications({
       env: {
-        DB: db,
+        DB: withBatch(db),
         WEBHOOK_ENCRYPTION_KEY: secret,
         BETTER_AUTH_URL: 'https://tokenboard.example.com'
       },
@@ -1546,15 +1557,17 @@ describe('notification service', () => {
     expect(bindings[skippedUpdateIndex][0]).toBe('2026-04-29T10:00:00.000Z')
   })
 
-  test('does not save daily report history when provider delivery fails', async () => {
+  test('removes the prewritten daily report history when provider delivery fails', async () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
     const statements: string[] = []
+    const bindings: unknown[][] = []
     const db = {
       prepare(sql: string) {
         statements.push(sql)
         return {
-          bind() {
+          bind(...values: unknown[]) {
+            bindings.push(values)
             return {
               async first() {
                 if (sql.includes('FROM webhook_delivery_logs')) return null
@@ -1589,7 +1602,204 @@ describe('notification service', () => {
     })
 
     expect(result).toEqual({ checked: 1, sent: 0, failed: 1, skipped: 0 })
-    expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(false)
+    expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history'))).toBe(true)
+    expect(bindings.some((values) => (
+      values[0] === 'user_1' &&
+      typeof values[1] === 'string' &&
+      values[1].startsWith('drr_')
+    ))).toBe(true)
+  })
+
+  test('keeps provider failure state when prewritten report history cleanup fails', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const statements: string[] = []
+    const bindings: unknown[][] = []
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_delivery_logs')) return null
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
+                }
+                return null
+              },
+              async all() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return { results: [dueSubscriptionRow(encryptedUrl)] }
+                }
+                return { results: [] }
+              },
+              async run() {
+                if (sql.includes('DELETE FROM daily_report_history')) {
+                  throw new Error('cleanup failed')
+                }
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    try {
+      const result = await runDueWebhookNotifications({
+        env: {
+          DB: withBatch(db),
+          WEBHOOK_ENCRYPTION_KEY: secret,
+          BETTER_AUTH_URL: 'https://tokenboard.example.com'
+        },
+        now: new Date('2026-04-29T01:31:00.000Z'),
+        fetcher: async () => new Response('provider failed', { status: 500 })
+      })
+
+      expect(result).toEqual({ checked: 1, sent: 0, failed: 1, skipped: 0 })
+      expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history'))).toBe(true)
+      expect(bindings.flat()).toContain('Webhook returned 500: provider failed')
+      expect(bindings.flat()).not.toContain('cleanup failed')
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('history cleanup failed'))
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test('keeps a successful delivery when old report history pruning fails', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const statements: string[] = []
+    const fetchCalls: string[] = []
+    let failureUpdateSeen = false
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_delivery_logs')) return null
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
+                }
+                return null
+              },
+              async all() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return { results: [dueSubscriptionRow(encryptedUrl)] }
+                }
+                return { results: [] }
+              },
+              async run() {
+                if (sql.includes('DELETE FROM daily_report_history WHERE user_id = ? AND report_date < ?')) {
+                  throw new Error('prune failed')
+                }
+                if (sql.includes('UPDATE webhook_subscriptions') && sql.includes('last_failure_at')) {
+                  failureUpdateSeen = true
+                }
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    try {
+      const result = await runDueWebhookNotifications({
+        env: {
+          DB: withBatch(db),
+          WEBHOOK_ENCRYPTION_KEY: secret,
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+        },
+        now: new Date('2026-04-29T01:31:00.000Z'),
+        fetcher: async (url) => {
+          fetchCalls.push(String(url))
+          return new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
+        }
+      })
+
+      expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
+      expect(fetchCalls).toHaveLength(1)
+      expect(failureUpdateSeen).toBe(false)
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('history prune failed'))
+      expect(statements.some((sql) => sql.includes('last_success_at'))).toBe(true)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test('does not overwrite an existing daily report history row when another delivery fails', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const statements: string[] = []
+    const fetchBodies: string[] = []
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes('INSERT INTO daily_report_history')) {
+                  return null
+                }
+                if (sql.includes('UPDATE daily_report_history')) {
+                  throw new Error('should not update history before provider success')
+                }
+                if (sql.includes('FROM daily_report_history')) {
+                  return {
+                    id: 'drr_dddddddddddddddddddddddddddddddd',
+                    shareRevokedAt: null
+                  }
+                }
+                if (sql.includes('FROM webhook_delivery_logs')) return null
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
+                }
+                return null
+              },
+              async all() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return { results: [dueSubscriptionRow(encryptedUrl)] }
+                }
+                return { results: [] }
+              },
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const result = await runDueWebhookNotifications({
+      env: {
+        DB: withBatch(db, { synthesizeDailyReportInsert: false }),
+        WEBHOOK_ENCRYPTION_KEY: secret,
+        BETTER_AUTH_URL: 'https://tokenboard.example.com'
+      },
+      now: new Date('2026-04-29T01:31:00.000Z'),
+      fetcher: async (_url, init) => {
+        fetchBodies.push(String(init?.body))
+        return new Response('provider failed', { status: 500 })
+      }
+    })
+
+    expect(result).toEqual({ checked: 1, sent: 0, failed: 1, skipped: 0 })
+    expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('FROM daily_report_history'))).toBe(true)
+    expect(statements.some((sql) => sql.includes('UPDATE daily_report_history'))).toBe(false)
+    expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history'))).toBe(false)
+    expect(fetchBodies[0]).toContain('https://tokenboard.example.com/reports/daily/drr_dddddddddddddddddddddddddddddddd')
   })
 
   test('does not record webhook failure when skipped delivery state fails', async () => {
@@ -1669,6 +1879,7 @@ function dueSubscriptionRow(
     id: 'sub_1',
     userId: 'user_1',
     displayName: 'Example',
+    dailyReportShareEnabled: true,
     name: '日报',
     provider: 'wecom',
     webhookUrlEncrypted: encryptedUrl,
@@ -1722,9 +1933,31 @@ function historyJsonValues(bindings: unknown[][]) {
   }
 }
 
-function withBatch(db: D1Database): D1Database {
+function withBatch(
+  db: D1Database,
+  options: { synthesizeDailyReportInsert?: boolean } = {}
+): D1Database {
+  const synthesizeDailyReportInsert = options.synthesizeDailyReportInsert ?? true
   return {
     ...db,
+    prepare(sql: string) {
+      const statement = db.prepare(sql)
+      return {
+        ...statement,
+        bind(...values: unknown[]) {
+          const bound = statement.bind(...values)
+          return {
+            ...bound,
+            async first<T = unknown>(column?: string) {
+              const row = await bound.first<T>(column as never)
+              if (row || !sql.includes('INSERT INTO daily_report_history')) return row
+              if (!synthesizeDailyReportInsert) return row
+              return { id: values[0], isNew: 1, shareRevokedAt: null } as T
+            }
+          }
+        }
+      }
+    },
     batch: async (statements) => {
       const results: D1Result<unknown>[] = []
       for (const statement of statements) {

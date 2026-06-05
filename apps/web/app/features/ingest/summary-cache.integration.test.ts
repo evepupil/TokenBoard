@@ -660,6 +660,10 @@ function applyMigrations(dbPath: string, includeSummaryCache = true) {
     migrations.push(refreshSummaryCacheMigrationCommand())
     migrations.push(summaryBackfillStateMigrationCommand())
   }
+  migrations.push(
+    `.read ${quoteSqlitePath(join(migrationsDir, '0019_backfill_webhook_pending_schedule_slots.sql'))}`,
+    `.read ${quoteSqlitePath(join(migrationsDir, '0020_daily_report_share_controls.sql'))}`
+  )
   runSql(dbPath, migrations.join('\n'))
 }
 

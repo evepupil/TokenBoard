@@ -10,6 +10,7 @@ const report: DailyTokenReport = {
   totalTokensWithoutCacheRead: 900,
   costUsd: 1.23,
   sessionCount: 4,
+  reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   sourceSplit: [
     { source: 'codex', totalTokens: 800, totalTokensWithoutCacheRead: 620 },
     { source: 'claude-code', totalTokens: 400, totalTokensWithoutCacheRead: 280 }
@@ -29,7 +30,10 @@ describe('notification adapters', () => {
     expect(text).toContain('缓存率 25%')
     expect(text).toContain('Codex：620 token，含缓存读 800 token，缓存率 23%')
     expect(text).toContain('gpt-5：620 token，缓存率 23%')
-    expect(text).toContain('[打开 TokenBoard](https://tokenboard.example.com/dashboard)')
+    expect(text).toContain(
+      '[查看本次日报](https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)'
+    )
+    expect(text).not.toContain('[打开 TokenBoard](https://tokenboard.example.com/dashboard)')
   })
 
   test('builds WeCom markdown payload', async () => {

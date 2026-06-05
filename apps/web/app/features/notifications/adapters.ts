@@ -7,6 +7,7 @@ export type DailyTokenReport = {
   reportDate: string
   timezone: string
   dashboardUrl: string
+  reportUrl?: string
   previewLabel?: string
   totalTokens: number
   totalTokensWithoutCacheRead: number
@@ -110,7 +111,9 @@ export function formatDailyReport(report: DailyTokenReport) {
     ...formatTopModels(report),
     '',
     `统计时区：${report.timezone}`,
-    `[打开 TokenBoard](${report.dashboardUrl})`
+    report.reportUrl
+      ? `[查看本次日报](${report.reportUrl})`
+      : `[打开 TokenBoard](${report.dashboardUrl})`
   ]
 
   return lines.join('\n')

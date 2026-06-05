@@ -6,42 +6,59 @@ import {
   webhookLogRetentionDays,
   type WebhookEnv
 } from './config'
+import { recordDeliveryFailure, recordDeliverySuccess } from './delivery-state'
 import {
-  recordDeliveryFailure,
-  recordDeliverySuccess,
-  markSubscriptionSkipped
-} from './delivery-state'
-import {
-  claimWebhookSubscription,
   getWebhookSubscriptionForUser,
-  hasSuccessfulDailyDelivery,
   listDueWebhookSubscriptions,
   pruneWebhookDeliveryLogs,
   type DueWebhookSubscription
 } from './queries'
 import { getDailyTokenReport } from './report-queries'
-import { dailyReportHistoryRetentionDays, persistDailyReportHistory } from './report-history-delivery'
-import { localDateInTimezone, localTimeInTimezone } from './time'
+import {
+  canSendDailyReportLink,
+  cleanupNewDailyReportHistoryShare,
+  dailyReportHistoryRetentionDays,
+  prepareDailyReportHistoryForDelivery,
+  persistDeliveredDailyReportHistory,
+  pruneDailyReportHistoryAfterDelivery,
+  type DailyReportHistoryShare
+} from './report-history-delivery'
 import { usageSummaryStrictMode } from '../usage/deduped-daily-usage'
 import { deliveryHttpStatus, sendWebhookRequest } from './webhook-client'
+import type { DailyTokenReport } from './adapters'
+import {
+  claimDueSubscription,
+  errorMessage,
+  incrementCounts,
+  LocalDeliveryStateError,
+  markSkippedOrThrow,
+  reportDateForDelivery,
+  scheduleSlotForDelivery,
+  shouldSkipAlreadyDelivered,
+  type DeliveryKind,
+  type DeliveryStatus
+} from './delivery-helpers'
 
 type Fetcher = typeof fetch
-type DeliveryKind = 'daily' | 'test'
-type DeliveryStatus = 'success' | 'failure' | 'skipped'
-
-const lockLeaseMinutes = 10
+type DeliverSubscriptionInput = {
+  env: WebhookEnv
+  subscription: DueWebhookSubscription
+  kind: DeliveryKind
+  now: Date
+  fetcher: Fetcher
+}
+type CheckedDeliveryInput = DeliverSubscriptionInput & {
+  reportDate: string
+  scheduleSlot: string | null
+  attempt: number
+  startedAt: number
+}
+type ReportHistoryDeliveryState = { retentionDays: number; share: DailyReportHistoryShare | null }
 
 class SuccessfulDeliveryPersistenceError extends Error {
   constructor(error: unknown) {
     super(errorMessage(error))
     this.name = 'SuccessfulDeliveryPersistenceError'
-  }
-}
-
-class LocalDeliveryStateError extends Error {
-  constructor(error: unknown) {
-    super(errorMessage(error))
-    this.name = 'LocalDeliveryStateError'
   }
 }
 
@@ -135,22 +152,7 @@ function logSuccessfulDeliveryPersistenceFailure(subscription: DueWebhookSubscri
   console.error(`TokenBoard webhook success persistence failed for subscription ${subscription.id}: ${errorMessage(error)}`)
 }
 
-async function claimDueSubscription(db: D1Database, subscription: DueWebhookSubscription, now: Date) {
-  return claimWebhookSubscription({
-    db,
-    subscriptionId: subscription.id,
-    nowIso: now.toISOString(),
-    lockedUntilIso: addMinutes(now, lockLeaseMinutes).toISOString()
-  })
-}
-
-async function deliverSubscription(input: {
-  env: WebhookEnv
-  subscription: DueWebhookSubscription
-  kind: DeliveryKind
-  now: Date
-  fetcher: Fetcher
-}) {
+async function deliverSubscription(input: DeliverSubscriptionInput) {
   const startedAt = Date.now()
   const reportDate = reportDateForDelivery(input.kind, input.subscription, input.now)
   const scheduleSlot = scheduleSlotForDelivery(input.kind, input.subscription, reportDate)
@@ -179,18 +181,21 @@ async function deliverSubscription(input: {
   }
 }
 
-async function deliverSubscriptionChecked(input: {
-  env: WebhookEnv
-  subscription: DueWebhookSubscription
-  kind: DeliveryKind
-  now: Date
-  fetcher: Fetcher
-  reportDate: string
-  scheduleSlot: string | null
-  attempt: number
-  startedAt: number
-}): Promise<DeliveryStatus> {
+async function deliverSubscriptionChecked(input: CheckedDeliveryInput): Promise<DeliveryStatus> {
   if (await shouldSkipAlreadyDelivered(input)) return 'skipped'
+  const report = await reportForDelivery(input)
+  if (input.kind === 'daily' && report.totalTokens <= 0 && !input.subscription.sendEmptyReport) {
+    await markSkippedOrThrow(input, 'Empty report')
+    return 'skipped'
+  }
+
+  const reportHistory = await prepareReportHistoryForDelivery(input, report)
+  const response = await sendReportOrCleanup(input, report, reportHistory.share)
+  await recordSuccessOrThrow(input, report, reportHistory, response)
+  return 'success'
+}
+
+async function reportForDelivery(input: CheckedDeliveryInput) {
   const report = await getDailyTokenReport({
     db: input.env.DB,
     userId: input.subscription.userId,
@@ -203,15 +208,54 @@ async function deliverSubscriptionChecked(input: {
   if (input.kind === 'test') {
     report.previewLabel = '测试预览'
   }
-  if (input.kind === 'daily' && report.totalTokens <= 0 && !input.subscription.sendEmptyReport) {
-    await markSkippedOrThrow(input, 'Empty report')
-    return 'skipped'
-  }
+  return report
+}
 
-  const reportHistoryRetentionDays = input.kind === 'daily'
+async function prepareReportHistoryForDelivery(
+  input: CheckedDeliveryInput,
+  report: DailyTokenReport
+): Promise<ReportHistoryDeliveryState> {
+  const retentionDays = input.kind === 'daily'
     ? dailyReportHistoryRetentionDays(input.env)
     : 0
-  const response = await sendWebhookRequest({ ...input, report })
+  const share = input.kind === 'daily' && input.scheduleSlot
+    ? await prepareDailyReportHistoryForDelivery({
+        env: input.env,
+        subscription: input.subscription,
+        report,
+        scheduleSlot: input.scheduleSlot,
+        now: input.now
+      })
+    : null
+  if (share && canSendDailyReportLink(input.subscription, share)) {
+    report.reportUrl = share.reportUrl
+  }
+  return { retentionDays, share }
+}
+
+async function sendReportOrCleanup(
+  input: CheckedDeliveryInput,
+  report: DailyTokenReport,
+  reportHistoryShare: DailyReportHistoryShare | null
+) {
+  try {
+    return await sendWebhookRequest({ ...input, report })
+  } catch (error) {
+    await cleanupNewDailyReportHistoryShare({
+      env: input.env,
+      subscription: input.subscription,
+      share: reportHistoryShare
+    })
+    throw error
+  }
+}
+
+async function recordSuccessOrThrow(
+  input: CheckedDeliveryInput,
+  report: DailyTokenReport,
+  reportHistory: ReportHistoryDeliveryState,
+  response: Awaited<ReturnType<typeof sendWebhookRequest>>
+) {
   try {
     const persistence = await recordDeliverySuccess({
       db: input.env.DB,
@@ -231,96 +275,24 @@ async function deliverSubscriptionChecked(input: {
       )
     }
     if (input.kind === 'daily') {
-      if (!input.scheduleSlot) throw new Error('Missing webhook schedule slot')
-      await persistDailyReportHistory({
+      if (!input.scheduleSlot || !reportHistory.share) throw new Error('Missing webhook schedule slot')
+      await persistDeliveredDailyReportHistory({
         env: input.env,
         subscription: input.subscription,
         report,
         scheduleSlot: input.scheduleSlot,
         now: input.now,
-        retentionDays: reportHistoryRetentionDays
+        share: reportHistory.share
+      })
+      await pruneDailyReportHistoryAfterDelivery({
+        env: input.env,
+        subscription: input.subscription,
+        report,
+        retentionDays: reportHistory.retentionDays
       })
     }
   } catch (error) {
     logSuccessfulDeliveryPersistenceFailure(input.subscription, error)
     throw new SuccessfulDeliveryPersistenceError(error)
   }
-  return 'success'
-}
-
-async function shouldSkipAlreadyDelivered(input: {
-  env: WebhookEnv
-  subscription: DueWebhookSubscription
-  kind: DeliveryKind
-  now: Date
-  reportDate: string
-  scheduleSlot: string | null
-}) {
-  if (input.kind !== 'daily') return false
-  if (!input.scheduleSlot) throw new Error('Missing webhook schedule slot')
-  const delivered = await hasSuccessfulDailyDelivery({
-    db: input.env.DB,
-    subscriptionId: input.subscription.id,
-    reportDate: input.reportDate,
-    scheduleSlot: input.scheduleSlot
-  })
-  if (!delivered) return false
-  await markSkippedOrThrow(input, 'Already delivered')
-  return true
-}
-
-async function markSkippedOrThrow(input: {
-  env: WebhookEnv
-  subscription: DueWebhookSubscription
-  now: Date
-  reportDate: string
-  scheduleSlot: string | null
-}, reason: string) {
-  try {
-    await markSubscriptionSkipped({
-      db: input.env.DB,
-      subscription: input.subscription,
-      now: input.now,
-      reportDate: input.reportDate,
-      scheduleSlot: input.scheduleSlot,
-      reason
-    })
-  } catch (error) {
-    throw new LocalDeliveryStateError(error)
-  }
-}
-
-function reportDateForDelivery(kind: DeliveryKind, subscription: DueWebhookSubscription, now: Date) {
-  if (kind === 'daily') {
-    return subscription.pendingReportDate ?? localDateInTimezone(new Date(subscription.nextRunAt), subscription.timezone)
-  }
-  return localDateInTimezone(now, subscription.timezone)
-}
-
-function scheduleSlotForDelivery(
-  kind: DeliveryKind,
-  subscription: DueWebhookSubscription,
-  reportDate: string
-) {
-  if (kind !== 'daily') return null
-  return subscription.pendingScheduleSlot ??
-    `${reportDate}T${localTimeInTimezone(new Date(subscription.nextRunAt), subscription.timezone)}`
-}
-
-function incrementCounts(
-  counts: { sent: number; failed: number; skipped: number },
-  status: DeliveryStatus
-) {
-  if (status === 'success') counts.sent += 1
-  if (status === 'failure') counts.failed += 1
-  if (status === 'skipped') counts.skipped += 1
-}
-
-function addMinutes(date: Date, minutes: number) {
-  return new Date(date.getTime() + minutes * 60 * 1000)
-}
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error) return error.message.slice(0, 500)
-  return String(error).slice(0, 500)
 }

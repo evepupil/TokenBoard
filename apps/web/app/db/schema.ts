@@ -61,6 +61,7 @@ export const profiles = sqliteTable('profiles', {
   timezone: text('timezone').notNull().default('UTC'),
   timezoneSource: text('timezone_source').notNull().default('default'),
   publicCardConfig: text('public_card_config'),
+  dailyReportShareEnabled: integer('daily_report_share_enabled', { mode: 'boolean' }).notNull().default(false),
   isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
   participatesInLeaderboards: integer('participates_in_leaderboards', {
     mode: 'boolean'
@@ -278,6 +279,7 @@ export const dailyReportHistory = sqliteTable(
     sessionCount: integer('session_count').notNull().default(0),
     sourceSplit: text('source_split').notNull(),
     topModels: text('top_models').notNull(),
+    shareRevokedAt: text('share_revoked_at'),
     generatedAt: text('generated_at').notNull(),
     updatedAt: text('updated_at').notNull()
   },
@@ -289,19 +291,9 @@ export const dailyReportHistory = sqliteTable(
 )
 
 export const schema = {
-  users,
-  sessions,
-  accounts,
-  verifications,
-  profiles,
-  uploadTokens,
-  pairingCodes,
-  devices,
-  dailyUsage,
-  dailyUsageSummary,
-  userUsageTotals,
+  users, sessions, accounts, verifications, profiles,
+  uploadTokens, pairingCodes, devices,
+  dailyUsage, dailyUsageSummary, userUsageTotals,
   usageSummaryBackfillState,
-  webhookSubscriptions,
-  webhookDeliveryLogs,
-  dailyReportHistory
+  webhookSubscriptions, webhookDeliveryLogs, dailyReportHistory
 }

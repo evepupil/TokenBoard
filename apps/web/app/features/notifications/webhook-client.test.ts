@@ -122,6 +122,7 @@ function subscriptionRow(encryptedUrl: string, provider: DueWebhookSubscription[
     id: 'sub_1',
     userId: 'user_1',
     displayName: 'Example',
+    dailyReportShareEnabled: false,
     name: '日报',
     provider,
     webhookUrlEncrypted: encryptedUrl,

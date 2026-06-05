@@ -115,6 +115,8 @@ describe('Wrangler deploy config', () => {
     const schema = readPackageFile('app/db/schema.ts')
 
     expect(schema).toContain("'daily_report_history'")
+    expect(schema).toContain('dailyReportShareEnabled')
+    expect(schema).toContain('shareRevokedAt')
     expect(schema).toContain("uniqueIndex('daily_report_history_user_date_slot_idx')")
     expect(schema).toContain("index('daily_report_history_user_generated_idx')")
     expect(schema).toContain("index('daily_report_history_report_date_idx')")
@@ -183,6 +185,15 @@ describe('Wrangler deploy config', () => {
     expect(migration).toContain('ON daily_report_history(user_id, generated_at)')
     expect(migration).toContain('CREATE INDEX IF NOT EXISTS daily_report_history_report_date_idx')
     expect(migration).toContain('ON daily_report_history(report_date)')
+  })
+
+  test('daily report share migration adds owner-controlled public access fields', () => {
+    const migration = readPackageFile('db/migrations/0020_daily_report_share_controls.sql')
+
+    expect(migration).toContain('ALTER TABLE profiles')
+    expect(migration).toContain('ADD COLUMN daily_report_share_enabled INTEGER NOT NULL DEFAULT 0')
+    expect(migration).toContain('ALTER TABLE daily_report_history')
+    expect(migration).toContain('ADD COLUMN share_revoked_at TEXT')
   })
 
   test('usage summary migration creates cache tables without blocking backfill work', () => {

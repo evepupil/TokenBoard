@@ -1,11 +1,13 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card'
+import { Button } from '../../components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table'
 import { formatUsd } from '../../lib/money'
 import { formatPercentRate } from '../../lib/usage-metrics'
-import type { DailyReportHistoryItem } from './report-history'
+import type { DailyReportHistoryItem } from './report-history-item'
 
 export function DailyReportHistoryCard(props: {
   reportHistory: DailyReportHistoryItem[]
+  dailyReportShareEnabled: boolean
   retentionDays: number
 }) {
   return (
@@ -14,7 +16,8 @@ export function DailyReportHistoryCard(props: {
         <CardTitle>历史日报</CardTitle>
         <CardDescription>保留最近 {props.retentionDays} 天的 token 日报快照。</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent class="space-y-4">
+        <DailyReportShareSettings enabled={props.dailyReportShareEnabled} />
         {props.reportHistory.length > 0 ? (
           <div class="overflow-x-auto">
             <Table class="min-w-[760px] border-separate border-spacing-y-2">
@@ -44,6 +47,27 @@ export function DailyReportHistoryCard(props: {
   )
 }
 
+function DailyReportShareSettings(props: { enabled: boolean }) {
+  return (
+    <form
+      method="post"
+      class="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <input type="hidden" name="action" value="update-share-settings" />
+      <label class="flex min-h-11 items-center gap-3 text-sm font-bold text-[var(--app-text)]">
+        <input type="checkbox" name="dailyReportShareEnabled" checked={props.enabled} />
+        日报分享
+      </label>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <span class="text-xs text-[var(--app-muted)]">
+          {props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}
+        </span>
+        <Button type="submit">保存分享设置</Button>
+      </div>
+    </form>
+  )
+}
+
 function DailyReportHistoryRow(props: { item: DailyReportHistoryItem }) {
   return (
     <TableRow class="border-0 bg-[var(--app-bg-soft)]">
@@ -60,9 +84,36 @@ function DailyReportHistoryRow(props: { item: DailyReportHistoryItem }) {
       <TableCell class="font-bold tabular-nums">{formatInteger(props.item.sessionCount)}</TableCell>
       <TableCell class="rounded-r-xl text-xs text-[var(--app-muted)]">
         <div>{props.item.generatedAt}</div>
+        <a
+          class="mt-2 inline-flex min-h-8 items-center rounded-lg border border-[var(--app-border)] px-3 py-1 font-bold text-[var(--app-text)] transition hover:border-lime-300"
+          href={props.item.reportUrl}
+        >
+          查看
+        </a>
+        <ReportShareAction item={props.item} />
         <HistoryDetails item={props.item} />
       </TableCell>
     </TableRow>
+  )
+}
+
+function ReportShareAction(props: { item: DailyReportHistoryItem }) {
+  if (props.item.shareRevokedAt) {
+    return <p class="mt-2 text-xs font-bold text-[var(--app-muted)]">分享已撤销</p>
+  }
+
+  return (
+    <form method="post" class="mt-2">
+      <input type="hidden" name="action" value="revoke-report-share" />
+      <input type="hidden" name="reportId" value={props.item.id} />
+      <button
+        class="inline-flex min-h-8 items-center rounded-lg border border-red-400/40 px-3 py-1 font-bold text-red-700 transition hover:bg-red-500/10 dark:text-red-300"
+        type="submit"
+        data-confirm="确认撤销这条日报的未登录访问？"
+      >
+        撤销分享
+      </button>
+    </form>
   )
 }
 

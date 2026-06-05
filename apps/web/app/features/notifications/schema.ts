@@ -55,6 +55,7 @@ export type WebhookSubscriptionSummary = {
 
 export type ClaimedWebhookSubscription = WebhookSubscriptionSummary & {
   lockedAt: string | null
+  dailyReportShareEnabled: boolean
 }
 
 export function parseWebhookSubscriptionForm(form: Record<string, unknown>): WebhookSubscriptionForm {
