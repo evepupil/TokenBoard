@@ -24,8 +24,11 @@ import {
   updateDailyReportShareSettings,
   updateWebhookSubscription
 } from '../../features/notifications/service'
+import {
+  NotificationFormError,
+  notificationFormErrorMessage
+} from '../../features/notifications/errors'
 import { getCanonicalPublicOrigin, getProfileSettings } from '../../features/settings/service'
-import { ApiError } from '../../lib/errors'
 import { jsonError } from '../../lib/http'
 
 export { NotificationsPage }
@@ -154,39 +157,10 @@ export const POST = createRoute(async (c) => {
   }
 })
 
-const notificationFormErrorMessages = {
-  'invalid-daily-report-id': 'Invalid daily report id',
-  'invalid-request': 'Invalid request',
-  'invalid-schedule-time': 'Invalid schedule time',
-  'invalid-schedule-weekday': 'Invalid schedule weekday',
-  'invalid-timezone': 'Invalid timezone',
-  'invalid-webhook-name': 'Invalid webhook name',
-  'webhook-url-must-use-https': 'Webhook URL must use HTTPS',
-  'webhook-url-not-supported': 'Webhook URL host or path is not supported for this provider'
-} as const
-
-const notificationBadRequestErrorCodes = {
-  'Invalid daily report id': 'invalid-daily-report-id',
-  'Invalid request': 'invalid-request',
-  'Invalid schedule time': 'invalid-schedule-time',
-  'Invalid schedule weekday': 'invalid-schedule-weekday',
-  'Invalid timezone': 'invalid-timezone',
-  'Invalid webhook name': 'invalid-webhook-name',
-  'Webhook URL must use HTTPS': 'webhook-url-must-use-https',
-  'Webhook URL host or path is not supported for this provider': 'webhook-url-not-supported'
-} as const
-
-export function notificationFormErrorMessage(code: string | undefined) {
-  if (!code) return undefined
-  return notificationFormErrorMessages[code as keyof typeof notificationFormErrorMessages]
-}
+export { notificationFormErrorMessage }
 
 function notificationFormErrorCode(error: unknown) {
   if (error instanceof ZodError) return 'invalid-request'
-  if (!(error instanceof ApiError) || error.code !== 'BAD_REQUEST' || error.status !== 400) {
-    return null
-  }
-  return notificationBadRequestErrorCodes[
-    error.message as keyof typeof notificationBadRequestErrorCodes
-  ] ?? 'invalid-request'
+  if (error instanceof NotificationFormError) return error.formErrorCode
+  return null
 }

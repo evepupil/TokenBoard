@@ -1,5 +1,6 @@
 import { ApiError } from '../../lib/errors'
 import type { Bindings } from '../../lib/db'
+import { NotificationFormError } from './errors'
 import { webhookProviderSchema, type WebhookProvider } from './schema'
 
 export type WebhookEnv = Pick<
@@ -89,12 +90,12 @@ export function parseProviderWebhookUrl(provider: WebhookProvider, value: string
   const parsedProvider = webhookProviderSchema.parse(provider)
   const url = new URL(value)
   if (url.protocol !== 'https:') {
-    throw new ApiError('BAD_REQUEST', 'Webhook URL must use HTTPS', 400)
+    throw new NotificationFormError('webhook-url-must-use-https')
   }
 
   const allowed = providerHostRules[parsedProvider]
   if (!allowed(url)) {
-    throw new ApiError('BAD_REQUEST', 'Webhook URL host or path is not supported for this provider', 400)
+    throw new NotificationFormError('webhook-url-not-supported')
   }
   return url
 }

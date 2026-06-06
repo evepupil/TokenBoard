@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { z } from 'zod'
 import { requireUser } from '../../features/auth/middleware'
+import { NotificationFormError } from '../../features/notifications/errors'
 import {
   createWebhookSubscription,
   revokeDailyReportShare,
@@ -124,12 +126,12 @@ describe('notifications POST route', () => {
     expect(mockedRevokeDailyReportShare).not.toHaveBeenCalled()
   })
 
-  test('redirects unsupported webhook URL form errors back to the notifications page', async () => {
+  test('redirects known notification form errors back to the notifications page', async () => {
     const context = postContext({ action: 'create' })
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedParseWebhookCreateForm.mockReturnValue({ provider: 'wecom' } as never)
     mockedCreateWebhookSubscription.mockRejectedValue(
-      new ApiError('BAD_REQUEST', 'Webhook URL host or path is not supported for this provider', 400) as never
+      new NotificationFormError('webhook-url-not-supported') as never
     )
 
     const response = await POST[0](context as never, async () => undefined) as Response
@@ -140,6 +142,43 @@ describe('notifications POST route', () => {
       env: context.env,
       userId: 'user_1',
       form: { provider: 'wecom' }
+    })
+  })
+
+  test('redirects zod form validation errors to generic page feedback', async () => {
+    const context = postContext({ action: 'create' })
+    mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
+    mockedParseWebhookCreateForm.mockImplementation(() => {
+      z.object({ webhookUrl: z.string().url() }).parse({ webhookUrl: 'not-a-url' })
+      throw new Error('unreachable')
+    })
+
+    const response = await POST[0](context as never, async () => undefined) as Response
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe('/settings/notifications?error=invalid-request')
+    expect(mockedCreateWebhookSubscription).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    ['INTERNAL_SERVER_ERROR', 'WEBHOOK_ENCRYPTION_KEY is not configured', 500],
+    ['NOT_FOUND', 'Webhook subscription not found', 404],
+    ['UNAUTHORIZED', 'Authentication required', 401]
+  ] as const)('keeps %s errors as JSON responses', async (code, message, status) => {
+    const context = postContext({ action: 'create' })
+    mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
+    mockedParseWebhookCreateForm.mockReturnValue({ provider: 'wecom' } as never)
+    mockedCreateWebhookSubscription.mockRejectedValue(new ApiError(code, message, status) as never)
+
+    const response = await POST[0](context as never, async () => undefined) as Response
+
+    expect(response.status).toBe(status)
+    expect(response.headers.get('location')).toBeNull()
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code,
+        message
+      }
     })
   })
 

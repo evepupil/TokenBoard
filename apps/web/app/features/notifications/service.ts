@@ -2,6 +2,7 @@ import { ApiError } from '../../lib/errors'
 import { randomId } from '../../lib/crypto'
 import { isValidTimezone } from '../../lib/timezone'
 import { encryptSecret } from './crypto'
+import { NotificationFormError } from './errors'
 import {
   maskWebhookUrl,
   parseProviderWebhookUrl,
@@ -250,13 +251,13 @@ export async function deleteWebhookSubscription(input: {
 
 function validateUpdateForm(form: ReturnType<typeof parseWebhookUpdateForm>) {
   if (form.name.length < 1 || form.name.length > 80) {
-    throw new ApiError('BAD_REQUEST', 'Invalid webhook name', 400)
+    throw new NotificationFormError('invalid-webhook-name')
   }
   if (form.scheduleTimesLocal.length < 1) {
-    throw new ApiError('BAD_REQUEST', 'Invalid schedule time', 400)
+    throw new NotificationFormError('invalid-schedule-time')
   }
   if (!isValidTimezone(form.timezone)) {
-    throw new ApiError('BAD_REQUEST', 'Invalid timezone', 400)
+    throw new NotificationFormError('invalid-timezone')
   }
 }
 
@@ -282,8 +283,11 @@ function parseWebhookFormOrThrow<T>(parser: () => T) {
   try {
     return parser()
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Invalid schedule')) {
-      throw new ApiError('BAD_REQUEST', error.message, 400)
+    if (error instanceof Error && error.message === 'Invalid schedule time') {
+      throw new NotificationFormError('invalid-schedule-time')
+    }
+    if (error instanceof Error && error.message === 'Invalid schedule weekday') {
+      throw new NotificationFormError('invalid-schedule-weekday')
     }
     throw error
   }

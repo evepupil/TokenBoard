@@ -5,6 +5,7 @@ import {
 } from './report-history-item'
 import { ApiError } from '../../lib/errors'
 import { toIsoDate } from '../../lib/time'
+import { NotificationFormError } from './errors'
 
 export type DailyReportShareSettings = {
   dailyReportShareEnabled: boolean
@@ -144,7 +145,7 @@ export async function revokeDailyReportShare(input: {
 export function parseDailyReportId(form: Record<string, unknown>) {
   const id = String(form.reportId ?? '').trim()
   if (!isDailyReportId(id)) {
-    throw new ApiError('BAD_REQUEST', 'Invalid daily report id', 400)
+    throw new NotificationFormError('invalid-daily-report-id')
   }
   return id
 }
