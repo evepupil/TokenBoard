@@ -28,20 +28,16 @@ import {
   NotificationFormError,
   notificationFormErrorMessage
 } from '../../features/notifications/errors'
-import { getCanonicalPublicOrigin, getProfileSettings } from '../../features/settings/service'
+import { getProfileTimezoneSettings } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
 
 export { NotificationsPage }
 
 export const GET = createRoute(async (c) => {
   const user = await requireUser(c)
-  const publicOrigin = getCanonicalPublicOrigin({
-    configuredOrigin: c.env.BETTER_AUTH_URL,
-    requestOrigin: new URL(c.req.url).origin
-  })
   const reportHistoryRetentionDays = dailyReportHistoryRetentionDays(c.env)
   const [profile, subscriptions, reportHistory, shareSettings] = await Promise.all([
-    getProfileSettings(c.env.DB, user.id, publicOrigin),
+    getProfileTimezoneSettings(c.env.DB, user.id),
     listWebhookSubscriptions(c.env.DB, user.id),
     listDailyReportHistory({
       db: c.env.DB,

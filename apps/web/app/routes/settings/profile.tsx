@@ -60,6 +60,9 @@ function ProfileSettingsCard(props: { profile: ProfileSettings; saved: boolean }
         {props.saved ? (
           <p class="app-flash-success mb-4 p-3 text-sm">设置已保存。</p>
         ) : null}
+        {props.profile.profileNeedsRepair ? (
+          <p class="app-flash-error mb-4 p-3 text-sm">资料里有旧格式字段，请检查后保存一次。</p>
+        ) : null}
         <ProfileSettingsFields profile={props.profile} />
       </CardContent>
     </Card>

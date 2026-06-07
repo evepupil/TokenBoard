@@ -19,7 +19,8 @@ describe('ProfilePage layout', () => {
           publicJsonUrl: 'https://tokenboard.example/api/public/example-long-public-slug.json',
           publicSvgUrl: 'https://tokenboard.example/api/public/example-long-public-slug.svg',
           publicMarkdown: '[![TokenBoard](https://tokenboard.example/api/public/example-long-public-slug.svg)](https://tokenboard.example)',
-          publicCardConfig: defaultPublicCardConfig
+          publicCardConfig: defaultPublicCardConfig,
+          profileNeedsRepair: true
         }}
       />
     )
@@ -39,6 +40,7 @@ describe('ProfilePage layout', () => {
     expect(html).toContain('w-full sm:w-auto')
     expect(html).toContain('>公开</span>')
     expect(html).toContain('README 卡片外观')
+    expect(html).toContain('资料里有旧格式字段')
     expect(html).toContain('name="cardLanguage"')
     expect(html).toContain('name="cardMetric1"')
     expect(html).not.toContain('<select')

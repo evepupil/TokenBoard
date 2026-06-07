@@ -4,7 +4,7 @@ import { requireUser } from '../../features/auth/middleware'
 import { InstallCommand } from '../../features/device/components/install-command'
 import { D1DevicePairingRepository } from '../../features/device/repository'
 import { createPairingCode, createPairingCodeDeps } from '../../features/device/service'
-import { getCanonicalPublicOrigin, getProfileSettings } from '../../features/settings/service'
+import { getCanonicalPublicOrigin, getProfileTimezoneSettings } from '../../features/settings/service'
 import { ApiError } from '../../lib/errors'
 import { jsonError } from '../../lib/http'
 import { normalizeTimezone, parseTimezone } from '../../lib/timezone'
@@ -15,7 +15,7 @@ export const GET = createRoute(async (c) => {
     configuredOrigin: c.env.BETTER_AUTH_URL,
     requestOrigin: new URL(c.req.url).origin
   })
-  const profile = await getProfileSettings(c.env.DB, user.id, publicOrigin)
+  const profile = await getProfileTimezoneSettings(c.env.DB, user.id)
   return c.render(
     <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
       <title>连接 TokenBoard</title>
@@ -37,7 +37,7 @@ export const POST = createRoute(async (c) => {
       configuredOrigin: c.env.BETTER_AUTH_URL,
       requestOrigin: new URL(c.req.url).origin
     })
-    const profile = await readProfile(c.env.DB, user.id, publicOrigin)
+    const profile = await readProfile(c.env.DB, user.id)
     const timezone = parseInstallTimezone(form.timezone, profile.timezone)
     const repository = new D1DevicePairingRepository(c.env.DB)
     const result = await createPairingCode(repository, user.id, createPairingCodeDeps())
@@ -60,8 +60,8 @@ export const POST = createRoute(async (c) => {
   }
 })
 
-async function readProfile(db: D1Database, userId: string, origin: string) {
-  return getProfileSettings(db, userId, origin)
+async function readProfile(db: D1Database, userId: string) {
+  return getProfileTimezoneSettings(db, userId)
 }
 
 function parseInstallTimezone(value: unknown, fallback: string) {

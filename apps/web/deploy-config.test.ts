@@ -70,31 +70,22 @@ describe('Wrangler deploy config', () => {
     expect(example).not.toMatch(/"database_id":\s*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/i)
   })
 
-  test('production workflow deploys after migrations with a generated config', () => {
-    const workflow = readRepoFile('.github/workflows/deploy.yml')
+  test('manual production deploy helper applies migrations before Worker deploy', () => {
+    const deployScript = readPackageFile('scripts/deploy.mjs')
 
-    expect(workflow).toContain('TOKENBOARD_WRANGLER_CONFIG: wrangler.production.ci.jsonc')
-    expect(workflow).toContain('TOKENBOARD_WORKER_ROUTE: ${{ vars.TOKENBOARD_WORKER_ROUTE }}')
-    expect(workflow).toContain('BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}')
-    expect(workflow).toContain('TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: ${{ vars.TOKENBOARD_DAILY_REPORT_HISTORY_DAYS }}')
-    expect(workflow).toContain('TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT: ${{ vars.TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT }}')
-    expect(workflow).toContain('TOKENBOARD_USAGE_SUMMARY_STRICT: ${{ vars.TOKENBOARD_USAGE_SUMMARY_STRICT }}')
-    expect(workflow).toContain('TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS: ${{ vars.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS }}')
-    expect(workflow).toContain('TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE: ${{ vars.TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE }}')
-    expect(workflow).toContain('D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}')
-    expect(workflow).toContain('node scripts/write-production-config.mjs')
-    expect(workflow).toContain('node scripts/check-production-config.mjs')
-    expect(workflow).toContain('pnpm run build')
-    expect(workflow).toContain('wrangler d1 migrations apply DB --remote --config "$TOKENBOARD_WRANGLER_CONFIG"')
-    expect(workflow).toContain('wrangler deploy --config "$TOKENBOARD_WRANGLER_CONFIG"')
-    expect(workflow.indexOf('node scripts/check-production-config.mjs')).toBeLessThan(workflow.indexOf('pnpm run build'))
-    expect(workflow.indexOf('pnpm run build')).toBeLessThan(
-      workflow.indexOf('wrangler d1 migrations apply DB --remote --config "$TOKENBOARD_WRANGLER_CONFIG"')
+    expect(deployScript).toContain('wrangler.production.ci.jsonc')
+    expect(deployScript).toContain('scripts/write-production-config.mjs')
+    expect(deployScript).toContain('scripts/check-production-config.mjs')
+    expect(deployScript).toContain("runPnpm(['run', 'build'])")
+    expect(deployScript).toContain("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
+    expect(deployScript).toContain("'deploy', '--config', configPath")
+    expect(deployScript.indexOf("runPnpm(['run', 'build'])")).toBeLessThan(
+      deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
     )
-    expect(workflow.indexOf('wrangler d1 migrations apply DB --remote --config "$TOKENBOARD_WRANGLER_CONFIG"')).toBeLessThan(
-      workflow.indexOf('wrangler deploy --config "$TOKENBOARD_WRANGLER_CONFIG"')
+    expect(deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")).toBeLessThan(
+      deployScript.indexOf("'deploy', '--config', configPath")
     )
-    expect(workflow).not.toContain('--config wrangler.jsonc')
+    expect(deployScript).not.toContain('--config wrangler.jsonc')
   })
 
   test('Drizzle schema declares webhook migration indexes', () => {
@@ -625,10 +616,6 @@ describe('Wrangler deploy config', () => {
 
 function readPackageFile(relativePath: string): string {
   return readFileSync(resolve(packageDir, relativePath), 'utf8')
-}
-
-function readRepoFile(relativePath: string): string {
-  return readFileSync(resolve(packageDir, '..', '..', relativePath), 'utf8')
 }
 
 function filledProductionExample() {

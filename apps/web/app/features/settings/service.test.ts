@@ -4,6 +4,7 @@ import {
   getCanonicalPublicOrigin,
   getProfileDisplayName,
   getProfileSettings,
+  getProfileTimezoneSettings,
   parseProfilePageForm,
   parseProfileForm,
   updateProfilePageSettings,
@@ -198,6 +199,66 @@ describe('settings service', () => {
       theme: 'light',
       metrics: ['todayTokens', 'totalCost']
     })
+  })
+
+  test('normalizes legacy profile values for settings pages', async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return {
+                  userId: 'user_1',
+                  slug: 'MisonL Profile!',
+                  displayName: '  MisonL  ',
+                  timezone: 'Mars/Base',
+                  isPublic: 1,
+                  participatesInLeaderboards: 1
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const settings = await getProfileSettings(db, 'user_1', 'https://tokenboard.example.com')
+
+    expect(settings.slug).toBe('misonl-profile')
+    expect(settings.displayName).toBe('MisonL')
+    expect(settings.timezone).toBe('UTC')
+    expect(settings.profileNeedsRepair).toBe(true)
+    expect(settings.publicCardConfig).toEqual(defaultPublicCardConfig)
+  })
+
+  test('reads profile timezone without requiring public card columns', async () => {
+    let statement = ''
+    const db = {
+      prepare(sql: string) {
+        statement = sql
+        return {
+          bind() {
+            return {
+              async first() {
+                return {
+                  userId: 'user_1',
+                  timezone: 'Mars/Base',
+                  timezoneSource: 'default'
+                }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const settings = await getProfileTimezoneSettings(db, 'user_1')
+
+    expect(statement).toContain('timezone')
+    expect(statement).not.toContain('public_card_config')
+    expect(settings.timezone).toBe('UTC')
+    expect(settings.profileNeedsRepair).toBe(true)
   })
 
   test('marks default UTC profiles as browser-timezone default candidates', async () => {
