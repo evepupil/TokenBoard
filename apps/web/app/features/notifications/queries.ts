@@ -1,5 +1,10 @@
 import type { ClaimedWebhookSubscription, WebhookProvider, WebhookSubscriptionSummary } from './schema'
-import { normalizeScheduleTimes, normalizeScheduleWeekdays } from './time'
+import {
+  defaultWebhookScheduleTime,
+  defaultWebhookScheduleWeekdays,
+  normalizeScheduleTimes,
+  normalizeScheduleWeekdays
+} from './time'
 
 type WebhookSubscriptionRow = Omit<
   WebhookSubscriptionSummary,
@@ -64,7 +69,7 @@ export async function listWebhookSubscriptions(
     .bind(userId)
     .all<WebhookSubscriptionRow>()
 
-  return (rows.results ?? []).map(normalizeSubscriptionSummary)
+  return (rows.results ?? []).map(normalizeSettingsSubscriptionSummary)
 }
 
 export async function getWebhookSubscriptionForUser(
@@ -340,4 +345,73 @@ function normalizeSubscriptionSummary(row: WebhookSubscriptionRow): WebhookSubsc
     lastFailureAt: row.lastFailureAt ?? null,
     lastError: row.lastError ?? null
   }
+}
+
+function normalizeSettingsSubscriptionSummary(row: WebhookSubscriptionRow): WebhookSubscriptionSummary {
+  const scheduleTimes = normalizeSettingsScheduleTimes(row)
+  const scheduleWeekdays = normalizeSettingsScheduleWeekdays(row)
+  return {
+    ...row,
+    provider: row.provider as WebhookProvider,
+    scheduleTimeLocal: scheduleTimes.values[0],
+    scheduleTimesLocal: scheduleTimes.values,
+    scheduleWeekdays: scheduleWeekdays.values,
+    sendEmptyReport: Boolean(row.sendEmptyReport),
+    enabled: Boolean(row.enabled),
+    pendingReportDate: row.pendingReportDate ?? null,
+    pendingScheduleSlot: row.pendingScheduleSlot ?? null,
+    failureCount: Number(row.failureCount ?? 0),
+    lastSuccessAt: row.lastSuccessAt ?? null,
+    lastFailureAt: row.lastFailureAt ?? null,
+    lastError: row.lastError ?? null,
+    needsRepair: scheduleTimes.needsRepair || scheduleWeekdays.needsRepair
+  }
+}
+
+function normalizeSettingsScheduleTimes(row: WebhookSubscriptionRow) {
+  const storedValue = isEmptyScheduleValue(row.scheduleTimesLocal)
+    ? row.scheduleTimeLocal
+    : row.scheduleTimesLocal
+  try {
+    return {
+      values: normalizeScheduleTimes(storedValue),
+      needsRepair:
+        isEmptyScheduleValue(row.scheduleTimesLocal) ||
+        isEmptyScheduleValue(storedValue)
+    }
+  } catch {
+    return normalizeLegacyScheduleTime(row.scheduleTimeLocal)
+  }
+}
+
+function normalizeLegacyScheduleTime(value: unknown) {
+  try {
+    return {
+      values: normalizeScheduleTimes(value),
+      needsRepair: true
+    }
+  } catch {
+    return {
+      values: [defaultWebhookScheduleTime],
+      needsRepair: true
+    }
+  }
+}
+
+function normalizeSettingsScheduleWeekdays(row: WebhookSubscriptionRow) {
+  try {
+    return {
+      values: normalizeScheduleWeekdays(row.scheduleWeekdays),
+      needsRepair: isEmptyScheduleValue(row.scheduleWeekdays)
+    }
+  } catch {
+    return {
+      values: defaultWebhookScheduleWeekdays,
+      needsRepair: true
+    }
+  }
+}
+
+function isEmptyScheduleValue(value: unknown) {
+  return value === null || value === undefined || String(value).trim() === ''
 }

@@ -3,11 +3,52 @@ import {
   claimWebhookSubscription,
   hasSuccessfulDailyDelivery,
   insertDeliveryLog,
+  listWebhookSubscriptions,
   listDueWebhookSubscriptions,
   pruneWebhookDeliveryLogs
 } from './queries'
 
 describe('notification queries', () => {
+  test('lists settings subscriptions with legacy schedule values marked for repair', async () => {
+    const db = allRowsDb([
+      webhookRow({
+        scheduleTimeLocal: '09:30',
+        scheduleTimesLocal: '',
+        scheduleWeekdays: '',
+        enabled: 1
+      })
+    ])
+
+    const subscriptions = await listWebhookSubscriptions(db, 'user_1')
+
+    expect(subscriptions[0]).toMatchObject({
+      scheduleTimeLocal: '09:30',
+      scheduleTimesLocal: ['09:30'],
+      scheduleWeekdays: [0, 1, 2, 3, 4, 5, 6],
+      enabled: true,
+      needsRepair: true
+    })
+  })
+
+  test('lists settings subscriptions with defaults when stored schedule values are invalid', async () => {
+    const db = allRowsDb([
+      webhookRow({
+        scheduleTimeLocal: 'bad',
+        scheduleTimesLocal: '25:99',
+        scheduleWeekdays: '8'
+      })
+    ])
+
+    const subscriptions = await listWebhookSubscriptions(db, 'user_1')
+
+    expect(subscriptions[0]).toMatchObject({
+      scheduleTimeLocal: '18:00',
+      scheduleTimesLocal: ['18:00'],
+      scheduleWeekdays: [0, 1, 2, 3, 4, 5, 6],
+      needsRepair: true
+    })
+  })
+
   test('filters out active delivery locks when listing due subscriptions', async () => {
     const statements: string[] = []
     const bindings: unknown[][] = []
@@ -187,3 +228,45 @@ describe('notification queries', () => {
     expect(bindings[0]).toEqual(['2026-01-30T00:00:00.000Z'])
   })
 })
+
+function webhookRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'sub_1',
+    name: 'Daily',
+    provider: 'wecom',
+    webhookUrlHost: 'qyapi.weixin.qq.com',
+    webhookUrlMasked: 'qyapi.weixin.qq.com/...',
+    timezone: 'Asia/Shanghai',
+    scheduleTimeLocal: '18:00',
+    scheduleTimesLocal: '18:00',
+    scheduleWeekdays: '0,1,2,3,4,5,6',
+    sendEmptyReport: 0,
+    enabled: 1,
+    nextRunAt: '2026-04-29T10:00:00.000Z',
+    pendingReportDate: null,
+    pendingScheduleSlot: null,
+    failureCount: 0,
+    lastSuccessAt: null,
+    lastFailureAt: null,
+    lastError: null,
+    createdAt: '2026-04-28T10:00:00.000Z',
+    updatedAt: '2026-04-28T10:00:00.000Z',
+    ...overrides
+  }
+}
+
+function allRowsDb(rows: Array<Record<string, unknown>>) {
+  return {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async all() {
+              return { results: rows }
+            }
+          }
+        }
+      }
+    }
+  } as unknown as D1Database
+}

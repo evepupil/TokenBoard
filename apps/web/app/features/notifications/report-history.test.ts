@@ -56,7 +56,7 @@ describe('daily report history', () => {
     expect(history[0].topModels[0].model).toBe('gpt-5')
   })
 
-  test('fails on invalid stored history JSON shape', async () => {
+  test('marks invalid stored history JSON shape instead of failing the page', async () => {
     const db = statementDb({
       rows: [
         {
@@ -79,11 +79,14 @@ describe('daily report history', () => {
       ]
     })
 
-    await expect(listDailyReportHistory({ db, userId: 'user_1' }))
-      .rejects.toThrow('Invalid daily report history source_split')
+    const history = await listDailyReportHistory({ db, userId: 'user_1' })
+
+    expect(history[0].sourceSplit).toEqual([])
+    expect(history[0].topModels[0].model).toBe('gpt-5')
+    expect(history[0].detailsParseError).toBe('Invalid daily report history source_split')
   })
 
-  test('fails with the same message when stored history JSON is malformed', async () => {
+  test('marks malformed stored history JSON instead of failing the page', async () => {
     const db = statementDb({
       rows: [
         {
@@ -106,8 +109,10 @@ describe('daily report history', () => {
       ]
     })
 
-    await expect(listDailyReportHistory({ db, userId: 'user_1' }))
-      .rejects.toThrow('Invalid daily report history source_split')
+    const history = await listDailyReportHistory({ db, userId: 'user_1' })
+
+    expect(history[0].sourceSplit).toEqual([])
+    expect(history[0].detailsParseError).toBe('Invalid daily report history source_split')
   })
 
   test('prunes rows older than the configured retention window', async () => {

@@ -1,5 +1,5 @@
 import { ApiError } from '../../lib/errors'
-import { defaultTimezone } from '../../lib/timezone'
+import { defaultTimezone, normalizeTimezone } from '../../lib/timezone'
 import {
   parsePublicCardConfig,
   parsePublicCardConfigForm,
@@ -20,6 +20,13 @@ export type ProfileSettings = PublicProfileInput & {
   publicMarkdown: string
   publicCardConfig: PublicCardConfig
   shouldUseBrowserTimezoneDefault?: boolean
+  profileNeedsRepair?: boolean
+}
+
+export type ProfileTimezoneSettings = {
+  timezone: string
+  shouldUseBrowserTimezoneDefault?: boolean
+  profileNeedsRepair?: boolean
 }
 
 export type ProfilePageInput = {
@@ -28,6 +35,7 @@ export type ProfilePageInput = {
 }
 
 type ProfileRow = {
+  userId: string
   slug: string
   displayName: string
   timezone: string
@@ -37,6 +45,12 @@ type ProfileRow = {
   timezoneSource?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+}
+
+type ProfileTimezoneRow = {
+  userId: string
+  timezone: string | null
+  timezoneSource?: string | null
 }
 
 type ProfileDisplayNameRow = {
@@ -80,6 +94,7 @@ export async function getProfileSettings(
     .prepare(
       `
         SELECT
+          user_id as userId,
           slug,
           display_name as displayName,
           timezone,
@@ -102,6 +117,32 @@ export async function getProfileSettings(
   }
 
   return toProfileSettings(row, origin)
+}
+
+export async function getProfileTimezoneSettings(
+  db: D1Database,
+  userId: string
+): Promise<ProfileTimezoneSettings> {
+  const row = await db
+    .prepare(
+      `
+        SELECT
+          user_id as userId,
+          timezone,
+          COALESCE(timezone_source, 'default') as timezoneSource
+        FROM profiles
+        WHERE user_id = ?
+        LIMIT 1
+      `
+    )
+    .bind(userId)
+    .first<ProfileTimezoneRow>()
+
+  if (!row) {
+    throw new ApiError('NOT_FOUND', 'Profile not found', 404)
+  }
+
+  return toProfileTimezoneSettings(row)
 }
 
 export async function getProfileDisplayName(
@@ -210,13 +251,7 @@ export async function updateProfilePageSettings(
 }
 
 function toProfileSettings(row: ProfileRow, origin: string): ProfileSettings {
-  const profile = publicProfileSchema.parse({
-    slug: row.slug,
-    displayName: row.displayName,
-    timezone: row.timezone,
-    isPublic: Boolean(row.isPublic),
-    participatesInLeaderboards: Boolean(row.participatesInLeaderboards)
-  })
+  const { profile, needsRepair } = normalizePublicProfileRow(row)
 
   const publicSvgUrl = `${origin}/api/public/${profile.slug}.svg`
 
@@ -226,8 +261,67 @@ function toProfileSettings(row: ProfileRow, origin: string): ProfileSettings {
     shouldUseBrowserTimezoneDefault:
       profile.timezone === defaultTimezone &&
       (row.timezoneSource ?? profileTimezoneSource.default) === profileTimezoneSource.default,
+    profileNeedsRepair: needsRepair,
     publicJsonUrl: `${origin}/api/public/${profile.slug}.json`,
     publicSvgUrl,
     publicMarkdown: `[![TokenBoard](${publicSvgUrl})](${origin})`
   }
+}
+
+function toProfileTimezoneSettings(row: ProfileTimezoneRow): ProfileTimezoneSettings {
+  const timezone = normalizeTimezone(row.timezone)
+  return {
+    timezone,
+    shouldUseBrowserTimezoneDefault:
+      timezone === defaultTimezone &&
+      (row.timezoneSource ?? profileTimezoneSource.default) === profileTimezoneSource.default,
+    profileNeedsRepair: timezone !== row.timezone
+  }
+}
+
+function normalizePublicProfileRow(row: ProfileRow) {
+  const rawProfile = {
+    slug: row.slug,
+    displayName: row.displayName,
+    timezone: row.timezone,
+    isPublic: Boolean(row.isPublic),
+    participatesInLeaderboards: Boolean(row.participatesInLeaderboards)
+  }
+  const normalizedProfile = {
+    ...rawProfile,
+    slug: normalizeStoredSlug(row.slug, row.displayName, row.userId),
+    displayName: normalizeDisplayName(row.displayName),
+    timezone: normalizeTimezone(row.timezone)
+  }
+
+  return {
+    profile: publicProfileSchema.parse(normalizedProfile),
+    needsRepair:
+      !publicProfileSchema.safeParse(rawProfile).success ||
+      rawProfile.slug !== normalizedProfile.slug ||
+      rawProfile.displayName !== normalizedProfile.displayName ||
+      rawProfile.timezone !== normalizedProfile.timezone
+  }
+}
+
+function normalizeDisplayName(value: unknown) {
+  const trimmed = String(value ?? '').trim()
+  return (trimmed || 'TokenBoard User').slice(0, 80)
+}
+
+function normalizeStoredSlug(slug: unknown, displayName: unknown, userId: unknown) {
+  const candidates = [
+    slug,
+    displayName,
+    userId
+  ].map(slugCandidate)
+
+  return candidates.find((candidate) => candidate.length >= 3)?.slice(0, 32) ?? 'user'
+}
+
+function slugCandidate(value: unknown) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }

@@ -118,6 +118,14 @@ function ReportShareAction(props: { item: DailyReportHistoryItem }) {
 }
 
 function HistoryDetails(props: { item: DailyReportHistoryItem }) {
+  if (props.item.detailsParseError) {
+    return (
+      <p class="mt-2 text-xs font-bold text-red-700 dark:text-red-300">
+        历史明细格式异常，请重新生成日报。
+      </p>
+    )
+  }
+
   return (
     <details class="mt-2">
       <summary class="cursor-pointer font-bold text-[var(--app-text)]">明细</summary>

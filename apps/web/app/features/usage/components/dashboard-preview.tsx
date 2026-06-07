@@ -44,7 +44,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         </div>
       </header>
 
-      <div class="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="今日 tokens" value={formatInteger(props.summary.todayTokens)} tone="lime" />
         <Metric label="今日不含缓存读" value={formatInteger(props.summary.todayTokensWithoutCacheRead)} />
         <Metric label="今日缓存率" value={formatPercentRate(props.summary.todayCacheReadRate)} />
@@ -151,9 +151,9 @@ function trendBarHeight(value: number, max: number) {
 
 function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (
-    <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
+    <div class={`min-w-0 rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
       <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{props.value}</p>
+      <p class="mt-3 break-words text-2xl font-black leading-tight tracking-tight tabular-nums sm:text-3xl">{props.value}</p>
     </div>
   )
 }

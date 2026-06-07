@@ -121,6 +121,11 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
           {props.subscription.enabled ? '已启用' : '已停用'}
         </span>
       </div>
+      {props.subscription.needsRepair ? (
+        <p class="mt-3 rounded-lg border border-red-400/40 bg-red-500/10 p-3 text-xs font-bold text-red-700 dark:text-red-300">
+          这个 Webhook 有旧格式字段，请检查后保存一次。
+        </p>
+      ) : null}
       <SubscriptionForm subscription={props.subscription} />
     </article>
   )

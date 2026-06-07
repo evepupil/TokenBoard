@@ -51,6 +51,7 @@ export type WebhookSubscriptionSummary = {
   lastError: string | null
   createdAt: string
   updatedAt: string
+  needsRepair?: boolean
 }
 
 export type ClaimedWebhookSubscription = WebhookSubscriptionSummary & {

@@ -11,6 +11,7 @@ export type DailyReportHistoryItem = DailyTokenReport & {
   shareRevokedAt: string | null
   generatedAt: string
   updatedAt: string
+  detailsParseError?: string | null
 }
 
 export type DailyReportHistoryRow = {
@@ -35,6 +36,7 @@ export type DailyReportHistoryRow = {
 }
 
 export function toDailyReportHistoryItem(row: DailyReportHistoryRow): DailyReportHistoryItem {
+  const details = parseHistoryDetails(row)
   return {
     id: row.id,
     displayName: row.displayName,
@@ -49,8 +51,9 @@ export function toDailyReportHistoryItem(row: DailyReportHistoryRow): DailyRepor
     cacheReadRate: Number(row.cacheReadRate),
     costUsd: Number(row.costUsd),
     sessionCount: Number(row.sessionCount),
-    sourceSplit: parseReportHistorySourceSplit(row.sourceSplit),
-    topModels: parseReportHistoryTopModels(row.topModels),
+    sourceSplit: details.sourceSplit,
+    topModels: details.topModels,
+    detailsParseError: details.detailsParseError,
     generatedAt: row.generatedAt,
     updatedAt: row.updatedAt
   }
@@ -59,4 +62,26 @@ export function toDailyReportHistoryItem(row: DailyReportHistoryRow): DailyRepor
 export function dailyReportUrl(id: string, origin?: string) {
   const path = `/reports/daily/${encodeURIComponent(id)}`
   return origin ? `${origin.replace(/\/$/, '')}${path}` : path
+}
+
+function parseHistoryDetails(row: DailyReportHistoryRow) {
+  let detailsParseError: string | null = null
+  let sourceSplit: DailyTokenReport['sourceSplit'] = []
+  let topModels: DailyTokenReport['topModels'] = []
+
+  try {
+    sourceSplit = parseReportHistorySourceSplit(row.sourceSplit)
+  } catch {
+    detailsParseError = 'Invalid daily report history source_split'
+  }
+
+  try {
+    topModels = parseReportHistoryTopModels(row.topModels)
+  } catch {
+    detailsParseError = detailsParseError
+      ? `${detailsParseError}; Invalid daily report history top_models`
+      : 'Invalid daily report history top_models'
+  }
+
+  return { sourceSplit, topModels, detailsParseError }
 }
