@@ -11,9 +11,9 @@ export default createRoute(async (c) => {
   const displayName = await getProfileDisplayName(c.env.DB, user.id, user.name || user.email)
 
   return c.render(
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-3 text-[var(--app-text)] sm:px-5">
       <title>控制台 - TokenBoard</title>
-      <AppNav active="dashboard" email={user.email} />
+      <AppNav active="dashboard" email={user.email} compact />
       <DashboardPreview summary={summary} userName={displayName} />
     </main>
   )

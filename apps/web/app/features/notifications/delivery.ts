@@ -41,6 +41,8 @@ import {
 } from './delivery-helpers'
 
 type Fetcher = typeof fetch
+const defaultWebhookFetcher: Fetcher = (url, init) => fetch(url, init)
+
 type DeliverSubscriptionInput = {
   env: WebhookEnv
   subscription: DueWebhookSubscription
@@ -78,7 +80,7 @@ export async function sendWebhookTest(input: {
     subscription,
     kind: 'test',
     now: input.now ?? new Date(),
-    fetcher: input.fetcher ?? fetch
+    fetcher: input.fetcher ?? defaultWebhookFetcher
   })
 }
 
@@ -91,7 +93,7 @@ export async function runDueWebhookNotifications(input: {
   const now = input.now ?? new Date()
   const due = await listDueWebhookSubscriptions(input.env.DB, now.toISOString(), input.limit ?? webhookCronBatchSize(input.env))
   const counts = { checked: due.length, sent: 0, failed: 0, skipped: 0 }
-  const fetcher = input.fetcher ?? fetch
+  const fetcher = input.fetcher ?? defaultWebhookFetcher
 
   if (shouldPruneWebhookDeliveryLogs(now)) {
     await pruneDeliveryLogs(input.env, now)
