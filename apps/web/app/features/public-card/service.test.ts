@@ -250,4 +250,53 @@ describe('public card service', () => {
     expect(bindings[1]).toEqual(['user_1', '2026-05-01', '2026-05-01'])
     expect(bindings).toHaveLength(2)
   })
+
+  test('falls back to UTC for legacy invalid stored timezones instead of crashing', async () => {
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                if (sql.includes('FROM profiles')) {
+                  return {
+                    userId: 'user_1',
+                    slug: 'misonl-sbphidok',
+                    displayName: 'MisonL',
+                    timezone: 'Mars/Base',
+                    publicCardConfig: null,
+                    isPublic: 1
+                  }
+                }
+
+                return {
+                  totalTokens: 0,
+                  totalTokensWithoutCacheRead: 0,
+                  totalCostUsd: 0,
+                  todayTokens: 0,
+                  todayTokensWithoutCacheRead: 0,
+                  todayCostUsd: 0,
+                  monthTokens: 0,
+                  monthTokensWithoutCacheRead: 0,
+                  monthCostUsd: 0
+                }
+              },
+              async all() {
+                throw new Error('Public card should not query breakdown rows')
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const json = await getPublicUsageJson(db, 'misonl-sbphidok', new Date('2026-04-30T16:30:00.000Z'))
+    const svg = await getPublicUsageCard(db, 'misonl-sbphidok', new Date('2026-04-30T16:30:00.000Z'))
+
+    expect(json.timezone).toBe('UTC')
+    expect(bindings[1]).toEqual(['user_1', '2026-04-30', '2026-04-01'])
+    expect(svg).toContain('<svg')
+  })
 })

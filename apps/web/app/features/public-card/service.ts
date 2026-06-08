@@ -2,6 +2,7 @@ import type { UsageSource } from '@tokenboard/usage-core'
 import { ApiError } from '../../lib/errors'
 import { canShowPublicProfile } from '../settings/service'
 import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
+import { normalizeTimezone } from '../../lib/timezone'
 import { localDateInTimezone } from '../notifications/time'
 import {
   effectiveDailyUsageSummaryWith,
@@ -112,7 +113,8 @@ async function getPublicUsageProfileCore(
     throw new ApiError('NOT_FOUND', 'Public profile not found', 404)
   }
 
-  const today = localDateInTimezone(now, profile.timezone)
+  const timezone = normalizeTimezone(profile.timezone)
+  const today = localDateInTimezone(now, timezone)
   const monthStart = `${today.slice(0, 8)}01`
   const totals = await getPublicTotals({
     db,
@@ -127,7 +129,7 @@ async function getPublicUsageProfileCore(
     userId: profile.userId,
     slug: profile.slug,
     displayName: profile.displayName,
-    timezone: profile.timezone,
+    timezone,
     totalTokens: Number(totals?.totalTokens ?? 0),
     totalTokensWithoutCacheRead: Number(totals?.totalTokensWithoutCacheRead ?? 0),
     totalCacheReadRate: cacheReadRateFromTotals({
