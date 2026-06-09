@@ -79,8 +79,10 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
             >
               {props.summary.dailyTrend.map((item) => (
                 <div
-                  class="group relative flex h-full flex-1 items-end justify-center"
+                  class="group relative flex h-full flex-1 items-end justify-center rounded-[6px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg-soft)]"
                   aria-label={`${item.usageDate}: ${formatInteger(item.totalTokens)} total tokens, ${formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读`}
+                  tabindex={0}
+                  title={`${item.usageDate}: ${formatInteger(item.totalTokens)} total tokens, ${formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读`}
                   data-dashboard-trend-bar="true"
                   data-trend-date={item.usageDate}
                   data-trend-total={formatInteger(item.totalTokens)}
@@ -165,11 +167,15 @@ function containedBarHeight(value: number, total: number) {
   return Math.min(100, Math.max(8, Math.round((value / total) * 100)))
 }
 
+export const dashboardPreviewTestUtils = {
+  containedBarHeight
+}
+
 function Metric(props: { label: string; value: string; tone?: 'lime' }) {
   return (
     <div class={`min-w-0 rounded-lg border p-4 lg:p-3 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
       <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-2 break-all text-2xl font-black leading-tight tabular-nums sm:text-3xl lg:text-2xl xl:text-3xl" data-dashboard-metric-value="true">{props.value}</p>
+      <p class="mt-2 break-words text-2xl font-black leading-tight tabular-nums sm:text-3xl lg:text-2xl xl:text-3xl" data-dashboard-metric-value="true">{props.value}</p>
     </div>
   )
 }

@@ -25,6 +25,7 @@ describe('AppNav', () => {
     expect(html).toContain('mb-3')
     expect(html).toContain('xl:py-2')
     expect(html).toContain('h-9 w-9')
-    expect(html).toContain('px-3 py-2 xl:px-3 xl:py-2')
+    expect(html).toContain('px-3 py-2')
+    expect(html).not.toContain('xl:px-3 xl:py-2')
   })
 })

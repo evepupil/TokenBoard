@@ -1,5 +1,6 @@
 import { createClient } from 'honox/client'
 import { initCustomSelects } from './components/ui/custom-select-client'
+import { initDashboardTrendTooltip, resetDashboardTrendTooltip } from './features/usage/dashboard-trend-tooltip'
 import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
 import { leaderboardDocumentTitle } from './features/leaderboards/title'
 import { copyTextToClipboard } from './lib/clipboard'
@@ -167,98 +168,6 @@ function getToastContainer() {
   return container
 }
 
-function initDashboardTrendTooltip() {
-  document.addEventListener('pointermove', (event) => {
-    if (!(event.target instanceof Element)) return
-
-    const bar = event.target.closest<HTMLElement>('[data-dashboard-trend-bar]')
-    if (!bar) {
-      hideDashboardTrendTooltip()
-      return
-    }
-
-    showDashboardTrendTooltip(bar, event.clientX, event.clientY)
-  })
-
-  document.addEventListener('pointerout', (event) => {
-    if (!(event.target instanceof Element)) return
-    if (event.relatedTarget instanceof Element && event.relatedTarget.closest('[data-dashboard-trend-bar]')) return
-
-    hideDashboardTrendTooltip()
-  })
-  document.addEventListener('scroll', hideDashboardTrendTooltip, true)
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') hideDashboardTrendTooltip()
-  })
-}
-
-function showDashboardTrendTooltip(bar: HTMLElement, clientX: number, clientY: number) {
-  const tooltip = getDashboardTrendTooltip()
-  const date = bar.dataset.trendDate ?? '-'
-  const total = bar.dataset.trendTotal ?? '0'
-  const withoutCacheRead = bar.dataset.trendWithoutCacheRead ?? '0'
-
-  tooltip.innerHTML = ''
-  tooltip.appendChild(tooltipLine('日期', date))
-  tooltip.appendChild(tooltipLine('Total tokens', total))
-  tooltip.appendChild(tooltipLine('不含缓存读', withoutCacheRead))
-  tooltip.dataset.visible = 'true'
-  tooltip.setAttribute('aria-hidden', 'false')
-
-  const offset = 14
-  const tooltipRect = tooltip.getBoundingClientRect()
-  const left = Math.min(
-    clientX + offset,
-    window.innerWidth - tooltipRect.width - offset
-  )
-  const top = Math.min(
-    clientY + offset,
-    window.innerHeight - tooltipRect.height - offset
-  )
-
-  tooltip.style.left = `${Math.max(offset, left)}px`
-  tooltip.style.top = `${Math.max(offset, top)}px`
-}
-
-function hideDashboardTrendTooltip() {
-  const tooltip = document.querySelector<HTMLElement>('[data-dashboard-trend-tooltip]')
-  if (!tooltip) return
-
-  tooltip.dataset.visible = 'false'
-  tooltip.setAttribute('aria-hidden', 'true')
-}
-
-function getDashboardTrendTooltip() {
-  const existing = document.querySelector<HTMLDivElement>('[data-dashboard-trend-tooltip]')
-  if (existing) return existing
-
-  const tooltip = document.createElement('div')
-  tooltip.className = 'app-chart-tooltip'
-  tooltip.dataset.dashboardTrendTooltip = 'true'
-  tooltip.dataset.visible = 'false'
-  tooltip.setAttribute('role', 'tooltip')
-  tooltip.setAttribute('aria-hidden', 'true')
-  document.body.appendChild(tooltip)
-  return tooltip
-}
-
-function tooltipLine(label: string, value: string) {
-  const line = document.createElement('div')
-  line.className = 'app-chart-tooltip-line'
-
-  const labelElement = document.createElement('span')
-  labelElement.className = 'app-chart-tooltip-label'
-  labelElement.textContent = label
-
-  const valueElement = document.createElement('span')
-  valueElement.className = 'app-chart-tooltip-value'
-  valueElement.textContent = value
-
-  line.appendChild(labelElement)
-  line.appendChild(valueElement)
-  return line
-}
-
 function initAppNavigation() {
   document.addEventListener('click', async (event) => {
     const link = getNavigableLink(event)
@@ -350,6 +259,7 @@ async function replaceLeaderboardPanel(pageUrl: URL, pushState: boolean) {
 
 async function replaceDocument(pageUrl: URL, pushState: boolean) {
   document.body.setAttribute('aria-busy', 'true')
+  resetDashboardTrendTooltip()
 
   try {
     const response = await fetch(pageUrl, {

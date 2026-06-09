@@ -1,6 +1,6 @@
 import { renderToString } from 'hono/jsx/dom/server'
 import { describe, expect, test } from 'vitest'
-import { DashboardPreview } from './dashboard-preview'
+import { DashboardPreview, dashboardPreviewTestUtils } from './dashboard-preview'
 
 describe('DashboardPreview', () => {
   test('renders no-cache-read trend and source split metrics', async () => {
@@ -37,6 +37,9 @@ describe('DashboardPreview', () => {
     expect(html).toContain('data-trend-date="2026-04-27"')
     expect(html).toContain('data-trend-total="120"')
     expect(html).toContain('data-trend-without-cache-read="100"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('title="2026-04-27: 120 total tokens, 100 不含缓存读"')
+    expect(html).toContain('focus-visible:ring-2')
     expect(html).toContain('max-w-3 overflow-hidden rounded-t')
     expect(html).toContain('absolute inset-x-0 bottom-0 rounded-t bg-lime-300/90')
     expect(html).not.toContain('w-1/2 rounded-t')
@@ -47,7 +50,7 @@ describe('DashboardPreview', () => {
     expect(html).toContain('本月缓存率')
     expect(html).toContain('data-dashboard-metrics-grid="true"')
     expect(html).toContain('grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));')
-    expect(html).toContain('break-all text-2xl font-black')
+    expect(html).toContain('break-words text-2xl font-black')
     expect(html).toContain('mx-auto flex max-w-6xl flex-col gap-3')
     expect(html).toContain('p-4 sm:p-5')
     expect(html).toContain('h-36 items-end gap-1')
@@ -56,5 +59,13 @@ describe('DashboardPreview', () => {
     expect(html).not.toContain(`xl:${['grid', 'cols', '8'].join('-')}`)
     expect(html).toContain('600 不含缓存读 / 800 total / 缓存率 25%')
     expect(html).toContain('300 不含缓存读 / 400 total / 缓存率 25%')
+  })
+
+  test('clamps contained trend heights for edge cases', () => {
+    expect(dashboardPreviewTestUtils.containedBarHeight(0, 100)).toBe(0)
+    expect(dashboardPreviewTestUtils.containedBarHeight(30, 0)).toBe(0)
+    expect(dashboardPreviewTestUtils.containedBarHeight(1, 100)).toBe(8)
+    expect(dashboardPreviewTestUtils.containedBarHeight(50, 100)).toBe(50)
+    expect(dashboardPreviewTestUtils.containedBarHeight(160, 100)).toBe(100)
   })
 })

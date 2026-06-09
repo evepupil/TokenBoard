@@ -81,7 +81,7 @@ function NavLink(props: { href: string; active?: boolean; compact?: boolean; chi
     <a
       class={cn(
         'rounded-xl font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
-        props.compact ? 'px-3 py-2 xl:px-3 xl:py-2' : 'px-4 py-3',
+        props.compact ? 'px-3 py-2' : 'px-4 py-3',
         props.active && 'bg-lime-300 text-stone-950 shadow-sm shadow-lime-950/10 hover:bg-lime-300 hover:text-stone-950'
       )}
       href={props.href}
