@@ -1,43 +1,14 @@
 import { createClient } from 'honox/client'
 import { initCustomSelects } from './components/ui/custom-select-client'
+import { initDashboardTrendTooltip, resetDashboardTrendTooltip } from './features/usage/dashboard-trend-tooltip'
 import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
 import { leaderboardDocumentTitle } from './features/leaderboards/title'
 import { copyTextToClipboard } from './lib/clipboard'
+import { initTheme } from './lib/theme-client'
 import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 
 createClient()
-
-const themeKey = 'tokenboard-theme'
-
-type Theme = 'dark' | 'light'
 type ToastTone = 'success' | 'error'
-
-function getStoredTheme(): Theme | null {
-  try {
-    const value = window.localStorage.getItem(themeKey)
-    return value === 'light' || value === 'dark' ? value : null
-  } catch (_) {
-    return null
-  }
-}
-
-function getPreferredTheme(): Theme {
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-}
-
-function applyTheme(theme: Theme) {
-  document.documentElement.classList.toggle('theme-light', theme === 'light')
-  document.documentElement.dataset.theme = theme
-  document.querySelectorAll<HTMLElement>('[data-theme-toggle]').forEach((button) => {
-    const targetThemeLabel = theme === 'light' ? '深色' : '浅色'
-    button.setAttribute('aria-label', `切换到${targetThemeLabel}主题`)
-    button.setAttribute('title', `切换到${targetThemeLabel}主题`)
-  })
-}
-
-function initTheme() {
-  applyTheme(getStoredTheme() ?? getPreferredTheme())
-}
 
 initTheme()
 initBrowserTimezone()
@@ -48,6 +19,7 @@ initConfirmableActions()
 initAppNavigation()
 initCustomSelects()
 initPublicCardPreview()
+initDashboardTrendTooltip()
 
 function initBrowserTimezone() {
   const timezone = detectBrowserTimezone()
@@ -257,6 +229,7 @@ async function replaceLeaderboardPanel(pageUrl: URL, pushState: boolean) {
 
 async function replaceDocument(pageUrl: URL, pushState: boolean) {
   document.body.setAttribute('aria-busy', 'true')
+  resetDashboardTrendTooltip()
 
   try {
     const response = await fetch(pageUrl, {

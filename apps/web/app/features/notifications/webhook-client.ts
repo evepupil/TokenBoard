@@ -34,7 +34,8 @@ export async function sendWebhookRequest(input: {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), webhookRequestTimeoutMs)
   try {
-    const response = await input.fetcher(payload.url, {
+    const fetcher = input.fetcher
+    const response = await fetcher(payload.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload.body),

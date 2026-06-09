@@ -344,6 +344,78 @@ describe('notification service', () => {
     expect(bindings.flat()).toContain('2026-04-30T01:30:00.000Z')
   })
 
+  test('uses a this-safe default fetcher for scheduled webhook delivery', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const statements: string[] = []
+    const bindings: unknown[][] = []
+    const fetchCalls: Array<{ url: string; body: string }> = []
+    const originalFetch = globalThis.fetch
+    const thisSensitiveFetch = function (
+      this: unknown,
+      url: RequestInfo | URL,
+      init?: RequestInit
+    ) {
+      if (this && this !== globalThis) {
+        throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
+      }
+      fetchCalls.push({ url: String(url), body: String(init?.body) })
+      return Promise.resolve(new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 }))
+    } as typeof fetch
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_delivery_logs')) return null
+                if (sql.includes('sessionCount')) {
+                  return reportTotalsRow()
+                }
+                return null
+              },
+              async all() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return {
+                    results: [dueSubscriptionRow(encryptedUrl)]
+                  }
+                }
+                return { results: [] }
+              },
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    try {
+      vi.stubGlobal('fetch', thisSensitiveFetch)
+
+      const result = await runDueWebhookNotifications({
+        env: {
+          DB: withBatch(db),
+          WEBHOOK_ENCRYPTION_KEY: secret,
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+        },
+        now: new Date('2026-04-29T01:31:00.000Z')
+      })
+
+      expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
+      expect(fetchCalls).toHaveLength(1)
+      expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
+      expect(fetchCalls[0].body).toContain('Example token 日报 2026-04-29')
+      expect(statements.some((sql) => sql.includes('last_success_at'))).toBe(true)
+    } finally {
+      vi.stubGlobal('fetch', originalFetch)
+    }
+  })
+
   test('schedules the next same-day slot from the delivered slot when cron is delayed', async () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
