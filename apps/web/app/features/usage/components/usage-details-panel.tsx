@@ -10,6 +10,8 @@ import { formatPercentRate } from '../../../lib/usage-metrics'
 import type { UserDevice } from '../../device/service'
 import type { UsageDetails } from '../queries'
 import type { UsageDetailsFilters } from '../service'
+import { UsageMetricCard, UsageMetricGrid } from './usage-metric-card'
+import { formatUsageMetricInteger, formatUsageMetricUsd } from './usage-metric-format'
 
 export function UsageDetailsPanel(props: { details: UsageDetails; filters: UsageDetailsFilters; devices: UserDevice[] }) {
   const dailyRows = [...props.details.dailyRows].reverse()
@@ -19,14 +21,14 @@ export function UsageDetailsPanel(props: { details: UsageDetails; filters: Usage
     <section class="mx-auto flex max-w-6xl flex-col gap-5">
       <UsageDetailsHeader filters={props.filters} devices={props.devices} selectedDevice={selectedDevice} />
 
-      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Metric label="范围 tokens" value={formatInteger(props.details.summary.totalTokens)} tone="lime" />
-        <Metric label="不含缓存读" value={formatInteger(props.details.summary.totalTokensWithoutCacheRead)} />
-        <Metric label="缓存率" value={formatPercentRate(props.details.summary.cacheReadRate)} />
-        <Metric label="范围费用" value={formatUsd(props.details.summary.costUsd)} />
-        <Metric label="Sessions" value={formatInteger(props.details.summary.sessionCount)} />
-        <Metric label="活跃天数" value={formatInteger(props.details.summary.activeDays)} />
-      </div>
+      <UsageMetricGrid columns={3}>
+        <UsageMetricCard label="范围 tokens" value={formatUsageMetricInteger(props.details.summary.totalTokens)} tone="lime" />
+        <UsageMetricCard label="不含缓存读" value={formatUsageMetricInteger(props.details.summary.totalTokensWithoutCacheRead)} />
+        <UsageMetricCard label="缓存率" value={formatPercentRate(props.details.summary.cacheReadRate)} />
+        <UsageMetricCard label="范围费用" value={formatUsageMetricUsd(props.details.summary.costUsd)} />
+        <UsageMetricCard label="Sessions" value={formatUsageMetricInteger(props.details.summary.sessionCount)} />
+        <UsageMetricCard label="活跃天数" value={formatUsageMetricInteger(props.details.summary.activeDays)} />
+      </UsageMetricGrid>
 
       <DailySummaryCard dailyRows={dailyRows} />
     </section>
@@ -283,15 +285,6 @@ const sourceOptions = [
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' }
 ]
-
-function Metric(props: { label: string; value: string; tone?: 'lime' }) {
-  return (
-    <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
-      <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{props.value}</p>
-    </div>
-  )
-}
 
 function formatInteger(value: number) {
   return new Intl.NumberFormat('en-US').format(value)

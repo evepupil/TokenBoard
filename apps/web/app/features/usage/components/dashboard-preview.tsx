@@ -1,12 +1,10 @@
 import { Badge } from '../../../components/ui/badge'
 import { LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
-import { formatUsd } from '../../../lib/money'
 import { formatPercentRate } from '../../../lib/usage-metrics'
 import type { DashboardSummary } from '../service'
-
-const metricCardMinWidth = '16rem'
-const metricGridStyle = `grid-template-columns: repeat(auto-fit, minmax(min(100%, ${metricCardMinWidth}), 1fr));`
+import { UsageMetricCard, UsageMetricGrid } from './usage-metric-card'
+import { formatUsageMetricInteger, formatUsageMetricUsd } from './usage-metric-format'
 
 export function DashboardPreview(props: { summary: DashboardSummary; userName?: string }) {
   const totalSourceTokens = props.summary.sourceSplit.reduce(
@@ -47,16 +45,16 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         </div>
       </header>
 
-      <div class="grid gap-3" style={metricGridStyle} data-dashboard-metrics-grid="true">
-        <Metric label="今日 tokens" value={formatInteger(props.summary.todayTokens)} tone="lime" />
-        <Metric label="今日不含缓存读" value={formatInteger(props.summary.todayTokensWithoutCacheRead)} />
-        <Metric label="今日缓存率" value={formatPercentRate(props.summary.todayCacheReadRate)} />
-        <Metric label="今日费用" value={formatUsd(props.summary.todayCostUsd)} />
-        <Metric label="本月 tokens" value={formatInteger(props.summary.monthTokens)} />
-        <Metric label="本月不含缓存读" value={formatInteger(props.summary.monthTokensWithoutCacheRead)} />
-        <Metric label="本月缓存率" value={formatPercentRate(props.summary.monthCacheReadRate)} />
-        <Metric label="本月费用" value={formatUsd(props.summary.monthCostUsd)} />
-      </div>
+      <UsageMetricGrid>
+        <UsageMetricCard label="今日 tokens" value={formatUsageMetricInteger(props.summary.todayTokens)} tone="lime" />
+        <UsageMetricCard label="今日不含缓存读" value={formatUsageMetricInteger(props.summary.todayTokensWithoutCacheRead)} />
+        <UsageMetricCard label="今日缓存率" value={formatPercentRate(props.summary.todayCacheReadRate)} />
+        <UsageMetricCard label="今日费用" value={formatUsageMetricUsd(props.summary.todayCostUsd)} />
+        <UsageMetricCard label="本月 tokens" value={formatUsageMetricInteger(props.summary.monthTokens)} />
+        <UsageMetricCard label="本月不含缓存读" value={formatUsageMetricInteger(props.summary.monthTokensWithoutCacheRead)} />
+        <UsageMetricCard label="本月缓存率" value={formatPercentRate(props.summary.monthCacheReadRate)} />
+        <UsageMetricCard label="本月费用" value={formatUsageMetricUsd(props.summary.monthCostUsd)} />
+      </UsageMetricGrid>
 
       <section class="grid gap-3 lg:grid-cols-[1.45fr_0.85fr]">
         <Card>
@@ -169,13 +167,4 @@ function containedBarHeight(value: number, total: number) {
 
 export const dashboardPreviewTestUtils = {
   containedBarHeight
-}
-
-function Metric(props: { label: string; value: string; tone?: 'lime' }) {
-  return (
-    <div class={`min-w-0 rounded-lg border p-4 lg:p-3 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
-      <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-2 break-words text-2xl font-black leading-tight tabular-nums sm:text-3xl lg:text-2xl xl:text-3xl" data-dashboard-metric-value="true">{props.value}</p>
-    </div>
-  )
 }
