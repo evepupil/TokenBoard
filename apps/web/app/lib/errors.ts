@@ -5,6 +5,7 @@ export type ApiErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
+  | 'RATE_LIMITED'
   | 'INTERNAL_SERVER_ERROR'
 
 export class ApiError extends Error {

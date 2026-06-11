@@ -187,6 +187,17 @@ describe('Wrangler deploy config', () => {
     expect(migration).toContain('ADD COLUMN share_revoked_at TEXT')
   })
 
+  test('rate limit migration creates a fixed-window state table', () => {
+    const migration = readPackageFile('db/migrations/0021_api_rate_limits.sql')
+
+    expect(migration).toContain('CREATE TABLE api_rate_limits')
+    expect(migration).toContain('key TEXT PRIMARY KEY NOT NULL')
+    expect(migration).toContain('count INTEGER NOT NULL DEFAULT 0')
+    expect(migration).toContain('reset_at TEXT NOT NULL')
+    expect(migration).toContain('updated_at TEXT NOT NULL')
+    expect(migration).toContain('CREATE INDEX api_rate_limits_reset_idx')
+  })
+
   test('usage summary migration creates cache tables without blocking backfill work', () => {
     const migration = readPackageFile('db/migrations/0016_usage_summary_cache.sql')
     const refreshMigration = readPackageFile('db/migrations/0017_refresh_usage_summary_cache.sql')

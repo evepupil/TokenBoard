@@ -1,3 +1,7 @@
+import { isValidTimezone as isUsageTimezone } from '@tokenboard/usage-core'
+
+export { isUsageTimezone as isValidTimezone }
+
 export const defaultTimezone = 'UTC'
 export const timezoneCookieName = 'tokenboard-timezone'
 
@@ -5,27 +9,13 @@ export function parseTimezone(value: unknown): string | null {
   if (typeof value !== 'string') return null
 
   const timezone = value.trim()
-  if (!isValidTimezone(timezone)) return null
+  if (!isUsageTimezone(timezone)) return null
 
   return timezone
 }
 
 export function normalizeTimezone(value: unknown, fallback = defaultTimezone): string {
   return parseTimezone(value) ?? parseTimezone(fallback) ?? defaultTimezone
-}
-
-export function isValidTimezone(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-
-  const timezone = value.trim()
-  if (!timezone || timezone.length > 80) return false
-
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date(0))
-    return true
-  } catch (_) {
-    return false
-  }
 }
 
 export function readTimezoneCookie(cookieHeader: string | null | undefined): string | null {

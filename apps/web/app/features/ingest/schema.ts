@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { usageSnapshotSchema, usageSourceSchema } from '@tokenboard/usage-core'
+import { usageModelSchema, usageSnapshotSchema, usageSourceSchema } from '@tokenboard/usage-core'
 
 export const maxIngestSnapshotBatchSize = 500
 export const maxSnapshotCheckBatchSize = maxIngestSnapshotBatchSize
@@ -14,7 +14,7 @@ export const snapshotCheckRequestSchema = z.object({
       z.object({
         source: usageSourceSchema,
         usageDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        model: z.string().min(1)
+        model: usageModelSchema
       })
     )
     .min(1)

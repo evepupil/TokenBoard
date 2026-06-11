@@ -12,6 +12,7 @@ import {
 import { assertPublicUsageVisible } from './features/public-card/service'
 import { usageSummaryStrictMode } from './features/usage/deduped-daily-usage'
 import type { Bindings } from './lib/db'
+import { pruneExpiredRateLimits } from './lib/rate-limit'
 
 const app = createApp()
 const PUBLIC_API_SUBJECT_CACHE_CONTROL = 'public, max-age=15'
@@ -197,7 +198,8 @@ function shouldFetchStaticAsset(request: Request) {
 async function runScheduledTasks(env: Bindings, now: Date) {
   await Promise.all([
     runUsageSummaryBackfill(env),
-    runScheduledNotifications(env, now)
+    runScheduledNotifications(env, now),
+    runRateLimitPrune(env, now)
   ])
 }
 
@@ -218,6 +220,15 @@ async function runUsageSummaryBackfill(env: Bindings) {
     })
   } catch (error) {
     console.error(`TokenBoard usage summary backfill failed: ${errorMessage(error)}`)
+    throw error
+  }
+}
+
+async function runRateLimitPrune(env: Bindings, now: Date) {
+  try {
+    await pruneExpiredRateLimits(env.DB, now)
+  } catch (error) {
+    console.error(`TokenBoard rate limit cleanup failed: ${errorMessage(error)}`)
     throw error
   }
 }

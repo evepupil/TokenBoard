@@ -1,12 +1,22 @@
 import { z } from 'zod'
 
 export const usageSourceSchema = z.enum(['claude-code', 'codex'])
+export const maxUsageTimezoneLength = 80
+export const maxUsageModelNameLength = 160
+
+export const usageTimezoneSchema = z
+  .string()
+  .min(1)
+  .max(maxUsageTimezoneLength)
+  .refine(isValidTimezone, 'Invalid timezone')
+
+export const usageModelSchema = z.string().min(1).max(maxUsageModelNameLength)
 
 export const usageSnapshotSchema = z.object({
   source: usageSourceSchema,
   usageDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  timezone: z.string().min(1),
-  model: z.string().min(1),
+  timezone: usageTimezoneSchema,
+  model: usageModelSchema,
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   cacheCreationTokens: z.number().int().nonnegative(),
@@ -48,4 +58,18 @@ export function snapshotHashPayload(snapshot: UsageSnapshot) {
     costUsd: snapshot.costUsd,
     sessionCount: snapshot.sessionCount
   })
+}
+
+export function isValidTimezone(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+
+  const timezone = value.trim()
+  if (!timezone || timezone !== value || timezone.length > maxUsageTimezoneLength) return false
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date(0))
+    return true
+  } catch (_) {
+    return false
+  }
 }
