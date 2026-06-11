@@ -57,7 +57,7 @@ describe('DashboardPreview', () => {
     expect(html).toContain('本月缓存率')
     expect(html).toContain('data-usage-metric-grid="true"')
     expect(html).toContain('data-usage-metric-card="true"')
-    expect(html).toContain('app-surface-raised')
+    expect(html).toContain('app-surface-contained')
     expect(html).toContain('app-surface-subtle flex h-36')
     expect(html).toContain('sm:grid-cols-2')
     expect(html).toContain('xl:grid-cols-4')

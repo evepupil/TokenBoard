@@ -27,7 +27,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
 
   return (
     <section class="mx-auto flex max-w-6xl flex-col gap-3">
-      <header class="app-surface-raised relative overflow-hidden rounded-2xl border border-lime-200/20 bg-[radial-gradient(circle_at_85%_10%,rgba(190,242,100,.24),transparent_28%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-4 sm:p-5">
+      <header class="app-surface-contained relative overflow-hidden rounded-2xl border border-lime-200/20 bg-[radial-gradient(circle_at_85%_10%,rgba(190,242,100,.24),transparent_28%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-4 sm:p-5">
         <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <Badge class="min-h-8 px-3 py-1">控制台</Badge>

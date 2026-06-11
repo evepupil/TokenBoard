@@ -35,7 +35,7 @@ export function UsageMetricCard(props: {
 
   return (
     <div class={cn(
-      'app-surface-raised min-w-0 rounded-lg border p-4 lg:p-3',
+      'app-surface-contained min-w-0 rounded-lg border p-4 lg:p-3',
       props.tone === 'lime'
         ? 'border-lime-300/40 bg-lime-300 text-stone-950'
         : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'
