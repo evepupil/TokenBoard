@@ -1,11 +1,15 @@
 import { randomId } from '../../lib/crypto'
 import { insertDeliveryLog, prepareDeliveryLog, type DueWebhookSubscription } from './queries'
-import { nextScheduledRunAt, zonedTimeToUtc } from './time'
+import {
+  assertBatchSucceeded,
+  assertClaimedUpdate,
+  nextRunAfterClearedPending,
+  nextRunAfterFailure
+} from './delivery-state/helpers'
 
 type DeliveryKind = 'daily' | 'test'
 
 const maxAttempts = 3
-const retryDelayMinutes = [5, 30]
 const successPersistenceAttempts = 3
 
 export async function recordDeliverySuccess(input: {
@@ -174,16 +178,6 @@ async function markSubscriptionFailure(input: {
   assertClaimedUpdate(result)
 }
 
-async function markSubscriptionSuccess(
-  db: D1Database,
-  subscription: DueWebhookSubscription,
-  now: Date,
-  scheduleSlot: string | null
-) {
-  const result = await prepareSubscriptionSuccess(db, subscription, now, scheduleSlot).run()
-  assertClaimedUpdate(result)
-}
-
 function prepareSubscriptionSuccess(
   db: D1Database,
   subscription: DueWebhookSubscription,
@@ -215,22 +209,6 @@ function prepareSubscriptionSuccess(
       subscription.id,
       subscription.lockedAt
     )
-}
-
-function nextRunAfterClearedPending(
-  subscription: DueWebhookSubscription,
-  now: Date,
-  scheduleSlot: string | null
-) {
-  if (subscription.pendingScheduleSlot && subscription.failureCount === 0) {
-    return subscription.nextRunAt
-  }
-  return nextScheduledRunAt({
-    now: scheduledSlotDate(subscription, scheduleSlot) ?? now,
-    timezone: subscription.timezone,
-    scheduleTimesLocal: subscription.scheduleTimesLocal,
-    scheduleWeekdays: subscription.scheduleWeekdays
-  })
 }
 
 async function markSubscriptionSkippedState(
@@ -290,49 +268,4 @@ async function markSubscriptionTestFailure(input: {
       input.subscription.id
     )
     .run()
-}
-
-function nextRunAfterFailure(input: {
-  subscription: DueWebhookSubscription
-  scheduleSlot: string | null
-  attempt: number
-  now: Date
-}, shouldRetry: boolean) {
-  if (shouldRetry) {
-    return addMinutes(input.now, retryDelayMinutes[input.attempt - 1] ?? retryDelayMinutes.at(-1) ?? 30).toISOString()
-  }
-  return nextScheduledRunAt({
-    now: scheduledSlotDate(input.subscription, input.scheduleSlot) ?? input.now,
-    timezone: input.subscription.timezone,
-    scheduleTimesLocal: input.subscription.scheduleTimesLocal,
-    scheduleWeekdays: input.subscription.scheduleWeekdays
-  })
-}
-
-function scheduledSlotDate(subscription: DueWebhookSubscription, scheduleSlot: string | null) {
-  if (!scheduleSlot) return null
-  const match = scheduleSlot.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/)
-  if (!match) return null
-  return zonedTimeToUtc(match[1], match[2], subscription.timezone)
-}
-
-function addMinutes(date: Date, minutes: number) {
-  return new Date(date.getTime() + minutes * 60 * 1000)
-}
-
-function assertBatchSucceeded(results: D1Result<unknown>[]) {
-  const batchResults = results as Array<{ success?: boolean; error?: string }>
-  const failedIndex = batchResults.findIndex((result) => result.success === false)
-  if (failedIndex < 0) return
-
-  const error = batchResults[failedIndex]?.error
-  throw new Error(
-    `D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`
-  )
-}
-
-function assertClaimedUpdate(result: D1Result<unknown>) {
-  if (Number(result.meta?.changes ?? 0) <= 0) {
-    throw new Error('Webhook subscription claim is no longer current')
-  }
 }

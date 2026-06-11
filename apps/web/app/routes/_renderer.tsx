@@ -25,10 +25,15 @@ const themeScript = `
   }
 
   function syncThemeMeta(theme) {
-    document.documentElement.style.colorScheme = themeColorSchemes[theme] || themeColorSchemes.dark
+    var colorScheme = themeColorSchemes[theme] || themeColorSchemes.dark
+    document.documentElement.style.colorScheme = colorScheme
     var themeColorMeta = document.querySelector('meta[name="theme-color"]')
     if (themeColorMeta) {
       themeColorMeta.setAttribute('content', themeChromeColors[theme] || themeChromeColors.dark)
+    }
+    var colorSchemeMeta = document.querySelector('meta[name="color-scheme"]')
+    if (colorSchemeMeta) {
+      colorSchemeMeta.setAttribute('content', colorScheme)
     }
   }
 

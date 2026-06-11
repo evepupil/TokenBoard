@@ -2,7 +2,7 @@ import type { Child } from 'hono/jsx'
 import { cn } from '../../lib/cn'
 
 export function Card(props: { class?: string; children?: Child }) {
-  return <section class={cn('rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)] shadow-xl shadow-black/10 backdrop-blur', props.class)}>{props.children}</section>
+  return <section class={cn('app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)] backdrop-blur', props.class)}>{props.children}</section>
 }
 
 export function CardHeader(props: { class?: string; children?: Child }) {

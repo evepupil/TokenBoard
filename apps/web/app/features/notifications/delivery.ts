@@ -36,27 +36,16 @@ import {
   safeWebhookErrorMessage,
   scheduleSlotForDelivery,
   shouldSkipAlreadyDelivered,
-  type DeliveryKind,
   type DeliveryStatus
 } from './delivery-helpers'
+import type {
+  CheckedDeliveryInput,
+  DeliverSubscriptionInput,
+  Fetcher,
+  ReportHistoryDeliveryState
+} from './delivery-types'
 
-type Fetcher = typeof fetch
 const defaultWebhookFetcher: Fetcher = (url, init) => fetch(url, init)
-
-type DeliverSubscriptionInput = {
-  env: WebhookEnv
-  subscription: DueWebhookSubscription
-  kind: DeliveryKind
-  now: Date
-  fetcher: Fetcher
-}
-type CheckedDeliveryInput = DeliverSubscriptionInput & {
-  reportDate: string
-  scheduleSlot: string | null
-  attempt: number
-  startedAt: number
-}
-type ReportHistoryDeliveryState = { retentionDays: number; share: DailyReportHistoryShare | null }
 
 class SuccessfulDeliveryPersistenceError extends Error {
   constructor(error: unknown) {

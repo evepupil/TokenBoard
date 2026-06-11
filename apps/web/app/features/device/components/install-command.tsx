@@ -50,7 +50,7 @@ export function InstallCommand(props: InstallCommandProps) {
 
 function InstallCommandHeader() {
   return (
-    <header class="relative overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[radial-gradient(circle_at_90%_10%,rgba(190,242,100,.2),transparent_28%),var(--app-panel)] p-5 shadow-xl shadow-black/10 sm:p-6">
+    <header class="app-surface-raised relative overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[radial-gradient(circle_at_90%_10%,rgba(190,242,100,.2),transparent_28%),var(--app-panel)] p-5 sm:p-6">
       <div class="absolute -right-16 -top-16 h-40 w-40 rounded-full border border-lime-300/20" />
       <p class="app-accent-text text-sm font-black uppercase tracking-[0.28em]">TokenBoard Collector</p>
       <h1 class="mt-4 text-3xl font-black tracking-tight sm:text-4xl">连接这台机器</h1>
@@ -63,13 +63,14 @@ function InstallCommandHeader() {
 
 function InstallTimezoneForm(props: { timezone: string }) {
   return (
-    <form method="post" class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10 backdrop-blur">
+    <form method="post" class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 backdrop-blur">
       <label class="flex flex-col gap-2 text-sm font-bold text-[var(--app-muted)]">
         时区
         <input
           class="min-h-11 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-4 py-3 text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20"
           name="timezone"
           value={props.timezone}
+          autocomplete="off"
           data-timezone-input="true"
           data-timezone-default={props.timezone}
           data-timezone-autofill="always"
@@ -89,12 +90,12 @@ function InstallPromptSection(props: { prompt: string; expiresAt?: string; visib
   if (!props.visible) return null
 
   return (
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10 backdrop-blur">
+    <section class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 backdrop-blur">
       <div class="flex flex-col gap-1">
         <h2 class="text-base font-black">粘贴到 Codex 或 Claude Code</h2>
         <p class="text-sm text-[var(--app-muted)]">过期时间：{props.expiresAt}</p>
       </div>
-      <div class="mt-4 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-sm leading-6 text-[var(--app-text)]">
+      <div class="app-surface-subtle mt-4 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-sm leading-6 text-[var(--app-text)]">
         <CopyBlockHeader title="安装提示词" targetId="install-prompt-text" label="复制安装提示词" />
         <pre id="install-prompt-text" class="overflow-x-auto p-4">
           {props.prompt}
@@ -135,7 +136,7 @@ function CommandSection(props: {
   actionLabel: string
 }) {
   return (
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10 backdrop-blur">
+    <section class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 backdrop-blur">
       <div class="flex flex-col gap-1">
         <h2 class="text-base font-black">{props.title}</h2>
         {props.description ? <p class="text-sm text-[var(--app-muted)]">{props.description}</p> : null}
@@ -166,7 +167,7 @@ function CopyableCommandBlock(props: {
 }) {
   return (
     <div class="min-w-0">
-      <div class="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-sm leading-6 text-[var(--app-text)]">
+      <div class="app-surface-subtle overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-sm leading-6 text-[var(--app-text)]">
         <CopyBlockHeader title={props.title} targetId={props.targetId} label={props.copyLabel} />
         <pre id={props.targetId} class="overflow-x-auto p-4">{props.command}</pre>
       </div>

@@ -13,7 +13,7 @@ export function SharedDailyReportPage(props: {
       <title>{props.report.displayName} token 日报 - TokenBoard</title>
       <AppNav email={props.viewerEmail} />
       <section class="mx-auto max-w-5xl">
-        <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+        <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
           <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Daily Report</p>
           <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
             {props.report.displayName} token 日报
@@ -58,7 +58,7 @@ export function MissingDailyReportPage(props: { viewerEmail?: string } = {}) {
     <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
       <title>日报不存在 - TokenBoard</title>
       <AppNav email={props.viewerEmail} />
-      <section class="mx-auto max-w-3xl rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+      <section class="app-surface-raised mx-auto max-w-3xl rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
         <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Daily Report</p>
         <h1 class="mt-3 text-3xl font-black tracking-tight">日报不存在</h1>
         <p class="mt-2 text-sm text-[var(--app-muted)]">这个分享链接不存在或历史快照已过期。</p>
@@ -69,7 +69,7 @@ export function MissingDailyReportPage(props: { viewerEmail?: string } = {}) {
 
 function Metric(props: { label: string; value: string }) {
   return (
-    <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 shadow-lg shadow-black/5">
+    <div class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
       <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">{props.label}</p>
       <p class="mt-3 break-words text-2xl font-black tabular-nums">{props.value}</p>
     </div>
@@ -89,7 +89,7 @@ function ReportList(props: {
         {props.items.length > 0 ? (
           <ul class="space-y-3">
             {props.items.map((item) => (
-              <li class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+              <li class="app-surface-subtle rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <span class="break-words text-lg font-black">{item.name}</span>
                   <span class="font-black tabular-nums">{item.value}</span>
@@ -99,7 +99,7 @@ function ReportList(props: {
             ))}
           </ul>
         ) : (
-          <p class="rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+          <p class="app-surface-subtle rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
             暂无数据
           </p>
         )}

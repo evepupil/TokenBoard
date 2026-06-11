@@ -60,7 +60,7 @@ function LeaderboardPanelContent(props: { entries: LeaderboardEntry[] }) {
         </>
       ) : (
         <div
-          class="rounded-xl border border-dashed border-[var(--app-border)] px-4 py-8 text-center text-sm text-[var(--app-muted)]"
+          class="app-surface-subtle rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-bg-soft)] px-4 py-8 text-center text-sm text-[var(--app-muted)]"
           data-leaderboard-empty="true"
         >
           还没有公开排行榜数据。
@@ -91,7 +91,7 @@ function metricItems(period: 'daily' | 'monthly', metric: LeaderboardMetric) {
 
 function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
   return (
-    <article class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <article class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <RankBadge rank={props.entry.rank} />

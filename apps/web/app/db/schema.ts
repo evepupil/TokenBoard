@@ -63,11 +63,7 @@ export const profiles = sqliteTable('profiles', {
   publicCardConfig: text('public_card_config'),
   dailyReportShareEnabled: integer('daily_report_share_enabled', { mode: 'boolean' }).notNull().default(false),
   isPublic: integer('is_public', { mode: 'boolean' }).notNull().default(false),
-  participatesInLeaderboards: integer('participates_in_leaderboards', {
-    mode: 'boolean'
-  })
-    .notNull()
-    .default(false),
+  participatesInLeaderboards: integer('participates_in_leaderboards', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull()
 })
@@ -290,10 +286,15 @@ export const dailyReportHistory = sqliteTable(
   ]
 )
 
+export const apiRateLimits = sqliteTable('api_rate_limits', {
+  key: text('key').notNull().primaryKey(),
+  count: integer('count').notNull().default(0),
+  resetAt: text('reset_at').notNull(),
+  updatedAt: text('updated_at').notNull()
+}, (table) => [index('api_rate_limits_reset_idx').on(table.resetAt)])
+
 export const schema = {
-  users, sessions, accounts, verifications, profiles,
-  uploadTokens, pairingCodes, devices,
-  dailyUsage, dailyUsageSummary, userUsageTotals,
-  usageSummaryBackfillState,
-  webhookSubscriptions, webhookDeliveryLogs, dailyReportHistory
+  users, sessions, accounts, verifications, profiles, uploadTokens, pairingCodes, devices,
+  dailyUsage, dailyUsageSummary, userUsageTotals, usageSummaryBackfillState,
+  webhookSubscriptions, webhookDeliveryLogs, dailyReportHistory, apiRateLimits
 }

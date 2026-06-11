@@ -1,8 +1,6 @@
 import { ChevronRight } from 'lucide'
 import { Badge } from '../../../components/ui/badge'
-import { Button, LinkButton } from '../../../components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../components/ui/card'
-import { CustomSelect } from '../../../components/ui/custom-select'
 import { LucideIcon } from '../../../components/ui/icon'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table'
 import { formatUsd } from '../../../lib/money'
@@ -10,23 +8,27 @@ import { formatPercentRate } from '../../../lib/usage-metrics'
 import type { UserDevice } from '../../device/service'
 import type { UsageDetails } from '../queries'
 import type { UsageDetailsFilters } from '../service'
+import { UsageMetricCard, UsageMetricGrid } from './usage-metric-card'
+import { UsageDetailsFiltersForm } from './usage-details-filters'
+import { formatInteger, formatPercent, formatSource } from './usage-details-format'
+import { formatUsageMetricInteger, formatUsageMetricUsd } from './usage-metric-format'
 
 export function UsageDetailsPanel(props: { details: UsageDetails; filters: UsageDetailsFilters; devices: UserDevice[] }) {
   const dailyRows = [...props.details.dailyRows].reverse()
   const selectedDevice = props.devices.find((device) => device.id === props.filters.deviceId)
 
   return (
-    <section class="mx-auto flex max-w-6xl flex-col gap-5">
+    <section class="mx-auto flex max-w-7xl flex-col gap-5">
       <UsageDetailsHeader filters={props.filters} devices={props.devices} selectedDevice={selectedDevice} />
 
-      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Metric label="范围 tokens" value={formatInteger(props.details.summary.totalTokens)} tone="lime" />
-        <Metric label="不含缓存读" value={formatInteger(props.details.summary.totalTokensWithoutCacheRead)} />
-        <Metric label="缓存率" value={formatPercentRate(props.details.summary.cacheReadRate)} />
-        <Metric label="范围费用" value={formatUsd(props.details.summary.costUsd)} />
-        <Metric label="Sessions" value={formatInteger(props.details.summary.sessionCount)} />
-        <Metric label="活跃天数" value={formatInteger(props.details.summary.activeDays)} />
-      </div>
+      <UsageMetricGrid columns={3}>
+        <UsageMetricCard label="范围 tokens" value={formatUsageMetricInteger(props.details.summary.totalTokens)} tone="lime" />
+        <UsageMetricCard label="不含缓存读" value={formatUsageMetricInteger(props.details.summary.totalTokensWithoutCacheRead)} />
+        <UsageMetricCard label="缓存率" value={formatPercentRate(props.details.summary.cacheReadRate)} />
+        <UsageMetricCard label="范围费用" value={formatUsageMetricUsd(props.details.summary.costUsd)} />
+        <UsageMetricCard label="Sessions" value={formatUsageMetricInteger(props.details.summary.sessionCount)} />
+        <UsageMetricCard label="活跃天数" value={formatUsageMetricInteger(props.details.summary.activeDays)} />
+      </UsageMetricGrid>
 
       <DailySummaryCard dailyRows={dailyRows} />
     </section>
@@ -35,11 +37,11 @@ export function UsageDetailsPanel(props: { details: UsageDetails; filters: Usage
 
 function UsageDetailsHeader(props: { filters: UsageDetailsFilters; devices: UserDevice[]; selectedDevice?: UserDevice }) {
   return (
-    <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+    <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
       <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <Badge>详情</Badge>
-          <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">每日用量详情</h1>
+          <h1 class="mt-3 whitespace-nowrap text-3xl font-black tracking-tight sm:text-4xl">每日用量详情</h1>
           <p class="mt-2 text-sm text-[var(--app-muted)]">
             {usageDetailsSubtitle(props.filters, props.selectedDevice)}
           </p>
@@ -92,7 +94,7 @@ function DailySummaryHeader() {
 
 function DailySummaryRow(props: { row: UsageDetails['dailyRows'][number] }) {
   return (
-    <details class="group rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
+    <details class="app-surface-subtle group rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
       <DailySummaryRowHeader row={props.row} />
       <DailyModelRows rows={props.row.modelRows} />
     </details>
@@ -167,7 +169,7 @@ function DailyModelRows(props: { rows: UsageDetails['dailyRows'][number]['modelR
           </Table>
         </div>
       ) : (
-        <p class="rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+        <p class="app-surface-subtle rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
           当前日期没有匹配的模型明细。
         </p>
       )}
@@ -215,108 +217,4 @@ function DailyModelRowsBody(props: { rows: UsageDetails['dailyRows'][number]['mo
       ))}
     </TableBody>
   )
-}
-
-function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
-  return (
-    <form method="get" class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]">
-      <SourceFilter filters={props.filters} />
-      <DeviceFilter filters={props.filters} devices={props.devices} />
-      <DateFilter label="开始日期" name="startDate" value={props.filters.startDate} />
-      <DateFilter label="结束日期" name="endDate" value={props.filters.endDate} />
-      <ModelFilter value={props.filters.modelQuery} />
-      <Button class="h-11 w-full sm:mt-7" type="submit">应用</Button>
-      <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
-    </form>
-  )
-}
-
-function SourceFilter(props: { filters: UsageDetailsFilters }) {
-  return <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-2" />
-}
-
-function DeviceFilter(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
-  const options = [
-    { value: 'all', label: '全部设备' },
-    ...props.devices.map((device) => ({ value: device.id, label: device.name }))
-  ]
-
-  return (
-    <CustomSelect
-      label="设备"
-      name="device"
-      value={props.filters.deviceId}
-      options={options}
-      wrapperClass="mt-2"
-    />
-  )
-}
-
-function DateFilter(props: { label: string; name: string; value: string }) {
-  return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
-      {props.label}
-      <input class={filterControlClass()} name={props.name} type="date" value={props.value} />
-    </label>
-  )
-}
-
-function ModelFilter(props: { value: string }) {
-  return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
-      模型
-      <input class={filterControlClass('placeholder:text-[var(--app-subtle)]')} name="model" placeholder="sonnet" value={props.value} />
-    </label>
-  )
-}
-
-function filterControlClass(extra = '') {
-  return [
-    'mt-2 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3',
-    'text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20',
-    extra
-  ].filter(Boolean).join(' ')
-}
-
-const sourceOptions = [
-  { value: 'all', label: '全部' },
-  { value: 'claude-code', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' }
-]
-
-function Metric(props: { label: string; value: string; tone?: 'lime' }) {
-  return (
-    <div class={`rounded-lg border p-4 ${props.tone === 'lime' ? 'border-lime-300/40 bg-lime-300 text-stone-950' : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'}`}>
-      <p class={`text-sm ${props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]'}`}>{props.label}</p>
-      <p class="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{props.value}</p>
-    </div>
-  )
-}
-
-function formatInteger(value: number) {
-  return new Intl.NumberFormat('en-US').format(value)
-}
-
-function formatSource(source: string) {
-  if (source === 'claude-code') return 'Claude Code'
-  if (source === 'codex') return 'Codex'
-  return '全部来源'
-}
-
-function formatPercent(value: number, total: number) {
-  if (total <= 0) return '0%'
-  return `${Math.round((value / total) * 100)}%`
-}
-
-function csvHref(filters: UsageDetailsFilters) {
-  const params = new URLSearchParams({
-    source: filters.source,
-    startDate: filters.startDate,
-    endDate: filters.endDate,
-    device: filters.deviceId
-  })
-  if (filters.modelQuery) {
-    params.set('model', filters.modelQuery)
-  }
-  return `/dashboard/details.csv?${params.toString()}`
 }

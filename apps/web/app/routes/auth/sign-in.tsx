@@ -22,7 +22,7 @@ function AuthScreen(props: { hasError: boolean }) {
       <title>登录 - TokenBoard</title>
       <AppNav isAuthenticated={false} />
       <section class="mx-auto grid min-h-[calc(100vh-7rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-        <div class="relative overflow-hidden rounded-xl border border-lime-200/10 bg-[radial-gradient(circle_at_20%_10%,rgba(190,242,100,.22),transparent_32%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-5 shadow-2xl shadow-black/30 sm:p-8">
+        <div class="app-surface-floating relative overflow-hidden rounded-xl border border-lime-200/10 bg-[radial-gradient(circle_at_20%_10%,rgba(190,242,100,.22),transparent_32%),linear-gradient(135deg,var(--app-panel-strong),var(--app-bg-soft))] p-5 sm:p-8">
           <div class="absolute -right-20 top-12 h-56 w-56 rounded-full border border-lime-300/20" />
           <p class="app-accent-text text-sm font-semibold uppercase tracking-[0.35em]">TokenBoard</p>
           <h1 class="mt-8 max-w-xl text-4xl font-black leading-none tracking-tight text-[var(--app-text)] sm:text-5xl md:text-7xl">
@@ -68,7 +68,7 @@ function AuthScreen(props: { hasError: boolean }) {
 
 function Panel(props: { icon: typeof ShieldCheck; label: string; value: string }) {
   return (
-    <div class="rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <div class="app-surface-subtle rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <LucideIcon icon={props.icon} class="app-accent-text" />
       <p class="mt-3 text-xs uppercase tracking-wide text-[var(--app-muted)]">{props.label}</p>
       <p class="mt-2 text-lg font-bold text-[var(--app-text)]">{props.value}</p>

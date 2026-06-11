@@ -25,14 +25,14 @@ export default createRoute(async (c) => {
             <a class="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--app-border)] px-5 py-3 text-sm font-bold text-[var(--app-text)] transition hover:border-lime-300" href="/leaderboards">查看排行榜</a>
           </div>
         </div>
-        <div class="relative z-10 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-5 text-[var(--app-text)] shadow-2xl shadow-black/15">
+        <div class="app-surface-floating relative z-10 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-5 text-[var(--app-text)]">
           <div class="grid gap-3 sm:grid-cols-2">
             <Metric label="今日 tokens" value="128,420" />
             <Metric label="不含缓存读" value="97,850" />
             <Metric label="本月费用" value="$42.31" />
             <Metric label="主要模型" value="gpt-5.4" />
           </div>
-          <div class="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+          <div class="app-surface-subtle mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
             <div class="mb-4 flex items-center justify-between text-sm">
               <span class="app-accent-text font-bold">来源占比</span>
               <span class="text-[var(--app-muted)]">最近 30 天</span>
@@ -53,7 +53,7 @@ export default createRoute(async (c) => {
 
 function Metric(props: { label: string; value: string }) {
   return (
-    <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <div class="app-surface-subtle rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <p class="text-xs uppercase tracking-wide text-[var(--app-muted)]">{props.label}</p>
       <p class="mt-3 text-2xl font-black text-[var(--app-text)]">{props.value}</p>
     </div>

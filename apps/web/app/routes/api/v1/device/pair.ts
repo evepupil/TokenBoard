@@ -3,9 +3,18 @@ import { D1DevicePairingRepository } from '../../../../features/device/repositor
 import { devicePairRequestSchema } from '../../../../features/device/schema'
 import { createPairDeviceDeps, pairDevice } from '../../../../features/device/service'
 import { jsonError } from '../../../../lib/http'
+import {
+  clientIpRateLimitSubject,
+  enforceRateLimit,
+  writeRateLimitPolicies
+} from '../../../../lib/rate-limit'
 
 export const POST = createRoute(async (c) => {
   try {
+    await enforceRateLimit(c.env.DB, {
+      policy: writeRateLimitPolicies.devicePair,
+      subject: clientIpRateLimitSubject(c.req.raw.headers)
+    })
     const request = devicePairRequestSchema.parse(await c.req.json())
     const repository = new D1DevicePairingRepository(c.env.DB)
     const endpoint = new URL('/api/v1/ingest', c.req.url).toString()
@@ -15,4 +24,3 @@ export const POST = createRoute(async (c) => {
     return jsonError(c, error)
   }
 })
-

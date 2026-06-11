@@ -56,7 +56,7 @@ export function NotificationsPage(props: {
 
 function NotificationsHeader() {
   return (
-    <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+    <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
       <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Notifications</p>
       <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">通知 Webhook</h1>
       <p class="mt-2 text-sm text-[var(--app-muted)]">
@@ -99,7 +99,7 @@ function SubscriptionsCard(props: { subscriptions: WebhookSubscriptionSummary[] 
         {props.subscriptions.length > 0 ? (
           props.subscriptions.map((subscription) => <SubscriptionItem subscription={subscription} />)
         ) : (
-          <p class="rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+          <p class="app-surface-subtle rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
             还没有通知 webhook。
           </p>
         )}
@@ -110,7 +110,7 @@ function SubscriptionsCard(props: { subscriptions: WebhookSubscriptionSummary[] 
 
 function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
   return (
-    <article class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <article class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
           <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">{providerLabel(props.subscription.provider)}</p>
@@ -122,7 +122,7 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
         </span>
       </div>
       {props.subscription.needsRepair ? (
-        <p class="mt-3 rounded-lg border border-red-400/40 bg-red-500/10 p-3 text-xs font-bold text-red-700 dark:text-red-300">
+        <p class="app-surface-subtle mt-3 rounded-lg border border-red-400/40 bg-red-500/10 p-3 text-xs font-bold text-red-700 dark:text-red-300">
           这个 Webhook 有旧格式字段，请检查后保存一次。
         </p>
       ) : null}
@@ -137,11 +137,11 @@ function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
       <input type="hidden" name="subscriptionId" value={props.subscription.id} />
       <Label>
         名称
-        <Input name="name" value={props.subscription.name} required />
+        <Input name="name" value={props.subscription.name} autocomplete="off" required />
       </Label>
       <Label>
         时区
-        <Input name="timezone" value={props.subscription.timezone} required />
+        <Input name="timezone" value={props.subscription.timezone} autocomplete="off" required />
       </Label>
       <ScheduleTimeFields scheduleTimesLocal={props.subscription.scheduleTimesLocal} />
       <ScheduleWeekdayFields scheduleWeekdays={props.subscription.scheduleWeekdays} />
@@ -155,11 +155,11 @@ function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
 function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <>
-      <label class="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
         <input type="checkbox" name="sendEmptyReport" checked={props.subscription.sendEmptyReport} />
         空日报也发送
       </label>
-      <label class="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)] md:col-span-2">
+      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)] md:col-span-2">
         <input type="checkbox" name="enabled" checked={props.subscription.enabled} />
         启用定时推送
       </label>
@@ -237,12 +237,12 @@ function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) 
       <input type="hidden" name="action" value="create" />
       <Label>
         名称
-        <Input name="name" placeholder="每日日报" required disabled={props.disabled} />
+        <Input name="name" placeholder="每日日报" autocomplete="off" required disabled={props.disabled} />
       </Label>
       <ProviderSelect />
       <Label>
         Webhook URL
-        <Input name="webhookUrl" type="url" placeholder="https://..." required disabled={props.disabled} />
+        <Input name="webhookUrl" type="url" placeholder="https://..." autocomplete="off" required disabled={props.disabled} />
       </Label>
       <Label>
         加签 secret (钉钉、飞书 / Lark 启用加签时填写)
@@ -250,7 +250,7 @@ function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) 
       </Label>
       <Label>
         时区
-        <Input name="timezone" value={props.timezone} required disabled={props.disabled} />
+        <Input name="timezone" value={props.timezone} autocomplete="off" required disabled={props.disabled} />
       </Label>
       <ScheduleTimeFields scheduleTimesLocal={['18:00']} disabled={props.disabled} />
       <ScheduleWeekdayFields scheduleWeekdays={defaultScheduleWeekdayValues()} disabled={props.disabled} />
@@ -278,11 +278,11 @@ function ProviderSelect() {
 function CreateChecks(props: { disabled: boolean }) {
   return (
     <>
-      <label class="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
         <input type="checkbox" name="sendEmptyReport" disabled={props.disabled} />
         空日报也发送
       </label>
-      <label class="flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
         <input type="checkbox" name="enabled" checked disabled={props.disabled} />
         启用定时推送
       </label>

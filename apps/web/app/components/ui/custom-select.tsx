@@ -42,7 +42,7 @@ export function CustomSelect(props: {
       </button>
       <div
         id={menuId}
-        class="invisible absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-1 opacity-0 shadow-2xl shadow-black/30 transition"
+        class="app-surface-floating invisible absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-1 opacity-0 transition"
         role="listbox"
         aria-labelledby={buttonId}
         data-custom-select-menu="true"

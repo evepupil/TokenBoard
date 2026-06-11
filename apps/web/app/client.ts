@@ -4,7 +4,7 @@ import { initDashboardTrendTooltip, resetDashboardTrendTooltip } from './feature
 import { initPublicCardPreview, refreshPublicCardPreview } from './features/public-card/client-preview'
 import { leaderboardDocumentTitle } from './features/leaderboards/title'
 import { copyTextToClipboard } from './lib/clipboard'
-import { initTheme } from './lib/theme-client'
+import { initTheme, syncCurrentTheme } from './lib/theme-client'
 import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 
 createClient()
@@ -246,6 +246,7 @@ async function replaceDocument(pageUrl: URL, pushState: boolean) {
     document.body.innerHTML = nextBody.innerHTML
     if (pushState) window.history.pushState({}, '', resolvedUrl)
     document.title = nextDocument.title || document.title
+    syncCurrentTheme()
     initTimezoneInputs()
     refreshPublicCardPreview()
     syncScroll(resolvedUrl)

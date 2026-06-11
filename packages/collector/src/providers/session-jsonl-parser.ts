@@ -1,4 +1,13 @@
 import { usageSnapshotSchema, type UsageSnapshot, type UsageSource } from '@tokenboard/usage-core'
+import {
+  formatDate,
+  readNumber,
+  readOptionalNumber,
+  readRecord,
+  readString,
+  readTimestamp,
+  type UnknownRecord
+} from './session-jsonl-parser-utils'
 import { hasUnparsedTokenMetricField } from './session-jsonl-token-fields'
 
 type ParseInput = {
@@ -38,8 +47,6 @@ type MetricRow = {
 type AggregateRow = Omit<MetricRow, 'hasCost'> & {
   sessions: Set<string>
 }
-
-type UnknownRecord = Record<string, unknown>
 
 export function parseSessionJsonl(input: ParseInput): {
   snapshots: UsageSnapshot[]
@@ -251,13 +258,6 @@ function readLineRecord(state: ParseState, line: string) {
   }
 }
 
-function readTimestamp(record: UnknownRecord) {
-  const value = readString(record, ['timestamp', 'createdAt', 'created_at'])
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
 function readTotalTokens(
   usage: UnknownRecord,
   inputTokens: number,
@@ -275,52 +275,4 @@ function readCostUsd(usage: UnknownRecord, record: UnknownRecord) {
     if (value !== null) return { found: true, value }
   }
   return { found: false, value: 0 }
-}
-
-function readOptionalNumber(record: UnknownRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-  }
-  return null
-}
-
-function readNumber(record: UnknownRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-  }
-  return 0
-}
-
-function readString(record: UnknownRecord | null | undefined, keys: string[]) {
-  if (!record) return ''
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string' && value.length > 0) return value
-  }
-  return ''
-}
-
-function readRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : null
-}
-
-function formatDate(date: Date, timezone: string) {
-  let parts: Intl.DateTimeFormatPart[]
-  try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).formatToParts(date)
-  } catch (error) {
-    if (error instanceof RangeError) {
-      throw new Error(`Invalid timezone for session JSONL formatDate: ${timezone}`)
-    }
-    throw error
-  }
-  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
-  return `${values.year}-${values.month}-${values.day}`
 }

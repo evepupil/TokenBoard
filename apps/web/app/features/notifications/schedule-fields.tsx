@@ -27,6 +27,7 @@ export function ScheduleTimeFields(props: {
             name="scheduleTimesLocal[]"
             type="time"
             value={time}
+            autocomplete="off"
             required={index === 0}
             disabled={props.disabled}
           />
@@ -47,7 +48,7 @@ export function ScheduleWeekdayFields(props: {
       <input type="hidden" name="scheduleWeekdaysTouched" value="1" disabled={props.disabled} />
       <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {weekdayOptions.map((weekday) => (
-          <label key={weekday.value} class="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+          <label key={weekday.value} class="app-surface-subtle flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
             <input
               type="checkbox"
               name="scheduleWeekdays[]"

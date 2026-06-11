@@ -18,14 +18,14 @@ export function AppNav(props: AppNavProps) {
 
   return (
     <nav class={cn(
-      'mx-auto flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-3 py-3 text-[var(--app-text)] shadow-xl shadow-black/10 backdrop-blur sm:px-4 xl:flex-row xl:items-center xl:justify-between',
+      'app-surface-raised mx-auto flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-3 py-3 text-[var(--app-text)] backdrop-blur sm:px-4 xl:flex-row xl:items-center xl:justify-between',
       props.compact ? 'mb-3 xl:py-2' : 'mb-6'
     )}>
-      <div class="flex items-center justify-between gap-3">
-        <a class="group flex items-center gap-3" href={isAuthenticated ? '/dashboard' : '/'}>
+      <div class="flex min-w-0 items-center justify-between gap-3">
+        <a class="group flex min-w-0 items-center gap-3" href={isAuthenticated ? '/dashboard' : '/'}>
           <img
             class={cn(
-              'rounded-xl shadow-lg shadow-lime-950/20 transition group-hover:rotate-3',
+              'app-logo-elevation shrink-0 rounded-xl transition group-hover:rotate-3',
               props.compact ? 'h-9 w-9' : 'h-10 w-10'
             )}
             src="/logo.svg"
@@ -33,26 +33,26 @@ export function AppNav(props: AppNavProps) {
             width="40"
             height="40"
           />
-          <span>
-            <span class="block text-base font-black tracking-tight text-[var(--app-text)]">TokenBoard</span>
-            <span class="block text-xs text-[var(--app-muted)]">AI token 使用统计</span>
+          <span class="min-w-0">
+            <span class="block truncate text-base font-black tracking-tight text-[var(--app-text)]">TokenBoard</span>
+            <span class="block truncate text-xs text-[var(--app-muted)]">AI token 使用统计</span>
           </span>
         </a>
-        <div class="flex items-center gap-2 xl:hidden">
+        <div class="flex shrink-0 items-center gap-2 xl:hidden">
           <ThemeToggle />
           <RepositoryLink />
         </div>
       </div>
 
-      <div class="app-scrollbar-none -mx-3 overflow-x-auto px-3 xl:mx-0 xl:overflow-visible xl:px-0" data-app-nav-scroll="true">
-        <div class="flex min-w-max items-center gap-2 text-sm xl:min-w-0">
+      <div class="-mx-1 px-1" data-app-nav-scroll="true">
+        <div class="flex min-w-0 flex-wrap items-center gap-2 text-sm">
           {isAuthenticated ? <NavLink compact={props.compact} href="/dashboard" active={props.active === 'dashboard'}>控制台</NavLink> : null}
           {isAuthenticated ? <NavLink compact={props.compact} href="/dashboard/details" active={props.active === 'details'}>详情</NavLink> : null}
           <NavLink compact={props.compact} href="/leaderboards" active={props.active === 'leaderboards'}>排行榜</NavLink>
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/install" active={props.active === 'install'}>安装采集器</NavLink> : null}
+          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/install" active={props.active === 'install'} shortLabel="安装">安装采集器</NavLink> : null}
           {isAuthenticated ? <NavLink compact={props.compact} href="/settings/devices" active={props.active === 'devices'}>设备</NavLink> : null}
           {isAuthenticated ? <NavLink compact={props.compact} href="/settings/notifications" active={props.active === 'notifications'}>通知</NavLink> : null}
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/profile" active={props.active === 'profile'}>公开资料</NavLink> : null}
+          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/profile" active={props.active === 'profile'} shortLabel="资料">公开资料</NavLink> : null}
           {isAuthenticated ? null : <NavLink compact={props.compact} href="/auth/sign-in">登录</NavLink>}
           {isAuthenticated ? (
             <form class="xl:hidden" method="post" action="/auth/sign-out">
@@ -76,17 +76,22 @@ export function AppNav(props: AppNavProps) {
   )
 }
 
-function NavLink(props: { href: string; active?: boolean; compact?: boolean; children: string }) {
+function NavLink(props: { href: string; active?: boolean; compact?: boolean; shortLabel?: string; children: string }) {
   return (
     <a
       class={cn(
-        'rounded-xl font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
-        props.compact ? 'px-3 py-2' : 'px-4 py-3',
+        'shrink-0 rounded-xl font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
+        props.compact ? 'px-3 py-2' : 'px-3 py-2 sm:px-4 sm:py-3',
         props.active && 'bg-lime-300 text-stone-950 shadow-sm shadow-lime-950/10 hover:bg-lime-300 hover:text-stone-950'
       )}
       href={props.href}
     >
-      {props.children}
+      {props.shortLabel ? (
+        <>
+          <span class="sm:hidden">{props.shortLabel}</span>
+          <span class="hidden sm:inline">{props.children}</span>
+        </>
+      ) : props.children}
     </a>
   )
 }

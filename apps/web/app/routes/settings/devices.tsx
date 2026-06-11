@@ -79,7 +79,7 @@ export function DevicesPage(props: {
 
 function DevicesHeader() {
   return (
-    <header class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 shadow-xl shadow-black/10">
+    <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
       <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Devices</p>
@@ -145,7 +145,7 @@ function DevicesTable(props: { devices: UserDevice[] }) {
 
 function DeviceCard(props: { device: UserDevice }) {
   return (
-    <article class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <article class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">设备</p>
@@ -214,7 +214,14 @@ function DeviceRenameForm(props: { device: UserDevice }) {
     <form method="post" class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <input type="hidden" name="action" value="rename" />
       <input type="hidden" name="deviceId" value={props.device.id} />
-      <Input class="mt-0 h-10 py-2" name="name" value={props.device.name} required minLength={1} />
+      <Input
+        class="mt-0 h-10 py-2"
+        name="name"
+        value={props.device.name}
+        autocomplete="off"
+        required
+        minLength={1}
+      />
       <Button class="w-full sm:w-auto" type="submit" variant="secondary" size="sm">保存</Button>
     </form>
   )
@@ -241,7 +248,7 @@ function DeviceRevokeForm(props: { device: UserDevice }) {
 
 function DevicesEmptyState() {
   return (
-    <div class="rounded-xl border border-dashed border-[var(--app-border)] p-6 text-sm text-[var(--app-muted)]">
+    <div class="app-surface-subtle rounded-xl border border-dashed border-[var(--app-border)] p-6 text-sm text-[var(--app-muted)]">
       还没有连接设备。
     </div>
   )

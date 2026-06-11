@@ -97,4 +97,18 @@ describe('ingest schemas', () => {
 
     expect(snapshotCheckRequestSchema.parse({ keys })).toEqual({ keys })
   })
+
+  test('rejects oversized model names in snapshot hash checks', () => {
+    expect(() =>
+      snapshotCheckRequestSchema.parse({
+        keys: [
+          {
+            source: 'codex',
+            usageDate: '2026-05-09',
+            model: 'g'.repeat(161)
+          }
+        ]
+      })
+    ).toThrow()
+  })
 })

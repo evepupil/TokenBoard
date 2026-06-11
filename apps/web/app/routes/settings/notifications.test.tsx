@@ -46,11 +46,16 @@ describe('NotificationsPage', () => {
     expect(html).toContain('qyapi.weixin.qq.com/...abcdef')
     expect(html).not.toContain('key=')
     expect(html).toContain('data-custom-select="true"')
+    expect(html).toContain('app-surface-raised rounded-xl')
+    expect(html).toContain('app-surface-subtle flex min-h-11')
     expect(html).toContain('测试发送')
     expect(html).toContain('09:30、18:00')
     expect(html).toContain('周一、周三、周五')
     expect(html).toContain('name="scheduleTimesLocal[]"')
     expect(html).toContain('name="scheduleWeekdays[]"')
+    expect(html).toContain('name="name"')
+    expect(html).toContain('name="timezone"')
+    expect(html).toContain('autocomplete="off"')
   })
 
   test('shows encryption configuration warning', async () => {
@@ -197,6 +202,7 @@ describe('NotificationsPage', () => {
 
     expect(html).toContain('日报分享')
     expect(html).toContain('name="dailyReportShareEnabled"')
+    expect(html).toContain('app-surface-subtle flex flex-col gap-3 rounded-xl')
     expect(html).toContain('value="update-share-settings"')
     expect(html).not.toContain('name="dailyReportShareEnabled" checked')
   })

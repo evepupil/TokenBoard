@@ -74,7 +74,7 @@ function ProfileSettingsFields(props: { profile: ProfileSettings }) {
     <div class="space-y-4">
       <Label>
         显示名称
-        <Input name="displayName" value={props.profile.displayName} required />
+        <Input name="displayName" value={props.profile.displayName} autocomplete="name" required />
       </Label>
       <ProfileSlugInput profile={props.profile} />
       <Label>
@@ -82,6 +82,7 @@ function ProfileSettingsFields(props: { profile: ProfileSettings }) {
         <Input
           name="timezone"
           value={props.profile.timezone}
+          autocomplete="off"
           required
           data-timezone-input="true"
           data-timezone-default={props.profile.timezone}
@@ -106,7 +107,7 @@ function ProfileSlugInput(props: { profile: ProfileSettings }) {
   return (
     <Label>
       公开 slug
-      <Input name="slug" value={props.profile.slug} required />
+      <Input name="slug" value={props.profile.slug} autocomplete="off" required />
       <span class="mt-1 block text-xs text-[var(--app-muted)]">只能使用小写字母、数字和连字符，长度 3-32。</span>
     </Label>
   )
@@ -119,7 +120,7 @@ function ProfileCheckbox(props: {
   children: string
 }) {
   return (
-    <label class="flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
+    <label class="app-surface-subtle flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
       <input class="mt-1" type="checkbox" name={props.name} checked={props.checked} />
       <span>
         <strong class="block text-[var(--app-text)]">{props.title}</strong>
@@ -166,7 +167,7 @@ function CopyBlock(props: { label: string; value: string; targetId: string }) {
   return (
     <div>
       <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">{props.label}</p>
-      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
+      <div class="app-surface-subtle grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
         <pre id={props.targetId} class="min-h-12 overflow-x-auto whitespace-pre-wrap break-all p-3 text-sm leading-6 text-[var(--app-text)]">{props.value}</pre>
         <button
           type="button"

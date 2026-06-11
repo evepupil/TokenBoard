@@ -24,6 +24,7 @@ describe('LeaderboardPanel', () => {
 
     expect(html).toContain('data-leaderboard-mobile-list="true"')
     expect(html).toContain('data-leaderboard-desktop-table="true"')
+    expect(html).toContain('app-surface-raised rounded-xl')
     expect(html).toContain('Example User')
     expect(html).toContain('123,456')
     expect(html).toContain('100,000')
@@ -41,6 +42,7 @@ describe('LeaderboardPanel', () => {
     )
 
     expect(html).toContain('data-leaderboard-empty="true"')
+    expect(html).toContain('app-surface-subtle rounded-xl')
     expect(html).not.toContain('colspan="4"')
   })
 })

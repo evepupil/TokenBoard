@@ -38,7 +38,7 @@ export function DailyReportHistoryCard(props: {
             </Table>
           </div>
         ) : (
-          <p class="rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+          <p class="app-surface-subtle rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
             还没有历史日报。
           </p>
         )}
@@ -51,7 +51,7 @@ function DailyReportShareSettings(props: { enabled: boolean }) {
   return (
     <form
       method="post"
-      class="flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 sm:flex-row sm:items-center sm:justify-between"
+      class="app-surface-subtle flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <input type="hidden" name="action" value="update-share-settings" />
       <label class="flex min-h-11 items-center gap-3 text-sm font-bold text-[var(--app-text)]">

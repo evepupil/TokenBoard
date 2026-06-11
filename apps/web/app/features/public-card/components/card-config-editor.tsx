@@ -71,7 +71,7 @@ export function PublicCardConfigEditor(props: {
         </span>
       </div>
 
-      <div class="overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-2">
+      <div class="app-surface-subtle overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-2">
         <img
           class="block h-auto w-full rounded-md"
           src={previewSrc}
@@ -185,7 +185,7 @@ function SelectField<T extends string>(props: {
 
 function ToggleField(props: { name: string; checked: boolean; title: string }) {
   return (
-    <label class="flex min-h-11 items-center gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] px-3 text-sm font-bold text-[var(--app-text)]">
+    <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] px-3 text-sm font-bold text-[var(--app-text)]">
       <input class="h-4 w-4 accent-lime-300" type="checkbox" name={props.name} checked={props.checked} />
       {props.title}
     </label>

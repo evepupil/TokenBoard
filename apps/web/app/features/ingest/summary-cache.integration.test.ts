@@ -662,7 +662,8 @@ function applyMigrations(dbPath: string, includeSummaryCache = true) {
   }
   migrations.push(
     `.read ${quoteSqlitePath(join(migrationsDir, '0019_backfill_webhook_pending_schedule_slots.sql'))}`,
-    `.read ${quoteSqlitePath(join(migrationsDir, '0020_daily_report_share_controls.sql'))}`
+    `.read ${quoteSqlitePath(join(migrationsDir, '0020_daily_report_share_controls.sql'))}`,
+    `.read ${quoteSqlitePath(join(migrationsDir, '0021_api_rate_limits.sql'))}`
   )
   runSql(dbPath, migrations.join('\n'))
 }
