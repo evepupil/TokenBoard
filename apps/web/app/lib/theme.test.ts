@@ -36,6 +36,15 @@ describe('theme helpers', () => {
     expect(css).toContain('.theme-light *,')
   })
 
+  test('uses app-owned danger colors instead of system dark media classes', () => {
+    const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8')
+
+    expect(css).toContain('.app-danger-text')
+    expect(css).toContain('.app-danger-notice')
+    expect(css).toContain('.app-danger-action')
+    expect(css).toContain('.theme-light .app-danger-action')
+  })
+
   test('validates theme names and toggle labels', () => {
     expect(isTheme('dark')).toBe(true)
     expect(isTheme('light')).toBe(true)

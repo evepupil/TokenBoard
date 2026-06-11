@@ -320,6 +320,44 @@ button[data-copy-target][aria-disabled='true'] {
   color: #7f1d1d;
 }
 
+.app-danger-text {
+  color: #fca5a5;
+}
+
+.theme-light .app-danger-text {
+  color: #b91c1c;
+}
+
+.app-danger-notice {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.theme-light .app-danger-notice {
+  border-color: rgba(185, 28, 28, 0.34);
+  background: rgba(248, 113, 113, 0.14);
+  color: #7f1d1d;
+}
+
+.app-danger-action {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fca5a5;
+}
+
+.app-danger-action:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.theme-light .app-danger-action {
+  border-color: rgba(185, 28, 28, 0.34);
+  color: #b91c1c;
+}
+
+.theme-light .app-danger-action:hover {
+  background: rgba(248, 113, 113, 0.14);
+}
+
 .app-status-pill {
   display: inline-flex;
   min-height: 26px;

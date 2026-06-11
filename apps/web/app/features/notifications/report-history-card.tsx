@@ -107,7 +107,7 @@ function ReportShareAction(props: { item: DailyReportHistoryItem }) {
       <input type="hidden" name="action" value="revoke-report-share" />
       <input type="hidden" name="reportId" value={props.item.id} />
       <button
-        class="inline-flex min-h-8 items-center rounded-lg border border-red-400/40 px-3 py-1 font-bold text-red-700 transition hover:bg-red-500/10 dark:text-red-300"
+        class="app-danger-action inline-flex min-h-8 items-center rounded-lg border px-3 py-1 font-bold transition"
         type="submit"
         data-confirm="确认撤销这条日报的未登录访问？"
       >
@@ -120,7 +120,7 @@ function ReportShareAction(props: { item: DailyReportHistoryItem }) {
 function HistoryDetails(props: { item: DailyReportHistoryItem }) {
   if (props.item.detailsParseError) {
     return (
-      <p class="mt-2 text-xs font-bold text-red-700 dark:text-red-300">
+      <p class="app-danger-text mt-2 text-xs font-bold">
         历史明细格式异常，请重新生成日报。
       </p>
     )

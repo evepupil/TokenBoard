@@ -122,7 +122,7 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
         </span>
       </div>
       {props.subscription.needsRepair ? (
-        <p class="app-surface-subtle mt-3 rounded-lg border border-red-400/40 bg-red-500/10 p-3 text-xs font-bold text-red-700 dark:text-red-300">
+        <p class="app-danger-notice app-surface-subtle mt-3 rounded-lg border p-3 text-xs font-bold">
           这个 Webhook 有旧格式字段，请检查后保存一次。
         </p>
       ) : null}
@@ -205,7 +205,7 @@ function SubscriptionAction(props: { action: string; children: string; confirm?:
   return (
     <button
       class={`min-h-11 rounded-xl border px-4 py-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${props.variant === 'danger'
-        ? 'border-red-400/40 text-red-700 hover:bg-red-500/10 dark:text-red-300'
+        ? 'app-danger-action'
         : 'border-[var(--app-border)] text-[var(--app-text)] hover:border-lime-300'}`}
       type="submit"
       name="action"
