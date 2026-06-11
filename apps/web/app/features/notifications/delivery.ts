@@ -45,7 +45,7 @@ import type {
   ReportHistoryDeliveryState
 } from './delivery-types'
 
-const defaultWebhookFetcher: Fetcher = (url, init) => fetch(url, init)
+const defaultWebhookFetcher: Fetcher = (url, init) => globalThis.fetch.call(globalThis, url, init)
 
 class SuccessfulDeliveryPersistenceError extends Error {
   constructor(error: unknown) {
