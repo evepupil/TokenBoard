@@ -13,7 +13,7 @@
   --app-hover: rgba(255, 255, 255, 0.06);
   --app-input: rgba(28, 25, 23, 0.72);
   --app-shadow-raised: 0 32px 82px rgba(0, 0, 0, 0.76), 0 18px 54px -10px rgba(190, 242, 100, 0.34), 0 0 34px rgba(190, 242, 100, 0.14), 0 0 0 1px rgba(190, 242, 100, 0.26), 0 0 0 6px rgba(190, 242, 100, 0.035), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --app-shadow-contained: 0 14px 32px rgba(0, 0, 0, 0.64), 0 8px 22px -14px rgba(190, 242, 100, 0.24), 0 0 0 1px rgba(190, 242, 100, 0.24), 0 0 0 4px rgba(190, 242, 100, 0.025), inset 0 1px 0 rgba(255, 255, 255, 0.075);
+  --app-shadow-contained: 0 12px 26px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(190, 242, 100, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.075), inset 0 0 24px rgba(190, 242, 100, 0.045);
   --app-shadow-subtle: 0 22px 58px rgba(0, 0, 0, 0.62), 0 12px 38px -10px rgba(190, 242, 100, 0.26), 0 0 28px rgba(190, 242, 100, 0.1), 0 0 0 1px rgba(190, 242, 100, 0.2), 0 0 0 5px rgba(190, 242, 100, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.065);
   --app-shadow-floating: 0 44px 104px rgba(0, 0, 0, 0.82), 0 24px 70px -10px rgba(190, 242, 100, 0.4), 0 0 42px rgba(190, 242, 100, 0.16), 0 0 0 1px rgba(190, 242, 100, 0.3), 0 0 0 7px rgba(190, 242, 100, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.09);
   --app-shadow-logo: 0 20px 42px rgba(0, 0, 0, 0.66), 0 12px 32px rgba(190, 242, 100, 0.32), 0 0 0 1px rgba(190, 242, 100, 0.34), 0 0 0 5px rgba(190, 242, 100, 0.05);
