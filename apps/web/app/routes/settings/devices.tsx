@@ -211,7 +211,7 @@ function DeviceRow(props: { device: UserDevice }) {
 
 function DeviceRenameForm(props: { device: UserDevice }) {
   return (
-    <form method="post" class="flex flex-col gap-2 sm:flex-row sm:items-center">
+    <form method="post" class="flex flex-col gap-2 sm:flex-row sm:items-center" data-submit-feedback="true">
       <input type="hidden" name="action" value="rename" />
       <input type="hidden" name="deviceId" value={props.device.id} />
       <Input
@@ -222,14 +222,14 @@ function DeviceRenameForm(props: { device: UserDevice }) {
         required
         minLength={1}
       />
-      <Button class="w-full sm:w-auto" type="submit" variant="secondary" size="sm">保存</Button>
+      <Button class="w-full sm:w-auto" type="submit" variant="secondary" size="sm" data-submitting-label="正在保存...">保存</Button>
     </form>
   )
 }
 
 function DeviceRevokeForm(props: { device: UserDevice }) {
   return (
-    <form method="post">
+    <form method="post" data-submit-feedback="true">
       <input type="hidden" name="action" value="revoke" />
       <input type="hidden" name="deviceId" value={props.device.id} />
       <Button
@@ -239,6 +239,8 @@ function DeviceRevokeForm(props: { device: UserDevice }) {
         size="sm"
         disabled={props.device.activeTokenCount <= 0}
         data-confirm="确认停用这个设备的上传 token？"
+        data-submitting-label="正在停用..."
+        data-submitting-tone="danger"
       >
         停用
       </Button>

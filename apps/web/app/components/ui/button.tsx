@@ -34,6 +34,7 @@ type ButtonProps = VariantProps<typeof buttonVariants> & {
   disabled?: boolean
   'data-confirm'?: string
   'data-submitting-label'?: string
+  'data-submitting-tone'?: string
   children?: Child
 }
 
@@ -50,5 +51,5 @@ type LinkButtonProps = VariantProps<typeof buttonVariants> & {
 
 export function LinkButton(props: LinkButtonProps) {
   const { variant, size, class: className, ...rest } = props
-  return <a class={cn(buttonVariants({ variant, size }), className)} {...rest} />
+  return <a class={cn(buttonVariants({ variant, size }), className)} data-link-button="true" {...rest} />
 }

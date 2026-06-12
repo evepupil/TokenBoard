@@ -63,7 +63,11 @@ function InstallCommandHeader() {
 
 function InstallTimezoneForm(props: { timezone: string }) {
   return (
-    <form method="post" class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 backdrop-blur">
+    <form
+      method="post"
+      class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5 backdrop-blur"
+      data-submit-feedback="true"
+    >
       <label class="flex flex-col gap-2 text-sm font-bold text-[var(--app-muted)]">
         时区
         <input
@@ -79,6 +83,7 @@ function InstallTimezoneForm(props: { timezone: string }) {
       <button
         class="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-black text-stone-950 transition hover:bg-lime-200 sm:w-auto"
         type="submit"
+        data-submitting-label="正在生成..."
       >
         生成安装提示词
       </button>

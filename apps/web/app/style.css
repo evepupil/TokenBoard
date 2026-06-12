@@ -144,7 +144,8 @@ input[type='file'] {
   }
 }
 
-button {
+button,
+a[data-link-button='true'] {
   transform-origin: center;
   transition:
     transform 120ms ease,
@@ -155,12 +156,14 @@ button {
     filter 160ms ease;
 }
 
-button:hover:not(:disabled):not([aria-disabled='true']) {
+button:hover:not(:disabled):not([aria-disabled='true']),
+a[data-link-button='true']:hover {
   transform: translateY(-1px);
   filter: brightness(1.03);
 }
 
-button:active {
+button:active,
+a[data-link-button='true']:active {
   transform: translateY(1px) scale(0.96);
   filter: brightness(0.98);
 }
@@ -202,6 +205,7 @@ button[data-submitting='true'][data-submitting-tone='danger'] {
 
 @media (prefers-reduced-motion: reduce) {
   button,
+  a[data-link-button='true'],
   button[data-copy-target],
   button[data-submitting='true'] {
     transition: none;

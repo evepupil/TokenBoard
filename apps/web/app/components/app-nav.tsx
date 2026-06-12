@@ -55,8 +55,8 @@ export function AppNav(props: AppNavProps) {
           {isAuthenticated ? <NavLink compact={props.compact} href="/settings/profile" active={props.active === 'profile'} shortLabel="资料">公开资料</NavLink> : null}
           {isAuthenticated ? null : <NavLink compact={props.compact} href="/auth/sign-in">登录</NavLink>}
           {isAuthenticated ? (
-            <form class="xl:hidden" method="post" action="/auth/sign-out">
-              <button class={signOutButtonClass} type="submit">退出登录</button>
+            <form class="xl:hidden" method="post" action="/auth/sign-out" data-submit-feedback="true">
+              <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">退出登录</button>
             </form>
           ) : null}
         </div>
@@ -67,8 +67,8 @@ export function AppNav(props: AppNavProps) {
         <ThemeToggle />
         <RepositoryLink />
         {isAuthenticated ? (
-          <form method="post" action="/auth/sign-out">
-            <button class={signOutButtonClass} type="submit">退出登录</button>
+          <form method="post" action="/auth/sign-out" data-submit-feedback="true">
+            <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">退出登录</button>
           </form>
         ) : null}
       </div>

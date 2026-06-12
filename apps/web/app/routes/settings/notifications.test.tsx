@@ -188,6 +188,8 @@ describe('NotificationsPage', () => {
     expect(html).toContain('href="/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
     expect(html).toContain('name="reportId" value="drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
     expect(html).toContain('value="revoke-report-share"')
+    expect(html).toContain('data-submitting-label="正在撤销..."')
+    expect(html).toContain('data-submitting-tone="danger"')
     expect(html).toContain('查看')
   })
 
@@ -211,6 +213,8 @@ describe('NotificationsPage', () => {
     expect(html).toContain('name="dailyReportShareEnabled"')
     expect(html).toContain('app-surface-subtle flex flex-col gap-3 rounded-xl')
     expect(html).toContain('value="update-share-settings"')
+    expect(html).toContain('data-submit-feedback="true"')
+    expect(html).toContain('data-submitting-label="正在保存..."')
     expect(html).not.toContain('name="dailyReportShareEnabled" checked')
   })
 })
