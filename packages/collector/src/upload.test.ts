@@ -75,8 +75,8 @@ describe('uploadSnapshots', () => {
     expect(requests[1].body).toEqual({ snapshots: [changedSnapshot] })
   })
 
-  test('does not call the server when there are no collected snapshots', async () => {
-    const requests: unknown[] = []
+  test('acks sync when there are no collected snapshots', async () => {
+    const requests: Array<{ url: string; body: unknown }> = []
 
     const result = await uploadSnapshots(
       {
@@ -85,14 +85,19 @@ describe('uploadSnapshots', () => {
         timezone: 'Asia/Shanghai'
       },
       [],
-      async () => {
-        requests.push('called')
-        return { ok: true, async json() { return {} } } as Response
+      async (url, init) => {
+        requests.push({
+          url,
+          body: init.body ? JSON.parse(String(init.body)) : null
+        })
+        return { ok: true, async json() { return { upserted: 0 } } } as Response
       }
     )
 
     expect(result).toEqual({ upserted: 0, skipped: 0 })
-    expect(requests).toEqual([])
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url).toBe('https://tokenboard.example.com/api/v1/ingest')
+    expect(requests[0].body).toEqual({ snapshots: [] })
   })
 
   test('acks sync when every snapshot already exists on the server', async () => {

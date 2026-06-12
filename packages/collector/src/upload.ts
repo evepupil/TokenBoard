@@ -26,7 +26,8 @@ export async function uploadSnapshots(
   fetcher: Fetcher = fetch
 ): Promise<unknown> {
   if (snapshots.length === 0) {
-    return { upserted: 0, skipped: 0 }
+    const upserted = await uploadSnapshotBatch(config, [], fetcher)
+    return { upserted, skipped: 0 }
   }
 
   let upserted = 0
