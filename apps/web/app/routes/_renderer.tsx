@@ -2,6 +2,8 @@ import { jsxRenderer } from 'hono/jsx-renderer'
 import { Link } from 'honox/server'
 import {
   getThemeToggleTargetLabel,
+  initialColorScheme,
+  mobileNightModeOptOutMeta,
   themeChromeColors,
   themeColorSchemes,
   themeKey
@@ -71,7 +73,8 @@ export default jsxRenderer(({ children }) => {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta name="color-scheme" content="dark light" />
+        <meta name="color-scheme" content={initialColorScheme} />
+        <meta name={mobileNightModeOptOutMeta.name} content={mobileNightModeOptOutMeta.content} />
         <meta name="theme-color" content={themeChromeColors.dark} />
         <link rel="icon" type="image/svg+xml" href="/logo.svg" />
         <link rel="alternate icon" href="/favicon.ico" />

@@ -199,6 +199,68 @@ describe('notification service', () => {
     expect(bindings.flat()).toContain('Webhook returned 500: provider failed')
   })
 
+  test('uses a this-safe default fetcher for test webhook delivery', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const fetchCalls: Array<{ url: string; body: string }> = []
+    const originalFetch = globalThis.fetch
+    const thisSensitiveFetch = function (
+      this: unknown,
+      url: RequestInfo | URL,
+      init?: RequestInit
+    ) {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
+      }
+      fetchCalls.push({ url: String(url), body: String(init?.body) })
+      return Promise.resolve(new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 }))
+    } as typeof fetch
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('sessionCount')) return reportTotalsRow()
+                return null
+              },
+              async all() {
+                return { results: [] }
+              },
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    try {
+      vi.stubGlobal('fetch', thisSensitiveFetch)
+
+      const result = await sendWebhookTest({
+        env: {
+          DB: db,
+          WEBHOOK_ENCRYPTION_KEY: secret,
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+        },
+        userId: 'user_1',
+        subscriptionId: 'sub_1',
+        now: new Date('2026-04-29T01:31:00.000Z')
+      })
+
+      expect(result).toEqual({ status: 'success' })
+      expect(fetchCalls).toHaveLength(1)
+      expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
+      expect(fetchCalls[0].body).toContain('测试预览：Example token 日报 2026-04-29')
+    } finally {
+      vi.stubGlobal('fetch', originalFetch)
+    }
+  })
+
   test('redacts webhook secrets before persisting delivery failures', async () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
@@ -356,7 +418,7 @@ describe('notification service', () => {
       url: RequestInfo | URL,
       init?: RequestInit
     ) {
-      if (this && this !== globalThis) {
+      if (this !== globalThis) {
         throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
       }
       fetchCalls.push({ url: String(url), body: String(init?.body) })

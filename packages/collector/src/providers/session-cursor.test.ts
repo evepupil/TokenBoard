@@ -345,7 +345,7 @@ describe('collectChangedSessionFiles', () => {
     }
   })
 
-  test('reports missing pending upload entries that still have parsed snapshots', async () => {
+  test('returns missing pending upload snapshots for cached recovery', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
     const sessionsDir = join(root, 'sessions')
     const cursorPath = join(root, 'codex-cursor.json')
@@ -393,7 +393,19 @@ describe('collectChangedSessionFiles', () => {
 
       expect(retry.files.map((item) => item.relativePath)).toEqual(['2026/05/23/changed.jsonl'])
       expect(retry.hasPendingUpload).toBe(true)
-      expect(retry.hasUnreadablePendingUpload).toBe(true)
+      expect(retry.hasUnreadablePendingUpload).toBe(false)
+      expect(retry.missingPendingSnapshots).toEqual([
+        {
+          relativePath: '2026/05/22/missing.jsonl',
+          snapshots: [
+            expect.objectContaining({
+              usageDate: '2026-05-22',
+              model: 'gpt-5',
+              totalTokens: 15
+            })
+          ]
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

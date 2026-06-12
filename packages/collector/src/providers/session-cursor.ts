@@ -10,6 +10,7 @@ import {
   stripCollectedAt,
   writeCursor,
   type CursorEntry,
+  type CursorSnapshot,
   type CursorState
 } from './session-cursor-store'
 import { walkJsonlFiles } from './session-file-walk'
@@ -52,6 +53,7 @@ export async function collectChangedSessionFiles(input: CollectInput) {
     hasPendingUpload,
     hasUnreadableChangedFile: scan.hasUnreadableChangedFile,
     hasUnreadablePendingUpload: scan.hasUnreadablePendingUpload || missing.hasUnreadablePendingUpload,
+    missingPendingSnapshots: missing.missingPendingSnapshots,
     markPendingUpload: (relativePaths?: Iterable<string>) => {
       const allowed = relativePaths ? new Set(relativePaths) : null
       for (const file of scan.files) {
@@ -158,18 +160,20 @@ function newCursorEntry(entry: { size: number; mtimeMs: number; sha256: string }
 }
 
 function preserveMissingCursorEntries(current: CursorState, next: CursorState, seen: Set<string>) {
-  let hasUnreadablePendingUpload = false
   let hasCursorCleanup = false
+  const missingPendingSnapshots: Array<{ relativePath: string; snapshots: CursorSnapshot[] }> = []
   for (const [relativePath, entry] of Object.entries(current.files)) {
     if (seen.has(relativePath)) continue
     if (entry.pendingUpload && entry.snapshots.length === 0) {
       hasCursorCleanup = true
       continue
     }
+    if (entry.pendingUpload) {
+      missingPendingSnapshots.push({ relativePath, snapshots: entry.snapshots })
+    }
     next.files[relativePath] ??= entry
-    hasUnreadablePendingUpload ||= Boolean(entry.pendingUpload)
   }
-  return { hasCursorCleanup, hasUnreadablePendingUpload }
+  return { hasCursorCleanup, hasUnreadablePendingUpload: false, missingPendingSnapshots }
 }
 
 export function updateCursorFile(

@@ -21,6 +21,7 @@
 
 .theme-light {
   color-scheme: only light;
+  -webkit-force-dark: none;
   --app-bg: #f4f0e8;
   --app-bg-soft: #ede6d8;
   --app-panel: rgba(255, 255, 255, 0.82);
@@ -36,6 +37,12 @@
   --app-shadow-subtle: 0 16px 36px rgba(68, 64, 60, 0.11), 0 1px 8px rgba(68, 64, 60, 0.06);
   --app-shadow-floating: 0 28px 64px rgba(68, 64, 60, 0.18), 0 8px 18px rgba(68, 64, 60, 0.1);
   --app-shadow-logo: 0 16px 30px rgba(68, 64, 60, 0.18), 0 4px 10px rgba(54, 83, 20, 0.16);
+}
+
+.theme-light *,
+.theme-light::before,
+.theme-light::after {
+  -webkit-force-dark: none;
 }
 
 html,
@@ -311,6 +318,44 @@ button[data-copy-target][aria-disabled='true'] {
   border-color: rgba(185, 28, 28, 0.34);
   background: rgba(248, 113, 113, 0.14);
   color: #7f1d1d;
+}
+
+.app-danger-text {
+  color: #fca5a5;
+}
+
+.theme-light .app-danger-text {
+  color: #b91c1c;
+}
+
+.app-danger-notice {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.theme-light .app-danger-notice {
+  border-color: rgba(185, 28, 28, 0.34);
+  background: rgba(248, 113, 113, 0.14);
+  color: #7f1d1d;
+}
+
+.app-danger-action {
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fca5a5;
+}
+
+.app-danger-action:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.theme-light .app-danger-action {
+  border-color: rgba(185, 28, 28, 0.34);
+  color: #b91c1c;
+}
+
+.theme-light .app-danger-action:hover {
+  background: rgba(248, 113, 113, 0.14);
 }
 
 .app-status-pill {

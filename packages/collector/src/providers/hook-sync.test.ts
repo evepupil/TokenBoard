@@ -850,7 +850,7 @@ describe('hook sync collection', () => {
     }
   })
 
-  test('fails Codex hook sync instead of acking when pending upload files disappeared', async () => {
+  test('recovers Codex hook sync from cached snapshots when pending upload files disappeared', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
     const codexHome = join(root, 'codex')
     const stateDir = join(root, 'state')
@@ -891,14 +891,24 @@ describe('hook sync collection', () => {
 
       await rm(sessionFile)
 
-      await expect(collectCodexUsage({
+      const runner = vi.fn(async () => ({ data: [] }))
+      const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
         collectedAt: '2026-05-22T10:01:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/pending upload/)
+        runner
+      })
+
+      expect(runner).not.toHaveBeenCalled()
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-22',
+          model: 'gpt-5',
+          totalTokens: 15,
+          collectedAt: '2026-05-22T10:01:00.000Z'
+        })
+      ])
     } finally {
       vi.unstubAllEnvs()
       await rm(root, { recursive: true, force: true })
@@ -1043,7 +1053,7 @@ describe('hook sync collection', () => {
     }
   })
 
-  test('fails Codex hook sync when unreadable pending files coexist with readable changes', async () => {
+  test('recovers missing pending Codex snapshots while reconciling readable changes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
     const codexHome = join(root, 'codex')
     const stateDir = join(root, 'state')
@@ -1104,7 +1114,7 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
+      const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
         collectedAt: '2026-05-23T10:00:00.000Z',
@@ -1139,9 +1149,21 @@ describe('hook sync collection', () => {
             ]
           }
         }
-      })).rejects.toThrow(/pending upload/)
+      })
 
-      expect(calls).toEqual([])
+      expect(calls.length).toBeGreaterThan(0)
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          usageDate: '2026-05-22',
+          model: 'gpt-5',
+          totalTokens: 15
+        }),
+        expect.objectContaining({
+          usageDate: '2026-05-23',
+          model: 'gpt-5',
+          totalTokens: 30
+        })
+      ])
     } finally {
       vi.unstubAllEnvs()
       await rm(root, { recursive: true, force: true })

@@ -20,6 +20,7 @@ export type HookIncrementalResult = {
   changed: boolean
   changedDates: string[]
   changedKeys: Array<{ usageDate: string; model: string }>
+  cachedSnapshots: UsageSnapshot[]
 }
 
 export async function collectHookIncremental(input: HookInput): Promise<HookIncrementalResult> {
@@ -37,14 +38,27 @@ export async function collectHookIncremental(input: HookInput): Promise<HookIncr
     throw new Error(`${input.source} hook has pending upload entries that are not readable`)
   }
 
+  const cachedSnapshots = restoreCachedPendingSnapshots(changed.missingPendingSnapshots, input.collectedAt)
   if (changed.files.length === 0) {
+    if (cachedSnapshots.length > 0) {
+      if (changed.hasCursorCleanup) {
+        await changed.commit()
+      }
+      return {
+        rangeArgs: [],
+        changed: true,
+        changedDates: [],
+        changedKeys: [],
+        cachedSnapshots
+      }
+    }
     if (changed.hasPendingUpload) {
       throw new Error(`${input.source} hook has pending upload entries but no readable changed session files`)
     }
     if (changed.hasCursorCleanup) {
       await changed.commit()
     }
-    return { rangeArgs: [], changed: false, changedDates: [], changedKeys: [] }
+    return { rangeArgs: [], changed: false, changedDates: [], changedKeys: [], cachedSnapshots: [] }
   }
 
   const parsed = await parseChangedFiles(input, changed)
@@ -59,10 +73,20 @@ export async function collectHookIncremental(input: HookInput): Promise<HookIncr
 
   return {
     rangeArgs: buildDateRangeArgs(parsed.changedDates),
-    changed: parsed.changedDates.size > 0,
+    changed: parsed.changedDates.size > 0 || cachedSnapshots.length > 0,
     changedDates: [...parsed.changedDates].sort(),
-    changedKeys: [...parsed.changedKeys.values()].sort(compareSnapshotKeys)
+    changedKeys: [...parsed.changedKeys.values()].sort(compareSnapshotKeys),
+    cachedSnapshots
   }
+}
+
+function restoreCachedPendingSnapshots(
+  missingPendingSnapshots: Array<{ snapshots: Array<Omit<UsageSnapshot, 'collectedAt'>> }>,
+  collectedAt: string
+) {
+  return missingPendingSnapshots.flatMap((entry) =>
+    entry.snapshots.map((snapshot) => ({ ...snapshot, collectedAt }))
+  )
 }
 
 async function parseChangedFiles(input: HookInput, changed: Awaited<ReturnType<typeof collectChangedSessionFiles>>) {

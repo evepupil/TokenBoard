@@ -9,6 +9,7 @@ import {
   collectHookIncremental,
   isHookMode
 } from './hook-incremental'
+import { mergeSnapshots } from './session-cursor'
 
 export type CollectUsageOptions = {
   timezone?: string
@@ -70,21 +71,25 @@ async function collectClaudeHookUsage(input: {
     return []
   }
 
-  const snapshots = await collectClaudeCcusageRange({
-    runner: input.runner,
-    packageRunner: input.packageRunner,
-    rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
-    options: input.options,
-    collectedAt: input.collectedAt,
-    env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, CLAUDE_HOME: claudeHome }
-  })
-  assertHookReconciliationSnapshots({
-    sourceLabel: 'Claude',
-    expectedDates: incremental.changedDates,
-    expectedKeys: incremental.changedKeys,
-    snapshots
-  })
-  return snapshots
+  const snapshots = incremental.rangeArgs.length > 0
+    ? await collectClaudeCcusageRange({
+        runner: input.runner,
+        packageRunner: input.packageRunner,
+        rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
+        options: input.options,
+        collectedAt: input.collectedAt,
+        env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, CLAUDE_HOME: claudeHome }
+      })
+    : []
+  if (incremental.rangeArgs.length > 0) {
+    assertHookReconciliationSnapshots({
+      sourceLabel: 'Claude',
+      expectedDates: incremental.changedDates,
+      expectedKeys: incremental.changedKeys,
+      snapshots
+    })
+  }
+  return mergeSnapshots([...snapshots, ...incremental.cachedSnapshots])
 }
 
 async function collectClaudeCcusageRange(input: {

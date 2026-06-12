@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { UsageSnapshot, UsageSource } from '@tokenboard/usage-core'
 
-type CursorSnapshot = Omit<UsageSnapshot, 'collectedAt'>
+export type CursorSnapshot = Omit<UsageSnapshot, 'collectedAt'>
 
 export type CursorEntry = {
   size: number

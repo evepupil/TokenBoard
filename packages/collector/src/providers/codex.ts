@@ -120,21 +120,25 @@ async function collectCodexHookUsage(input: {
     return []
   }
 
-  const snapshots = await collectCodexCcusageRange({
-    runner: input.runner,
-    packageRunner: input.packageRunner,
-    rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
-    options: input.options,
-    collectedAt: input.collectedAt,
-    env: { ...process.env, CODEX_HOME: codexHome }
-  })
-  assertHookReconciliationSnapshots({
-    sourceLabel: 'Codex',
-    expectedDates: incremental.changedDates,
-    expectedKeys: incremental.changedKeys,
-    snapshots
-  })
-  return snapshots
+  const snapshots = incremental.rangeArgs.length > 0
+    ? await collectCodexCcusageRange({
+        runner: input.runner,
+        packageRunner: input.packageRunner,
+        rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
+        options: input.options,
+        collectedAt: input.collectedAt,
+        env: { ...process.env, CODEX_HOME: codexHome }
+      })
+    : []
+  if (incremental.rangeArgs.length > 0) {
+    assertHookReconciliationSnapshots({
+      sourceLabel: 'Codex',
+      expectedDates: incremental.changedDates,
+      expectedKeys: incremental.changedKeys,
+      snapshots
+    })
+  }
+  return mergeSnapshots([...snapshots, ...incremental.cachedSnapshots])
 }
 
 async function collectCodexCcusageRange(input: {

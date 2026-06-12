@@ -10,6 +10,13 @@ export const themeColorSchemes = {
   light: 'only light'
 } as const
 
+export const initialColorScheme = themeColorSchemes.dark
+
+export const mobileNightModeOptOutMeta = {
+  name: 'nightmode',
+  content: 'disable'
+} as const
+
 export type Theme = keyof typeof themeChromeColors
 
 export function isTheme(value: string | null | undefined): value is Theme {

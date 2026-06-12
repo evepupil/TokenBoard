@@ -72,8 +72,9 @@ export function renderUsageCardSvg(input: UsageCardInput, configInput?: Partial<
   const metrics = buildMetricBlocks(input, config)
   const title = config.title || labels(config.language).title
   const subtitle = config.subtitle || subtitleText(input, config)
+  const colorScheme = config.theme === 'light' ? 'only light' : 'dark'
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="520" height="220" viewBox="0 0 520 220" role="img" aria-label="${escapeXml(title)}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="520" height="220" viewBox="0 0 520 220" role="img" aria-label="${escapeXml(title)}" color-scheme="${colorScheme}" style="color-scheme:${colorScheme};-webkit-force-dark:none">
   <title>${escapeXml(title)}</title>
   <defs>
     <linearGradient id="card-bg" x1="0" y1="0" x2="520" y2="220" gradientUnits="userSpaceOnUse">
