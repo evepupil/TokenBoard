@@ -1,4 +1,5 @@
 import {
+  maxUsageModelNameLength,
   snapshotHashPayload,
   snapshotKey,
   type UsageSnapshot,
@@ -10,6 +11,10 @@ type Fetcher = (url: string, init: RequestInit) => Promise<Response>
 
 const snapshotBatchSize = 30
 const transientFetchAttempts = 3
+const defaultRetryDelayMs = 250
+const maxRetryDelayMs = 5_000
+const usageDatePattern = /^\d{4}-\d{2}-\d{2}$/
+const snapshotHashPattern = /^[a-f0-9]{64}$/
 
 export type ExistingSnapshotHash = UsageSnapshotKey & {
   snapshotHash: string
@@ -21,7 +26,8 @@ export async function uploadSnapshots(
   fetcher: Fetcher = fetch
 ): Promise<unknown> {
   if (snapshots.length === 0) {
-    return { upserted: 0, skipped: 0 }
+    const upserted = await uploadSnapshotBatch(config, [], fetcher)
+    return { upserted, skipped: 0 }
   }
 
   let upserted = 0
@@ -114,7 +120,7 @@ async function fetchExistingSnapshotHashes(
     throw new Error(`Snapshot check failed with status ${response.status}`)
   }
 
-  return response.json() as Promise<{ existing: ExistingSnapshotHash[] }>
+  return parseExistingSnapshotHashResponse(await response.json())
 }
 
 function isUnsupportedSnapshotCheckResponse(response: Response) {
@@ -139,8 +145,7 @@ async function uploadSnapshotBatch(
     throw new Error(`Upload failed with status ${response.status}`)
   }
 
-  const result = (await response.json()) as Record<string, unknown>
-  return typeof result.upserted === 'number' ? result.upserted : 0
+  return parseUploadResponse(await response.json())
 }
 
 function chunkSnapshots(snapshots: UsageSnapshot[], size: number) {
@@ -155,10 +160,105 @@ async function fetchWithRetries(fetcher: Fetcher, url: string, init: RequestInit
   let lastError: unknown
   for (let attempt = 0; attempt < transientFetchAttempts; attempt += 1) {
     try {
-      return await fetcher(url, init)
+      const response = await fetcher.call(globalThis, url, init)
+      if (!isRetryableResponse(response) || attempt === transientFetchAttempts - 1) {
+        return response
+      }
+      await wait(readRetryDelayMs(response, attempt))
     } catch (error) {
       lastError = error
+      if (attempt < transientFetchAttempts - 1) {
+        await wait(readRetryDelayMs(undefined, attempt))
+      }
     }
   }
   throw lastError
+}
+
+function parseExistingSnapshotHashResponse(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.existing)) {
+    throw new Error('Snapshot check returned invalid response')
+  }
+  const existing = value.existing
+  if (!existing.every(isExistingSnapshotHash)) {
+    throw new Error('Snapshot check returned invalid response')
+  }
+  return { existing }
+}
+
+function isExistingSnapshotHash(value: unknown): value is ExistingSnapshotHash {
+  if (!isRecord(value)) return false
+  return isUsageSource(value.source) &&
+    isUsageDate(value.usageDate) &&
+    isModelName(value.model) &&
+    isSnapshotHash(value.snapshotHash)
+}
+
+function parseUploadResponse(value: unknown) {
+  if (!isRecord(value) || !isNonNegativeInteger(value.upserted)) {
+    throw new Error('Upload returned invalid response')
+  }
+  return value.upserted
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isUsageSource(value: unknown): value is ExistingSnapshotHash['source'] {
+  return value === 'claude-code' || value === 'codex'
+}
+
+function isUsageDate(value: unknown): value is string {
+  return typeof value === 'string' && usageDatePattern.test(value)
+}
+
+function isModelName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxUsageModelNameLength
+}
+
+function isSnapshotHash(value: unknown): value is string {
+  return typeof value === 'string' && snapshotHashPattern.test(value)
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
+function isRetryableResponse(response: Response) {
+  return response.status === 408 ||
+    response.status === 429 ||
+    response.status === 500 ||
+    response.status === 502 ||
+    response.status === 503 ||
+    response.status === 504
+}
+
+function readRetryDelayMs(response: Response | undefined, attempt: number) {
+  return readRetryAfterMs(response) ?? readDefaultRetryDelayMs(attempt)
+}
+
+function readRetryAfterMs(response: Response | undefined) {
+  const header = response?.headers?.get?.('retry-after')
+  if (!header) return null
+  const seconds = Number.parseFloat(header)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(maxRetryDelayMs, seconds * 1000)
+  }
+  const dateMs = Date.parse(header)
+  if (!Number.isNaN(dateMs)) {
+    return Math.min(maxRetryDelayMs, Math.max(0, dateMs - Date.now()))
+  }
+  return null
+}
+
+function readDefaultRetryDelayMs(attempt: number) {
+  const configured = Number.parseInt(process.env.TOKENBOARD_FETCH_RETRY_DELAY_MS || '', 10)
+  const base = Number.isFinite(configured) && configured >= 0 ? configured : defaultRetryDelayMs
+  return Math.min(maxRetryDelayMs, base * 2 ** attempt)
+}
+
+function wait(delayMs: number) {
+  if (delayMs <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, delayMs))
 }

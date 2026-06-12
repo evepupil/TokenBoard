@@ -41,6 +41,7 @@ export function ProfilePage(props: { profile: ProfileSettings; saved: boolean; e
         method="post"
         class="mx-auto grid max-w-6xl items-start gap-5 lg:grid-cols-[minmax(22rem,0.8fr)_minmax(0,1.2fr)]"
         data-public-card-form="true"
+        data-submit-feedback="true"
       >
         <ProfileSettingsCard profile={props.profile} saved={props.saved} />
         <PublicLinksCard profile={props.profile} />
@@ -96,7 +97,7 @@ function ProfileSettingsFields(props: { profile: ProfileSettings }) {
         开启后会自动公开资料，排行榜才会统计你的数据。
       </ProfileCheckbox>
       <div class="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
-        <Button class="w-full sm:w-auto" type="submit">保存设置</Button>
+        <Button class="w-full sm:w-auto" type="submit" data-submitting-label="正在保存...">保存设置</Button>
         <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard">返回控制台</LinkButton>
       </div>
     </div>

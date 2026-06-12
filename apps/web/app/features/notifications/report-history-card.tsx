@@ -52,6 +52,7 @@ function DailyReportShareSettings(props: { enabled: boolean }) {
     <form
       method="post"
       class="app-surface-subtle flex flex-col gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4 sm:flex-row sm:items-center sm:justify-between"
+      data-submit-feedback="true"
     >
       <input type="hidden" name="action" value="update-share-settings" />
       <label class="flex min-h-11 items-center gap-3 text-sm font-bold text-[var(--app-text)]">
@@ -62,7 +63,7 @@ function DailyReportShareSettings(props: { enabled: boolean }) {
         <span class="text-xs text-[var(--app-muted)]">
           {props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}
         </span>
-        <Button type="submit">保存分享设置</Button>
+        <Button type="submit" data-submitting-label="正在保存...">保存分享设置</Button>
       </div>
     </form>
   )
@@ -85,7 +86,7 @@ function DailyReportHistoryRow(props: { item: DailyReportHistoryItem }) {
       <TableCell class="rounded-r-xl text-xs text-[var(--app-muted)]">
         <div>{props.item.generatedAt}</div>
         <a
-          class="mt-2 inline-flex min-h-8 items-center rounded-lg border border-[var(--app-border)] px-3 py-1 font-bold text-[var(--app-text)] transition hover:border-lime-300"
+          class="mt-2 inline-flex min-h-11 items-center rounded-lg border border-[var(--app-border)] px-3 py-2 font-bold text-[var(--app-text)] transition hover:border-lime-300"
           href={props.item.reportUrl}
         >
           查看
@@ -103,13 +104,15 @@ function ReportShareAction(props: { item: DailyReportHistoryItem }) {
   }
 
   return (
-    <form method="post" class="mt-2">
+    <form method="post" class="mt-2" data-submit-feedback="true">
       <input type="hidden" name="action" value="revoke-report-share" />
       <input type="hidden" name="reportId" value={props.item.id} />
       <button
-        class="app-danger-action inline-flex min-h-8 items-center rounded-lg border px-3 py-1 font-bold transition"
+        class="app-danger-action inline-flex min-h-11 items-center rounded-lg border px-3 py-2 font-bold transition"
         type="submit"
         data-confirm="确认撤销这条日报的未登录访问？"
+        data-submitting-label="正在撤销..."
+        data-submitting-tone="danger"
       >
         撤销分享
       </button>

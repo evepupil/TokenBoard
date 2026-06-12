@@ -133,7 +133,7 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
 
 function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
   return (
-    <form method="post" class="mt-4 grid gap-3 md:grid-cols-2">
+    <form method="post" class="mt-4 grid gap-3 md:grid-cols-2" data-submit-feedback="true">
       <input type="hidden" name="subscriptionId" value={props.subscription.id} />
       <Label>
         名称
@@ -191,17 +191,20 @@ function Meta(props: { label: string; value: string }) {
 function SubscriptionActions(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap md:col-span-2">
-      <Button class="w-full sm:w-auto" type="submit" name="action" value="update">保存</Button>
-      <SubscriptionAction action="test">测试发送</SubscriptionAction>
-      <SubscriptionAction action={props.subscription.enabled ? 'disable' : 'enable'}>
+      <Button class="w-full sm:w-auto" type="submit" name="action" value="update" data-submitting-label="正在保存...">保存</Button>
+      <SubscriptionAction action="test" submittingLabel="正在发送...">测试发送</SubscriptionAction>
+      <SubscriptionAction
+        action={props.subscription.enabled ? 'disable' : 'enable'}
+        submittingLabel={props.subscription.enabled ? '正在停用...' : '正在启用...'}
+      >
         {props.subscription.enabled ? '停用' : '启用'}
       </SubscriptionAction>
-      <SubscriptionAction action="delete" confirm="确认删除这个 Webhook 通知配置？" variant="danger">删除</SubscriptionAction>
+      <SubscriptionAction action="delete" confirm="确认删除这个 Webhook 通知配置？" submittingLabel="正在删除..." variant="danger">删除</SubscriptionAction>
     </div>
   )
 }
 
-function SubscriptionAction(props: { action: string; children: string; confirm?: string; variant?: 'danger' }) {
+function SubscriptionAction(props: { action: string; children: string; confirm?: string; submittingLabel?: string; variant?: 'danger' }) {
   return (
     <button
       class={`min-h-11 rounded-xl border px-4 py-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${props.variant === 'danger'
@@ -211,6 +214,8 @@ function SubscriptionAction(props: { action: string; children: string; confirm?:
       name="action"
       value={props.action}
       data-confirm={props.confirm}
+      data-submitting-label={props.submittingLabel || '处理中...'}
+      data-submitting-tone={props.variant}
     >
       {props.children}
     </button>
@@ -233,7 +238,7 @@ function CreateSubscriptionCard(props: { timezone: string; disabled: boolean }) 
 
 function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) {
   return (
-    <form method="post" class="space-y-4">
+    <form method="post" class="space-y-4" data-submit-feedback="true">
       <input type="hidden" name="action" value="create" />
       <Label>
         名称
@@ -255,7 +260,7 @@ function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) 
       <ScheduleTimeFields scheduleTimesLocal={['18:00']} disabled={props.disabled} />
       <ScheduleWeekdayFields scheduleWeekdays={defaultScheduleWeekdayValues()} disabled={props.disabled} />
       <CreateChecks disabled={props.disabled} />
-      <Button class="w-full" type="submit" disabled={props.disabled}>保存 Webhook</Button>
+      <Button class="w-full" type="submit" disabled={props.disabled} data-submitting-label="正在保存 Webhook...">保存 Webhook</Button>
     </form>
   )
 }

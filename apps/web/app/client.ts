@@ -16,6 +16,7 @@ initTimezoneInputs()
 
 initCopyButtons()
 initConfirmableActions()
+initSubmitFeedback()
 initAppNavigation()
 initCustomSelects()
 initPublicCardPreview()
@@ -101,6 +102,46 @@ function initConfirmableActions() {
       event.stopPropagation()
     }
   })
+}
+
+function initSubmitFeedback() {
+  document.addEventListener('submit', (event) => {
+    const form = event.target
+    if (!(form instanceof HTMLFormElement)) return
+    if (form.dataset.submitFeedback !== 'true') return
+    if (form.dataset.submitting === 'true') {
+      event.preventDefault()
+      return
+    }
+
+    const submitter = event.submitter instanceof HTMLButtonElement ? event.submitter : null
+    preserveSubmitterValue(form, submitter)
+    form.dataset.submitting = 'true'
+    form.setAttribute('aria-busy', 'true')
+
+    form.querySelectorAll<HTMLButtonElement>('button[type="submit"], button:not([type])').forEach((button) => {
+      button.disabled = true
+      if (button === submitter) {
+        button.dataset.submitting = 'true'
+        button.dataset.originalLabel = button.textContent?.trim() || ''
+        button.textContent = button.dataset.submittingLabel || '处理中...'
+      }
+    })
+  })
+}
+
+function preserveSubmitterValue(form: HTMLFormElement, submitter: HTMLButtonElement | null) {
+  if (!submitter?.name) return
+  const existing = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="hidden"][data-submit-feedback-value]'))
+    .some((input) => input.dataset.submitFeedbackValue === submitter.name)
+  if (existing) return
+
+  const input = document.createElement('input')
+  input.type = 'hidden'
+  input.name = submitter.name
+  input.value = submitter.value
+  input.dataset.submitFeedbackValue = submitter.name
+  form.appendChild(input)
 }
 
 function showToast(message: string, tone: ToastTone) {

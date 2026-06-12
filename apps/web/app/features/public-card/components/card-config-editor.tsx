@@ -154,8 +154,15 @@ export function PublicCardConfigEditor(props: {
       </div>
 
       <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:flex-wrap">
-        <Button class="w-full sm:w-auto" type="submit">保存设置</Button>
-        <Button class="w-full sm:w-auto" type="submit" variant="secondary" name="cardAction" value="reset">
+        <Button class="w-full sm:w-auto" type="submit" data-submitting-label="正在保存...">保存设置</Button>
+        <Button
+          class="w-full sm:w-auto"
+          type="submit"
+          variant="secondary"
+          name="cardAction"
+          value="reset"
+          data-submitting-label="正在还原..."
+        >
           <LucideIcon icon={RotateCcw} size={16} />
           还原默认卡片
         </Button>

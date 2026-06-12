@@ -9,13 +9,13 @@ export function UsageDetailsFiltersForm(props: {
   devices: UserDevice[]
 }) {
   return (
-    <form method="get" class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]">
+    <form method="get" class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]" data-submit-feedback="true">
       <SourceFilter filters={props.filters} />
       <DeviceFilter filters={props.filters} devices={props.devices} />
       <DateFilter label="开始日期" name="startDate" value={props.filters.startDate} />
       <DateFilter label="结束日期" name="endDate" value={props.filters.endDate} />
       <ModelFilter value={props.filters.modelQuery} />
-      <Button class="h-11 w-full sm:mt-7" type="submit">应用</Button>
+      <Button class="h-11 w-full sm:mt-7" type="submit" data-submitting-label="正在应用...">应用</Button>
       <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
     </form>
   )

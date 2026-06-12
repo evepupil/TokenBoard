@@ -39,7 +39,7 @@ function AuthScreen(props: { hasError: boolean }) {
         </div>
 
         <Card class="p-6 backdrop-blur">
-          <form method="post">
+          <form method="post" data-submit-feedback="true">
             <div class="mb-6 flex items-center justify-between gap-4">
               <div>
                 <p class="app-accent-text text-sm">需要 GitHub 账号</p>
@@ -52,7 +52,7 @@ function AuthScreen(props: { hasError: boolean }) {
                 GitHub 登录失败。请检查 OAuth 配置后重试。
               </p>
             ) : null}
-            <Button class="w-full rounded-md" type="submit">
+            <Button class="w-full rounded-md" type="submit" data-submitting-label="正在跳转 GitHub...">
               <GitHubMark />
               使用 GitHub 继续
             </Button>

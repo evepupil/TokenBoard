@@ -56,6 +56,12 @@ describe('NotificationsPage', () => {
     expect(html).toContain('name="name"')
     expect(html).toContain('name="timezone"')
     expect(html).toContain('autocomplete="off"')
+    expect(html).toContain('data-submit-feedback="true"')
+    expect(html).toContain('data-submitting-label="正在保存..."')
+    expect(html).toContain('data-submitting-label="正在发送..."')
+    expect(html).toContain('data-submitting-label="正在停用..."')
+    expect(html).toContain('data-submitting-label="正在删除..."')
+    expect(html).toContain('data-submitting-tone="danger"')
   })
 
   test('shows encryption configuration warning', async () => {
@@ -76,6 +82,7 @@ describe('NotificationsPage', () => {
 
     expect(html).toContain('WEBHOOK_ENCRYPTION_KEY')
     expect(html).toContain('disabled')
+    expect(html).toContain('data-submitting-label="正在保存 Webhook..."')
   })
 
   test('shows failed test send feedback separately from success feedback', async () => {
@@ -179,8 +186,11 @@ describe('NotificationsPage', () => {
     expect(html).toContain('$1.23')
     expect(html).toContain('gpt-5')
     expect(html).toContain('href="/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
+    expect(html).toContain('inline-flex min-h-11 items-center rounded-lg')
     expect(html).toContain('name="reportId" value="drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"')
     expect(html).toContain('value="revoke-report-share"')
+    expect(html).toContain('data-submitting-label="正在撤销..."')
+    expect(html).toContain('data-submitting-tone="danger"')
     expect(html).toContain('查看')
   })
 
@@ -204,6 +214,8 @@ describe('NotificationsPage', () => {
     expect(html).toContain('name="dailyReportShareEnabled"')
     expect(html).toContain('app-surface-subtle flex flex-col gap-3 rounded-xl')
     expect(html).toContain('value="update-share-settings"')
+    expect(html).toContain('data-submit-feedback="true"')
+    expect(html).toContain('data-submitting-label="正在保存..."')
     expect(html).not.toContain('name="dailyReportShareEnabled" checked')
   })
 })
