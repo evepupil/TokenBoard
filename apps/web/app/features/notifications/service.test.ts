@@ -163,7 +163,9 @@ describe('notification service', () => {
             bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
                 if (sql.includes('sessionCount')) {
                   return reportTotalsRow()
                 }
@@ -230,6 +232,7 @@ describe('notification service', () => {
                     lastError: 'Illegal invocation: function called with incorrect `this` reference.'
                   })
                 }
+                if (sql.includes('INSERT INTO daily_report_history')) return testReportShareRow()
                 if (sql.includes('sessionCount')) return reportTotalsRow()
                 return null
               },
@@ -265,6 +268,9 @@ describe('notification service', () => {
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
       expect(fetchCalls[0].body).toContain('## 测试预览：Example token 日报')
       expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
+      expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
+      expect(bindings.some((values) => values.includes('test-preview'))).toBe(true)
       expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('last_error = NULL'))).toBe(true)
       expect(bindings.flat()).toContain('2026-04-29T01:31:00.000Z')
     } finally {
@@ -283,7 +289,9 @@ describe('notification service', () => {
             bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
                 if (sql.includes('sessionCount')) return reportTotalsRow()
                 return null
               },
@@ -2127,6 +2135,14 @@ function reportTotalsRow() {
     topModels: JSON.stringify([
       { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
     ])
+  }
+}
+
+function testReportShareRow() {
+  return {
+    id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    shareRevokedAt: null,
+    isNew: 1
   }
 }
 

@@ -142,7 +142,7 @@ describe('NotificationsPage', () => {
             id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             displayName: 'Example',
             reportDate: '2026-04-29',
-            scheduleSlot: '2026-04-29T18:00',
+            scheduleSlot: 'test-preview',
             timezone: 'Asia/Shanghai',
             dashboardUrl: 'https://tokenboard.example.com/dashboard',
             totalTokens: 1200,
@@ -179,7 +179,8 @@ describe('NotificationsPage', () => {
     expect(html).toContain('历史日报')
     expect(html).toContain('保留最近 7 天')
     expect(html).toContain('2026-04-29')
-    expect(html).toContain('18:00')
+    expect(html).toContain('测试预览')
+    expect(html).not.toContain('test-preview')
     expect(html).toContain('1,200')
     expect(html).toContain('900')
     expect(html).toContain('25%')

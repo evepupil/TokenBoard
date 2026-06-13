@@ -46,6 +46,7 @@ import type {
 } from './delivery-types'
 
 const defaultWebhookFetcher: Fetcher = (url, init) => globalThis.fetch.call(globalThis, url, init)
+const testReportHistoryScheduleSlot = 'test-preview'
 
 class SuccessfulDeliveryPersistenceError extends Error {
   constructor(error: unknown) {
@@ -207,15 +208,16 @@ async function prepareReportHistoryForDelivery(
   input: CheckedDeliveryInput,
   report: DailyTokenReport
 ): Promise<ReportHistoryDeliveryState> {
-  const retentionDays = input.kind === 'daily'
+  const scheduleSlot = reportHistoryScheduleSlot(input)
+  const retentionDays = scheduleSlot
     ? dailyReportHistoryRetentionDays(input.env)
     : 0
-  const share = input.kind === 'daily' && input.scheduleSlot
+  const share = scheduleSlot
     ? await prepareDailyReportHistoryForDelivery({
         env: input.env,
         subscription: input.subscription,
         report,
-        scheduleSlot: input.scheduleSlot,
+        scheduleSlot,
         now: input.now
       })
     : null
@@ -223,6 +225,11 @@ async function prepareReportHistoryForDelivery(
     report.reportUrl = share.reportUrl
   }
   return { retentionDays, share }
+}
+
+function reportHistoryScheduleSlot(input: CheckedDeliveryInput) {
+  if (input.kind === 'daily') return input.scheduleSlot
+  return input.subscription.dailyReportShareEnabled ? testReportHistoryScheduleSlot : null
 }
 
 async function sendReportOrCleanup(

@@ -69,6 +69,16 @@ describe('daily report share route', () => {
     expect(await response.text()).toContain('日报不存在')
   })
 
+  test('renders test preview report links with a user-facing schedule label', async () => {
+    mockedGetDailyReportHistoryById.mockResolvedValue(reportItem({ scheduleSlot: 'test-preview' }) as never)
+    const response = await GET[0](pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never, async () => undefined) as Response
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain('测试预览')
+    expect(html).not.toContain('test-preview')
+  })
+
   test('returns 404 for invalid report ids without touching auth or the database', async () => {
     const response = await GET[0](pageContext('bad id') as never, async () => undefined) as Response
 
@@ -164,7 +174,11 @@ function pageContext(id: string, cookie?: string, env?: Record<string, unknown>)
   }
 }
 
-function reportItem() {
+function reportItem(overrides: Partial<ReturnType<typeof reportItemBase>> = {}) {
+  return { ...reportItemBase(), ...overrides }
+}
+
+function reportItemBase() {
   return {
     id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     displayName: 'Example',

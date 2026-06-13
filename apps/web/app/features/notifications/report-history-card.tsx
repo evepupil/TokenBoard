@@ -176,5 +176,6 @@ function formatSource(source: string) {
 }
 
 function scheduleSlotLabel(scheduleSlot: string) {
+  if (scheduleSlot === 'test-preview') return '测试预览'
   return scheduleSlot.includes('T') ? scheduleSlot.slice(scheduleSlot.indexOf('T') + 1) : scheduleSlot
 }
