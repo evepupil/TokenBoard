@@ -4,7 +4,7 @@ import type { WebhookProvider } from './schema'
 
 const wecomMarkdownMaxBytes = 4096
 const wecomListLimit = 3
-const wecomTruncatedSuffix = '\n\n<font color="comment">内容已截断，请打开 TokenBoard 查看完整日报。</font>'
+const wecomTruncatedSuffix = '\n\n<font color="comment">内容已截断，请打开 TokenBoard 查看更多统计。</font>'
 
 export type DailyTokenReport = {
   displayName: string
@@ -120,7 +120,7 @@ export function formatWeComDailyReport(report: DailyTokenReport) {
     '',
     report.reportUrl
       ? `[打开日报详情](${report.reportUrl})`
-      : `[打开 TokenBoard](${report.dashboardUrl})`
+      : `[查看排行榜](${report.dashboardUrl})`
   ]
 
   return truncateUtf8(lines.join('\n'), wecomMarkdownMaxBytes, wecomTruncatedSuffix)
@@ -143,7 +143,7 @@ export function formatDailyReport(report: DailyTokenReport) {
     `统计时区：${report.timezone}`,
     report.reportUrl
       ? `[查看本次日报](${report.reportUrl})`
-      : `[打开 TokenBoard](${report.dashboardUrl})`
+      : `[查看排行榜](${report.dashboardUrl})`
   ]
 
   return lines.join('\n')

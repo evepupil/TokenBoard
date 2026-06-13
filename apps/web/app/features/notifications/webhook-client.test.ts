@@ -159,7 +159,7 @@ function dailyReport(): DailyTokenReport {
     displayName: 'Example',
     reportDate: '2026-04-29',
     timezone: 'Asia/Shanghai',
-    dashboardUrl: 'https://tokenboard.example.com/dashboard',
+    dashboardUrl: 'https://tokenboard.example.com/leaderboards',
     totalTokens: 100,
     totalTokensWithoutCacheRead: 80,
     cacheReadRate: 0.2,

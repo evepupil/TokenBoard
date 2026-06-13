@@ -278,6 +278,63 @@ describe('notification service', () => {
     }
   })
 
+  test('links test webhook deliveries to public leaderboards when report sharing is disabled', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const fetchCalls: Array<{ url: string; body: string }> = []
+    const statements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
+                if (sql.includes('sessionCount')) return reportTotalsRow()
+                return null
+              },
+              async all() {
+                return { results: [] }
+              },
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const result = await sendWebhookTest({
+      env: {
+        DB: db,
+        WEBHOOK_ENCRYPTION_KEY: secret,
+        BETTER_AUTH_URL: 'https://tokenboard.example.com',
+        TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+      },
+      userId: 'user_1',
+      subscriptionId: 'sub_1',
+      now: new Date('2026-04-29T01:31:00.000Z'),
+      fetcher: async (url, init) => {
+        fetchCalls.push({ url: String(url), body: String(init?.body) })
+        return new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
+      }
+    })
+
+    expect(result).toEqual({ status: 'success' })
+    expect(fetchCalls).toHaveLength(1)
+    expect(fetchCalls[0].body).toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
+    expect(fetchCalls[0].body).not.toContain('/dashboard')
+    expect(fetchCalls[0].body).not.toContain('/reports/daily/')
+    expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(false)
+    expect(bindings.some((values) => values.includes('test-preview'))).toBe(false)
+  })
+
   test('redacts webhook secrets before persisting delivery failures', async () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
@@ -401,7 +458,7 @@ describe('notification service', () => {
     expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
     expect(fetchCalls[0].body).toContain('缓存率 25%')
     expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_')
-    expect(fetchCalls[0].body).not.toContain('[打开 TokenBoard](https://tokenboard.example.com)')
+    expect(fetchCalls[0].body).not.toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
     expect(fetchCalls[0].signal).toBeInstanceOf(AbortSignal)
     expect(statements.some((sql) => sql.includes('INSERT INTO webhook_delivery_logs'))).toBe(true)
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
@@ -2148,7 +2205,7 @@ function testReportShareRow() {
 
 function historyJsonValues(bindings: unknown[][]) {
   const historyBindings = bindings.find((values) =>
-    values.includes('https://tokenboard.example.com/dashboard') &&
+    values.includes('https://tokenboard.example.com/leaderboards') &&
     values.includes('2026-04-29T01:31:00.000Z')
   )
   if (!historyBindings) throw new Error('Missing daily report history bindings')

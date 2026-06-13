@@ -1,6 +1,6 @@
 import { ApiError } from '../../lib/errors'
 import {
-  dashboardUrl,
+  publicLeaderboardUrl,
   shouldPruneWebhookDeliveryLogs,
   webhookCronBatchSize,
   webhookLogRetentionDays,
@@ -195,7 +195,7 @@ async function reportForDelivery(input: CheckedDeliveryInput) {
     displayName: input.subscription.displayName,
     reportDate: input.reportDate,
     timezone: input.subscription.timezone,
-    dashboardUrl: dashboardUrl(input.env),
+    dashboardUrl: publicLeaderboardUrl(input.env),
     summaryStrict: usageSummaryStrictMode(input.env)
   })
   if (input.kind === 'test') {

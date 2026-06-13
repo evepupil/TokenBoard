@@ -5,7 +5,7 @@ const report: DailyTokenReport = {
   displayName: 'Example',
   reportDate: '2026-04-29',
   timezone: 'Asia/Shanghai',
-  dashboardUrl: 'https://tokenboard.example.com/dashboard',
+  dashboardUrl: 'https://tokenboard.example.com/leaderboards',
   totalTokens: 1200,
   totalTokensWithoutCacheRead: 900,
   costUsd: 1.23,
@@ -33,7 +33,17 @@ describe('notification adapters', () => {
     expect(text).toContain(
       '[查看本次日报](https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)'
     )
-    expect(text).not.toContain('[打开 TokenBoard](https://tokenboard.example.com/dashboard)')
+    expect(text).not.toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
+  })
+
+  test('falls back to the public leaderboards when no shared report URL exists', () => {
+    const text = formatDailyReport({ ...report, reportUrl: undefined })
+    const wecomText = formatWeComDailyReport({ ...report, reportUrl: undefined })
+
+    expect(text).toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
+    expect(wecomText).toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
+    expect(text).not.toContain('/dashboard')
+    expect(wecomText).not.toContain('/dashboard')
   })
 
   test('builds WeCom markdown payload', async () => {
