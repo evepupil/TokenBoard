@@ -104,9 +104,9 @@ export function maskWebhookUrl(url: URL) {
   return `${url.host}/...`
 }
 
-export function dashboardUrl(env: Pick<WebhookEnv, 'BETTER_AUTH_URL'>) {
+export function publicLeaderboardUrl(env: Pick<WebhookEnv, 'BETTER_AUTH_URL'>) {
   const origin = env.BETTER_AUTH_URL?.replace(/\/$/, '')
-  return origin ? `${origin}/dashboard` : '/dashboard'
+  return origin ? `${origin}/leaderboards` : '/leaderboards'
 }
 
 const providerHostRules: Record<WebhookProvider, (url: URL) => boolean> = {

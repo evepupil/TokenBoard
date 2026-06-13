@@ -163,7 +163,9 @@ describe('notification service', () => {
             bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
                 if (sql.includes('sessionCount')) {
                   return reportTotalsRow()
                 }
@@ -203,6 +205,8 @@ describe('notification service', () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
     const fetchCalls: Array<{ url: string; body: string }> = []
+    const statements: string[] = []
+    const bindings: unknown[][] = []
     const originalFetch = globalThis.fetch
     const thisSensitiveFetch = function (
       this: unknown,
@@ -217,11 +221,18 @@ describe('notification service', () => {
     } as typeof fetch
     const db = {
       prepare(sql: string) {
+        statements.push(sql)
         return {
-          bind() {
+          bind(...values: unknown[]) {
+            bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, {
+                    lastError: 'Illegal invocation: function called with incorrect `this` reference.'
+                  })
+                }
+                if (sql.includes('INSERT INTO daily_report_history')) return testReportShareRow()
                 if (sql.includes('sessionCount')) return reportTotalsRow()
                 return null
               },
@@ -255,10 +266,73 @@ describe('notification service', () => {
       expect(result).toEqual({ status: 'success' })
       expect(fetchCalls).toHaveLength(1)
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
-      expect(fetchCalls[0].body).toContain('测试预览：Example token 日报 2026-04-29')
+      expect(fetchCalls[0].body).toContain('## 测试预览：Example token 日报')
+      expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
+      expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
+      expect(bindings.some((values) => values.includes('test-preview'))).toBe(true)
+      expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('last_error = NULL'))).toBe(true)
+      expect(bindings.flat()).toContain('2026-04-29T01:31:00.000Z')
     } finally {
       vi.stubGlobal('fetch', originalFetch)
     }
+  })
+
+  test('links test webhook deliveries to public leaderboards when report sharing is disabled', async () => {
+    const secret = testEncryptionKey
+    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
+    const fetchCalls: Array<{ url: string; body: string }> = []
+    const statements: string[] = []
+    const bindings: unknown[][] = []
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind(...values: unknown[]) {
+            bindings.push(values)
+            return {
+              async first() {
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
+                if (sql.includes('sessionCount')) return reportTotalsRow()
+                return null
+              },
+              async all() {
+                return { results: [] }
+              },
+              async run() {
+                return { meta: { changes: 1 } }
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const result = await sendWebhookTest({
+      env: {
+        DB: db,
+        WEBHOOK_ENCRYPTION_KEY: secret,
+        BETTER_AUTH_URL: 'https://tokenboard.example.com',
+        TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: '7'
+      },
+      userId: 'user_1',
+      subscriptionId: 'sub_1',
+      now: new Date('2026-04-29T01:31:00.000Z'),
+      fetcher: async (url, init) => {
+        fetchCalls.push({ url: String(url), body: String(init?.body) })
+        return new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
+      }
+    })
+
+    expect(result).toEqual({ status: 'success' })
+    expect(fetchCalls).toHaveLength(1)
+    expect(fetchCalls[0].body).toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
+    expect(fetchCalls[0].body).not.toContain('/dashboard')
+    expect(fetchCalls[0].body).not.toContain('/reports/daily/')
+    expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(false)
+    expect(bindings.some((values) => values.includes('test-preview'))).toBe(false)
   })
 
   test('redacts webhook secrets before persisting delivery failures', async () => {
@@ -272,7 +346,9 @@ describe('notification service', () => {
             bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, { dailyReportShareEnabled: false })
+                }
                 if (sql.includes('sessionCount')) return reportTotalsRow()
                 return null
               },
@@ -378,10 +454,11 @@ describe('notification service', () => {
     expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
     expect(fetchCalls).toHaveLength(1)
     expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
-    expect(fetchCalls[0].body).toContain('Example token 日报 2026-04-29')
+    expect(fetchCalls[0].body).toContain('## Example token 日报')
+    expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
     expect(fetchCalls[0].body).toContain('缓存率 25%')
     expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_')
-    expect(fetchCalls[0].body).not.toContain('[打开 TokenBoard](https://tokenboard.example.com)')
+    expect(fetchCalls[0].body).not.toContain('[查看排行榜](https://tokenboard.example.com/leaderboards)')
     expect(fetchCalls[0].signal).toBeInstanceOf(AbortSignal)
     expect(statements.some((sql) => sql.includes('INSERT INTO webhook_delivery_logs'))).toBe(true)
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
@@ -471,7 +548,8 @@ describe('notification service', () => {
       expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
       expect(fetchCalls).toHaveLength(1)
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
-      expect(fetchCalls[0].body).toContain('Example token 日报 2026-04-29')
+      expect(fetchCalls[0].body).toContain('## Example token 日报')
+      expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
       expect(statements.some((sql) => sql.includes('last_success_at'))).toBe(true)
     } finally {
       vi.stubGlobal('fetch', originalFetch)
@@ -1400,7 +1478,8 @@ describe('notification service', () => {
       expect(result).toEqual({ checked: 2, sent: 1, failed: 1, skipped: 0 })
       expect(fetchCalls).toHaveLength(1)
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=good')
-      expect(fetchCalls[0].body).toContain('Example token 日报 2026-04-29')
+      expect(fetchCalls[0].body).toContain('## Example token 日报')
+      expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
       expect(fetchCalls[0].signal).toBeInstanceOf(AbortSignal)
       expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('sub_bad'))
     } finally {
@@ -2116,9 +2195,17 @@ function reportTotalsRow() {
   }
 }
 
+function testReportShareRow() {
+  return {
+    id: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    shareRevokedAt: null,
+    isNew: 1
+  }
+}
+
 function historyJsonValues(bindings: unknown[][]) {
   const historyBindings = bindings.find((values) =>
-    values.includes('https://tokenboard.example.com/dashboard') &&
+    values.includes('https://tokenboard.example.com/leaderboards') &&
     values.includes('2026-04-29T01:31:00.000Z')
   )
   if (!historyBindings) throw new Error('Missing daily report history bindings')

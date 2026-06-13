@@ -3,6 +3,7 @@ import {
   webhookCronBatchSize,
   hasValidEncryptionKey,
   parseProviderWebhookUrl,
+  publicLeaderboardUrl,
   requireEncryptionKey,
   shouldPruneWebhookDeliveryLogs,
   webhookLogRetentionDays
@@ -104,5 +105,12 @@ describe('notification config', () => {
     expect(shouldPruneWebhookDeliveryLogs(
       new Date('2026-04-29T01:00:00.000Z')
     )).toBe(false)
+  })
+
+  test('builds public leaderboard URLs from the configured origin', () => {
+    expect(publicLeaderboardUrl({ BETTER_AUTH_URL: 'https://tokenboard.example.com/' })).toBe(
+      'https://tokenboard.example.com/leaderboards'
+    )
+    expect(publicLeaderboardUrl({})).toBe('/leaderboards')
   })
 })

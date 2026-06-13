@@ -15,26 +15,25 @@ describe('Wrangler deploy config', () => {
     expect(deployScript).toBe('node scripts/deploy.mjs')
   })
 
-  test('tracked wrangler config stays runnable for local preview', () => {
+  test('tracked wrangler config stays production deploy ready', () => {
     const config = readPackageFile('wrangler.jsonc')
     const deploymentScript = readPackageFile('scripts/deploy.mjs')
     const productionCheckScript = readPackageFile('scripts/check-production-config.mjs')
 
-    expect(config).not.toContain('"routes"')
     expect(config).not.toContain('<your-tokenboard-domain>')
-    expect(config).toContain('"BETTER_AUTH_URL": "http://localhost:8787"')
+    expect(config).toContain('"workers_dev": false')
+    expect(config).toContain('"routes"')
+    expect(config).toContain('"pattern": "tokenboard.chaosyn.com"')
+    expect(config).toContain('"BETTER_AUTH_URL": "https://tokenboard.chaosyn.com"')
     expect(config).toContain('"TOKENBOARD_DAILY_REPORT_HISTORY_DAYS": "30"')
     expect(config).toContain('"TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "50"')
     expect(config).toContain('"TOKENBOARD_USAGE_SUMMARY_STRICT": "false"')
     expect(config).toContain('"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "90"')
     expect(config).toContain('"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "5"')
-    expect(config).toContain('"database_id": "local-tokenboard-dev"')
+    expect(config).toContain('"database_id": "4af5cf99-10d9-4114-b707-f82e75f89746"')
     expect(config).toContain('"binding": "ASSETS"')
     expect(config).toContain('"run_worker_first"')
     expect(config).toContain('"run_worker_first": true')
-    expect(config).not.toMatch(/https:\/\/[a-z0-9.-]+\.[a-z]{2,}/i)
-    expect(config).not.toMatch(/"pattern":\s*"[a-z0-9.-]+\.[a-z]{2,}"/i)
-    expect(config).not.toMatch(/"database_id":\s*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/i)
     expect(deploymentScript).toContain('TOKENBOARD_WRANGLER_CONFIG')
     expect(deploymentScript).toContain('wrangler.production.jsonc')
     expect(deploymentScript).toContain('wrangler.production.ci.jsonc')
@@ -478,18 +477,42 @@ describe('Wrangler deploy config', () => {
     }
   })
 
-  test('production config checker rejects the local preview Wrangler config', () => {
-    const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
-      cwd: packageDir,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        TOKENBOARD_WRANGLER_CONFIG: 'wrangler.jsonc'
-      }
-    })
+  test('production config checker rejects a local preview Wrangler config', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-local-preview-config-'))
+    const localConfig = join(tempDir, 'wrangler.local.jsonc')
 
-    expect(result.status).not.toBe(0)
-    expect(result.stderr).toContain('wrangler.jsonc is missing workers_dev: false')
+    try {
+      writeFileSync(localConfig, `
+        {
+          "name": "tokenboard",
+          "main": "./dist/index.js",
+          "vars": {
+            "BETTER_AUTH_URL": "http://localhost:8787"
+          },
+          "d1_databases": [
+            {
+              "binding": "DB",
+              "database_name": "tokenboard",
+              "database_id": "local-tokenboard-dev"
+            }
+          ]
+        }
+      `)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_WRANGLER_CONFIG: localConfig
+        }
+      })
+
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain(`${localConfig} is missing workers_dev: false`)
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
   })
 
   test('production config checker rejects production config without cron triggers', () => {
