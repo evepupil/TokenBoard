@@ -203,6 +203,8 @@ describe('notification service', () => {
     const secret = testEncryptionKey
     const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef', secret)
     const fetchCalls: Array<{ url: string; body: string }> = []
+    const statements: string[] = []
+    const bindings: unknown[][] = []
     const originalFetch = globalThis.fetch
     const thisSensitiveFetch = function (
       this: unknown,
@@ -217,11 +219,17 @@ describe('notification service', () => {
     } as typeof fetch
     const db = {
       prepare(sql: string) {
+        statements.push(sql)
         return {
-          bind() {
+          bind(...values: unknown[]) {
+            bindings.push(values)
             return {
               async first() {
-                if (sql.includes('FROM webhook_subscriptions')) return dueSubscriptionRow(encryptedUrl)
+                if (sql.includes('FROM webhook_subscriptions')) {
+                  return dueSubscriptionRow(encryptedUrl, {
+                    lastError: 'Illegal invocation: function called with incorrect `this` reference.'
+                  })
+                }
                 if (sql.includes('sessionCount')) return reportTotalsRow()
                 return null
               },
@@ -256,6 +264,8 @@ describe('notification service', () => {
       expect(fetchCalls).toHaveLength(1)
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
       expect(fetchCalls[0].body).toContain('测试预览：Example token 日报 2026-04-29')
+      expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('last_error = NULL'))).toBe(true)
+      expect(bindings.flat()).toContain('2026-04-29T01:31:00.000Z')
     } finally {
       vi.stubGlobal('fetch', originalFetch)
     }

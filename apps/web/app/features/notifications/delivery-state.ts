@@ -25,6 +25,7 @@ export async function recordDeliverySuccess(input: {
 }) {
   if (input.kind !== 'daily') {
     await insertDeliveryLog(successDeliveryLogInput(input))
+    await markSubscriptionTestSuccess(input.db, input.subscription, input.now)
     return { complete: true }
   }
 
@@ -267,5 +268,25 @@ async function markSubscriptionTestFailure(input: {
       input.now.toISOString(),
       input.subscription.id
     )
+    .run()
+}
+
+async function markSubscriptionTestSuccess(
+  db: D1Database,
+  subscription: DueWebhookSubscription,
+  now: Date
+) {
+  await db
+    .prepare(
+      `
+        UPDATE webhook_subscriptions
+        SET
+          last_success_at = ?,
+          last_error = NULL,
+          updated_at = ?
+        WHERE id = ?
+      `
+    )
+    .bind(now.toISOString(), now.toISOString(), subscription.id)
     .run()
 }
