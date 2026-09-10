@@ -65,7 +65,12 @@ if (!pairingCode && !useDeviceLink && savedProfile) {
       repoUrl: installOptions.repoUrl,
       repoRef: installOptions.repoRef,
       packageManager: profilePackageManager,
-      scheduleTimes: profileScheduleTimes
+      scheduleTimes: profileScheduleTimes,
+      ...(installOptions.codexSymlinkRoots === undefined
+        ? {}
+        : {
+            codexSymlinkRoots: installOptions.codexSymlinkRoots
+          })
     })
     writeConfig(nextConfig)
     activeProfile = nextConfig.servers[serverOrigin]
@@ -133,17 +138,25 @@ if (!pairingCode && !useDeviceLink && savedProfile) {
       repoRef: installOptions.repoRef,
       packageManager: pairedPackageManager,
       scheduleTimes: pairedScheduleTimes,
+      ...(installOptions.codexSymlinkRoots === undefined
+        ? {}
+        : {
+            codexSymlinkRoots: installOptions.codexSymlinkRoots
+          }),
       createdAt: new Date().toISOString()
     })
     writeConfig(nextConfig)
     activeProfile = nextConfig.servers[pairedServerOrigin]
     if (paired.installClaim) {
-      writeDeviceLink({
-        serverOrigin: pairedServerOrigin,
-        deviceId: paired.deviceId,
-        installationId: paired.installationId,
-        installClaim: paired.installClaim
-      }, { lockHeld: true })
+      writeDeviceLink(
+        {
+          serverOrigin: pairedServerOrigin,
+          deviceId: paired.deviceId,
+          installationId: paired.installationId,
+          installClaim: paired.installClaim
+        },
+        { lockHeld: true }
+      )
     }
   })
   console.log('TokenBoard config written.')
@@ -199,23 +212,20 @@ if (!flags['skip-collector']) {
 }
 
 if (!flags['skip-schedule']) {
-  const schedule = spawnSync(process.execPath, [
-    scriptPath('./install-schedule.mjs'),
-    '--schedule-times',
-    scheduleTimes.join(',')
-  ], {
-    stdio: 'inherit'
-  })
+  const schedule = spawnSync(
+    process.execPath,
+    [scriptPath('./install-schedule.mjs'), '--schedule-times', scheduleTimes.join(',')],
+    {
+      stdio: 'inherit'
+    }
+  )
   if (schedule.status !== 0) process.exit(schedule.status ?? 1)
 }
 
 if (!flags['skip-initial-sync']) {
   const sync = spawnSync(
     process.execPath,
-    [
-      scriptPath('./sync.mjs'),
-      ...buildInitialSyncArgs({ flags, packageManager })
-    ],
+    [scriptPath('./sync.mjs'), ...buildInitialSyncArgs({ flags, packageManager })],
     {
       stdio: 'inherit'
     }
@@ -224,23 +234,14 @@ if (!flags['skip-initial-sync']) {
 }
 
 if (shouldWarmHookCursorsBeforeInstall(flags)) {
-  const warm = spawnSync(
-    process.execPath,
-    [
-      scriptPath('./sync.mjs'),
-      ...buildWarmHookCursorArgs({ packageManager })
-    ],
-    {
-      stdio: 'inherit'
-    }
-  )
+  const warm = spawnSync(process.execPath, [scriptPath('./sync.mjs'), ...buildWarmHookCursorArgs({ packageManager })], {
+    stdio: 'inherit'
+  })
   if (warm.status !== 0) process.exit(warm.status ?? 1)
 }
 
 if (!flags['skip-hook']) {
-  const hook = spawnSync(process.execPath, [
-    scriptPath('./install-hook.mjs')
-  ], {
+  const hook = spawnSync(process.execPath, [scriptPath('./install-hook.mjs')], {
     stdio: 'inherit'
   })
   if (hook.status !== 0) process.exit(hook.status ?? 1)

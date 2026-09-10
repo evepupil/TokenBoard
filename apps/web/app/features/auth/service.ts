@@ -14,7 +14,10 @@ export async function forwardGithubSignIn(c: Context) {
     return response
   }
 
-  const body = await response.clone().json<Partial<{ url: string }>>().catch(() => ({ url: undefined }))
+  const body = await response
+    .clone()
+    .json<Partial<{ url: string }>>()
+    .catch(() => ({ url: undefined }))
   return redirectWithCookies(c, response, body.url ?? '/dashboard')
 }
 

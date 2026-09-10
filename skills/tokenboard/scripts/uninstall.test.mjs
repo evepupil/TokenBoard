@@ -79,9 +79,7 @@ test('removes hooks when deleting only the config file', () => {
     deviceLink: false
   })
   assert.equal(harness.hookCalls, 1)
-  assert.deepEqual(harness.removedPaths, [
-    '/home/tokenboard/.tokenboard/config.json'
-  ])
+  assert.deepEqual(harness.removedPaths, ['/home/tokenboard/.tokenboard/config.json'])
 })
 
 test('removes whole config directory only when explicitly requested', () => {
@@ -100,9 +98,7 @@ test('removes whole config directory only when explicitly requested', () => {
     configDir: true,
     deviceLink: true
   })
-  assert.deepEqual(harness.removedPaths, [
-    '/home/tokenboard/.tokenboard'
-  ])
+  assert.deepEqual(harness.removedPaths, ['/home/tokenboard/.tokenboard'])
 })
 
 test('removes collector and config directory with all flag', () => {
@@ -121,10 +117,7 @@ test('removes collector and config directory with all flag', () => {
     configDir: true,
     deviceLink: true
   })
-  assert.deepEqual(harness.removedPaths, [
-    '/home/tokenboard/.tokenboard/TokenBoard',
-    '/home/tokenboard/.tokenboard'
-  ])
+  assert.deepEqual(harness.removedPaths, ['/home/tokenboard/.tokenboard/TokenBoard', '/home/tokenboard/.tokenboard'])
 })
 
 for (const flag of ['--all', '--remove-config-dir', '--remove-collector', '--remove-config', '--remove-hooks']) {
@@ -132,22 +125,25 @@ for (const flag of ['--all', '--remove-config-dir', '--remove-collector', '--rem
     const harness = createHarness()
 
     assert.throws(
-      () => uninstallClient({
-        ...harness.options,
-        argv: [flag],
-        uninstallHooks: () => {
-          harness.recordHookCall()
-          return {
-            hooks: [{
-              source: 'antigravity-cli',
-              action: 'skip',
-              changed: false,
-              incomplete: true,
-              detail: 'Antigravity statusline not checked: Invalid Antigravity settings.json'
-            }]
+      () =>
+        uninstallClient({
+          ...harness.options,
+          argv: [flag],
+          uninstallHooks: () => {
+            harness.recordHookCall()
+            return {
+              hooks: [
+                {
+                  source: 'antigravity-cli',
+                  action: 'skip',
+                  changed: false,
+                  incomplete: true,
+                  detail: 'Antigravity statusline not checked: Invalid Antigravity settings.json'
+                }
+              ]
+            }
           }
-        }
-      }),
+        }),
       /Antigravity statusline restoration is incomplete/
     )
     assert.equal(harness.hookCalls, 1)
@@ -171,10 +167,7 @@ test('leaves collector directory before removing it', () => {
   })
 
   assert.deepEqual(harness.changedDirectories, ['/home/tokenboard'])
-  assert.deepEqual(harness.removedPaths, [
-    '/home/tokenboard/.tokenboard/TokenBoard',
-    '/home/tokenboard/.tokenboard'
-  ])
+  assert.deepEqual(harness.removedPaths, ['/home/tokenboard/.tokenboard/TokenBoard', '/home/tokenboard/.tokenboard'])
 })
 
 test('does not delete the config directory before the collector when they are the same path', () => {
@@ -194,9 +187,7 @@ test('does not delete the config directory before the collector when they are th
     configDir: true,
     deviceLink: true
   })
-  assert.deepEqual(harness.removedPaths, [
-    '/home/tokenboard/.tokenboard'
-  ])
+  assert.deepEqual(harness.removedPaths, ['/home/tokenboard/.tokenboard'])
 })
 
 test('treats case-variant Windows collector and config paths as the same path', () => {
@@ -241,6 +232,29 @@ test('does not change directory for a Windows cwd on another drive', () => {
   assert.equal(chdirCalls, 0)
   assert.equal(removed.collector, true)
   assert.equal(removed.configDir, true)
+})
+
+test('changes directory for a Windows cwd in a child named ..cache', () => {
+  const harness = createHarness()
+  let chdirCalls = 0
+
+  uninstallClient({
+    ...harness.options,
+    platform: 'win32',
+    collectorDir: 'C:\\work\\.tokenboard\\TokenBoard',
+    configDir: 'C:\\work\\.tokenboard',
+    configPath: 'C:\\work\\.tokenboard\\config.json',
+    deviceLinkPath: 'C:\\work\\.tokenboard\\device-link.json',
+    fallbackCwd: 'C:\\safe',
+    cwd: () => 'C:\\work\\.tokenboard\\..cache',
+    chdir: () => {
+      chdirCalls += 1
+    },
+    exists: () => true,
+    argv: ['--all']
+  })
+
+  assert.equal(chdirCalls, 1)
 })
 
 function createHarness() {

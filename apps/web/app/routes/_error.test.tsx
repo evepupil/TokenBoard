@@ -46,10 +46,11 @@ function createContext(path: string, accept = 'text/html') {
       header: (name: string) => (name.toLowerCase() === 'accept' ? accept : null)
     },
     json: (body: unknown, status: number) => Response.json(body, { status }),
-    redirect: (location: string) => new Response(null, {
-      status: 302,
-      headers: { location }
-    }),
+    redirect: (location: string) =>
+      new Response(null, {
+        status: 302,
+        headers: { location }
+      }),
     status() {},
     render: (body: string) => new Response(body)
   } as never

@@ -2,10 +2,7 @@ type ClipboardWriter = {
   writeText(text: string): Promise<void>
 }
 
-export async function copyTextToClipboard(
-  clipboard: ClipboardWriter | undefined,
-  text: string
-) {
+export async function copyTextToClipboard(clipboard: ClipboardWriter | undefined, text: string) {
   if (!clipboard || typeof clipboard.writeText !== 'function') return false
 
   try {

@@ -194,13 +194,10 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('surfaces a failed reconnect batch before returning success', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: false, error: 'constraint failed' },
-        { success: true, meta: { changes: 1 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: false, error: 'constraint failed' },
+      { success: true, meta: { changes: 1 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -238,14 +235,11 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('rejects a reconnect exchange when the stored claim no longer matches', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -362,15 +356,12 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('surfaces a failed new-device credential batch before returning success', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-        { success: false, error: 'constraint failed' },
-        { success: true, meta: { changes: 1 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+      { success: false, error: 'constraint failed' },
+      { success: true, meta: { changes: 1 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -393,14 +384,11 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('surfaces an incomplete new-device credential batch result', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -423,16 +411,13 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('rejects a new-device pairing batch when audit insert reports no changes', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 1 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 1 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -493,12 +478,7 @@ describe('D1DevicePairingRepository', () => {
     expect(sqlStatements[4]).toContain('WHERE EXISTS')
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(6)
-    expect(bindings[0]).toEqual([
-      'pair_1',
-      'user_1',
-      'dev_old',
-      '2026-06-30T10:00:00.000Z'
-    ])
+    expect(bindings[0]).toEqual(['pair_1', 'user_1', 'dev_old', '2026-06-30T10:00:00.000Z'])
     expect(bindings[1]).toEqual([
       'hash:claim-consumed',
       '2026-06-30T10:00:00.000Z',
@@ -583,24 +563,16 @@ describe('D1DevicePairingRepository', () => {
     expect(sqlStatements[1]).toContain('(? IS NULL OR source.id = ?)')
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(5)
-    expect(bindings[1]?.slice(13, 17)).toEqual([
-      null,
-      null,
-      null,
-      null
-    ])
+    expect(bindings[1]?.slice(13, 17)).toEqual([null, null, null, null])
   })
 
   test('surfaces a failed reconnect credential batch before returning success', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: false, error: 'constraint failed' },
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 1 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: false, error: 'constraint failed' },
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -623,17 +595,14 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('rejects reconnect credentials when the source claim was revoked or rotated', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -659,16 +628,13 @@ describe('D1DevicePairingRepository', () => {
   })
 
   test('rejects reconnect credentials when no active target installation remains', async () => {
-    const { db } = createRecordingDb(
-      null,
-      [
-        { success: true, meta: { changes: 1 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } },
-        { success: true, meta: { changes: 0 } }
-      ]
-    )
+    const { db } = createRecordingDb(null, [
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } },
+      { success: true, meta: { changes: 0 } }
+    ])
     const repository = new D1DevicePairingRepository(db)
 
     await expect(
@@ -694,9 +660,7 @@ describe('D1DevicePairingRepository', () => {
     const { db, sqlStatements, bindings } = createRecordingDb({ id: 'inst_1' })
     const repository = new D1DevicePairingRepository(db)
 
-    await expect(
-      repository.hasActiveInstallationForDevice('user_1', 'dev_1')
-    ).resolves.toBe(true)
+    await expect(repository.hasActiveInstallationForDevice('user_1', 'dev_1')).resolves.toBe(true)
     expect(sqlStatements[0]).toContain('FROM device_installations')
     expect(sqlStatements[0]).toContain('revoked_at IS NULL')
     expect(bindings[0]).toEqual(['user_1', 'dev_1'])
@@ -706,9 +670,7 @@ describe('D1DevicePairingRepository', () => {
     const { db } = createRecordingDb(null)
     const repository = new D1DevicePairingRepository(db)
 
-    await expect(
-      repository.hasActiveInstallationForDevice('user_1', 'dev_1')
-    ).resolves.toBe(false)
+    await expect(repository.hasActiveInstallationForDevice('user_1', 'dev_1')).resolves.toBe(false)
   })
 
   test('finds an installation by stored install claim hash', async () => {

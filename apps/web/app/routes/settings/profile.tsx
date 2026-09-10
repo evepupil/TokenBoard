@@ -7,7 +7,13 @@ import { LucideIcon } from '../../components/ui/icon'
 import { Input, Label } from '../../components/ui/input'
 import { requireUser } from '../../features/auth/middleware'
 import { PublicCardConfigEditor } from '../../features/public-card/components/card-config-editor'
-import { getCanonicalPublicOrigin, getProfileSettings, parseProfilePageForm, updateProfilePageSettings, type ProfileSettings } from '../../features/settings/service'
+import {
+  getCanonicalPublicOrigin,
+  getProfileSettings,
+  parseProfilePageForm,
+  updateProfilePageSettings,
+  type ProfileSettings
+} from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
 
 export const GET = createRoute(async (c) => {
@@ -61,9 +67,7 @@ function ProfileSettingsCard(props: { profile: ProfileSettings; saved: boolean }
         <CardDescription>默认保持私有；只有开启公开后，JSON 和 SVG 才会返回真实统计。</CardDescription>
       </CardHeader>
       <CardContent>
-        {props.saved ? (
-          <p class="app-flash-success mb-4 p-3 text-sm">设置已保存。</p>
-        ) : null}
+        {props.saved ? <p class="app-flash-success mb-4 p-3 text-sm">设置已保存。</p> : null}
         {props.profile.profileNeedsRepair ? (
           <p class="app-flash-error mb-4 p-3 text-sm">资料里有旧格式字段，请检查后保存一次。</p>
         ) : null}
@@ -96,12 +100,20 @@ function ProfileSettingsFields(props: { profile: ProfileSettings }) {
       <ProfileCheckbox name="isPublic" checked={props.profile.isPublic} title="公开 JSON / SVG">
         允许任何人通过公开链接查看你的聚合统计。
       </ProfileCheckbox>
-      <ProfileCheckbox name="participatesInLeaderboards" checked={props.profile.participatesInLeaderboards} title="参与排行榜">
+      <ProfileCheckbox
+        name="participatesInLeaderboards"
+        checked={props.profile.participatesInLeaderboards}
+        title="参与排行榜"
+      >
         开启后会自动公开资料，排行榜才会统计你的数据。
       </ProfileCheckbox>
       <div class="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
-        <Button class="w-full sm:w-auto" type="submit" data-submitting-label="正在保存...">保存设置</Button>
-        <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard">返回控制台</LinkButton>
+        <Button class="w-full sm:w-auto" type="submit" data-submitting-label="正在保存...">
+          保存设置
+        </Button>
+        <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard">
+          返回控制台
+        </LinkButton>
       </div>
     </div>
   )
@@ -117,12 +129,7 @@ function ProfileSlugInput(props: { profile: ProfileSettings }) {
   )
 }
 
-function ProfileCheckbox(props: {
-  name: string
-  checked: boolean
-  title: string
-  children: string
-}) {
+function ProfileCheckbox(props: { name: string; checked: boolean; title: string; children: string }) {
   return (
     <label class="app-surface-subtle flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
       <input class="mt-1" type="checkbox" name={props.name} checked={props.checked} />
@@ -172,7 +179,12 @@ function CopyBlock(props: { label: string; value: string; targetId: string }) {
     <div>
       <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">{props.label}</p>
       <div class="app-surface-subtle grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
-        <pre id={props.targetId} class="min-h-12 overflow-x-auto whitespace-pre-wrap break-all p-3 text-sm leading-6 text-[var(--app-text)]">{props.value}</pre>
+        <pre
+          id={props.targetId}
+          class="min-h-12 overflow-x-auto whitespace-pre-wrap break-all p-3 text-sm leading-6 text-[var(--app-text)]"
+        >
+          {props.value}
+        </pre>
         <button
           type="button"
           class="inline-flex h-full min-h-12 w-12 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-lime-300/30"

@@ -6,6 +6,7 @@ export type ApiErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'RATE_LIMITED'
+  | 'SERVICE_UNAVAILABLE'
   | 'INTERNAL_SERVER_ERROR'
 
 export class ApiError extends Error {

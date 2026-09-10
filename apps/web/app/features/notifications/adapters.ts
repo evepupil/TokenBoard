@@ -77,7 +77,11 @@ export async function buildWebhookPayload(input: {
   if (input.provider === 'feishu') {
     const signature = await feishuSignature(input.signingSecret, input.now)
     const feishuTitle = truncateUtf8(`TokenBoard：${reportTitleWithoutDate(input.report)}`, feishuTitleMaxBytes, '...')
-    const feishuText = truncateUtf8(formatFeishuDailyReport(input.report), feishuMarkdownMaxBytes, feishuTruncatedSuffix)
+    const feishuText = truncateUtf8(
+      formatFeishuDailyReport(input.report),
+      feishuMarkdownMaxBytes,
+      feishuTruncatedSuffix
+    )
     return {
       url: input.webhookUrl,
       body: {
@@ -146,9 +150,7 @@ export function formatWeComDailyReport(report: DailyTokenReport) {
     '**主要模型**',
     ...formatWeComTopModels(report),
     '',
-    report.reportUrl
-      ? `[打开日报详情](${report.reportUrl})`
-      : `[查看排行榜](${report.dashboardUrl})`
+    report.reportUrl ? `[打开日报详情](${report.reportUrl})` : `[查看排行榜](${report.dashboardUrl})`
   ]
 
   return truncateUtf8(lines.join('\n'), wecomMarkdownMaxBytes, wecomTruncatedSuffix)
@@ -190,7 +192,7 @@ function formatFeishuDailyReport(report: DailyTokenReport) {
     ...formatFeishuSourceSplit(report),
     '',
     '**主要模型**',
-    ...formatFeishuTopModels(report),
+    ...formatFeishuTopModels(report)
   ]
 
   return lines.join('\n')
@@ -211,9 +213,7 @@ export function formatDailyReport(report: DailyTokenReport) {
     ...formatTopModels(report),
     '',
     `统计时区：${report.timezone}`,
-    report.reportUrl
-      ? `[查看本次日报](${report.reportUrl})`
-      : `[查看排行榜](${report.dashboardUrl})`
+    report.reportUrl ? `[查看本次日报](${report.reportUrl})` : `[查看排行榜](${report.dashboardUrl})`
   ]
 
   return lines.join('\n')
@@ -221,9 +221,7 @@ export function formatDailyReport(report: DailyTokenReport) {
 
 function reportTitle(report: DailyTokenReport) {
   const title = `${report.displayName} token 日报 ${report.reportDate}`
-  return report.previewLabel
-    ? `${report.previewLabel}：${title}`
-    : title
+  return report.previewLabel ? `${report.previewLabel}：${title}` : title
 }
 
 function dingtalkReportTitle(report: DailyTokenReport) {
@@ -237,110 +235,111 @@ function formatWeComTitle(report: DailyTokenReport) {
 
 function reportTitleWithoutDate(report: DailyTokenReport) {
   const title = `${report.displayName} token 日报`
-  return report.previewLabel
-    ? `${report.previewLabel}：${title}`
-    : title
+  return report.previewLabel ? `${report.previewLabel}：${title}` : title
 }
 
 function formatWeComSourceSplit(report: DailyTokenReport) {
   if (report.sourceSplit.length === 0) return ['暂无数据']
-  const items = report.sourceSplit.slice(0, wecomListLimit).flatMap((item) => [
-    `- **${escapeWeComMarkdownText(formatSource(item.source))}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
-    `  <font color="comment">含缓存读 ${formatInteger(item.totalTokens)} / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}</font>`
-  ])
+  const items = report.sourceSplit
+    .slice(0, wecomListLimit)
+    .flatMap((item) => [
+      `- **${escapeWeComMarkdownText(formatSource(item.source))}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
+      `  <font color="comment">含缓存读 ${formatInteger(item.totalTokens)} / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}</font>`
+    ])
   return appendHiddenCount(items, report.sourceSplit.length)
 }
 
 function formatWeComTopModels(report: DailyTokenReport) {
   if (report.topModels.length === 0) return ['暂无数据']
-  const items = report.topModels.slice(0, wecomListLimit).flatMap((item) => [
-    `- **${escapeWeComMarkdownText(item.model)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / <font color="warning">${escapeWeComMarkdownText(formatModelCost(item, report))}</font>`,
-    `  <font color="comment">缓存率 ${formatReportCacheRate(item)}</font>`
-  ])
+  const items = report.topModels
+    .slice(0, wecomListLimit)
+    .flatMap((item) => [
+      `- **${escapeWeComMarkdownText(item.model)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / <font color="warning">${escapeWeComMarkdownText(formatModelCost(item, report))}</font>`,
+      `  <font color="comment">缓存率 ${formatReportCacheRate(item)}</font>`
+    ])
   return appendHiddenCount(items, report.topModels.length)
 }
 
 function appendHiddenCount(items: string[], total: number) {
   const hidden = total - wecomListLimit
-  return hidden > 0
-    ? [...items, `<font color="comment">其余 ${hidden} 项请打开 TokenBoard 查看。</font>`]
-    : items
+  return hidden > 0 ? [...items, `<font color="comment">其余 ${hidden} 项请打开 TokenBoard 查看。</font>`] : items
 }
 
 function appendDingTalkHiddenCount(items: string[], total: number) {
   const hidden = total - dingtalkListLimit
-  return hidden > 0
-    ? [...items, `- 其余 ${hidden} 项请打开 TokenBoard 查看。`]
-    : items
+  return hidden > 0 ? [...items, `- 其余 ${hidden} 项请打开 TokenBoard 查看。`] : items
 }
 
 function dingtalkReportLink(report: DailyTokenReport) {
-  return report.reportUrl
-    ? `[打开日报详情](${report.reportUrl})`
-    : `[查看排行榜](${report.dashboardUrl})`
+  return report.reportUrl ? `[打开日报详情](${report.reportUrl})` : `[查看排行榜](${report.dashboardUrl})`
 }
 
 function formatDingTalkSourceSplit(report: DailyTokenReport) {
   if (report.sourceSplit.length === 0) return ['暂无数据']
-  const items = report.sourceSplit.slice(0, dingtalkListLimit).flatMap((item) => [
-    `- **${escapeDingTalkMarkdownText(formatSource(item.source))}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
-    `  - 含缓存读 ${formatInteger(item.totalTokens)} token / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
-  ])
+  const items = report.sourceSplit
+    .slice(0, dingtalkListLimit)
+    .flatMap((item) => [
+      `- **${escapeDingTalkMarkdownText(formatSource(item.source))}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
+      `  - 含缓存读 ${formatInteger(item.totalTokens)} token / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
+    ])
   return appendDingTalkHiddenCount(items, report.sourceSplit.length)
 }
 
 function formatDingTalkTopModels(report: DailyTokenReport) {
   if (report.topModels.length === 0) return ['暂无数据']
-  const items = report.topModels.slice(0, dingtalkListLimit).flatMap((item) => [
-    `- **${escapeDingTalkMarkdownText(item.model)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / ${formatModelCost(item, report)}`,
-    `  - 缓存率 ${formatReportCacheRate(item)}`
-  ])
+  const items = report.topModels
+    .slice(0, dingtalkListLimit)
+    .flatMap((item) => [
+      `- **${escapeDingTalkMarkdownText(item.model)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / ${formatModelCost(item, report)}`,
+      `  - 缓存率 ${formatReportCacheRate(item)}`
+    ])
   return appendDingTalkHiddenCount(items, report.topModels.length)
 }
 
 function formatFeishuSourceSplit(report: DailyTokenReport) {
   if (report.sourceSplit.length === 0) return ['暂无数据']
-  const items = report.sourceSplit.slice(0, wecomListLimit).flatMap((item) => [
-    `- **${formatSource(item.source)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
-    `  - 含缓存读 ${formatInteger(item.totalTokens)} token / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
-  ])
+  const items = report.sourceSplit
+    .slice(0, wecomListLimit)
+    .flatMap((item) => [
+      `- **${formatSource(item.source)}**：${formatInteger(item.totalTokensWithoutCacheRead)} token`,
+      `  - 含缓存读 ${formatInteger(item.totalTokens)} token / 缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
+    ])
   return appendFeishuHiddenCount(items, report.sourceSplit.length)
 }
 
 function formatFeishuTopModels(report: DailyTokenReport) {
   if (report.topModels.length === 0) return ['暂无数据']
-  const items = report.topModels.slice(0, wecomListLimit).flatMap((item) => [
-    `- **${item.model}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / ${formatModelCost(item, report)}`,
-    `  - 缓存率 ${formatReportCacheRate(item)}`
-  ])
+  const items = report.topModels
+    .slice(0, wecomListLimit)
+    .flatMap((item) => [
+      `- **${item.model}**：${formatInteger(item.totalTokensWithoutCacheRead)} token / ${formatModelCost(item, report)}`,
+      `  - 缓存率 ${formatReportCacheRate(item)}`
+    ])
   return appendFeishuHiddenCount(items, report.topModels.length)
 }
 
 function appendFeishuHiddenCount(items: string[], total: number) {
   const hidden = total - wecomListLimit
-  return hidden > 0
-    ? [...items, `其余 ${hidden} 项请打开 TokenBoard 查看。`]
-    : items
+  return hidden > 0 ? [...items, `其余 ${hidden} 项请打开 TokenBoard 查看。`] : items
 }
 
 function formatSourceSplit(report: DailyTokenReport) {
   if (report.sourceSplit.length === 0) return ['暂无数据']
-  return report.sourceSplit.map((item) => (
-    `- ${formatSource(item.source)}：${formatInteger(item.totalTokensWithoutCacheRead)} token，含缓存读 ${formatInteger(item.totalTokens)} token，缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
-  ))
+  return report.sourceSplit.map(
+    (item) =>
+      `- ${formatSource(item.source)}：${formatInteger(item.totalTokensWithoutCacheRead)} token，含缓存读 ${formatInteger(item.totalTokens)} token，缓存率 ${formatReportCacheRate(item)}${formatSourceCostSuffix(item.source)}`
+  )
 }
 
 function formatTopModels(report: DailyTokenReport) {
   if (report.topModels.length === 0) return ['暂无数据']
-  return report.topModels.map((item) => (
-    `- ${item.model}：${formatInteger(item.totalTokensWithoutCacheRead)} token，缓存率 ${formatReportCacheRate(item)}，${formatModelCost(item, report)}`
-  ))
+  return report.topModels.map(
+    (item) =>
+      `- ${item.model}：${formatInteger(item.totalTokensWithoutCacheRead)} token，缓存率 ${formatReportCacheRate(item)}，${formatModelCost(item, report)}`
+  )
 }
 
-function formatModelCost(
-  item: DailyTokenReport['topModels'][number],
-  report: DailyTokenReport
-) {
+function formatModelCost(item: DailyTokenReport['topModels'][number], report: DailyTokenReport) {
   return formatModelCostWithAvailability(item.costUsd, item.sourceSplit, report.sourceSplit)
 }
 
@@ -362,11 +361,7 @@ function formatInteger(value: number) {
 }
 
 function escapeWeComMarkdownText(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\r?\n/g, ' ')
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, ' ')
 }
 
 function escapeDingTalkMarkdownText(value: string) {

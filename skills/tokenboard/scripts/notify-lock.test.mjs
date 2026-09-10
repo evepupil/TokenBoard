@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 import { runNotify } from './notify.mjs'
+import { memoryFileMap, memoryPathStartsWith, sameMemoryPath } from './coordinator-test-helpers.mjs'
 
 test('notify retains its own trailing lock without recursive scheduling', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/trailing.lock', JSON.stringify({ pid: 900, token: 'owner-a' })]
   ])
@@ -42,9 +44,7 @@ test('notify retains its own trailing lock without recursive scheduling', () => 
 })
 
 test('notify reports trailing lock cleanup failures after spawn errors', () => {
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
-  ])
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   let failedCleanup = false
 
   const result = runNotify({
@@ -64,7 +64,7 @@ test('notify reports trailing lock cleanup failures after spawn errors', () => {
       files.set(path, String(value))
     },
     unlink: (path) => {
-      if (path.startsWith('/state/trailing.lock.release-') && !failedCleanup) {
+      if (memoryPathStartsWith(path, '/state/trailing.lock.release-') && !failedCleanup) {
         failedCleanup = true
         const error = new Error('EPERM')
         error.code = 'EPERM'
@@ -88,10 +88,336 @@ test('notify reports trailing lock cleanup failures after spawn errors', () => {
   assert.match(result.error, /trailing lock cleanup failed: EPERM/)
 })
 
-test('notify preserves diagnostics when spawn and cleanup errors have empty messages', () => {
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
+test('notify releases a trailing lock when the detached notifier emits an asynchronous spawn error', async () => {
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  child.pid = 902
+  child.unref = () => {}
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.equal(result.error, undefined)
+  assert.equal(result.trailingScheduled, true)
+  assert.equal(JSON.parse(files.get('/state/trailing.lock')).pid, 902)
+
+  await new Promise((resolve) =>
+    setImmediate(() => {
+      const error = new Error('ENOENT: missing node')
+      error.code = 'ENOENT'
+      child.emit('error', error)
+      child.emit('error', new Error('second spawn error'))
+      resolve()
+    })
+  )
+
+  assert.equal(files.has('/state/trailing.lock'), false)
+  assert.deepEqual(errors, ['TokenBoard trailing notifier spawn failed: ENOENT: missing node'])
+})
+
+test('notify preserves a replacement trailing lock after a published child emits an asynchronous spawn error', async () => {
+  const lockPath = '/state/trailing.lock'
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  child.pid = 902
+  child.unref = () => {}
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.equal(result.error, undefined)
+  const replacement = JSON.stringify({ pid: 903, token: 'replacement-owner' })
+  files.set(lockPath, replacement)
+
+  await new Promise((resolve) =>
+    setImmediate(() => {
+      const error = new Error('ENOENT: missing node')
+      error.code = 'ENOENT'
+      child.emit('error', error)
+      resolve()
+    })
+  )
+
+  assert.equal(files.get(lockPath), replacement)
+  assert.deepEqual(errors, ['TokenBoard trailing notifier spawn failed: ENOENT: missing node'])
+})
+
+test('notify reports asynchronous trailing lock cleanup failures without crashing', async () => {
+  const lockPath = '/state/trailing.lock'
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  child.pid = 902
+  child.unref = () => {}
+  const errors = []
+  let failedCleanup = false
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    unlink: (path) => {
+      if (memoryPathStartsWith(path, `${lockPath}.release-`) && !failedCleanup) {
+        failedCleanup = true
+        const error = new Error('EPERM')
+        error.code = 'EPERM'
+        throw error
+      }
+      files.delete(path)
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.equal(result.error, undefined)
+  child.emit('error', new Error('ENOENT: missing node'))
+
+  assert.equal(files.has(lockPath), true)
+  assert.deepEqual(errors, [
+    'TokenBoard trailing notifier spawn failed: ENOENT: missing node; trailing lock cleanup failed: EPERM'
   ])
+})
+
+test('notify handles an asynchronous spawn error before the detached notifier has a pid', async () => {
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.match(result.error, /did not provide a valid process id/)
+  assert.equal(files.has('/state/trailing.lock'), false)
+
+  await new Promise((resolve) =>
+    setImmediate(() => {
+      const error = new Error('ENOENT: missing node')
+      error.code = 'ENOENT'
+      child.emit('error', error)
+      resolve()
+    })
+  )
+
+  assert.equal(files.has('/state/trailing.lock'), false)
+  assert.deepEqual(errors, ['TokenBoard trailing notifier spawn failed: ENOENT: missing node'])
+})
+
+test('notify does not remove a replacement trailing lock after a prior spawn failure', async () => {
+  const lockPath = '/state/trailing.lock'
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.match(result.error, /did not provide a valid process id/)
+  assert.equal(files.has(lockPath), false)
+  const replacement = JSON.stringify({ pid: 901, token: 'replacement-owner' })
+  files.set(lockPath, replacement)
+
+  await new Promise((resolve) =>
+    setImmediate(() => {
+      const error = new Error('ENOENT: missing node')
+      error.code = 'ENOENT'
+      child.emit('error', error)
+      resolve()
+    })
+  )
+
+  assert.equal(files.get(lockPath), replacement)
+  assert.deepEqual(errors, ['TokenBoard trailing notifier spawn failed: ENOENT: missing node'])
+})
+
+test('notify keeps its trailing lock and error listener after a successful child spawn', async () => {
+  const lockPath = '/state/trailing.lock'
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const child = new EventEmitter()
+  child.pid = 902
+  child.unref = () => {}
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.equal(result.error, undefined)
+  child.emit('spawn')
+  const lockBeforeError = files.get(lockPath)
+  const error = new Error('late child error')
+  error.code = 'EIO'
+  child.emit('error', error)
+
+  assert.equal(files.get(lockPath), lockBeforeError)
+  assert.deepEqual(errors, [])
+})
+
+test('notify re-registers the error listener for a once-only detached child', async () => {
+  const lockPath = '/state/trailing.lock'
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
+  const events = new EventEmitter()
+  const child = {
+    pid: 902,
+    unref: () => {},
+    once: events.once.bind(events)
+  }
+  const errors = []
+
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    ...atomicMemoryFileOps(files),
+    now: () => Date.parse('2026-05-22T10:01:00.000Z'),
+    mkdir: () => {},
+    exists: (path) => files.has(path),
+    readFile: (path) => files.get(path) || '',
+    writeFile: (path, value, options = {}) => {
+      if (options.flag === 'wx' && files.has(path)) {
+        const error = new Error(`EEXIST: ${path}`)
+        error.code = 'EEXIST'
+        throw error
+      }
+      files.set(path, String(value))
+    },
+    process: { pid: 901, kill: () => true },
+    error: (message) => errors.push(message),
+    spawnDetached: () => child,
+    executeSync: () => {
+      throw new Error('should not run')
+    }
+  })
+
+  assert.equal(result.error, undefined)
+  events.emit('error', new Error('ENOENT: missing node'))
+  events.emit('error', new Error('second spawn error'))
+
+  assert.equal(files.has(lockPath), false)
+  assert.deepEqual(errors, ['TokenBoard trailing notifier spawn failed: ENOENT: missing node'])
+})
+
+test('notify preserves diagnostics when spawn and cleanup errors have empty messages', () => {
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   let failedCleanup = false
 
   const result = runNotify({
@@ -104,7 +430,7 @@ test('notify preserves diagnostics when spawn and cleanup errors have empty mess
     readFile: (path) => files.get(path) || '',
     writeFile: (path, value) => files.set(path, String(value)),
     unlink: (path) => {
-      if (path.startsWith('/state/trailing.lock.release-') && !failedCleanup) {
+      if (memoryPathStartsWith(path, '/state/trailing.lock.release-') && !failedCleanup) {
         failedCleanup = true
         throw new Error('')
       }
@@ -126,7 +452,7 @@ test('notify preserves diagnostics when spawn and cleanup errors have empty mess
 })
 
 test('notify reports trailing lock ownership read failures', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/trailing.lock', JSON.stringify({ pid: 902 })]
   ])
@@ -139,7 +465,7 @@ test('notify reports trailing lock ownership read failures', () => {
     mkdir: () => {},
     exists: (path) => files.has(path),
     readFile: (path) => {
-      if (path === '/state/trailing.lock') {
+      if (sameMemoryPath(path, '/state/trailing.lock')) {
         const error = new Error('EACCES')
         error.code = 'EACCES'
         throw error
@@ -169,7 +495,7 @@ test('notify reports trailing lock ownership read failures', () => {
 })
 
 test('notify recovers a stale trailing lock through tasklist on legacy Windows Node', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/trailing.lock', JSON.stringify({ pid: 900 })]
   ])
@@ -216,13 +542,16 @@ test('notify recovers a stale trailing lock through tasklist on legacy Windows N
 
 test('notify replaces a trailing lock when the owner pid is reused', () => {
   const lockPath = '/state/trailing.lock'
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
-    [lockPath, JSON.stringify({
-      pid: 901,
-      token: 'old-owner',
-      processStartIdentity: 'linux:boot-a:100'
-    })]
+    [
+      lockPath,
+      JSON.stringify({
+        pid: 901,
+        token: 'old-owner',
+        processStartIdentity: 'linux:boot-a:100'
+      })
+    ]
   ])
   const spawned = []
   const result = runNotify({
@@ -263,7 +592,7 @@ test('notify replaces a trailing lock when the owner pid is reused', () => {
 
 test('notify reclaims an identity-unknown same-pid trailing lock with a different token', () => {
   const lockPath = '/state/trailing.lock'
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     [lockPath, JSON.stringify({ pid: 901, token: 'old-owner' })]
   ])
@@ -304,7 +633,7 @@ test('notify reclaims an identity-unknown same-pid trailing lock with a differen
 
 test('notify reclaims a legacy pid-only lock when a normal hook reuses its pid', () => {
   const lockPath = '/state/trailing.lock'
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/notify.signal', `${JSON.stringify({ source: 'codex' })}\n`],
     [lockPath, JSON.stringify({ pid: 901 })]
@@ -345,7 +674,7 @@ test('notify reclaims a legacy pid-only lock when a normal hook reuses its pid',
 
 test('legacy trailing continuation may retain a pid-only lock', () => {
   const lockPath = '/state/trailing.lock'
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/notify.signal', `${JSON.stringify({ source: 'codex' })}\n`],
     [lockPath, JSON.stringify({ pid: 901 })]
@@ -387,9 +716,7 @@ test('legacy trailing continuation may retain a pid-only lock', () => {
 })
 
 test('notify retries trailing lock acquisition when its owner releases the lock after EEXIST', () => {
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
-  ])
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   let firstTrailingLockWrite = true
   const trailingLockAcquireFlags = []
   const spawned = []
@@ -408,10 +735,10 @@ test('notify retries trailing lock acquisition when its owner releases the lock 
       throw error
     },
     writeFile: (path, value, options = {}) => {
-      if (path === '/state/trailing.lock' && options.flag === 'wx') {
+      if (sameMemoryPath(path, '/state/trailing.lock') && options.flag === 'wx') {
         trailingLockAcquireFlags.push(options.flag)
       }
-      if (path === '/state/trailing.lock' && options.flag === 'wx' && firstTrailingLockWrite) {
+      if (sameMemoryPath(path, '/state/trailing.lock') && options.flag === 'wx' && firstTrailingLockWrite) {
         firstTrailingLockWrite = false
         const error = new Error('EEXIST')
         error.code = 'EEXIST'
@@ -444,9 +771,7 @@ test('notify retries trailing lock acquisition when its owner releases the lock 
 
 test('notify atomically publishes the trailing child process id without exposing partial JSON', () => {
   const lockPath = '/state/trailing.lock'
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
-  ])
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   const writes = []
   let childOptions
   const result = runNotify({
@@ -471,13 +796,13 @@ test('notify atomically publishes the trailing child process id without exposing
         throw error
       }
       files.set(path, String(value))
-      if (path !== lockPath && files.has(lockPath)) {
+      if (!sameMemoryPath(path, lockPath) && files.has(lockPath)) {
         assert.doesNotThrow(() => JSON.parse(files.get(lockPath)))
       }
     },
     rename: (from, to) => {
-      if (to === lockPath) {
-        assert.match(from, /^\/state\/trailing\.lock\.publish-/)
+      if (sameMemoryPath(to, lockPath)) {
+        assert.match(from.replaceAll('\\', '/'), /^\/state\/trailing\.lock\.publish-/)
         assert.doesNotThrow(() => JSON.parse(files.get(from)))
         assert.doesNotThrow(() => JSON.parse(files.get(to)))
       }
@@ -499,8 +824,14 @@ test('notify atomically publishes the trailing child process id without exposing
 
   assert.equal(result.error, undefined)
   assert.equal(result.trailingScheduled, true)
-  assert.equal(writes.filter(({ path }) => path === lockPath).every(({ options }) => options.flag === 'wx'), true)
-  assert.equal(writes.some(({ path }) => path.startsWith(`${lockPath}.publish-`)), true)
+  assert.equal(
+    writes.filter(({ path }) => sameMemoryPath(path, lockPath)).every(({ options }) => options.flag === 'wx'),
+    true
+  )
+  assert.equal(
+    writes.some(({ path }) => memoryPathStartsWith(path, `${lockPath}.publish-`)),
+    true
+  )
   const published = JSON.parse(files.get(lockPath))
   assert.equal(published.pid, 904)
   assert.equal(published.startedAt, '2026-05-22T10:01:00.000Z')

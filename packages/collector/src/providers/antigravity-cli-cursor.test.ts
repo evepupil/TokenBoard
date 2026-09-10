@@ -34,11 +34,15 @@ describe('Antigravity CLI history cursor', () => {
     ])
     expect(cursor.files[cliHistoryEventKey(first)]).toBeDefined()
     expect(cursor.files[cliHistoryEventKey(second)]).toBeDefined()
-    expect(cursor.files[cliHistorySessionKey({
-      cascadeHash,
-      usageDate: '2026-07-20',
-      model: 'gemini-3-flash-a'
-    })]).toBeDefined()
+    expect(
+      cursor.files[
+        cliHistorySessionKey({
+          cascadeHash,
+          usageDate: '2026-07-20',
+          model: 'gemini-3-flash-a'
+        })
+      ]
+    ).toBeDefined()
   })
 
   test('re-emits a pending event without creating another history identity', () => {
@@ -64,9 +68,7 @@ describe('Antigravity CLI history cursor', () => {
       collectedAt: '2026-07-20T10:01:00.000Z'
     })
 
-    expect(retrySnapshots).toEqual([
-      expect.objectContaining({ inputTokens: 10, totalTokens: 10, sessionCount: 1 })
-    ])
+    expect(retrySnapshots).toEqual([expect.objectContaining({ inputTokens: 10, totalTokens: 10, sessionCount: 1 })])
     expect(Object.keys(cursor.files).filter((key) => key.startsWith('history-event\0'))).toHaveLength(1)
   })
 
@@ -94,8 +96,9 @@ describe('Antigravity CLI history cursor', () => {
     cursor.files[cliHistoryAggregateKey(group)] = aggregateEntry()
     cursor.antigravityCliHistoryCompactedThroughDate = '2026-04-21'
 
-    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone }))
-      .toThrow('rerun with --since all')
+    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone })).toThrow(
+      'rerun with --since all'
+    )
   })
 
   test('uses the persisted compacted frontier instead of the current clock for unknown events', () => {
@@ -104,22 +107,26 @@ describe('Antigravity CLI history cursor', () => {
     const event = historyEvent(firstEventHash, createdAt)
     cursor.antigravityCliHistoryCompactedThroughDate = createdAt.slice(0, 10)
 
-    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone }))
-      .toThrow('rerun with --since all')
+    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone })).toThrow(
+      'rerun with --since all'
+    )
   })
 
   test('requires a full rebuild when an old unknown event shares a retained session marker', () => {
     const cursor = emptyCursor()
     const event = historyEvent(firstEventHash, '2025-01-01T10:00:00.000Z')
     cursor.antigravityCliHistoryCompactedThroughDate = '2026-04-21'
-    cursor.files[cliHistorySessionKey({
-      cascadeHash,
-      usageDate: '2025-01-01',
-      model: 'gemini-3-flash-a'
-    })] = aggregateEntry()
+    cursor.files[
+      cliHistorySessionKey({
+        cascadeHash,
+        usageDate: '2025-01-01',
+        model: 'gemini-3-flash-a'
+      })
+    ] = aggregateEntry()
 
-    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone }))
-      .toThrow('rerun with --since all')
+    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone })).toThrow(
+      'rerun with --since all'
+    )
   })
 
   test('allows a recent new session to extend an existing compacted daily model', () => {
@@ -128,8 +135,7 @@ describe('Antigravity CLI history cursor', () => {
     const group = cliHistorySnapshotGroupFromEvent(event, timezone)
     cursor.files[cliHistoryAggregateKey(group)] = aggregateEntry()
 
-    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone }))
-      .not.toThrow()
+    expect(() => assertCliHistoryEventsCanApplyIncrementally({ cursor, events: [event], timezone })).not.toThrow()
   })
 })
 

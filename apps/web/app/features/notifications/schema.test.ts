@@ -35,9 +35,11 @@ describe('notification form schema', () => {
   })
 
   test('preserves multiple schedule weekdays from bracket form fields', () => {
-    expect(scheduleWeekdaysFromForm({
-      'scheduleWeekdays[]': ['1', '3', '5'],
-      scheduleWeekdaysTouched: '1'
-    })).toEqual([1, 3, 5])
+    expect(
+      scheduleWeekdaysFromForm({
+        'scheduleWeekdays[]': ['1', '3', '5'],
+        scheduleWeekdaysTouched: '1'
+      })
+    ).toEqual([1, 3, 5])
   })
 })

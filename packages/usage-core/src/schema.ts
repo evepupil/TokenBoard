@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidIsoDate } from './dates'
 
 export const usageSources = [
   'claude-code',
@@ -47,36 +48,39 @@ export const usageTimezoneSchema = z
 
 export const usageModelSchema = z.string().min(1).max(maxUsageModelNameLength)
 
-export const usageSnapshotSchema = z.object({
-  source: usageSourceSchema,
-  usageDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  timezone: usageTimezoneSchema,
-  model: usageModelSchema,
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-  cacheCreationTokens: z.number().int().nonnegative(),
-  cacheReadTokens: z.number().int().nonnegative(),
-  totalTokens: z.number().int().nonnegative(),
-  costUsd: z.number().nonnegative(),
-  sessionCount: z.number().int().nonnegative(),
-  collectedAt: z.string().datetime()
-}).superRefine((snapshot, ctx) => {
-  if (snapshot.cacheReadTokens > snapshot.totalTokens) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['cacheReadTokens'],
-      message: 'cacheReadTokens must not exceed totalTokens'
-    })
-  }
+export const usageSnapshotSchema = z
+  .object({
+    source: usageSourceSchema,
+    usageDate: z.string().refine(isValidIsoDate, 'Invalid ISO date'),
+    timezone: usageTimezoneSchema,
+    model: usageModelSchema,
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheCreationTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+    costUsd: z.number().nonnegative(),
+    sessionCount: z.number().int().nonnegative(),
+    correction: z.literal('codex-context-pricing').optional(),
+    collectedAt: z.string().datetime()
+  })
+  .superRefine((snapshot, ctx) => {
+    if (snapshot.cacheReadTokens > snapshot.totalTokens) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cacheReadTokens'],
+        message: 'cacheReadTokens must not exceed totalTokens'
+      })
+    }
 
-  if (isCostUnavailableSource(snapshot.source) && snapshot.costUsd > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['costUsd'],
-      message: costUnavailableMessages[snapshot.source as (typeof costUnavailableSources)[number]]
-    })
-  }
-})
+    if (isCostUnavailableSource(snapshot.source) && snapshot.costUsd > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['costUsd'],
+        message: costUnavailableMessages[snapshot.source as (typeof costUnavailableSources)[number]]
+      })
+    }
+  })
 
 export type UsageSource = z.infer<typeof usageSourceSchema>
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>
@@ -108,7 +112,8 @@ export function snapshotHashPayload(snapshot: UsageSnapshot) {
     cacheReadTokens: snapshot.cacheReadTokens,
     totalTokens: snapshot.totalTokens,
     costUsd: snapshot.costUsd,
-    sessionCount: snapshot.sessionCount
+    sessionCount: snapshot.sessionCount,
+    correction: snapshot.correction
   })
 }
 

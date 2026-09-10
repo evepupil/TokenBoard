@@ -27,11 +27,7 @@ export async function ingestSnapshots(
   return result
 }
 
-export async function checkExistingSnapshots(
-  db: D1Database,
-  user: AuthenticatedUser,
-  keys: UsageSnapshotKey[]
-) {
+export async function checkExistingSnapshots(db: D1Database, user: AuthenticatedUser, keys: UsageSnapshotKey[]) {
   const existing = await findExistingSnapshotHashes(db, {
     userId: user.id,
     deviceId: user.deviceId ?? legacyDeviceId,

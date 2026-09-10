@@ -2,10 +2,7 @@ import { renderToString } from 'hono/jsx/dom/server'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { requireUser } from '../../features/auth/middleware'
 import { createPairingCode } from '../../features/device/service'
-import {
-  getCanonicalPublicOrigin,
-  getProfileTimezoneSettings
-} from '../../features/settings/service'
+import { getCanonicalPublicOrigin, getProfileTimezoneSettings } from '../../features/settings/service'
 import { POST } from './install'
 
 vi.mock('../../features/auth/middleware', () => ({
@@ -54,7 +51,7 @@ describe('install POST route', () => {
       expiresAt: '2026-06-30T10:30:00.000Z'
     } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -78,11 +75,7 @@ function postContext(body: Record<string, unknown>) {
     header: vi.fn((name: string, value: string) => {
       headers.set(name, value)
     }),
-    json: vi.fn((body: unknown, status = 200) => (
-      Response.json(body, { status, headers })
-    )),
-    render: vi.fn(async (body: unknown) => (
-      new Response(await renderToString(body as never), { headers })
-    ))
+    json: vi.fn((body: unknown, status = 200) => Response.json(body, { status, headers })),
+    render: vi.fn(async (body: unknown) => new Response(await renderToString(body as never), { headers }))
   }
 }

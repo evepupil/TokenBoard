@@ -71,9 +71,8 @@ export async function verifyUploadToken(
   }
 
   const tokenHash = await hash(token)
-  const row = await env.DB
-    .prepare(
-      `
+  const row = await env.DB.prepare(
+    `
         SELECT
           user_id as userId,
           device_id as deviceId,
@@ -83,7 +82,7 @@ export async function verifyUploadToken(
           AND revoked_at IS NULL
         LIMIT 1
       `
-    )
+  )
     .bind(tokenHash)
     .first<{ userId: string; deviceId: string | null; installationId: string | null }>()
 
@@ -99,11 +98,7 @@ export async function verifyUploadToken(
   throw new ApiError('UNAUTHORIZED', 'Invalid upload token', 401)
 }
 
-export async function ensureProfile(
-  db: D1Database,
-  user: SessionUser,
-  timezoneInput?: string | null
-) {
+export async function ensureProfile(db: D1Database, user: SessionUser, timezoneInput?: string | null) {
   const now = new Date().toISOString()
   const detectedTimezone = parseTimezone(timezoneInput)
   const timezone = detectedTimezone ?? defaultTimezone
@@ -131,15 +126,7 @@ export async function ensureProfile(
           AND excluded.timezone_source = 'browser'
       `
     )
-    .bind(
-      user.id,
-      profileSlug(user),
-      user.name || user.email,
-      timezone,
-      timezoneSource,
-      now,
-      now
-    )
+    .bind(user.id, profileSlug(user), user.name || user.email, timezone, timezoneSource, now, now)
     .run()
 }
 

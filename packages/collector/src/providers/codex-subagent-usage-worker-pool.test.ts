@@ -14,38 +14,34 @@ describe('Codex subagent usage worker pool', () => {
     try {
       await writeFile(filePath, `${JSON.stringify(usageRecord())}\n`)
 
-      await expect(pool.read(
-        filePath,
-        '2026-07-25T00:00:00.000Z',
-        'UTC'
-      )).resolves.toEqual([{
-        usageDate: '2026-07-25',
-        inputTokens: 10,
-        outputTokens: 2,
-        cacheCreationTokens: 3,
-        cacheReadTokens: 4,
-        totalTokens: 19
-      }])
-      await expect(pool.read(
-        filePath,
-        '2026-07-25T00:00:00.000Z',
-        'Invalid/Timezone'
-      )).rejects.toThrow('Invalid timezone for Codex subagent usage date')
-    } finally {
-      await Promise.all([
-        pool.close(),
-        rm(root, { recursive: true, force: true })
+      await expect(pool.read(filePath, '2026-07-25T00:00:00.000Z', 'UTC')).resolves.toEqual([
+        {
+          usageDate: '2026-07-25',
+          inputTokens: 10,
+          outputTokens: 2,
+          cacheCreationTokens: 3,
+          cacheReadTokens: 4,
+          totalTokens: 19
+        }
       ])
+      await expect(pool.read(filePath, '2026-07-25T00:00:00.000Z', 'Invalid/Timezone')).rejects.toThrow(
+        'Invalid timezone for Codex subagent usage date'
+      )
+    } finally {
+      await Promise.all([pool.close(), rm(root, { recursive: true, force: true })])
     }
   })
 
   test('rejects queued work when a worker exits successfully but unexpectedly', async () => {
     const workers: Worker[] = []
     const pool = createCodexSubagentUsageWorkerPool(1, () => {
-      const worker = new Worker(`
+      const worker = new Worker(
+        `
         const { parentPort } = require('node:worker_threads')
         parentPort.once('message', () => process.exit(0))
-      `, { eval: true })
+      `,
+        { eval: true }
+      )
       workers.push(worker)
       return worker
     })
@@ -60,10 +56,13 @@ describe('Codex subagent usage worker pool', () => {
   test('close rejects in-flight work and waits for every worker to terminate', async () => {
     const workers: Worker[] = []
     const pool = createCodexSubagentUsageWorkerPool(2, () => {
-      const worker = new Worker(`
+      const worker = new Worker(
+        `
         const { parentPort } = require('node:worker_threads')
         parentPort.on('message', () => undefined)
-      `, { eval: true })
+      `,
+        { eval: true }
+      )
       workers.push(worker)
       return worker
     })
@@ -75,8 +74,7 @@ describe('Codex subagent usage worker pool', () => {
     await Promise.all([firstClose, secondClose])
 
     expect(workers.map((worker) => worker.threadId)).toEqual([-1, -1])
-    await expect(pool.read('/unused', '2026-07-25T00:00:00.000Z', 'UTC'))
-      .rejects.toThrow('worker pool is closed')
+    await expect(pool.read('/unused', '2026-07-25T00:00:00.000Z', 'UTC')).rejects.toThrow('worker pool is closed')
   })
 })
 

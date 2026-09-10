@@ -126,20 +126,22 @@ describe('usageDetailsToCsv', () => {
         activeDays: 1
       },
       dailyRows: [],
-      modelRows: [{
-        usageDate: '2026-04-29',
-        source: 'antigravity-ide',
-        model: 'gemini-3.5-flash',
-        inputTokens: 1,
-        outputTokens: 2,
-        cacheCreationTokens: 3,
-        cacheReadTokens: 4,
-        cacheReadRate: 0.4,
-        totalTokens: 10,
-        totalTokensWithoutCacheRead: 6,
-        costUsd: 0,
-        sessionCount: 1
-      }]
+      modelRows: [
+        {
+          usageDate: '2026-04-29',
+          source: 'antigravity-ide',
+          model: 'gemini-3.5-flash',
+          inputTokens: 1,
+          outputTokens: 2,
+          cacheCreationTokens: 3,
+          cacheReadTokens: 4,
+          cacheReadRate: 0.4,
+          totalTokens: 10,
+          totalTokensWithoutCacheRead: 6,
+          costUsd: 0,
+          sessionCount: 1
+        }
+      ]
     })
 
     expect(csv).toBe(

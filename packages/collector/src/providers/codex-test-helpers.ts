@@ -27,14 +27,14 @@ export async function fileExists(file: string) {
     .catch(() => false)
 }
 
-export function tokenCountEvent(timestamp: string, totalTokens: number) {
+export function tokenCountEvent(timestamp: string, totalTokens: number, model = 'gpt-5') {
   return {
     type: 'event_msg',
     timestamp,
     payload: {
       type: 'token_count',
       info: {
-        model: 'gpt-5',
+        model,
         last_token_usage: {
           input_tokens: totalTokens,
           output_tokens: 0,

@@ -14,11 +14,36 @@ import {
   readChildLastUsageByDate,
   readChildLastUsageEvents
 } from './codex-subagent-usage-child'
-import { normalizeDate, readJsonlRecords, readJsonlRecordsFromStream } from './codex-subagent-usage-json'
+import {
+  normalizeDate,
+  readJsonlRecords,
+  readJsonlRecordsFromStream,
+  readNumber,
+  readTotalTokens
+} from './codex-subagent-usage-json'
 
 const childUsageEventLimitTestTimeoutMs = 60_000
 
 describe('Codex JSONL reader', () => {
+  test('normalizes inconsistent Codex child totals', () => {
+    expect(
+      readTotalTokens({
+        input_tokens: 10,
+        output_tokens: 4,
+        cache_write_input_tokens: 3,
+        cached_input_tokens: 20,
+        total_tokens: 15
+      })
+    ).toBe(37)
+  })
+
+  test('ignores negative and fractional token fields', () => {
+    expect(readNumber({ input_tokens: -10 }, ['input_tokens'])).toBe(0)
+    expect(readNumber({ input_tokens: 1.5 }, ['input_tokens'])).toBe(0)
+    expect(readNumber({ input_tokens: Number.MAX_SAFE_INTEGER + 1 }, ['input_tokens'])).toBe(0)
+    expect(readNumber({ input_tokens: 12 }, ['input_tokens'])).toBe(12)
+  })
+
   test('reuses one date formatter for repeated Codex usage dates in the same timezone', () => {
     const OriginalDateTimeFormat = Intl.DateTimeFormat
     let formatterCount = 0
@@ -105,54 +130,51 @@ describe('Codex JSONL reader', () => {
     }
   })
 
-  test.skipIf(process.platform === 'win32')('rejects an early child-session reader exit after an atomic replacement', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-child-atomic-replace-'))
-    const filePath = join(root, 'child.jsonl')
-    const replacementPath = join(root, 'replacement.jsonl')
-    const original = '{"type":"session_meta","id":"a"}\n{"type":"event_msg"}\n'
-    const replacement = '{"type":"session_meta","id":"b"}\n{"type":"event_msg"}\n'
+  test.skipIf(process.platform === 'win32')(
+    'rejects an early child-session reader exit after an atomic replacement',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-child-atomic-replace-'))
+      const filePath = join(root, 'child.jsonl')
+      const replacementPath = join(root, 'replacement.jsonl')
+      const original = '{"type":"session_meta","id":"a"}\n{"type":"event_msg"}\n'
+      const replacement = '{"type":"session_meta","id":"b"}\n{"type":"event_msg"}\n'
 
-    try {
-      await writeFile(filePath, original)
-      const originalStat = await lstat(filePath)
-      const iterator = readJsonlRecords(filePath, undefined, {
-        maxBytes: 1024,
-        maxLineBytes: 128,
-        label: 'Codex child session'
-      })[Symbol.asyncIterator]()
+      try {
+        await writeFile(filePath, original)
+        const originalStat = await lstat(filePath)
+        const iterator = readJsonlRecords(filePath, undefined, {
+          maxBytes: 1024,
+          maxLineBytes: 128,
+          label: 'Codex child session'
+        })[Symbol.asyncIterator]()
 
-      await expect(iterator.next()).resolves.toMatchObject({
-        done: false,
-        value: { type: 'session_meta', id: 'a' }
-      })
-      await writeFile(replacementPath, replacement)
-      await rename(replacementPath, filePath)
-      const replacementStat = await lstat(filePath)
-      expect(replacementStat.ino).not.toBe(originalStat.ino)
+        await expect(iterator.next()).resolves.toMatchObject({
+          done: false,
+          value: { type: 'session_meta', id: 'a' }
+        })
+        await writeFile(replacementPath, replacement)
+        await rename(replacementPath, filePath)
+        const replacementStat = await lstat(filePath)
+        expect(replacementStat.ino).not.toBe(originalStat.ino)
 
-      const stop = iterator.return
-      if (!stop) throw new Error('Codex JSONL iterator does not support early return')
-      await expect(stop.call(iterator)).rejects.toThrow('Codex child session changed while reading; retry the sync')
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        const stop = iterator.return
+        if (!stop) throw new Error('Codex JSONL iterator does not support early return')
+        await expect(stop.call(iterator)).rejects.toThrow('Codex child session changed while reading; retry the sync')
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('reads CRLF-delimited records split across chunks', async () => {
-    const stream = Readable.from([
-      Buffer.from('{"type":"session_meta"}\r'),
-      Buffer.from('\n{"type":"event_msg"}\r\n')
-    ])
+    const stream = Readable.from([Buffer.from('{"type":"session_meta"}\r'), Buffer.from('\n{"type":"event_msg"}\r\n')])
     const records: unknown[] = []
 
     for await (const record of readJsonlRecordsFromStream(stream, undefined, { maxLineBytes: 64 })) {
       records.push(record)
     }
 
-    expect(records).toEqual([
-      { type: 'session_meta' },
-      { type: 'event_msg' }
-    ])
+    expect(records).toEqual([{ type: 'session_meta' }, { type: 'event_msg' }])
   })
 
   test('does not turn a delayed CRLF continuation into a blank row', async () => {
@@ -166,27 +188,23 @@ describe('Codex JSONL reader', () => {
     })
     const warnings: string[] = []
 
-    for await (const _record of readJsonlRecordsFromStream(stream, (line) => warnings.push(line), { maxLineBytes: 64 })) {
+    for await (const _record of readJsonlRecordsFromStream(stream, (line) => warnings.push(line), {
+      maxLineBytes: 64
+    })) {
     }
 
     expect(warnings).toEqual([])
   })
 
   test('emits a line when its LF terminator starts the next chunk', async () => {
-    const stream = Readable.from([
-      Buffer.from('{"type":"session_meta"}'),
-      Buffer.from('\n{"type":"event_msg"}\n')
-    ])
+    const stream = Readable.from([Buffer.from('{"type":"session_meta"}'), Buffer.from('\n{"type":"event_msg"}\n')])
     const records: unknown[] = []
 
     for await (const record of readJsonlRecordsFromStream(stream, undefined, { maxLineBytes: 64 })) {
       records.push(record)
     }
 
-    expect(records).toEqual([
-      { type: 'session_meta' },
-      { type: 'event_msg' }
-    ])
+    expect(records).toEqual([{ type: 'session_meta' }, { type: 'event_msg' }])
   })
 
   test('preserves standalone CR line delimiters', async () => {
@@ -197,10 +215,7 @@ describe('Codex JSONL reader', () => {
       records.push(record)
     }
 
-    expect(records).toEqual([
-      { type: 'session_meta' },
-      { type: 'event_msg' }
-    ])
+    expect(records).toEqual([{ type: 'session_meta' }, { type: 'event_msg' }])
   })
 
   test('rejects invalid UTF-8 before a short child row can be decoded with replacement characters', async () => {
@@ -211,11 +226,10 @@ describe('Codex JSONL reader', () => {
     ])
 
     await expect(async () => {
-      for await (const _record of readJsonlRecordsFromStream(
-        Readable.from([malformed]),
-        undefined,
-        { ...codexChildSessionReadLimits, maxLineBytes: 1024 }
-      )) {
+      for await (const _record of readJsonlRecordsFromStream(Readable.from([malformed]), undefined, {
+        ...codexChildSessionReadLimits,
+        maxLineBytes: 1024
+      })) {
       }
     }).rejects.toThrow('Codex child session contains invalid UTF-8')
   })
@@ -224,15 +238,11 @@ describe('Codex JSONL reader', () => {
     const malformed = `{"type":"compacted","payload":"${'x'.repeat(128)}`
 
     await expect(async () => {
-      for await (const _record of readJsonlRecordsFromStream(
-        Readable.from([Buffer.from(malformed)]),
-        undefined,
-        {
-          ...codexChildSessionReadLimits,
-          maxLineBytes: 64,
-          maxDiscardedLineBytes: 512
-        }
-      )) {
+      for await (const _record of readJsonlRecordsFromStream(Readable.from([Buffer.from(malformed)]), undefined, {
+        ...codexChildSessionReadLimits,
+        maxLineBytes: 64,
+        maxDiscardedLineBytes: 512
+      })) {
       }
     }).rejects.toThrow('Codex child session contains a malformed oversized line')
   })
@@ -246,15 +256,11 @@ describe('Codex JSONL reader', () => {
     ])
 
     await expect(async () => {
-      for await (const _record of readJsonlRecordsFromStream(
-        Readable.from([malformed]),
-        undefined,
-        {
-          ...codexChildSessionReadLimits,
-          maxLineBytes: 64,
-          maxDiscardedLineBytes: 512
-        }
-      )) {
+      for await (const _record of readJsonlRecordsFromStream(Readable.from([malformed]), undefined, {
+        ...codexChildSessionReadLimits,
+        maxLineBytes: 64,
+        maxDiscardedLineBytes: 512
+      })) {
       }
     }).rejects.toThrow('Codex child session contains a malformed oversized line')
   })
@@ -265,21 +271,14 @@ describe('Codex JSONL reader', () => {
       Buffer.from('x'.repeat(128)),
       Buffer.from([0xc3])
     ])
-    const secondChunk = Buffer.concat([
-      Buffer.from([0x28]),
-      Buffer.from('"}')
-    ])
+    const secondChunk = Buffer.concat([Buffer.from([0x28]), Buffer.from('"}')])
 
     await expect(async () => {
-      for await (const _record of readJsonlRecordsFromStream(
-        Readable.from([firstChunk, secondChunk]),
-        undefined,
-        {
-          ...codexChildSessionReadLimits,
-          maxLineBytes: 64,
-          maxDiscardedLineBytes: 512
-        }
-      )) {
+      for await (const _record of readJsonlRecordsFromStream(Readable.from([firstChunk, secondChunk]), undefined, {
+        ...codexChildSessionReadLimits,
+        maxLineBytes: 64,
+        maxDiscardedLineBytes: 512
+      })) {
       }
     }).rejects.toThrow('Codex child session contains a malformed oversized line')
   })
@@ -288,15 +287,11 @@ describe('Codex JSONL reader', () => {
     const oversized = `{"type":"event_msg","payload":{"info":{"\\u0074otal_token_usage":{"input_tokens":1}}},"padding":"${'x'.repeat(128)}"}`
 
     await expect(async () => {
-      for await (const _record of readJsonlRecordsFromStream(
-        Readable.from([Buffer.from(oversized)]),
-        undefined,
-        {
-          ...codexChildSessionReadLimits,
-          maxLineBytes: 64,
-          maxDiscardedLineBytes: 512
-        }
-      )) {
+      for await (const _record of readJsonlRecordsFromStream(Readable.from([Buffer.from(oversized)]), undefined, {
+        ...codexChildSessionReadLimits,
+        maxLineBytes: 64,
+        maxDiscardedLineBytes: 512
+      })) {
       }
     }).rejects.toThrow('Codex child session contains an oversized line with usage or subagent metadata')
   })
@@ -320,10 +315,7 @@ describe('Codex JSONL reader', () => {
   })
 
   test('enforces the total byte limit for direct JSONL streams', async () => {
-    const stream = Readable.from([
-      Buffer.from('{"type":"session_meta"}\n'),
-      Buffer.from('{"type":"event_msg"}\n')
-    ])
+    const stream = Readable.from([Buffer.from('{"type":"session_meta"}\n'), Buffer.from('{"type":"event_msg"}\n')])
 
     await expect(async () => {
       for await (const _record of readJsonlRecordsFromStream(stream, undefined, {
@@ -338,10 +330,7 @@ describe('Codex JSONL reader', () => {
   })
 
   test('bounds discarded oversized lines when an explicit streaming policy is enabled', async () => {
-    const stream = Readable.from([
-      Buffer.from('{"type":"compacted","payload":"'),
-      Buffer.from('x'.repeat(65))
-    ])
+    const stream = Readable.from([Buffer.from('{"type":"compacted","payload":"'), Buffer.from('x'.repeat(65))])
 
     await expect(async () => {
       for await (const _record of readJsonlRecordsFromStream(stream, undefined, {
@@ -370,22 +359,23 @@ describe('Codex JSONL reader', () => {
     const filePath = join(root, 'child.jsonl')
 
     try {
-      await writeFile(filePath, `${JSON.stringify({
-        type: 'event_msg',
-        timestamp: '2026-02-30T00:00:00.000Z',
-        payload: {
-          info: {
-            total_token_usage: { input_tokens: 1, total_tokens: 1 },
-            last_token_usage: { input_tokens: 1, total_tokens: 1 }
-          }
-        }
-      })}\n`)
-
-      await expect(readChildLastUsageByDate(
+      await writeFile(
         filePath,
-        '2026-02-01T00:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow('Invalid Codex date')
+        `${JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-02-30T00:00:00.000Z',
+          payload: {
+            info: {
+              total_token_usage: { input_tokens: 1, total_tokens: 1 },
+              last_token_usage: { input_tokens: 1, total_tokens: 1 }
+            }
+          }
+        })}\n`
+      )
+
+      await expect(readChildLastUsageByDate(filePath, '2026-02-01T00:00:00.000Z', 'UTC')).rejects.toThrow(
+        'Invalid Codex date'
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -402,14 +392,12 @@ describe('Codex JSONL reader', () => {
       }
       await appendFile(filePath, `${JSON.stringify(childUsageEvent(1))}\n`)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).resolves.toEqual([expect.objectContaining({
-        usageDate: '2026-05-25',
-        totalTokens: 1
-      })])
+      await expect(readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).resolves.toEqual([
+        expect.objectContaining({
+          usageDate: '2026-05-25',
+          totalTokens: 1
+        })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -423,11 +411,9 @@ describe('Codex JSONL reader', () => {
       await writeFile(filePath, '')
       await truncate(filePath, maxCodexChildSessionBytes + 1)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow(`Codex child session exceeds the ${maxCodexChildSessionBytes}-byte limit`)
+      await expect(readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).rejects.toThrow(
+        `Codex child session exceeds the ${maxCodexChildSessionBytes}-byte limit`
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -442,11 +428,9 @@ describe('Codex JSONL reader', () => {
       await writeFile(targetPath, `${JSON.stringify(childUsageEvent(1))}\n`)
       await symlink(targetPath, linkedPath)
 
-      await expect(readChildLastUsageEvents(
-        linkedPath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow('Unable to read Codex child session: symbolic links are not supported')
+      await expect(readChildLastUsageEvents(linkedPath, '2026-05-25T01:00:00.000Z', 'UTC')).rejects.toThrow(
+        'Unable to read Codex child session: symbolic links are not supported'
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -459,11 +443,9 @@ describe('Codex JSONL reader', () => {
     try {
       await writeFile(filePath, `${' '.repeat(maxCodexChildSessionLineBytes + 1)}\n`)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow(`Codex child session contains a line exceeding the ${maxCodexChildSessionLineBytes}-byte limit`)
+      await expect(readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).rejects.toThrow(
+        `Codex child session contains a line exceeding the ${maxCodexChildSessionLineBytes}-byte limit`
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -481,15 +463,14 @@ describe('Codex JSONL reader', () => {
     try {
       await writeFile(filePath, `${oversized}\n${JSON.stringify(childUsageEvent(1))}\n`)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC',
-        (line) => warnings.push(line)
-      )).resolves.toEqual([expect.objectContaining({
-        usageDate: '2026-05-25',
-        totalTokens: 1
-      })])
+      await expect(
+        readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC', (line) => warnings.push(line))
+      ).resolves.toEqual([
+        expect.objectContaining({
+          usageDate: '2026-05-25',
+          totalTokens: 1
+        })
+      ])
       expect(warnings).toEqual([
         `Skipped 1 oversized Codex child session JSONL row without usage or subagent metadata (largest ${Buffer.byteLength(oversized)} bytes)`
       ])
@@ -516,11 +497,9 @@ describe('Codex JSONL reader', () => {
     try {
       await writeFile(filePath, `${oversized}\n`)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow('Codex child session contains an oversized line with usage or subagent metadata')
+      await expect(readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).rejects.toThrow(
+        'Codex child session contains an oversized line with usage or subagent metadata'
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -551,34 +530,40 @@ describe('Codex JSONL reader', () => {
     }).rejects.toThrow('Codex child session contains an oversized line with usage or subagent metadata')
   })
 
-  test('rejects excessive unique child usage events instead of retaining them unboundedly', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-child-events-'))
-    const filePath = join(root, 'child.jsonl')
+  test(
+    'rejects excessive unique child usage events instead of retaining them unboundedly',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-child-events-'))
+      const filePath = join(root, 'child.jsonl')
 
-    try {
-      const rows = Array.from({ length: maxCodexChildUsageEvents + 1 }, (_, index) => JSON.stringify(childUsageEvent(index + 1)))
-      await writeFile(filePath, `${rows.join('\n')}\n`)
+      try {
+        const rows = Array.from({ length: maxCodexChildUsageEvents + 1 }, (_, index) =>
+          JSON.stringify(childUsageEvent(index + 1))
+        )
+        await writeFile(filePath, `${rows.join('\n')}\n`)
 
-      await expect(readChildLastUsageEvents(
-        filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).rejects.toThrow(`Codex child session exceeds the ${maxCodexChildUsageEvents} unique usage-event limit`)
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  }, childUsageEventLimitTestTimeoutMs)
+        await expect(readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).rejects.toThrow(
+          `Codex child session exceeds the ${maxCodexChildUsageEvents} unique usage-event limit`
+        )
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+    childUsageEventLimitTestTimeoutMs
+  )
 
   test('rejects excessive combined multi-profile child usage events', () => {
-    const eventLists = [Array.from({ length: maxMergedCodexChildUsageEvents + 1 }, (_, index) => ({
-      eventKey: `event-${index}`,
-      usageDate: '2026-05-25',
-      inputTokens: 1,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-      totalTokens: 1
-    }))]
+    const eventLists = [
+      Array.from({ length: maxMergedCodexChildUsageEvents + 1 }, (_, index) => ({
+        eventKey: `event-${index}`,
+        usageDate: '2026-05-25',
+        inputTokens: 1,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        totalTokens: 1
+      }))
+    ]
 
     expect(() => mergeChildUsageEventsByDate(eventLists)).toThrow(
       `Codex child usage correction exceeds the ${maxMergedCodexChildUsageEvents} unique usage-event limit`
@@ -597,24 +582,25 @@ describe('Codex JSONL reader', () => {
         cached_input_tokens: 150,
         total_tokens: 250
       }
-      await writeFile(filePath, `${JSON.stringify({
-        type: 'event_msg',
-        timestamp: '2026-05-25T01:10:00.000Z',
-        payload: { info: { total_token_usage: usage, last_token_usage: usage } }
-      })}\n`)
-
-      await expect(readChildLastUsageByDate(
+      await writeFile(
         filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC'
-      )).resolves.toEqual([{
-        usageDate: '2026-05-25',
-        inputTokens: 200,
-        outputTokens: 20,
-        cacheCreationTokens: 30,
-        cacheReadTokens: 150,
-        totalTokens: 250
-      }])
+        `${JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-05-25T01:10:00.000Z',
+          payload: { info: { total_token_usage: usage, last_token_usage: usage } }
+        })}\n`
+      )
+
+      await expect(readChildLastUsageByDate(filePath, '2026-05-25T01:00:00.000Z', 'UTC')).resolves.toEqual([
+        {
+          usageDate: '2026-05-25',
+          inputTokens: 200,
+          outputTokens: 20,
+          cacheCreationTokens: 30,
+          cacheReadTokens: 150,
+          totalTokens: 250
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -626,22 +612,22 @@ describe('Codex JSONL reader', () => {
     const warnings: string[] = []
 
     try {
-      await writeFile(filePath, `${JSON.stringify({
-        type: 'event_msg',
-        timestamp: '2026-05-25T01:10:00.000Z',
-        payload: {
-          info: {
-            total_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }
-          }
-        }
-      })}\n`)
-
-      await expect(readChildLastUsageEvents(
+      await writeFile(
         filePath,
-        '2026-05-25T01:00:00.000Z',
-        'UTC',
-        (line) => warnings.push(line)
-      )).resolves.toEqual([])
+        `${JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-05-25T01:10:00.000Z',
+          payload: {
+            info: {
+              total_token_usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }
+            }
+          }
+        })}\n`
+      )
+
+      await expect(
+        readChildLastUsageEvents(filePath, '2026-05-25T01:00:00.000Z', 'UTC', (line) => warnings.push(line))
+      ).resolves.toEqual([])
       expect(warnings).toEqual([
         'Skipped 1 Codex child usage record with total_token_usage but missing last_token_usage'
       ])
@@ -663,7 +649,10 @@ describe('Codex JSONL reader', () => {
         mkdir(join(root, 'profile-c', 'sessions', '2026', '05', '25'), { recursive: true })
       ])
       await Promise.all([
-        writeFile(firstPath, `${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:10:00.000Z'))}\n${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:20:00.000Z'))}\n`),
+        writeFile(
+          firstPath,
+          `${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:10:00.000Z'))}\n${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:20:00.000Z'))}\n`
+        ),
         writeFile(copiedPath, `${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:10:00.000Z'))}\n`),
         writeFile(otherPath, `${JSON.stringify(childUsageEventAt(1, '2026-05-25T01:10:00.000Z'))}\n`)
       ])
@@ -677,10 +666,12 @@ describe('Codex JSONL reader', () => {
       expect(firstEvents).toHaveLength(2)
       expect(firstEvents[0].eventKey).toBe(copiedEvents[0].eventKey)
       expect(firstEvents[0].eventKey).not.toBe(otherEvents[0].eventKey)
-      expect(mergeChildUsageEventsByDate([firstEvents, copiedEvents, otherEvents])).toEqual([expect.objectContaining({
-        usageDate: '2026-05-25',
-        totalTokens: 3
-      })])
+      expect(mergeChildUsageEventsByDate([firstEvents, copiedEvents, otherEvents])).toEqual([
+        expect.objectContaining({
+          usageDate: '2026-05-25',
+          totalTokens: 3
+        })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

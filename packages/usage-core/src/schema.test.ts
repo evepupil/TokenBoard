@@ -28,11 +28,13 @@ describe('usage snapshot schema', () => {
   test('accepts Antigravity sources', () => {
     for (const source of ['antigravity-cli', 'antigravity', 'antigravity-ide'] as const) {
       expect(usageSourceSchema.parse(source)).toBe(source)
-      expect(usageSnapshotSchema.parse({
-        ...baseSnapshot,
-        source,
-        costUsd: 0
-      }).source).toBe(source)
+      expect(
+        usageSnapshotSchema.parse({
+          ...baseSnapshot,
+          source,
+          costUsd: 0
+        }).source
+      ).toBe(source)
     }
   })
 
@@ -56,12 +58,12 @@ describe('usage snapshot schema', () => {
   })
 
   test('rejects costs from sources that cannot report one', () => {
-    expect(() =>
-      usageSnapshotSchema.parse({ ...baseSnapshot, source: 'grok-build', costUsd: 0.01 })
-    ).toThrow('Grok Build source costs are unavailable')
-    expect(() =>
-      usageSnapshotSchema.parse({ ...baseSnapshot, source: 'deepseek-harness', costUsd: 0.01 })
-    ).toThrow('DeepSeek Harness source costs are unavailable')
+    expect(() => usageSnapshotSchema.parse({ ...baseSnapshot, source: 'grok-build', costUsd: 0.01 })).toThrow(
+      'Grok Build source costs are unavailable'
+    )
+    expect(() => usageSnapshotSchema.parse({ ...baseSnapshot, source: 'deepseek-harness', costUsd: 0.01 })).toThrow(
+      'DeepSeek Harness source costs are unavailable'
+    )
 
     for (const source of ['grok-build', 'deepseek-harness'] as const) {
       expect(usageSnapshotSchema.parse({ ...baseSnapshot, source, costUsd: 0 }).source).toBe(source)
@@ -90,10 +92,19 @@ describe('usage snapshot schema', () => {
     ).toThrow()
   })
 
+  test.each(['2026-02-30', '2023-02-29', '2026-13-01'])('rejects impossible usage dates: %s', (usageDate) => {
+    expect(() => usageSnapshotSchema.parse({ ...baseSnapshot, usageDate })).toThrow('Invalid ISO date')
+  })
+
+  test('accepts leap-day usage dates', () => {
+    expect(usageSnapshotSchema.parse({ ...baseSnapshot, usageDate: '2024-02-29' }).usageDate).toBe('2024-02-29')
+  })
+
   test('does not retain attacker-controlled invalid timezone keys', () => {
     const formatter = Intl.DateTimeFormat
-    const constructor = vi.spyOn(Intl, 'DateTimeFormat')
-      .mockImplementation(function (...args) { return new formatter(...args) })
+    const constructor = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (...args) {
+      return new formatter(...args)
+    })
 
     expect(isValidTimezone('Invalid/NegativeCacheProbe')).toBe(false)
     expect(isValidTimezone('Invalid/NegativeCacheProbe')).toBe(false)
@@ -105,8 +116,9 @@ describe('usage snapshot schema', () => {
   test('caches case-insensitive and canonical timezone aliases after validation', () => {
     const before = timezoneValidationCacheSize()
     const formatter = Intl.DateTimeFormat
-    const constructor = vi.spyOn(Intl, 'DateTimeFormat')
-      .mockImplementation(function (...args) { return new formatter(...args) })
+    const constructor = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (...args) {
+      return new formatter(...args)
+    })
 
     expect(isValidTimezone('US/Eastern')).toBe(true)
     expect(isValidTimezone('us/eastern')).toBe(true)
@@ -132,5 +144,14 @@ describe('usage snapshot schema', () => {
         model: 'g'.repeat(161)
       })
     ).toThrow()
+  })
+
+  test('retains the Codex context-pricing correction marker', () => {
+    expect(
+      usageSnapshotSchema.parse({
+        ...baseSnapshot,
+        correction: 'codex-context-pricing'
+      }).correction
+    ).toBe('codex-context-pricing')
   })
 })

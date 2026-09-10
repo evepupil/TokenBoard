@@ -1,8 +1,5 @@
 import { defaultDailyReportHistoryDays, retentionCutoffDate } from './report-history'
-import {
-  toDailyReportHistoryItem,
-  type DailyReportHistoryRow
-} from './report-history-item'
+import { toDailyReportHistoryItem, type DailyReportHistoryRow } from './report-history-item'
 import { ApiError } from '../../lib/errors'
 import { toIsoDate } from '../../lib/time'
 import { NotificationFormError } from './errors'

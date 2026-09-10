@@ -20,7 +20,7 @@ describe('Codex bounded canonical attribution retry', () => {
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
 
     try {
-      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)])
+      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')])
 
       const snapshots = await collectCodexUsage({
         codexHome,
@@ -33,7 +33,10 @@ describe('Codex bounded canonical attribution retry', () => {
           if (args.includes('daily')) return dailyResult()
           canonicalRuns += 1
           if (canonicalRuns === 1) {
-            await writeFile(sessionPath, `${JSON.stringify(tokenCountEvent('2026-05-21T04:24:07.234Z', 20))}\n`)
+            await writeFile(
+              sessionPath,
+              `${JSON.stringify(tokenCountEvent('2026-05-21T04:24:07.234Z', 20, 'gpt-5.6'))}\n`
+            )
           }
           return canonicalSessionResult()
         }
@@ -43,13 +46,15 @@ describe('Codex bounded canonical attribution retry', () => {
       expect(diagnostics).toEqual([
         'Skipping stale Codex canonical attribution cache write for a session that changed after copy'
       ])
-      expect(snapshots).toContainEqual(expect.objectContaining({
-        source: 'codex',
-        usageDate: '2026-05-21',
-        model: 'gpt-5.6',
-        totalTokens: 10,
-        sessionCount: 1
-      }))
+      expect(snapshots).toContainEqual(
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-21',
+          model: 'gpt-5.6',
+          totalTokens: 10,
+          sessionCount: 1
+        })
+      )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
       await rm(stateDir, { recursive: true, force: true })
@@ -64,7 +69,7 @@ describe('Codex bounded canonical attribution retry', () => {
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
 
     try {
-      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)])
+      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')])
 
       await collectCodexUsage({
         codexHome,
@@ -76,7 +81,7 @@ describe('Codex bounded canonical attribution retry', () => {
           if (args.includes('daily')) return dailyResult()
           await writeFile(
             sessionPath,
-            `${JSON.stringify(tokenCountEvent('2026-05-21T04:24:07.234Z', 20))}\n`,
+            `${JSON.stringify(tokenCountEvent('2026-05-21T04:24:07.234Z', 20, 'gpt-5.6'))}\n`,
             { flag: 'a' }
           )
           return canonicalSessionResult()
@@ -101,7 +106,7 @@ describe('Codex bounded canonical attribution retry', () => {
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
 
     try {
-      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)])
+      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')])
 
       const snapshots = await collectCodexUsage({
         codexHome,
@@ -122,13 +127,15 @@ describe('Codex bounded canonical attribution retry', () => {
 
       expect(canonicalRuns).toBe(2)
       expect(diagnostics).toEqual(['Codex canonical attribution changed; retrying the bounded collection once'])
-      expect(snapshots).toContainEqual(expect.objectContaining({
-        source: 'codex',
-        usageDate: '2026-05-21',
-        model: 'gpt-5.6',
-        totalTokens: 10,
-        sessionCount: 1
-      }))
+      expect(snapshots).toContainEqual(
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-21',
+          model: 'gpt-5.6',
+          totalTokens: 10,
+          sessionCount: 1
+        })
+      )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
       await rm(stateDir, { recursive: true, force: true })
@@ -144,7 +151,7 @@ describe('Codex bounded canonical attribution retry', () => {
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
 
     try {
-      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)])
+      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')])
 
       const snapshots = await collectCodexUsage({
         codexHome,
@@ -162,13 +169,15 @@ describe('Codex bounded canonical attribution retry', () => {
 
       expect(canonicalRuns).toBe(2)
       expect(diagnostics).toEqual(['Codex canonical attribution changed; retrying the bounded collection once'])
-      expect(snapshots).toContainEqual(expect.objectContaining({
-        source: 'codex',
-        usageDate: '2026-05-21',
-        model: 'gpt-5.6',
-        totalTokens: 10,
-        sessionCount: 1
-      }))
+      expect(snapshots).toContainEqual(
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-21',
+          model: 'gpt-5.6',
+          totalTokens: 10,
+          sessionCount: 1
+        })
+      )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
       await rm(stateDir, { recursive: true, force: true })
@@ -184,26 +193,28 @@ describe('Codex bounded canonical attribution retry', () => {
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
 
     try {
-      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)])
+      await writeJsonl(sessionPath, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        stateDir,
-        timezone: 'Asia/Shanghai',
-        since: '20260515',
-        stderr: reportDiagnostic(diagnostics),
-        async runner(_command, args) {
-          if (args.includes('--since') && args.includes('session')) {
-            return unstableBoundedSessionResult()
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          stateDir,
+          timezone: 'Asia/Shanghai',
+          since: '20260515',
+          stderr: reportDiagnostic(diagnostics),
+          async runner(_command, args) {
+            if (args.includes('--since') && args.includes('session')) {
+              return unstableBoundedSessionResult()
+            }
+            if (args.includes('daily')) return dailyResult()
+            canonicalRuns += 1
+            if (canonicalRuns <= 2) {
+              throw new Error('Codex child session changed while correcting; retry the sync')
+            }
+            return unstableCanonicalSessionResult()
           }
-          if (args.includes('daily')) return dailyResult()
-          canonicalRuns += 1
-          if (canonicalRuns <= 2) {
-            throw new Error('Codex child session changed while correcting; retry the sync')
-          }
-          return unstableCanonicalSessionResult()
-        }
-      })).rejects.toThrow('Codex child session changed while correcting; retry the sync')
+        })
+      ).rejects.toThrow('Codex child session changed while correcting; retry the sync')
 
       expect(canonicalRuns).toBe(2)
       expect(diagnostics).toEqual(['Codex canonical attribution changed; retrying the bounded collection once'])

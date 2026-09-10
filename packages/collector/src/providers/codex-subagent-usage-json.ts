@@ -4,12 +4,15 @@ import type { Readable } from 'node:stream'
 import { TextDecoder } from 'node:util'
 import { assertValidIsoCalendarDate } from '../iso-calendar-date'
 import type { UsageSource } from '@tokenboard/usage-core'
+import { normalizeCodexTotalTokens } from '../codex-token-usage'
 import {
   createSessionJsonlMetadataScanner,
   finishSessionJsonlMetadataScan,
   hasRelevantSessionJsonlMetadata,
+  readSessionJsonlMetadataRecord,
   readSessionJsonlRecordType,
   scanSessionJsonlMetadata,
+  type SessionJsonlMetadataRecord,
   type SessionJsonlMetadataScanner
 } from './session-jsonl-metadata-scanner'
 
@@ -36,9 +39,10 @@ export async function* readJsonlRecords(
 
   const label = limits.label ?? 'Codex JSONL input'
   const file = await openVerifiedJsonlFile(filePath, limits.maxBytes, label)
-  const stream = file.fingerprint.size === 0
-    ? undefined
-    : file.handle.createReadStream({ end: file.fingerprint.size - 1, autoClose: false })
+  const stream =
+    file.fingerprint.size === 0
+      ? undefined
+      : file.handle.createReadStream({ end: file.fingerprint.size - 1, autoClose: false })
   let completed = false
   let readerFailed = false
   try {
@@ -78,16 +82,23 @@ async function* readJsonlRecordsFromStreamWithLifecycle(
 ): AsyncIterable<UnknownRecord> {
   let lineNumber = 0
   let discardedRows = 0
+  let projectedRows = 0
   let largestDiscardedRowBytes = 0
-  const onDiscardedLine = (lineBytes: number) => {
-    discardedRows += 1
+  const onDiscardedLine = (lineBytes: number, projection?: SessionJsonlMetadataRecord) => {
+    if (projection) projectedRows += 1
+    else discardedRows += 1
     largestDiscardedRowBytes = Math.max(largestDiscardedRowBytes, lineBytes)
   }
 
   try {
     for await (const line of readJsonlLines(stream, { ...limits, onDiscardedLine }, destroyOnIncomplete)) {
       lineNumber += 1
-      if (line === null || !line.trim()) continue
+      if (line === null) continue
+      if (typeof line !== 'string') {
+        yield line
+        continue
+      }
+      if (!line.trim()) continue
       const record = parseJsonlRecord(line)
       if (record === 'malformed') {
         stderr?.(`Skipping malformed Codex subagent JSONL row at line ${lineNumber}`)
@@ -98,13 +109,21 @@ async function* readJsonlRecordsFromStreamWithLifecycle(
   } finally {
     if (discardedRows > 0) {
       const label = limits.label ?? 'Codex JSONL input'
-      stderr?.(`Skipped ${discardedRows} oversized ${label} JSONL row${discardedRows === 1 ? '' : 's'} without usage or subagent metadata (largest ${largestDiscardedRowBytes} bytes)`)
+      stderr?.(
+        `Skipped ${discardedRows} oversized ${label} JSONL row${discardedRows === 1 ? '' : 's'} without usage or subagent metadata (largest ${largestDiscardedRowBytes} bytes)`
+      )
+    }
+    if (projectedRows > 0) {
+      const label = limits.label ?? 'Codex JSONL input'
+      stderr?.(
+        `Retained bounded turn_context metadata from ${projectedRows} oversized ${label} JSONL row${projectedRows === 1 ? '' : 's'} (largest ${largestDiscardedRowBytes} bytes)`
+      )
     }
   }
 }
 
 type JsonlReadRuntimeLimits = JsonlReadLimits & {
-  onDiscardedLine?: (lineBytes: number) => void
+  onDiscardedLine?: (lineBytes: number, projection?: SessionJsonlMetadataRecord) => void
 }
 
 type JsonlLineState = {
@@ -121,7 +140,7 @@ async function* readJsonlLines(
   stream: Readable,
   limits: JsonlReadRuntimeLimits,
   destroyOnIncomplete: boolean
-): AsyncIterable<string | null> {
+): AsyncIterable<string | SessionJsonlMetadataRecord | null> {
   let line = emptyLineState(limits)
   let skipLeadingLineFeed = false
   let completed = false
@@ -191,11 +210,7 @@ function appendLineSegment(segment: Buffer, line: JsonlLineState, limits: JsonlR
   }
 
   if (!line.skipping && line.startsAsObject !== true) throw lineLimitError(limits)
-  scanSessionJsonlMetadata(
-    line.skipping ? [segment] : [...line.chunks, segment],
-    line.metadataScanner,
-    codexSource
-  )
+  scanSessionJsonlMetadata(line.skipping ? [segment] : [...line.chunks, segment], line.metadataScanner, codexSource)
   if (line.metadataScanner.invalid) {
     throw malformedOversizedLineError(limits)
   }
@@ -220,8 +235,9 @@ function finishLine(line: JsonlLineState, limits: JsonlReadRuntimeLimits) {
     if (!isDiscardableLineType(line.metadataScanner, limits)) {
       throw unknownOversizedLineTypeError(limits)
     }
-    limits.onDiscardedLine?.(line.bytes)
-    return null
+    const projection = readSessionJsonlMetadataRecord(line.metadataScanner)
+    limits.onDiscardedLine?.(line.bytes, projection ?? undefined)
+    return projection
   }
   return decodeJsonlLine(Buffer.concat(line.chunks, line.bytes), limits)
 }
@@ -315,14 +331,13 @@ async function openVerifiedJsonlFile(filePath: string, maxBytes: number, label: 
 
   const handle = await open(filePath, 'r')
   try {
-    const [handleBefore, pathAfterOpen] = await Promise.all([
-      handle.stat(),
-      lstat(filePath)
-    ])
+    const [handleBefore, pathAfterOpen] = await Promise.all([handle.stat(), lstat(filePath)])
     assertJsonlFileAtPath(pathAfterOpen, filePath, label)
     const fingerprint = jsonlFileFingerprint(handleBefore)
-    if (!sameJsonlFileFingerprint(jsonlFileFingerprint(pathBefore), fingerprint) ||
-        !sameJsonlFileFingerprint(jsonlFileFingerprint(pathAfterOpen), fingerprint)) {
+    if (
+      !sameJsonlFileFingerprint(jsonlFileFingerprint(pathBefore), fingerprint) ||
+      !sameJsonlFileFingerprint(jsonlFileFingerprint(pathAfterOpen), fingerprint)
+    ) {
       throw new Error(`${label} changed before reading; retry the sync`)
     }
     return { handle, fingerprint }
@@ -337,10 +352,7 @@ async function assertVerifiedJsonlFileUnchanged(
   file: { handle: FileHandle; fingerprint: JsonlFileFingerprint },
   label: string
 ) {
-  const [handleAfter, pathAfter] = await Promise.all([
-    file.handle.stat(),
-    lstat(filePath)
-  ])
+  const [handleAfter, pathAfter] = await Promise.all([file.handle.stat(), lstat(filePath)])
   assertJsonlFileAtPath(pathAfter, filePath, label)
   if (
     !sameJsonlFileFingerprint(jsonlFileFingerprint(handleAfter), file.fingerprint) ||
@@ -363,11 +375,7 @@ function isBadFileDescriptorError(error: unknown): error is NodeJS.ErrnoExceptio
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'EBADF'
 }
 
-function assertJsonlFileAtPath(
-  details: Awaited<ReturnType<typeof lstat>>,
-  filePath: string,
-  label: string
-) {
+function assertJsonlFileAtPath(details: Awaited<ReturnType<typeof lstat>>, filePath: string, label: string) {
   if (details.isSymbolicLink()) {
     throw new Error(`Unable to read ${label}: symbolic links are not supported`)
   }
@@ -391,11 +399,13 @@ function jsonlFileFingerprint(details: {
 }
 
 function sameJsonlFileFingerprint(left: JsonlFileFingerprint, right: JsonlFileFingerprint) {
-  return left.dev === right.dev &&
+  return (
+    left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
     left.mtimeMs === right.mtimeMs &&
     left.ctimeMs === right.ctimeMs
+  )
 }
 
 function parseJsonlRecord(line: string): UnknownRecord | 'malformed' | null {
@@ -435,21 +445,20 @@ const isoTimestampPattern = /^\d{4}-\d{2}-\d{2}T/
 export function readNumber(record: UnknownRecord, keys: string[]) {
   for (const key of keys) {
     const value = record[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
   }
   return 0
 }
 
 export function readTotalTokens(row: UnknownRecord) {
-  const total = readNumber(row, ['totalTokens', 'total_tokens'])
-  return total > 0
-    ? total
-    : (
-      readNumber(row, ['inputTokens', 'input_tokens']) +
-      readNumber(row, ['outputTokens', 'output_tokens']) +
-      readCacheCreationTokens(row) +
-      readCacheReadTokens(row)
-    )
+  const explicitTotal = readNumber(row, ['totalTokens', 'total_tokens'])
+  return normalizeCodexTotalTokens({
+    inputTokens: readNumber(row, ['inputTokens', 'input_tokens']),
+    outputTokens: readNumber(row, ['outputTokens', 'output_tokens']),
+    cacheCreationTokens: readCacheCreationTokens(row),
+    cacheReadTokens: readCacheReadTokens(row),
+    explicitTotalTokens: explicitTotal > 0 ? explicitTotal : undefined
+  })
 }
 
 export function readCacheCreationTokens(row: UnknownRecord) {
@@ -459,7 +468,8 @@ export function readCacheCreationTokens(row: UnknownRecord) {
     'inputCacheCreationTokens',
     'cache_creation_tokens',
     'cache_creation_input_tokens',
-    'input_cache_creation_tokens'
+    'input_cache_creation_tokens',
+    'cache_write_input_tokens'
   ])
 }
 

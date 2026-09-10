@@ -63,7 +63,7 @@ describe('notifications POST route', () => {
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedSendWebhookTest.mockResolvedValue({ status: 'failure' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(mockedSendWebhookTest).toHaveBeenCalledWith({
       env: context.env,
@@ -79,7 +79,7 @@ describe('notifications POST route', () => {
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedSendWebhookTest.mockResolvedValue({ status: 'success' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('/settings/notifications?tested=1')
@@ -89,7 +89,7 @@ describe('notifications POST route', () => {
     const context = postContext({ action: 'update-share-settings', dailyReportShareEnabled: 'on' })
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(mockedUpdateDailyReportShareSettings).toHaveBeenCalledWith({
       db: context.env.DB,
@@ -104,7 +104,7 @@ describe('notifications POST route', () => {
     const context = postContext({ action: 'revoke-report-share', reportId: 'drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' })
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(mockedRevokeDailyReportShare).toHaveBeenCalledWith({
       db: context.env.DB,
@@ -119,7 +119,7 @@ describe('notifications POST route', () => {
     const context = postContext({ action: 'revoke-report-share', reportId: 'drr_1' })
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('/settings/notifications?error=invalid-daily-report-id')
@@ -130,11 +130,9 @@ describe('notifications POST route', () => {
     const context = postContext({ action: 'create' })
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedParseWebhookCreateForm.mockReturnValue({ provider: 'wecom' } as never)
-    mockedCreateWebhookSubscription.mockRejectedValue(
-      new NotificationFormError('webhook-url-not-supported') as never
-    )
+    mockedCreateWebhookSubscription.mockRejectedValue(new NotificationFormError('webhook-url-not-supported') as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('/settings/notifications?error=webhook-url-not-supported')
@@ -153,7 +151,7 @@ describe('notifications POST route', () => {
       throw new Error('unreachable')
     })
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(303)
     expect(response.headers.get('location')).toBe('/settings/notifications?error=invalid-request')
@@ -170,7 +168,7 @@ describe('notifications POST route', () => {
     mockedParseWebhookCreateForm.mockReturnValue({ provider: 'wecom' } as never)
     mockedCreateWebhookSubscription.mockRejectedValue(new ApiError(code, message, status) as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(status)
     expect(response.headers.get('location')).toBeNull()
@@ -197,11 +195,7 @@ function postContext(body: Record<string, unknown>) {
     req: {
       parseBody: vi.fn(async () => body)
     },
-    json: vi.fn((body: unknown, status = 200) => (
-      Response.json(body, { status })
-    )),
-    redirect: vi.fn((location: string, status = 302) => (
-      new Response(null, { status, headers: { location } })
-    ))
+    json: vi.fn((body: unknown, status = 200) => Response.json(body, { status })),
+    redirect: vi.fn((location: string, status = 302) => new Response(null, { status, headers: { location } }))
   }
 }

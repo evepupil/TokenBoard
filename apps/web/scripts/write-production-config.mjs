@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs'
+import { isIP } from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -13,34 +14,11 @@ const betterAuthUrl = requireEnv('BETTER_AUTH_URL')
 const d1DatabaseId = requireEnv('D1_DATABASE_ID')
 const collectorRepoUrl = requireEnv('TOKENBOARD_COLLECTOR_REPO_URL')
 const collectorRepoRef = requireEnv('TOKENBOARD_COLLECTOR_REF')
-const dailyReportHistoryDays = optionalIntegerEnv(
-  'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS',
-  '30',
-  1,
-  31
-)
-const usageSummaryBackfillLimit = optionalIntegerEnv(
-  'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT',
-  '50',
-  1,
-  500
-)
-const usageSummaryStrict = optionalBooleanEnv(
-  'TOKENBOARD_USAGE_SUMMARY_STRICT',
-  'false'
-)
-const webhookLogRetentionDays = optionalIntegerEnv(
-  'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS',
-  '90',
-  1,
-  365
-)
-const webhookCronBatchSize = optionalIntegerEnv(
-  'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE',
-  '5',
-  1,
-  5
-)
+const dailyReportHistoryDays = optionalIntegerEnv('TOKENBOARD_DAILY_REPORT_HISTORY_DAYS', '30', 1, 31)
+const usageSummaryBackfillLimit = optionalIntegerEnv('TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT', '50', 1, 500)
+const usageSummaryStrict = optionalBooleanEnv('TOKENBOARD_USAGE_SUMMARY_STRICT', 'false')
+const webhookLogRetentionDays = optionalIntegerEnv('TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS', '90', 1, 365)
+const webhookCronBatchSize = optionalIntegerEnv('TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE', '5', 1, 5)
 
 validateWorkerRoute(workerRoute)
 validateBetterAuthUrl(betterAuthUrl)
@@ -162,7 +140,7 @@ function validateWorkerRoute(value) {
   }
 
   const hostname = route.startsWith('*.') ? route.slice(2) : route
-  if (!isValidHostname(hostname)) {
+  if (!isValidHostname(hostname) || isUnsafeProductionHostname(hostname)) {
     fail('TOKENBOARD_WORKER_ROUTE must be a custom domain host without protocol, path, query, or hash.')
   }
 }
@@ -177,6 +155,16 @@ function validateBetterAuthUrl(value) {
 
   if (url.protocol !== 'https:') {
     fail('BETTER_AUTH_URL must use https for production.')
+  }
+  if (
+    hasExplicitDefaultHttpsPort(value) ||
+    url.port ||
+    url.username ||
+    url.password ||
+    isUnsafeProductionHostname(url.hostname) ||
+    !isValidHostname(url.hostname)
+  ) {
+    fail('BETTER_AUTH_URL must use a public hostname without credentials or an explicit port.')
   }
   if (url.pathname !== '/' || url.search || url.hash) {
     fail('BETTER_AUTH_URL must be the production origin without path, query, or hash.')
@@ -212,11 +200,42 @@ function validateCollectorRepoRef(value) {
   }
 }
 
+function hasExplicitDefaultHttpsPort(value) {
+  return /^https:\/\/(?:[^/?#@]*@)?(?:\[[^\]]+\]|[^/?#:]+):0*443(?:[/?#]|$)/i.test(value)
+}
+
 function isValidHostname(value) {
   if (value.length === 0 || value.length > 253) return false
   const labels = value.split('.')
   if (labels.length < 2) return false
   return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
+}
+
+function isUnsafeProductionHostname(value) {
+  const hostname = value
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '')
+  if (
+    !hostname ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.local') ||
+    isIP(hostname) !== 0 ||
+    hostname.includes(':')
+  ) {
+    return true
+  }
+
+  // WHATWG URL parsing accepts abbreviated, hexadecimal, and octal IPv4
+  // spellings (for example 127.1 and 0x7f.0.0.1). Reject them after parsing
+  // as well, otherwise a route that looks like a hostname can resolve to a
+  // private or loopback address in production.
+  try {
+    const parsedHostname = new URL(`https://${hostname}`).hostname.replace(/^\[|\]$/g, '')
+    return isIP(parsedHostname) !== 0
+  } catch {
+    return false
+  }
 }
 
 function fail(message) {

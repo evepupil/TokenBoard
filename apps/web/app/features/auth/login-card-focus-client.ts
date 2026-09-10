@@ -4,7 +4,10 @@ const loginCardSelector = '[data-login-card="true"]'
 const loginCardPrimarySelector = '[data-login-primary="true"]'
 const signInPath = '/auth/sign-in'
 
-type LoginFocusWindow = Pick<Window, 'document' | 'innerHeight' | 'innerWidth' | 'location' | 'matchMedia' | 'setTimeout'>
+type LoginFocusWindow = Pick<
+  Window,
+  'document' | 'innerHeight' | 'innerWidth' | 'location' | 'matchMedia' | 'setTimeout'
+>
 
 let loginCardFocusSeq = 0
 
@@ -13,10 +16,12 @@ export function initLoginCardFocus(doc: Document = document, win: LoginFocusWind
     const trigger = getLoginFocusTrigger(event)
     if (!trigger) return
 
-    if (!shouldHandleLoginFocusNavigation({
-      currentHref: win.location.href,
-      targetHref: trigger.href
-    })) {
+    if (
+      !shouldHandleLoginFocusNavigation({
+        currentHref: win.location.href,
+        targetHref: trigger.href
+      })
+    ) {
       return
     }
 
@@ -28,7 +33,9 @@ export function initLoginCardFocus(doc: Document = document, win: LoginFocusWind
   })
 }
 
-export function shouldEnhanceLoginFocusClick(event: Pick<MouseEvent, 'altKey' | 'button' | 'ctrlKey' | 'defaultPrevented' | 'metaKey' | 'shiftKey'>) {
+export function shouldEnhanceLoginFocusClick(
+  event: Pick<MouseEvent, 'altKey' | 'button' | 'ctrlKey' | 'defaultPrevented' | 'metaKey' | 'shiftKey'>
+) {
   return !(
     event.defaultPrevented ||
     event.button !== 0 ||
@@ -43,9 +50,9 @@ export function shouldHandleLoginFocusNavigation(input: { currentHref: string; t
   try {
     const currentUrl = new URL(input.currentHref)
     const targetUrl = new URL(input.targetHref, currentUrl)
-    return currentUrl.pathname === signInPath &&
-      targetUrl.pathname === signInPath &&
-      targetUrl.search === currentUrl.search
+    return (
+      currentUrl.pathname === signInPath && targetUrl.pathname === signInPath && targetUrl.search === currentUrl.search
+    )
   } catch (_) {
     return false
   }
@@ -59,11 +66,14 @@ export function focusLoginCard(card: HTMLElement, win: LoginFocusWindow = window
   card.dataset.loginFocusRun = runId
   card.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' })
 
-  win.setTimeout(() => {
-    if (card.dataset.loginFocusRun !== runId) return
-    startLoginCardAttention(card, runId, win)
-    focusLoginCardPrimary(card)
-  }, shouldDelayAttention ? loginCardScrollAttentionDelayMs : 0)
+  win.setTimeout(
+    () => {
+      if (card.dataset.loginFocusRun !== runId) return
+      startLoginCardAttention(card, runId, win)
+      focusLoginCardPrimary(card)
+    },
+    shouldDelayAttention ? loginCardScrollAttentionDelayMs : 0
+  )
 }
 
 function getLoginFocusTrigger(event: MouseEvent) {

@@ -1,9 +1,6 @@
 import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
-import {
-  effectiveDailyUsageSummaryWith,
-  usageSummaryScopeSql,
-  usageSummaryValue
-} from '../usage/deduped-daily-usage'
+import { billableCostSql, costUnavailableSourcesSql } from '../../lib/usage-cost'
+import { effectiveDailyUsageSummaryWith, usageSummaryScopeSql, usageSummaryValue } from '../usage/deduped-daily-usage'
 
 export type LeaderboardEntry = {
   rank: number
@@ -13,6 +10,7 @@ export type LeaderboardEntry = {
   totalTokensWithoutCacheRead: number
   cacheReadRate: number
   costUsd: number
+  costAvailable: boolean
 }
 
 export type LeaderboardQuery = {
@@ -24,11 +22,7 @@ export type LeaderboardQuery = {
   summaryStrict?: boolean
 }
 
-export async function listDailyLeaderboard(
-  db: D1Database,
-  usageDate: string,
-  limit = 50
-): Promise<LeaderboardEntry[]> {
+export async function listDailyLeaderboard(db: D1Database, usageDate: string, limit = 50): Promise<LeaderboardEntry[]> {
   return listLeaderboard(db, {
     period: 'daily',
     metric: 'tokens',
@@ -38,10 +32,7 @@ export async function listDailyLeaderboard(
   })
 }
 
-export async function listLeaderboard(
-  db: D1Database,
-  input: LeaderboardQuery
-): Promise<LeaderboardEntry[]> {
+export async function listLeaderboard(db: D1Database, input: LeaderboardQuery): Promise<LeaderboardEntry[]> {
   const orderBy = leaderboardOrderBy(input.metric)
 
   const rows = await db
@@ -59,7 +50,14 @@ export async function listLeaderboard(
           profiles.display_name as displayName,
           COALESCE(SUM(effective_daily_usage_summary.total_tokens), 0) as totalTokens,
           COALESCE(SUM(effective_daily_usage_summary.total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
-          COALESCE(SUM(effective_daily_usage_summary.cost_usd), 0) as costUsd
+          COALESCE(SUM(${billableCostSql({
+            sourceColumn: 'effective_daily_usage_summary.source',
+            costColumn: 'effective_daily_usage_summary.cost_usd'
+          })}), 0) as costUsd,
+          COALESCE(MIN(CASE
+            WHEN effective_daily_usage_summary.source IN (${costUnavailableSourcesSql}) THEN 0
+            ELSE 1
+          END), 1) as costAvailable
         FROM profiles
         JOIN effective_daily_usage_summary ON effective_daily_usage_summary.user_id = profiles.user_id
         WHERE profiles.is_public = 1
@@ -82,7 +80,8 @@ export async function listLeaderboard(
       totalTokens: Number(row.totalTokens),
       totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
     }),
-    costUsd: Number(row.costUsd)
+    costUsd: Number(row.costUsd),
+    costAvailable: Number(row.costAvailable) !== 0
   }))
 }
 

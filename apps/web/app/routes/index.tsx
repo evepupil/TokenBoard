@@ -21,8 +21,18 @@ export default createRoute(async (c) => {
             连接本机 Claude Code、Codex 与 Antigravity 采集器，只上传聚合后的 token 指标，并由你决定哪些视图可以公开。
           </p>
           <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <a class="inline-flex min-h-11 items-center justify-center rounded-xl bg-lime-300 px-5 py-3 text-sm font-black text-stone-950 transition hover:bg-lime-200" href="/auth/sign-in">使用 GitHub 登录</a>
-            <a class="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--app-border)] px-5 py-3 text-sm font-bold text-[var(--app-text)] transition hover:border-lime-300" href="/leaderboards">查看排行榜</a>
+            <a
+              class="inline-flex min-h-11 items-center justify-center rounded-xl bg-lime-300 px-5 py-3 text-sm font-black text-stone-950 transition hover:bg-lime-200"
+              href="/auth/sign-in"
+            >
+              使用 GitHub 登录
+            </a>
+            <a
+              class="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--app-border)] px-5 py-3 text-sm font-bold text-[var(--app-text)] transition hover:border-lime-300"
+              href="/leaderboards"
+            >
+              查看排行榜
+            </a>
           </div>
         </div>
         <div class="app-surface-floating relative z-10 min-w-0 max-w-full overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-5 text-[var(--app-text)]">

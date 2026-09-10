@@ -1,16 +1,10 @@
 import { cacheReadRateFromTotals } from '../../../lib/usage-metrics'
-import {
-  effectiveDailyUsageSummaryWith,
-  usageSummaryScopeSql,
-  usageSummaryValue
-} from '../deduped-daily-usage'
+import { billableCostSql, costUnavailableSourcesSql } from '../../../lib/usage-cost'
+import { effectiveDailyUsageSummaryWith, usageSummaryScopeSql, usageSummaryValue } from '../deduped-daily-usage'
 import { eachIsoDate, summaryRangeBindings } from './shared'
 import type { DailyUsageTrendInput, DailyUsageTrendItem } from './types'
 
-export async function getDailyUsageTrend(
-  db: D1Database,
-  input: DailyUsageTrendInput
-): Promise<DailyUsageTrendItem[]> {
+export async function getDailyUsageTrend(db: D1Database, input: DailyUsageTrendInput): Promise<DailyUsageTrendItem[]> {
   const rows = await db
     .prepare(
       `
@@ -26,7 +20,8 @@ export async function getDailyUsageTrend(
           usage_date as usageDate,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
           COALESCE(SUM(total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
-          COALESCE(SUM(cost_usd), 0) as costUsd
+          COALESCE(SUM(${billableCostSql()}), 0) as costUsd,
+          MIN(CASE WHEN source IN (${costUnavailableSourcesSql}) THEN 0 ELSE 1 END) as costAvailable
         FROM effective_daily_usage_summary
         GROUP BY usage_date
         ORDER BY usage_date ASC
@@ -46,18 +41,21 @@ export async function getDailyUsageTrend(
           totalTokens: Number(row.totalTokens),
           totalTokensWithoutCacheRead: Number(row.totalTokensWithoutCacheRead)
         }),
-        costUsd: Number(row.costUsd)
+        costUsd: Number(row.costUsd),
+        costAvailable: Number(row.costAvailable) !== 0
       }
     ])
   )
 
   return eachIsoDate(input.startDate, input.endDate).map(
-    (usageDate) => byDate.get(usageDate) ?? {
-      usageDate,
-      totalTokens: 0,
-      totalTokensWithoutCacheRead: 0,
-      cacheReadRate: 0,
-      costUsd: 0
-    }
+    (usageDate) =>
+      byDate.get(usageDate) ?? {
+        usageDate,
+        totalTokens: 0,
+        totalTokensWithoutCacheRead: 0,
+        cacheReadRate: 0,
+        costUsd: 0,
+        costAvailable: true
+      }
   )
 }

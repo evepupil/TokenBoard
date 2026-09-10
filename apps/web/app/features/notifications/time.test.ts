@@ -17,35 +17,43 @@ describe('notification time helpers', () => {
   })
 
   test('moves next run to tomorrow after the configured local time has passed', () => {
-    expect(nextScheduledRunAt({
-      now: new Date('2026-04-29T02:00:00.000Z'),
-      timezone: 'Asia/Shanghai',
-      scheduleTimeLocal: '09:30'
-    })).toBe('2026-04-30T01:30:00.000Z')
+    expect(
+      nextScheduledRunAt({
+        now: new Date('2026-04-29T02:00:00.000Z'),
+        timezone: 'Asia/Shanghai',
+        scheduleTimeLocal: '09:30'
+      })
+    ).toBe('2026-04-30T01:30:00.000Z')
   })
 
   test('defaults missing schedule to 18:00 local time', () => {
-    expect(nextScheduledRunAt({
-      now: new Date('2026-04-29T08:00:00.000Z'),
-      timezone: 'Asia/Shanghai'
-    })).toBe('2026-04-29T10:00:00.000Z')
+    expect(
+      nextScheduledRunAt({
+        now: new Date('2026-04-29T08:00:00.000Z'),
+        timezone: 'Asia/Shanghai'
+      })
+    ).toBe('2026-04-29T10:00:00.000Z')
   })
 
   test('selects the next same-day local time from multiple schedule slots', () => {
-    expect(nextScheduledRunAt({
-      now: new Date('2026-04-29T02:00:00.000Z'),
-      timezone: 'Asia/Shanghai',
-      scheduleTimesLocal: ['09:30', '18:00']
-    })).toBe('2026-04-29T10:00:00.000Z')
+    expect(
+      nextScheduledRunAt({
+        now: new Date('2026-04-29T02:00:00.000Z'),
+        timezone: 'Asia/Shanghai',
+        scheduleTimesLocal: ['09:30', '18:00']
+      })
+    ).toBe('2026-04-29T10:00:00.000Z')
   })
 
   test('skips to the next selected local weekday', () => {
-    expect(nextScheduledRunAt({
-      now: new Date('2026-04-29T02:00:00.000Z'),
-      timezone: 'Asia/Shanghai',
-      scheduleTimesLocal: ['09:30'],
-      scheduleWeekdays: [5]
-    })).toBe('2026-05-01T01:30:00.000Z')
+    expect(
+      nextScheduledRunAt({
+        now: new Date('2026-04-29T02:00:00.000Z'),
+        timezone: 'Asia/Shanghai',
+        scheduleTimesLocal: ['09:30'],
+        scheduleWeekdays: [5]
+      })
+    ).toBe('2026-05-01T01:30:00.000Z')
   })
 
   test('normalizes comma separated schedule settings', () => {

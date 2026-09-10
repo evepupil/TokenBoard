@@ -1,4 +1,5 @@
 import { usageSnapshotSchema, type UsageSnapshot, type UsageSource } from '@tokenboard/usage-core'
+import { assertValidDateFilter, isAllDateFilter } from '../iso-calendar-date'
 import { formatDate } from './session-jsonl-parser-utils'
 
 const maxModelNameLength = 160
@@ -37,16 +38,17 @@ type AggregateRow = {
 export class SessionUsageAggregate {
   private readonly rows = new Map<string, AggregateRow>()
 
-  constructor(private readonly options: {
-    source: UsageSource
-    timezone: string
-    collectedAt: string
-    costAvailable: boolean
-  }) {}
+  constructor(
+    private readonly options: {
+      source: UsageSource
+      timezone: string
+      collectedAt: string
+      costAvailable: boolean
+    }
+  ) {}
 
   add(event: UsageEvent) {
-    const billable = event.inputTokens + event.outputTokens +
-      event.cacheCreationTokens + event.cacheReadTokens
+    const billable = event.inputTokens + event.outputTokens + event.cacheCreationTokens + event.cacheReadTokens
     if (billable === 0) return
 
     const usageDate = formatDate(event.occurredAt, this.options.timezone)
@@ -76,23 +78,23 @@ export class SessionUsageAggregate {
 
   snapshots(): UsageSnapshot[] {
     return [...this.rows.values()]
-      .sort((left, right) => left.usageDate.localeCompare(right.usageDate) ||
-        left.model.localeCompare(right.model))
-      .map((row) => usageSnapshotSchema.parse({
-        source: this.options.source,
-        usageDate: row.usageDate,
-        timezone: this.options.timezone,
-        model: row.model,
-        inputTokens: row.inputTokens,
-        outputTokens: row.outputTokens,
-        cacheCreationTokens: row.cacheCreationTokens,
-        cacheReadTokens: row.cacheReadTokens,
-        totalTokens: row.inputTokens + row.outputTokens +
-          row.cacheCreationTokens + row.cacheReadTokens,
-        costUsd: this.options.costAvailable ? row.costUsd : 0,
-        sessionCount: row.sessions.size,
-        collectedAt: this.options.collectedAt
-      }))
+      .sort((left, right) => left.usageDate.localeCompare(right.usageDate) || left.model.localeCompare(right.model))
+      .map((row) =>
+        usageSnapshotSchema.parse({
+          source: this.options.source,
+          usageDate: row.usageDate,
+          timezone: this.options.timezone,
+          model: row.model,
+          inputTokens: row.inputTokens,
+          outputTokens: row.outputTokens,
+          cacheCreationTokens: row.cacheCreationTokens,
+          cacheReadTokens: row.cacheReadTokens,
+          totalTokens: row.inputTokens + row.outputTokens + row.cacheCreationTokens + row.cacheReadTokens,
+          costUsd: this.options.costAvailable ? row.costUsd : 0,
+          sessionCount: row.sessions.size,
+          collectedAt: this.options.collectedAt
+        })
+      )
   }
 }
 
@@ -146,26 +148,22 @@ export function parseJsonLine(line: string): Record<string, unknown> | null {
   if (!trimmed) return null
   try {
     const parsed = JSON.parse(trimmed)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null
   } catch {
     return null
   }
 }
 
 export function readRecordAt(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 }
 
 /** Resolve `--since` to a local date string, or `''` for full history. */
 export function readSinceDate(since: string | undefined, label: string) {
   const value = since ?? process.env.TOKENBOARD_SINCE ?? process.env.TOKENBOARD_DEFAULT_SINCE ?? ''
-  if (!value || value === 'all') return ''
-  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(value)
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
-  throw new Error(`Invalid ${label} since value: ${value}`)
+  if (!value) return ''
+  const normalized = assertValidDateFilter(value, `${label} since value`, true)
+  if (isAllDateFilter(normalized)) return ''
+  const compact = normalized.replaceAll('-', '')
+  return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
 }

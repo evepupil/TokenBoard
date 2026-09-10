@@ -63,8 +63,9 @@ export function initSubmitFeedback() {
 
 function preserveSubmitterValue(form: HTMLFormElement, submitter: HTMLButtonElement | null) {
   if (!submitter?.name) return
-  const exists = Array.from(form.querySelectorAll<HTMLInputElement>('input[type="hidden"][data-submit-feedback-value]'))
-    .some((input) => input.dataset.submitFeedbackValue === submitter.name)
+  const exists = Array.from(
+    form.querySelectorAll<HTMLInputElement>('input[type="hidden"][data-submit-feedback-value]')
+  ).some((input) => input.dataset.submitFeedbackValue === submitter.name)
   if (exists) return
   const input = document.createElement('input')
   input.type = 'hidden'
@@ -82,7 +83,9 @@ function showToast(message: string, tone: ToastTone) {
   toast.setAttribute('role', 'status')
   toast.textContent = message
   container.appendChild(toast)
-  window.requestAnimationFrame(() => { toast.dataset.visible = 'true' })
+  window.requestAnimationFrame(() => {
+    toast.dataset.visible = 'true'
+  })
   window.setTimeout(() => {
     toast.dataset.visible = 'false'
     window.setTimeout(() => {

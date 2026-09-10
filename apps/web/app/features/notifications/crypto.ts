@@ -6,11 +6,7 @@ export async function encryptSecret(value: string, secret: string) {
   const iv = new Uint8Array(12)
   crypto.getRandomValues(iv)
   const key = await importSecretKey(secret)
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    new TextEncoder().encode(value)
-  )
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(value))
 
   return `${encryptedValuePrefix}:${base64UrlEncode(iv)}:${base64UrlEncode(new Uint8Array(ciphertext))}`
 }
@@ -44,7 +40,10 @@ function base64UrlEncode(bytes: Uint8Array) {
 }
 
 function base64UrlDecode(value: string) {
-  const padded = value.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(value.length / 4) * 4, '=')
+  const padded = value
+    .replaceAll('-', '+')
+    .replaceAll('_', '/')
+    .padEnd(Math.ceil(value.length / 4) * 4, '=')
   const binary = atob(padded)
   const bytes = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) {

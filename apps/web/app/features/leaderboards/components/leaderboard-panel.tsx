@@ -28,11 +28,7 @@ export function LeaderboardPanel(props: LeaderboardPanelProps) {
   )
 }
 
-function LeaderboardPanelHeader(props: {
-  title: string
-  period: 'daily' | 'monthly'
-  metric: LeaderboardMetric
-}) {
+function LeaderboardPanelHeader(props: { title: string; period: 'daily' | 'monthly'; metric: LeaderboardMetric }) {
   return (
     <CardHeader class="flex-col gap-4 border-b border-[var(--app-border)] md:flex-row md:items-end md:justify-between">
       <div>
@@ -101,7 +97,7 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
           <RankBadge rank={props.entry.rank} />
           <h2 class="mt-1 truncate text-lg font-black">{props.entry.displayName}</h2>
         </div>
-        <p class="shrink-0 text-sm font-bold text-[var(--app-muted)]">{formatUsd(props.entry.costUsd)}</p>
+        <p class="shrink-0 text-sm font-bold text-[var(--app-muted)]">{formatLeaderboardCost(props.entry)}</p>
       </div>
       <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div class="min-w-0">
@@ -110,11 +106,13 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
         </div>
         <div class="min-w-0">
           <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">不含缓存读</dt>
-          <dd class="mt-1 break-words font-black tabular-nums">{formatInteger(props.entry.totalTokensWithoutCacheRead)}</dd>
+          <dd class="mt-1 break-words font-black tabular-nums">
+            {formatInteger(props.entry.totalTokensWithoutCacheRead)}
+          </dd>
         </div>
         <div class="min-w-0">
           <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">费用</dt>
-          <dd class="mt-1 break-words font-black tabular-nums">{formatUsd(props.entry.costUsd)}</dd>
+          <dd class="mt-1 break-words font-black tabular-nums">{formatLeaderboardCost(props.entry)}</dd>
         </div>
         <div class="min-w-0">
           <dt class="text-xs font-bold uppercase text-[var(--app-muted)]">缓存率</dt>
@@ -149,9 +147,7 @@ function LeaderboardTable(props: { entries: LeaderboardEntry[] }) {
               <TableCell class="font-bold">{formatInteger(entry.totalTokens)}</TableCell>
               <TableCell class="font-bold">{formatInteger(entry.totalTokensWithoutCacheRead)}</TableCell>
               <TableCell class="font-bold">{formatPercentRate(entry.cacheReadRate)}</TableCell>
-              <TableCell class="rounded-r-xl text-[var(--app-muted)]">
-                {formatUsd(entry.costUsd)}
-              </TableCell>
+              <TableCell class="rounded-r-xl text-[var(--app-muted)]">{formatLeaderboardCost(entry)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -168,6 +164,10 @@ function formatInteger(value: number) {
   return new Intl.NumberFormat('en-US').format(value)
 }
 
+function formatLeaderboardCost(entry: LeaderboardEntry) {
+  return entry.costAvailable ? formatUsd(entry.costUsd) : '费用不可用'
+}
+
 function metricTitle(metric: LeaderboardMetric) {
   if (metric === 'cost') return '费用'
   if (metric === 'tokens-without-cache-read') return '不含缓存读 token'
@@ -178,14 +178,14 @@ function leaderboardHref(period: 'daily' | 'monthly', metric: LeaderboardMetric)
   return `/leaderboards?period=${period}&metric=${metric}`
 }
 
-function SegmentedControl(props: {
-  items: Array<{ label: string; href: string; active: boolean }>
-}) {
+function SegmentedControl(props: { items: Array<{ label: string; href: string; active: boolean }> }) {
   return (
-    <div class={cn(
-      'grid rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)] sm:flex',
-      props.items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'
-    )}>
+    <div
+      class={cn(
+        'grid rounded-full border border-[var(--app-border)] p-1 text-sm text-[var(--app-muted)] sm:flex',
+        props.items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'
+      )}
+    >
       {props.items.map((item) =>
         item.active ? (
           <Badge class="w-full justify-center sm:w-auto">{item.label}</Badge>

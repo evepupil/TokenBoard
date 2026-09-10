@@ -68,14 +68,7 @@ export function zonedTimeToUtc(localDate: string, time: string, timezone: string
 
   for (let index = 0; index < 3; index += 1) {
     const parts = localDateTimeParts(new Date(utc), timezone)
-    const currentLocalAsUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second
-    )
+    const currentLocalAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
     utc += targetLocalAsUtc - currentLocalAsUtc
   }
 

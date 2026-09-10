@@ -1,9 +1,6 @@
 import { createRoute } from 'honox/factory'
 import { getOptionalUser } from '../../../features/auth/middleware'
-import {
-  getDailyReportHistoryById,
-  isDailyReportId
-} from '../../../features/notifications/report-share'
+import { getDailyReportHistoryById, isDailyReportId } from '../../../features/notifications/report-share'
 import { dailyReportHistoryRetentionDays } from '../../../features/notifications/report-history'
 import { MissingDailyReportPage, SharedDailyReportPage } from '../../../features/notifications/report-page'
 

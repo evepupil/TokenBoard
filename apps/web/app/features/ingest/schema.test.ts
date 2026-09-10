@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import {
-  ingestRequestSchema,
-  snapshotCheckRequestSchema
-} from './schema'
+import { ingestRequestSchema, snapshotCheckRequestSchema } from './schema'
 
 const legacyCollectorBatchSize = 500
 
@@ -30,10 +27,12 @@ describe('ingest schemas', () => {
   test('rejects cache reads that exceed provider total tokens', () => {
     expect(() =>
       ingestRequestSchema.parse({
-        snapshots: [{
-          ...baseSnapshot,
-          cacheReadTokens: baseSnapshot.totalTokens + 1
-        }]
+        snapshots: [
+          {
+            ...baseSnapshot,
+            cacheReadTokens: baseSnapshot.totalTokens + 1
+          }
+        ]
       })
     ).toThrow('cacheReadTokens must not exceed totalTokens')
   })
@@ -42,11 +41,13 @@ describe('ingest schemas', () => {
     for (const source of ['antigravity-cli', 'antigravity', 'antigravity-ide'] as const) {
       expect(() =>
         ingestRequestSchema.parse({
-          snapshots: [{
-            ...baseSnapshot,
-            source,
-            costUsd: 0.01
-          }]
+          snapshots: [
+            {
+              ...baseSnapshot,
+              source,
+              costUsd: 0.01
+            }
+          ]
         })
       ).toThrow('Antigravity source costs are unavailable')
     }

@@ -8,7 +8,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-lime-300 text-stone-950 hover:bg-lime-200',
-        secondary: 'border border-[var(--app-border)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:border-lime-300 hover:text-[var(--app-text)]',
+        secondary:
+          'border border-[var(--app-border)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:border-lime-300 hover:text-[var(--app-text)]',
         ghost: 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
         destructive: 'app-danger-button'
       },

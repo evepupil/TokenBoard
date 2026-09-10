@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { lstat, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import type { UsageSnapshot, UsageSource } from '@tokenboard/usage-core'
 import {
   antigravityGuiDbResetCorrectionPrefix,
@@ -14,7 +14,7 @@ import {
   type CursorSnapshot,
   type CursorState
 } from './session-cursor-store'
-import { resolveSessionJsonlFiles } from './session-file-walk'
+import { normalizeSessionRelativePath, resolveSessionJsonlFiles } from './session-file-walk'
 import { resolveAntigravityCollectionRange } from './antigravity-since'
 import {
   cliHistoryAggregateKey,
@@ -28,6 +28,7 @@ import {
   type SessionJsonlLine
 } from './session-jsonl-line-reader'
 import { formatDate } from './session-jsonl-parser-utils'
+import { isUnresolvedCodexContextPricingSnapshot } from './codex-context-pricing'
 
 export type ChangedSessionFile = {
   absolutePath: string
@@ -45,11 +46,13 @@ export type ChangedSessionFile = {
 type CollectInput = {
   source: UsageSource
   sessionsDir: string
+  sessionDirs?: readonly string[]
   cursorPath: string
   cursorProfileHash?: string
   scanSinceMs?: number
   scanSafetyMs?: number
   maxLineBytes?: number
+  allowedRootSymlinks?: readonly string[]
 }
 
 const defaultSessionLineBytes = 1024 * 1024
@@ -78,8 +81,8 @@ export async function collectChangedSessionFiles(input: CollectInput) {
     cursor: next,
     hasCursorCleanup: missing.hasCursorCleanup,
     hasCursorMetadataUpdate: scan.hasCursorMetadataUpdate,
-    hasCursorProfileUpdate: input.cursorProfileHash !== undefined &&
-      current.codexHookProfileHash !== input.cursorProfileHash,
+    hasCursorProfileUpdate:
+      input.cursorProfileHash !== undefined && current.codexHookProfileHash !== input.cursorProfileHash,
     hasPendingUpload,
     hasUnreadableChangedFile: scan.hasUnreadableChangedFile,
     hasUnreadablePendingUpload: scan.hasUnreadablePendingUpload || missing.hasUnreadablePendingUpload,
@@ -112,11 +115,25 @@ async function scanSessionTree(
   maxLineBytes: number
 ) {
   const result = emptyScanResult(current)
-  const sessionFiles = await resolveSessionJsonlFiles(input.sessionsDir)
-  if (!sessionFiles) return result
-  const resolvedInput = { ...input, sessionsDir: sessionFiles.rootDir }
-  for await (const file of sessionFiles.files) {
-    await collectSessionFile(resolvedInput, current, next, scanSinceMs, maxLineBytes, result, file)
+  const sessionDirs = input.sessionDirs?.length ? input.sessionDirs : [input.sessionsDir]
+  for (const sessionsDir of sessionDirs) {
+    const sessionFiles = await resolveSessionJsonlFiles(
+      sessionsDir,
+      input.source === 'codex'
+        ? {
+            rejectRootSymlink: true,
+            rootBoundary: dirname(sessionsDir),
+            allowedRootSymlinks: input.allowedRootSymlinks
+          }
+        : undefined
+    )
+    if (!sessionFiles) continue
+    const resolvedInput = { ...input, sessionsDir: sessionFiles.rootDir }
+    for await (const file of sessionFiles.files) {
+      const logicalRelativePath = normalizeRelativePath(file)
+      if (result.seen.has(logicalRelativePath)) continue
+      await collectSessionFile(resolvedInput, current, next, scanSinceMs, maxLineBytes, result, file)
+    }
   }
   return result
 }
@@ -190,14 +207,15 @@ async function collectSessionFile(
         pendingUpload: false,
         appendOnly: true,
         readOffsetBytes: prior.size,
-        readLines: () => readChangedSessionJsonlLines(result, relativePath, {
-          filePath: absolutePath,
-          startOffsetBytes: prior.size,
-          endOffsetBytes: entry.size,
-          maxLineBytes,
-          source: input.source,
-          expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
-        })
+        readLines: () =>
+          readChangedSessionJsonlLines(result, relativePath, {
+            filePath: absolutePath,
+            startOffsetBytes: prior.size,
+            endOffsetBytes: entry.size,
+            maxLineBytes,
+            source: input.source,
+            expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
+          })
       })
       result.unreadChangedFiles.add(relativePath)
       return
@@ -211,14 +229,15 @@ async function collectSessionFile(
       pendingUpload: Boolean(prior.pendingUpload),
       appendOnly: false,
       readOffsetBytes: 0,
-      readLines: () => readChangedSessionJsonlLines(result, relativePath, {
+      readLines: () =>
+        readChangedSessionJsonlLines(result, relativePath, {
           filePath: absolutePath,
-        startOffsetBytes: 0,
-        endOffsetBytes: entry.size,
-        maxLineBytes,
-        source: input.source,
-        expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
-      })
+          startOffsetBytes: 0,
+          endOffsetBytes: entry.size,
+          maxLineBytes,
+          source: input.source,
+          expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
+        })
     })
     result.unreadChangedFiles.add(relativePath)
     return
@@ -237,11 +256,7 @@ async function collectSessionFile(
     next.files[relativePath] = prior
     return
   }
-  next.files[relativePath] = newCursorEntry(
-    entry,
-    prior?.pendingUpload,
-    endsWithNewline
-  )
+  next.files[relativePath] = newCursorEntry(entry, prior?.pendingUpload, endsWithNewline)
   result.files.push({
     absolutePath,
     relativePath,
@@ -250,19 +265,26 @@ async function collectSessionFile(
     pendingUpload: Boolean(prior?.pendingUpload),
     appendOnly: false,
     readOffsetBytes: 0,
-    readLines: () => readChangedSessionJsonlLines(result, relativePath, {
-      filePath: absolutePath,
-      startOffsetBytes: 0,
-      endOffsetBytes: entry.size,
-      maxLineBytes,
-      source: input.source,
-      expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
-    })
+    readLines: () =>
+      readChangedSessionJsonlLines(result, relativePath, {
+        filePath: absolutePath,
+        startOffsetBytes: 0,
+        endOffsetBytes: entry.size,
+        maxLineBytes,
+        source: input.source,
+        expectedFingerprint: { ...fingerprint, sha256: entry.sha256 }
+      })
   })
   result.unreadChangedFiles.add(relativePath)
 }
 
-function skipByMetadata({ prior, entry, scanSinceMs, next, relativePath }: {
+function skipByMetadata({
+  prior,
+  entry,
+  scanSinceMs,
+  next,
+  relativePath
+}: {
   prior?: CursorEntry
   entry: CursorFileMetadata
   scanSinceMs?: number
@@ -280,7 +302,12 @@ function skipByMetadata({ prior, entry, scanSinceMs, next, relativePath }: {
   return false
 }
 
-function recordUnreadableFile({ prior, next, relativePath, result }: {
+function recordUnreadableFile({
+  prior,
+  next,
+  relativePath,
+  result
+}: {
   prior?: CursorEntry
   next: CursorState
   relativePath: string
@@ -317,8 +344,15 @@ function preserveMissingCursorEntries(current: CursorState, next: CursorState, s
       continue
     }
     if (entry.pendingUpload) {
-      missingPendingSnapshots.push({ relativePath, snapshots: entry.snapshots })
-      missingPendingSnapshotEntries.push({ relativePath, sha256: entry.sha256, snapshots: entry.snapshots })
+      missingPendingSnapshots.push({
+        relativePath,
+        snapshots: entry.snapshots
+      })
+      missingPendingSnapshotEntries.push({
+        relativePath,
+        sha256: entry.sha256,
+        snapshots: entry.snapshots
+      })
     }
     next.files[relativePath] ??= entry
   }
@@ -333,27 +367,61 @@ function preserveMissingCursorEntries(current: CursorState, next: CursorState, s
 export function updateCursorFile(
   cursor: CursorState,
   file: Pick<ChangedSessionFile, 'relativePath' | 'size' | 'mtimeMs' | 'sha256' | 'endsWithNewline' | 'appendOnly'>,
-  parsed: { snapshots: UsageSnapshot[]; missingCost: boolean; ignoredUploadSafeRows?: number },
+  parsed: {
+    snapshots: UsageSnapshot[]
+    missingCost: boolean
+    ignoredUploadSafeRows?: number
+  },
   updatedAt = new Date().toISOString()
 ) {
   const prior = cursor.files[file.relativePath]
-  const safeIgnoredPending = Boolean(prior?.pendingUpload && parsed.snapshots.length === 0 && parsed.ignoredUploadSafeRows)
-  const snapshots = file.appendOnly && prior
-    ? mergeCursorSnapshots([
-        ...prior.snapshots,
-        ...parsed.snapshots.map((snapshot) => stripCollectedAt(snapshot))
-      ])
-    : parsed.snapshots.map((snapshot) => stripCollectedAt(snapshot))
+  const hasSafeIgnoredRows = Boolean(parsed.ignoredUploadSafeRows && parsed.ignoredUploadSafeRows > 0)
+  const preservePendingSnapshots = Boolean(
+    prior?.pendingUpload &&
+    parsed.snapshots.length === 0 &&
+    hasSafeIgnoredRows &&
+    prior.snapshots.length > 0 &&
+    !prior.snapshots.every(isSyntheticZeroUsageSnapshot)
+  )
+  const safeIgnoredPending = Boolean(
+    prior?.pendingUpload && parsed.snapshots.length === 0 && hasSafeIgnoredRows && !preservePendingSnapshots
+  )
+  const snapshots =
+    file.appendOnly && prior
+      ? mergeCursorSnapshots([...prior.snapshots, ...parsed.snapshots.map((snapshot) => stripCollectedAt(snapshot))])
+      : preservePendingSnapshots
+        ? prior.snapshots
+        : parsed.snapshots.map((snapshot) => stripCollectedAt(snapshot))
   cursor.files[file.relativePath] = {
     size: file.size,
     mtimeMs: file.mtimeMs,
     sha256: file.sha256,
     endsWithNewline: file.endsWithNewline,
-    snapshots,
+    snapshots:
+      cursor.source === 'codex'
+        ? snapshots.map((snapshot) =>
+            isUnresolvedCodexContextPricingSnapshot(snapshot)
+              ? { ...snapshot, codexContextPricingPending: true as const }
+              : snapshot
+          )
+        : snapshots,
     missingCost: file.appendOnly && prior ? prior.missingCost || parsed.missingCost : parsed.missingCost,
     pendingUpload: safeIgnoredPending ? undefined : prior?.pendingUpload || undefined,
     updatedAt
   }
+}
+
+function isSyntheticZeroUsageSnapshot(snapshot: CursorSnapshot) {
+  return (
+    snapshot.source === 'claude-code' &&
+    snapshot.model === '<synthetic>' &&
+    snapshot.inputTokens === 0 &&
+    snapshot.outputTokens === 0 &&
+    snapshot.cacheCreationTokens === 0 &&
+    snapshot.cacheReadTokens === 0 &&
+    snapshot.totalTokens === 0 &&
+    snapshot.costUsd === 0
+  )
 }
 
 export async function clearPendingUploadCursors(input: {
@@ -363,6 +431,7 @@ export async function clearPendingUploadCursors(input: {
   since?: string
   timezone?: string
   acknowledgedSnapshotGroups?: string[]
+  acknowledgedSnapshotFiles?: ReadonlyArray<{ relativePath: string; sha256: string }>
 }) {
   const isAntigravity = input.source.startsWith('antigravity')
   if (isAntigravity && !input.timezone) {
@@ -379,32 +448,44 @@ export async function clearPendingUploadCursors(input: {
           env: {}
         })
       : null
-    const acknowledgedSnapshotGroups = input.acknowledgedSnapshotGroups === undefined
-      ? undefined
-      : new Set(input.acknowledgedSnapshotGroups)
+    const acknowledgedSnapshotGroups =
+      input.acknowledgedSnapshotGroups === undefined ? undefined : new Set(input.acknowledgedSnapshotGroups)
+    const acknowledgedSnapshotFiles =
+      input.acknowledgedSnapshotFiles === undefined
+        ? undefined
+        : new Set(input.acknowledgedSnapshotFiles.map((file) => `${file.relativePath}\0${file.sha256}`))
     let changed = false
     for (const [key, entry] of Object.entries(cursor.files)) {
       if (!entry.pendingUpload) continue
-      const acknowledged = acknowledgedSnapshotGroups !== undefined &&
-        cursorEntryHasAcknowledgedSnapshotGroup({
-          key,
-          entry,
-          source: input.source,
-          timezone,
-          acknowledgedSnapshotGroups
-        })
+      const acknowledged =
+        acknowledgedSnapshotFiles !== undefined
+          ? cursorEntryHasAcknowledgedSnapshotFile({ key, entry, acknowledgedSnapshotFiles })
+          : acknowledgedSnapshotGroups !== undefined &&
+            cursorEntryHasAcknowledgedSnapshotGroup({
+              key,
+              entry,
+              source: input.source,
+              timezone,
+              acknowledgedSnapshotGroups
+            })
       if (
-        acknowledgedSnapshotGroups !== undefined &&
-        cursorEntryRequiresAcknowledgedSnapshotGroup({
-          key,
-          entry,
-          source: input.source,
-          timezone
-        }) &&
+        (acknowledgedSnapshotFiles !== undefined || acknowledgedSnapshotGroups !== undefined) &&
+        (acknowledgedSnapshotFiles !== undefined
+          ? input.source === 'codex'
+          : cursorEntryRequiresAcknowledgedSnapshotGroup({
+              key,
+              entry,
+              source: input.source,
+              timezone
+            })) &&
         !acknowledged
-      ) continue
+      )
+        continue
       if (range && !acknowledged && !cursorEntryIsInRange(entry, range.sinceDate, range.includesTimestamp)) continue
       entry.pendingUpload = false
+      if (input.source === 'codex') {
+        entry.snapshots = entry.snapshots.map(({ codexContextPricingPending: _pending, ...snapshot }) => snapshot)
+      }
       entry.updatedAt = new Date().toISOString()
       changed = true
     }
@@ -413,6 +494,14 @@ export async function clearPendingUploadCursors(input: {
     }
     if (changed) await writeCursor(cursorPath, cursor)
   })
+}
+
+function cursorEntryHasAcknowledgedSnapshotFile(input: {
+  key: string
+  entry: CursorEntry
+  acknowledgedSnapshotFiles: ReadonlySet<string>
+}) {
+  return input.acknowledgedSnapshotFiles.has(`${input.key}\0${input.entry.sha256}`)
 }
 
 function cursorEntryHasAcknowledgedSnapshotGroup(input: {
@@ -437,8 +526,10 @@ function cursorEntryRequiresAcknowledgedSnapshotGroup(input: {
   source: UsageSource
   timezone?: string
 }) {
-  return input.entry.snapshots.length > 0 ||
+  return (
+    input.entry.snapshots.length > 0 ||
     sessionMarkerSnapshotGroup(input.key, input.source, input.timezone) !== undefined
+  )
 }
 
 function sessionMarkerSnapshotGroup(key: string, source: UsageSource, timezone?: string) {
@@ -471,12 +562,14 @@ function compactAcknowledgedAntigravityUsage(cursor: CursorState, timezone?: str
     if (!timezone) throw new Error('Antigravity CLI cursor compaction requires an explicit timezone')
     return compactAcknowledgedCliHistory(cursor, timezone)
   }
-  const cutoffMs = Date.now() - antigravityUsageCursorRetentionMs
-  const aggregateInputs = new Map<string, {
-    mtimeMs: number
-    snapshots: CursorSnapshot[]
-    origin?: CursorEntry['antigravityOrigin']
-  }>()
+  const aggregateInputs = new Map<
+    string,
+    {
+      mtimeMs: number
+      snapshots: CursorSnapshot[]
+      origin?: CursorEntry['antigravityOrigin']
+    }
+  >()
   const compactedAt = new Date().toISOString()
   let changed = false
 
@@ -488,8 +581,12 @@ function compactAcknowledgedAntigravityUsage(cursor: CursorState, timezone?: str
       }
       continue
     }
-    if (entry.compactedIdentity && entry.snapshots.length === 0 &&
-        !entry.pendingUpload && isAntigravityReplayIdentityKey(key)) {
+    if (
+      entry.compactedIdentity &&
+      entry.snapshots.length === 0 &&
+      !entry.pendingUpload &&
+      isAntigravityReplayIdentityKey(key)
+    ) {
       if (canDiscardAntigravityReplayIdentity(cursor, key)) {
         recordDiscardedAntigravityReplayIdentity(cursor, key)
         delete cursor.files[key]
@@ -500,18 +597,13 @@ function compactAcknowledgedAntigravityUsage(cursor: CursorState, timezone?: str
     const retainedAtMs = Date.parse(entry.updatedAt)
     if (entry.pendingUpload || !Number.isFinite(retainedAtMs) || !isAntigravityUsageStateKey(key)) continue
     if (entry.snapshots.length === 0) {
-      if (isAntigravityReplayIdentityKey(key)) {
-        if (canDiscardAntigravityReplayIdentity(cursor, key)) {
-          recordDiscardedAntigravityReplayIdentity(cursor, key)
-          delete cursor.files[key]
-          changed = true
-        } else {
-          entry.compactedIdentity = true
-          entry.updatedAt = compactedAt
-          changed = true
-        }
-      } else if (retainedAtMs < cutoffMs) {
+      if (canDiscardAntigravityReplayIdentity(cursor, key)) {
+        recordDiscardedAntigravityReplayIdentity(cursor, key)
         delete cursor.files[key]
+        changed = true
+      } else {
+        entry.compactedIdentity = true
+        entry.updatedAt = compactedAt
         changed = true
       }
       continue
@@ -548,10 +640,7 @@ function compactAcknowledgedAntigravityUsage(cursor: CursorState, timezone?: str
     // Ingest replaces daily model totals, so late events still need one compact baseline.
     const key = antigravityAggregateCursorKey(groupKey, input.origin)
     const existing = cursor.files[key]
-    const snapshots = [
-      ...(existing?.snapshots ?? []),
-      ...input.snapshots
-    ]
+    const snapshots = [...(existing?.snapshots ?? []), ...input.snapshots]
     cursor.files[key] = {
       size: 0,
       mtimeMs: Math.max(existing?.mtimeMs ?? 0, input.mtimeMs),
@@ -572,9 +661,7 @@ function antigravityAggregateInputKey(groupKey: string, origin: CursorEntry['ant
 }
 
 function antigravityAggregateCursorKey(groupKey: string, origin: CursorEntry['antigravityOrigin']) {
-  return origin
-    ? `aggregate\0${origin}\0${hashValue(groupKey)}`
-    : `aggregate\0${hashValue(groupKey)}`
+  return origin ? `aggregate\0${origin}\0${hashValue(groupKey)}` : `aggregate\0${hashValue(groupKey)}`
 }
 
 function compactAcknowledgedCliHistory(cursor: CursorState, timezone: string) {
@@ -597,8 +684,14 @@ function compactAcknowledgedCliHistory(cursor: CursorState, timezone: string) {
     if (!isCliHistoryAggregateKey(key)) continue
     const snapshots = entry.snapshots.filter((snapshot) => snapshot.usageDate >= cutoffDate)
     if (snapshots.length === 0) {
-      delete cursor.files[key]
-      changed = true
+      // Keep one compact baseline for groups outside the retention window.
+      // A later full rebuild may need it to emit a zero correction if the
+      // corresponding SQLite history group has disappeared.
+      if (entry.snapshots.length > 1) {
+        entry.snapshots = [mergeCursorSnapshotGroup(entry.snapshots)]
+        entry.updatedAt = compactedAt
+        changed = true
+      }
       continue
     }
     if (snapshots.length !== entry.snapshots.length || snapshots.length > 1) {
@@ -619,7 +712,7 @@ function compactAcknowledgedCliHistory(cursor: CursorState, timezone: string) {
       continue
     }
     const retainedSnapshots = entry.snapshots.filter((snapshot) => snapshot.usageDate >= cutoffDate)
-    for (const snapshot of retainedSnapshots) {
+    for (const snapshot of entry.snapshots) {
       const groupKey = cursorSnapshotGroupKey(snapshot)
       const group = aggregateInputs.get(groupKey) ?? { mtimeMs: 0, snapshots: [] }
       group.mtimeMs = Math.max(group.mtimeMs, entry.mtimeMs)
@@ -652,10 +745,7 @@ function compactAcknowledgedCliHistory(cursor: CursorState, timezone: string) {
       size: 0,
       mtimeMs: Math.max(existing?.mtimeMs ?? 0, input.mtimeMs),
       sha256: hashValue(key),
-      snapshots: [mergeCursorSnapshotGroup([
-        ...(existing?.snapshots ?? []),
-        ...input.snapshots
-      ])],
+      snapshots: [mergeCursorSnapshotGroup([...(existing?.snapshots ?? []), ...input.snapshots])],
       missingCost: true,
       pendingUpload: false,
       updatedAt: compactedAt
@@ -695,15 +785,14 @@ function isAntigravityUsageStateKey(key: string) {
 }
 
 function isAntigravityReplayIdentityKey(key: string) {
-  return antigravityReplayIdentityPrefixes.some((prefix) => key.startsWith(prefix))
+  return isAntigravityUsageStateKey(key)
 }
 
 function canDiscardAntigravityReplayIdentity(cursor: CursorState, key: string) {
   const protection = antigravityReplayIdentityProtection(key)
   if (protection === 'history') return cursor.antigravityHistoryReplayReady === true
   if (protection === 'statusline') return cursor.antigravityStatuslineReplayReady === true
-  return cursor.antigravityHistoryReplayReady === true &&
-    cursor.antigravityStatuslineReplayReady === true
+  return cursor.antigravityHistoryReplayReady === true && cursor.antigravityStatuslineReplayReady === true
 }
 
 function recordDiscardedAntigravityReplayIdentity(cursor: CursorState, key: string) {
@@ -744,12 +833,11 @@ export function cursorSnapshotGroupKey(snapshot: CursorSnapshot) {
   return [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
 }
 
-export function selectPendingCursorSnapshotGroups(input: {
-  cursor: CursorState
-  sinceDate?: string
-  limit?: number
-}) {
-  if (!input.sinceDate) return new Set<string>()
+export function selectPendingCursorSnapshotGroups(input: { cursor: CursorState; sinceDate?: string; limit?: number }) {
+  if (!input.sinceDate) {
+    delete input.cursor.pendingSnapshotRetryCursor
+    return new Set<string>()
+  }
   const groups = new Set<string>()
   for (const entry of Object.values(input.cursor.files)) {
     if (!entry.pendingUpload) continue
@@ -758,7 +846,28 @@ export function selectPendingCursorSnapshotGroups(input: {
       groups.add(cursorSnapshotGroupKey(snapshot))
     }
   }
-  return new Set([...groups].sort().slice(0, input.limit ?? defaultPendingCursorRetryGroupLimit))
+  const sortedGroups = [...groups].sort()
+  if (sortedGroups.length === 0) {
+    delete input.cursor.pendingSnapshotRetryCursor
+    return new Set<string>()
+  }
+  const limit = Math.max(0, Math.trunc(input.limit ?? defaultPendingCursorRetryGroupLimit))
+  if (limit === 0) {
+    delete input.cursor.pendingSnapshotRetryCursor
+    return new Set<string>()
+  }
+  if (sortedGroups.length <= limit) {
+    delete input.cursor.pendingSnapshotRetryCursor
+    return new Set(sortedGroups)
+  }
+
+  const previous = input.cursor.pendingSnapshotRetryCursor
+  const afterIndex = previous === undefined ? -1 : sortedGroups.findIndex((group) => group > previous)
+  const start = afterIndex === -1 ? 0 : afterIndex
+  const selected = sortedGroups.slice(start, start + limit)
+  if (selected.length < limit) selected.push(...sortedGroups.slice(0, limit - selected.length))
+  input.cursor.pendingSnapshotRetryCursor = selected[selected.length - 1]
+  return new Set(selected)
 }
 
 export function shouldIncludeCursorSnapshot(
@@ -766,8 +875,7 @@ export function shouldIncludeCursorSnapshot(
   sinceDate: string | undefined,
   pendingSnapshotGroups: ReadonlySet<string>
 ) {
-  return !sinceDate || snapshot.usageDate >= sinceDate ||
-    pendingSnapshotGroups.has(cursorSnapshotGroupKey(snapshot))
+  return !sinceDate || snapshot.usageDate >= sinceDate || pendingSnapshotGroups.has(cursorSnapshotGroupKey(snapshot))
 }
 
 function hashValue(value: string) {
@@ -776,14 +884,7 @@ function hashValue(value: string) {
 
 const antigravityUsageCursorRetentionMs = 90 * 24 * 60 * 60 * 1000
 const defaultPendingCursorRetryGroupLimit = 30
-const antigravityUsageStatePrefixes = [
-  'event\0',
-  'session\0'
-]
-const antigravityReplayIdentityPrefixes = [
-  'event\0',
-  'session\0'
-]
+const antigravityUsageStatePrefixes = ['event\0', 'session\0']
 
 export async function warmHookCursorHighWater(input: {
   stateDir: string
@@ -805,12 +906,7 @@ export async function warmHookCursorHighWater(input: {
 export function mergeSnapshots(snapshots: UsageSnapshot[]) {
   const rows = new Map<string, UsageSnapshot>()
   for (const snapshot of snapshots) {
-    const key = [
-      snapshot.source,
-      snapshot.usageDate,
-      snapshot.timezone,
-      snapshot.model
-    ].join('\0')
+    const key = [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
     const current = rows.get(key)
     if (!current) {
       rows.set(key, { ...snapshot })
@@ -826,17 +922,15 @@ export function mergeSnapshots(snapshots: UsageSnapshot[]) {
     current.sessionCount += snapshot.sessionCount
   }
 
-  return [...rows.values()].sort((left, right) =>
-    left.usageDate.localeCompare(right.usageDate) ||
-    left.model.localeCompare(right.model)
+  return [...rows.values()].sort(
+    (left, right) => left.usageDate.localeCompare(right.usageDate) || left.model.localeCompare(right.model)
   )
 }
 
 function readEffectiveScanSinceMs(current: CursorState, input: CollectInput) {
   const safetyMs = input.scanSafetyMs ?? 60_000
-  const previousScanMs = typeof current.lastScanHighWaterMs === 'number'
-    ? Math.max(0, current.lastScanHighWaterMs - safetyMs)
-    : undefined
+  const previousScanMs =
+    typeof current.lastScanHighWaterMs === 'number' ? Math.max(0, current.lastScanHighWaterMs - safetyMs) : undefined
   if (previousScanMs === undefined) return input.scanSinceMs
   if (input.scanSinceMs === undefined) return previousScanMs
   return Math.max(input.scanSinceMs, previousScanMs)
@@ -888,9 +982,15 @@ async function hashFileAndPrefix(filePath: string, prefixEndOffsetBytes: number,
 }
 
 function isAppendOnlyUpdate(prior: CursorEntry, entry: CursorFileMetadata) {
-  return !prior.pendingUpload && typeof prior.sha256 === 'string' && prior.sha256.length > 0 &&
-    Number.isSafeInteger(prior.size) && prior.size >= 0 && entry.size > prior.size &&
+  return (
+    !prior.pendingUpload &&
+    typeof prior.sha256 === 'string' &&
+    prior.sha256.length > 0 &&
+    Number.isSafeInteger(prior.size) &&
+    prior.size >= 0 &&
+    entry.size > prior.size &&
     (prior.size === 0 || prior.endsWithNewline === true)
+  )
 }
 
 async function readFileEndsWithNewline(filePath: string, size: number) {
@@ -920,8 +1020,8 @@ function mergeCursorSnapshots(snapshots: CursorSnapshot[]) {
     current.costUsd += snapshot.costUsd
     current.sessionCount = Math.max(current.sessionCount, snapshot.sessionCount)
   }
-  return [...rows.values()].sort((left, right) =>
-    left.usageDate.localeCompare(right.usageDate) || left.model.localeCompare(right.model)
+  return [...rows.values()].sort(
+    (left, right) => left.usageDate.localeCompare(right.usageDate) || left.model.localeCompare(right.model)
   )
 }
 
@@ -934,7 +1034,7 @@ function readSessionLineBytes(value: number | undefined) {
 }
 
 function normalizeRelativePath(value: string) {
-  return value.split('\\').join('/')
+  return normalizeSessionRelativePath(value)
 }
 
 async function* readChangedSessionJsonlLines(

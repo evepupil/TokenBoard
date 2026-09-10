@@ -12,11 +12,7 @@ export function appendSignal(runtime, trigger) {
     queueError = error
   }
   if (!queued || queueError) {
-    runtime.writeFile(
-      signalPath(runtime),
-      payload,
-      { flag: 'a' }
-    )
+    runtime.writeFile(signalPath(runtime), payload, { flag: 'a' })
     if (queueError) throw queueError
   }
 }
@@ -49,18 +45,12 @@ export function drainSignalSources(runtime) {
   const recovered = normalizeSignalRecoveryEntries(readSignalRecoveryEntries(runtime), runtime)
   const queuedDrainPaths = drainQueuedSignalPaths(runtime)
   const legacyDrainPaths = drainLegacySignalPaths(runtime)
-  return consumeDrainedSignalSources([
-    ...queuedDrainPaths,
-    ...legacyDrainPaths
-  ], recovered, runtime)
+  return consumeDrainedSignalSources([...queuedDrainPaths, ...legacyDrainPaths], recovered, runtime)
 }
 
 function drainLegacySignalPaths(runtime) {
   if (typeof runtime.rename !== 'function') {
-    return [
-      ...retainedLegacyDrainPaths(runtime),
-      ...drainLegacySignalWithoutRename(runtime)
-    ]
+    return [...retainedLegacyDrainPaths(runtime), ...drainLegacySignalWithoutRename(runtime)]
   }
 
   const drainPaths = retainedLegacyDrainPaths(runtime)
@@ -160,9 +150,7 @@ function readQueuedSignalSources(runtime) {
 
 function readQueueEntries(runtime) {
   try {
-    return runtime.readdir(signalQueueDir(runtime))
-      .filter(isQueuedSignalEntry)
-      .sort()
+    return runtime.readdir(signalQueueDir(runtime)).filter(isQueuedSignalEntry).sort()
   } catch (error) {
     if (error.code === 'ENOENT') return []
     throw error
@@ -188,7 +176,8 @@ function isDrainedSignalEntry(name) {
 function retainedLegacyDrainPaths(runtime) {
   if (typeof runtime.readdir !== 'function') return []
   try {
-    return runtime.readdir(runtime.stateDir)
+    return runtime
+      .readdir(runtime.stateDir)
       .filter(isLegacyDrainedSignalEntry)
       .sort()
       .map((name) => join(runtime.stateDir, name))
@@ -201,7 +190,8 @@ function retainedLegacyDrainPaths(runtime) {
 function retainedSignalRecoveryPaths(runtime) {
   if (typeof runtime.readdir !== 'function') return []
   try {
-    return runtime.readdir(runtime.stateDir)
+    return runtime
+      .readdir(runtime.stateDir)
       .filter(isSignalRecoveryEntry)
       .sort()
       .map((name) => join(runtime.stateDir, name))
@@ -227,8 +217,7 @@ function readSignalRecoveryEntries(runtime) {
 }
 
 function readRetainedLegacySignalSources(runtime) {
-  return retainedLegacyDrainPaths(runtime)
-    .flatMap((path) => readSourcesFromText(runtime.readFile(path)))
+  return retainedLegacyDrainPaths(runtime).flatMap((path) => readSourcesFromText(runtime.readFile(path)))
 }
 
 function isLegacyDrainedSignalEntry(name) {
@@ -236,9 +225,11 @@ function isLegacyDrainedSignalEntry(name) {
 }
 
 function isSignalRecoveryEntry(name) {
-  return name === 'notify.signal.recovery.codex.json' ||
+  return (
+    name === 'notify.signal.recovery.codex.json' ||
     name === 'notify.signal.recovery.claude-code.json' ||
     /^notify\.signal\.recovery\.[^.]+\.[^.]+\.[a-f0-9]+\.json$/.test(name)
+  )
 }
 
 function signalDrainPath(path, runtime) {
@@ -257,10 +248,21 @@ function drainLegacySignalWithoutRename(runtime) {
 }
 
 function consumeDrainedSignalSources(entries, recovered, runtime) {
-  const drained = entries.map((entry) => typeof entry === 'string'
-    ? { path: entry, sources: readSourcesFromText(runtime.readFile(entry)), remove: () => removeDrainedSignal(entry, runtime) }
-    : entry
-  )
+  const drained = entries.flatMap((entry) => {
+    if (typeof entry !== 'string') return [entry]
+    try {
+      return [
+        {
+          path: entry,
+          sources: readSourcesFromText(runtime.readFile(entry)),
+          remove: () => removeDrainedSignal(entry, runtime)
+        }
+      ]
+    } catch (error) {
+      if (error.code === 'ENOENT') return []
+      throw error
+    }
+  })
   if (drained.length === 0 && recovered.length === 0) return []
   const sources = mergeSources(
     recovered.flatMap(({ sources }) => sources),
@@ -270,7 +272,9 @@ function consumeDrainedSignalSources(entries, recovered, runtime) {
     ensureSignalRecoveryJournals(recovered, sources, runtime)
     for (const { remove } of drained) remove()
   } catch (error) {
-    throw new Error(`TokenBoard signal cleanup failed; recovery journal retained: ${errorMessage(error)}`, { cause: error })
+    throw new Error(`TokenBoard signal cleanup failed; recovery journal retained: ${errorMessage(error)}`, {
+      cause: error
+    })
   }
   return sources
 }
@@ -279,7 +283,10 @@ function normalizeSignalRecoveryEntries(entries, runtime) {
   const multiSourceEntries = entries.filter(({ sources }) => sources.length > 1)
   if (multiSourceEntries.length === 0) return entries
   const individualEntries = entries.filter(({ sources }) => sources.length === 1)
-  const sources = mergeSources(multiSourceEntries.flatMap(({ sources }) => sources), [])
+  const sources = mergeSources(
+    multiSourceEntries.flatMap(({ sources }) => sources),
+    []
+  )
   try {
     ensureSignalRecoveryJournals(individualEntries, sources, runtime)
     for (const { path } of multiSourceEntries) removeDrainedSignal(path, runtime)
@@ -296,9 +303,12 @@ function normalizeSignalRecoveryEntries(entries, runtime) {
 
 function ensureSignalRecoveryJournals(recovered, sources, runtime) {
   for (const source of sources) {
-    if (recovered.some(({ sources: recoveredSources }) => {
-      return recoveredSources.length === 1 && recoveredSources[0] === source
-    })) continue
+    if (
+      recovered.some(({ sources: recoveredSources }) => {
+        return recoveredSources.length === 1 && recoveredSources[0] === source
+      })
+    )
+      continue
     writeSignalRecoveryJournal(source, runtime)
   }
 }

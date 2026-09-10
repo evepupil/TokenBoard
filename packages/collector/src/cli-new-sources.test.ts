@@ -60,8 +60,11 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
     )
 
     expect(result).toBe(0)
-    expect(JSON.parse(stdout[0]).map((item: UsageSnapshot) => item.source).sort())
-      .toEqual(['claude-code', 'opencode'])
+    expect(
+      JSON.parse(stdout[0])
+        .map((item: UsageSnapshot) => item.source)
+        .sort()
+    ).toEqual(['claude-code', 'opencode'])
   })
 
   test('skips OpenCode without failing when it is not installed', async () => {
@@ -91,7 +94,9 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
       env,
       deps({
         collectClaudeCodeUsage: async () => [claudeSnapshot],
-        collectOpenCodeUsage: async () => { throw new Error('database disk image is malformed') }
+        collectOpenCodeUsage: async () => {
+          throw new Error('database disk image is malformed')
+        }
       })
     )
 
@@ -103,7 +108,9 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
       ['preview', '--source', 'opencode'],
       env,
       deps({
-        collectOpenCodeUsage: async () => { throw new Error('OpenCode database not found: /db') }
+        collectOpenCodeUsage: async () => {
+          throw new Error('OpenCode database not found: /db')
+        }
       })
     )
 
@@ -118,7 +125,10 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
       { ...env, TOKENBOARD_HOOK_MODE: '1' },
       deps({
         collectClaudeCodeUsage: async () => [claudeSnapshot],
-        collectOpenCodeUsage: async () => { calledOpenCode = true; return [openCodeSnapshot] }
+        collectOpenCodeUsage: async () => {
+          calledOpenCode = true
+          return [openCodeSnapshot]
+        }
       })
     )
 
@@ -175,8 +185,12 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
       env,
       deps({
         collectClaudeCodeUsage: async () => [claudeSnapshot],
-        collectPiUsage: async () => { throw new Error('No Pi sessions found: /home/user/.pi/agent/sessions') },
-        collectGrokBuildUsage: async () => { throw new Error('No Grok Build sessions found: /home/user/.grok/sessions') }
+        collectPiUsage: async () => {
+          throw new Error('No Pi sessions found: /home/user/.pi/agent/sessions')
+        },
+        collectGrokBuildUsage: async () => {
+          throw new Error('No Grok Build sessions found: /home/user/.grok/sessions')
+        }
       })
     )
 
@@ -191,8 +205,14 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
       { ...env, TOKENBOARD_HOOK_MODE: '1' },
       deps({
         collectClaudeCodeUsage: async () => [claudeSnapshot],
-        collectPiUsage: async () => { called.push('pi'); return [] },
-        collectGrokBuildUsage: async () => { called.push('grok-build'); return [] }
+        collectPiUsage: async () => {
+          called.push('pi')
+          return []
+        },
+        collectGrokBuildUsage: async () => {
+          called.push('grok-build')
+          return []
+        }
       })
     )
 
@@ -201,7 +221,10 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
 
   test('previews the selected DeepSeek Harness source', async () => {
     const dshSnapshot: UsageSnapshot = {
-      ...openCodeSnapshot, source: 'deepseek-harness', model: 'deepseek-v4-pro', costUsd: 0
+      ...openCodeSnapshot,
+      source: 'deepseek-harness',
+      model: 'deepseek-v4-pro',
+      costUsd: 0
     }
     const stdout: string[] = []
 
@@ -233,7 +256,9 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
   test('collects every new source in one all-source run', async () => {
     const stdout: string[] = []
     const make = (source: UsageSnapshot['source']): UsageSnapshot => ({
-      ...openCodeSnapshot, source, costUsd: 0
+      ...openCodeSnapshot,
+      source,
+      costUsd: 0
     })
 
     const result = await runCollectorCli(
@@ -250,9 +275,11 @@ describe('runCollectorCli OpenCode, Pi and Grok Build sources', () => {
     )
 
     expect(result).toBe(0)
-    expect(JSON.parse(stdout[0]).map((item: UsageSnapshot) => item.source).sort()).toEqual([
-      'claude-code', 'deepseek-harness', 'grok-build', 'opencode', 'pi'
-    ])
+    expect(
+      JSON.parse(stdout[0])
+        .map((item: UsageSnapshot) => item.source)
+        .sort()
+    ).toEqual(['claude-code', 'deepseek-harness', 'grok-build', 'opencode', 'pi'])
   })
 })
 

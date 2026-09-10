@@ -20,31 +20,35 @@ describe('collectAntigravityCliUsage', () => {
         collectedAt: '2026-06-24T02:00:00.000Z',
         readDbUsageEvents: async () => ({
           cascadeIds: new Set(['cascade-a']),
-          events: [historyEvent({
-            createdAt: '2026-06-23T16:30:00.000Z',
-            model: 'gemini-3-flash-a',
-            inputTokens: 100,
-            outputTokens: 12,
-            cacheReadTokens: 50
-          })],
+          events: [
+            historyEvent({
+              createdAt: '2026-06-23T16:30:00.000Z',
+              model: 'gemini-3-flash-a',
+              inputTokens: 100,
+              outputTokens: 12,
+              cacheReadTokens: 50
+            })
+          ],
           lastReadRowIndexByCascade: new Map([['cascade-a', 1]])
         })
       })
 
-      expect(snapshots).toEqual([{
-        source: 'antigravity-cli',
-        usageDate: '2026-06-24',
-        timezone: 'Asia/Shanghai',
-        model: 'gemini-3-flash-a',
-        inputTokens: 100,
-        outputTokens: 12,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 50,
-        totalTokens: 162,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity-cli',
+          usageDate: '2026-06-24',
+          timezone: 'Asia/Shanghai',
+          model: 'gemini-3-flash-a',
+          inputTokens: 100,
+          outputTokens: 12,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 50,
+          totalTokens: 162,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -61,7 +65,13 @@ describe('collectAntigravityCliUsage', () => {
           cascadeIds: new Set(['cascade-a']),
           events: [
             historyEvent({ eventHash: 'e'.repeat(64), inputTokens: 100, outputTokens: 12, cacheReadTokens: 50 }),
-            historyEvent({ eventHash: 'f'.repeat(64), createdAt: '2026-06-23T16:31:00.000Z', inputTokens: 100, outputTokens: 12, cacheReadTokens: 50 })
+            historyEvent({
+              eventHash: 'f'.repeat(64),
+              createdAt: '2026-06-23T16:31:00.000Z',
+              inputTokens: 100,
+              outputTokens: 12,
+              cacheReadTokens: 50
+            })
           ],
           lastReadRowIndexByCascade: new Map([['cascade-a', 2]])
         })
@@ -93,13 +103,14 @@ describe('collectAntigravityCliUsage', () => {
             historyEvent({ cascadeHash: conversationA, eventHash: 'e'.repeat(64), inputTokens: 10 }),
             historyEvent({ cascadeHash: conversationB, eventHash: 'e'.repeat(64), inputTokens: 10 })
           ],
-          lastReadRowIndexByCascade: new Map([['cascade-a', 1], ['cascade-b', 1]])
+          lastReadRowIndexByCascade: new Map([
+            ['cascade-a', 1],
+            ['cascade-b', 1]
+          ])
         })
       })
 
-      expect(snapshots).toEqual([
-        expect.objectContaining({ inputTokens: 20, totalTokens: 22, sessionCount: 2 })
-      ])
+      expect(snapshots).toEqual([expect.objectContaining({ inputTokens: 20, totalTokens: 22, sessionCount: 2 })])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -207,21 +218,25 @@ describe('collectAntigravityCliUsage', () => {
   test('propagates unavailable and malformed SQLite history errors', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-history-errors-'))
     try {
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        readDbUsageEvents: async () => {
-          throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
-        }
-      })).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          readDbUsageEvents: async () => {
+            throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
+          }
+        })
+      ).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        readDbUsageEvents: async () => {
-          throw new Error('Failed to read Antigravity SQLite metadata: invalid row')
-        }
-      })).rejects.toThrow('Failed to read Antigravity SQLite metadata: invalid row')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          readDbUsageEvents: async () => {
+            throw new Error('Failed to read Antigravity SQLite metadata: invalid row')
+          }
+        })
+      ).rejects.toThrow('Failed to read Antigravity SQLite metadata: invalid row')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -287,10 +302,7 @@ describe('collectAntigravityCliUsage', () => {
   test('keeps DB reads bounded unless full history is explicitly requested', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-db-limit-'))
     const reads: Array<{ maxDbFiles?: number | null; requireCompleteDirectoryScan?: boolean }> = []
-    const readDbUsageEvents = async (input: {
-      maxDbFiles?: number | null
-      requireCompleteDirectoryScan?: boolean
-    }) => {
+    const readDbUsageEvents = async (input: { maxDbFiles?: number | null; requireCompleteDirectoryScan?: boolean }) => {
       reads.push(input)
       return { cascadeIds: new Set<string>(), events: [] }
     }
@@ -316,10 +328,69 @@ describe('collectAntigravityCliUsage', () => {
       })
 
       expect(reads).toEqual([
-        { maxDbFiles: undefined, sinceDate: '2026-06-24', timezone: 'UTC', detectRowCursorReset: false, lastSeenRowIndexByCascadeHash: new Map(), requireCompleteDirectoryScan: false },
-        { maxDbFiles: null, sinceDate: '2026-06-24', timezone: 'UTC', detectRowCursorReset: false, lastSeenRowIndexByCascadeHash: new Map(), requireCompleteDirectoryScan: true },
-        { maxDbFiles: null, sinceDate: undefined, timezone: 'UTC', detectRowCursorReset: false, lastSeenRowIndexByCascadeHash: new Map(), requireCompleteDirectoryScan: true }
+        {
+          maxDbFiles: undefined,
+          sinceDate: '2026-06-24',
+          timezone: 'UTC',
+          detectRowCursorReset: false,
+          lastSeenRowIndexByCascadeHash: new Map(),
+          requireCompleteDirectoryScan: false
+        },
+        {
+          maxDbFiles: null,
+          sinceDate: '2026-06-24',
+          timezone: 'UTC',
+          detectRowCursorReset: false,
+          lastSeenRowIndexByCascadeHash: new Map(),
+          requireCompleteDirectoryScan: true
+        },
+        {
+          maxDbFiles: null,
+          sinceDate: undefined,
+          timezone: 'UTC',
+          detectRowCursorReset: false,
+          lastSeenRowIndexByCascadeHash: new Map(),
+          requireCompleteDirectoryScan: true
+        }
       ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps legacy unanchored cursor recovery within the bounded file budget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-unanchored-bounded-'))
+    const reads: Array<{
+      maxDbFiles?: number | null
+      forceFullScanCascadeHashes?: ReadonlySet<string>
+    }> = []
+    const readDbUsageEvents = async (input: {
+      maxDbFiles?: number | null
+      forceFullScanCascadeHashes?: ReadonlySet<string>
+    }) => {
+      reads.push(input)
+      return {
+        cascadeIds: new Set<string>(),
+        events: [],
+        lastReadRowIndexByCascade: new Map([['cascade-a', 1]])
+      }
+    }
+    try {
+      await collectAntigravityCliUsage({
+        stateDir: root,
+        timezone: 'UTC',
+        since: '20260624',
+        readDbUsageEvents
+      })
+      await collectAntigravityCliUsage({
+        stateDir: root,
+        timezone: 'UTC',
+        since: '20260624',
+        readDbUsageEvents
+      })
+
+      expect(reads[1]?.maxDbFiles).toBeUndefined()
+      expect(reads[1]?.forceFullScanCascadeHashes?.size).toBe(1)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

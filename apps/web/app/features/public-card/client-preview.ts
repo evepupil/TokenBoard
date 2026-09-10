@@ -25,8 +25,7 @@ export async function refreshPublicCardPreview() {
 
     const svg = await response.text()
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-  } catch (_) {
-  }
+  } catch (_) {}
 }
 
 function handlePublicCardPreviewEvent(event: Event) {

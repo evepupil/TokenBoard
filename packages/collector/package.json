@@ -17,12 +17,12 @@
   },
   "dependencies": {
     "@tokenboard/usage-core": "workspace:*",
-    "ccusage": "20.0.19"
+    "ccusage": "20.0.20"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.11"
   }
 }

@@ -12,9 +12,7 @@ describe('Antigravity GUI database reset corrections', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-db-reset-zero-retry-'))
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -43,22 +41,22 @@ describe('Antigravity GUI database reset corrections', () => {
       const replacement = await collectAntigravityGuiUsage(options)
       const retry = await collectAntigravityGuiUsage(options)
 
-      expect(replacement).toEqual([expect.objectContaining({
-        model: 'gemini-removed',
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        sessionCount: 0
-      })])
+      expect(replacement).toEqual([
+        expect.objectContaining({
+          model: 'gemini-removed',
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          sessionCount: 0
+        })
+      ])
       expect(retry).toEqual(replacement)
 
       await clearPendingUploadCursors({
         stateDir: root,
         source: 'antigravity',
         timezone: 'Asia/Shanghai',
-        acknowledgedSnapshotGroups: [
-          ['antigravity', '2026-06-24', 'Asia/Shanghai', 'gemini-removed'].join('\0')
-        ]
+        acknowledgedSnapshotGroups: [['antigravity', '2026-06-24', 'Asia/Shanghai', 'gemini-removed'].join('\0')]
       })
 
       expect(await collectAntigravityGuiUsage(options)).toEqual([])
@@ -73,9 +71,7 @@ describe('Antigravity GUI database reset corrections', () => {
     const cursorPath = join(root, 'antigravity-cursor.json')
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -112,9 +108,7 @@ describe('Antigravity GUI database reset corrections', () => {
     const languageServerCascade = 'conversation-language-server'
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -134,11 +128,13 @@ describe('Antigravity GUI database reset corrections', () => {
       }
       const options = {
         ...baseOptions(root),
-        listCascades: async () => [{
-          id: languageServerCascade,
-          mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
-          size: 20
-        }],
+        listCascades: async () => [
+          {
+            id: languageServerCascade,
+            mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
+            size: 20
+          }
+        ],
         readDbUsageEvents,
         requestGeneratorMetadata: async () => ({
           generatorMetadata: [metadataItem('gemini-shared', '30', 'response-ls')]
@@ -163,9 +159,7 @@ describe('Antigravity GUI database reset corrections', () => {
     const languageServerCascade = 'conversation-language-server'
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -185,11 +179,13 @@ describe('Antigravity GUI database reset corrections', () => {
       }
       const options = {
         ...baseOptions(root),
-        listCascades: async () => [{
-          id: languageServerCascade,
-          mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
-          size: 20
-        }],
+        listCascades: async () => [
+          {
+            id: languageServerCascade,
+            mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
+            size: 20
+          }
+        ],
         readDbUsageEvents,
         requestGeneratorMetadata: async () => ({
           generatorMetadata: [metadataItem('gemini-shared', '30', 'response-ls')]
@@ -237,29 +233,37 @@ describe('Antigravity GUI database reset corrections', () => {
         pendingUpload: false,
         updatedAt: '2026-06-24T00:00:00.000Z'
       }
-      const legacyKey = kind === 'event'
-        ? ['event', cascadeHash, 'b'.repeat(64)].join('\0')
-        : ['aggregate', 'b'.repeat(64)].join('\0')
+      const legacyKey =
+        kind === 'event' ? ['event', cascadeHash, 'b'.repeat(64)].join('\0') : ['aggregate', 'b'.repeat(64)].join('\0')
       try {
-        await writeFile(cursorPath, `${JSON.stringify({
-          version: 1,
-          source: 'antigravity',
-          files: {
-            [`db\0antigravity\0${cascadeHash}`]: { ...entry, snapshots: [] },
-            [legacyKey]: entry
-          }
-        }, null, 2)}\n`)
+        await writeFile(
+          cursorPath,
+          `${JSON.stringify(
+            {
+              version: 1,
+              source: 'antigravity',
+              files: {
+                [`db\0antigravity\0${cascadeHash}`]: { ...entry, snapshots: [] },
+                [legacyKey]: entry
+              }
+            },
+            null,
+            2
+          )}\n`
+        )
         const before = await readFile(cursorPath, 'utf8')
 
-        await expect(collectAntigravityGuiUsage({
-          ...baseOptions(root),
-          readDbUsageEvents: async (input) => {
-            if ((input?.lastSeenRowIndexByCascadeHash?.size ?? 0) > 0) {
-              throw new AntigravityDbRowCursorResetError('recreated.db')
+        await expect(
+          collectAntigravityGuiUsage({
+            ...baseOptions(root),
+            readDbUsageEvents: async (input) => {
+              if ((input?.lastSeenRowIndexByCascadeHash?.size ?? 0) > 0) {
+                throw new AntigravityDbRowCursorResetError('recreated.db')
+              }
+              return { cascadeIds: new Set<string>(), events: [] }
             }
-            return { cascadeIds: new Set<string>(), events: [] }
-          }
-        })).rejects.toThrow('cannot safely classify legacy database or language-server usage state')
+          })
+        ).rejects.toThrow('cannot safely classify legacy database or language-server usage state')
 
         expect(await readFile(cursorPath, 'utf8')).toBe(before)
       } finally {

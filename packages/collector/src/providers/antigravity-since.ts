@@ -1,3 +1,4 @@
+import { isAllDateFilter } from '../iso-calendar-date'
 import { formatDate } from './session-jsonl-parser-utils'
 
 export type AntigravityCollectionRange = {
@@ -23,7 +24,7 @@ export function resolveAntigravityCollectionRange(input: {
       includesFileMtime: () => true
     }
   }
-  if (since === 'all') {
+  if (isAllDateFilter(since)) {
     return {
       fullHistory: true,
       historyScope: 'all',
@@ -47,9 +48,12 @@ export function isReusableAntigravityHistoryScope(previous: string, current: str
   if (previous === current) return true
   const previousScope = parseBoundedHistoryScope(previous)
   const currentScope = parseBoundedHistoryScope(current)
-  return previousScope !== null && currentScope !== null &&
+  return (
+    previousScope !== null &&
+    currentScope !== null &&
     previousScope.timezone === currentScope.timezone &&
     previousScope.sinceDate <= currentScope.sinceDate
+  )
 }
 
 function boundedHistoryScope(sinceDate: string, timezone: string) {

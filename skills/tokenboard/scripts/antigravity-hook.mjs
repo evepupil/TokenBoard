@@ -18,7 +18,12 @@ export function installAntigravityHook({ paths, fs, nodePath = process.execPath,
 
   if (isAntigravityStatuslineCommand(currentCommand, paths.statuslineScriptPath)) {
     if (isStatusLineEnabled(statusLine)) {
-      return { source: antigravitySource, action: 'install', changed: false, detail: 'Antigravity statusline already installed' }
+      return {
+        source: antigravitySource,
+        action: 'install',
+        changed: false,
+        detail: 'Antigravity statusline already installed'
+      }
     }
     const next = {
       ...settings,
@@ -28,7 +33,13 @@ export function installAntigravityHook({ paths, fs, nodePath = process.execPath,
       }
     }
     const backupPath = writeJsonWithBackup(paths.antigravitySettingsPath, next, loaded.raw, fs)
-    return { source: antigravitySource, action: 'install', changed: true, detail: 'Antigravity statusline enabled', backupPath }
+    return {
+      source: antigravitySource,
+      action: 'install',
+      changed: true,
+      detail: 'Antigravity statusline enabled',
+      backupPath
+    }
   }
 
   captureOriginalAntigravityStatusLine({ settings, paths, fs })
@@ -41,7 +52,13 @@ export function installAntigravityHook({ paths, fs, nodePath = process.execPath,
     }
   }
   const backupPath = writeJsonWithBackup(paths.antigravitySettingsPath, next, loaded.raw, fs)
-  return { source: antigravitySource, action: 'install', changed: true, detail: 'Antigravity statusline installed', backupPath }
+  return {
+    source: antigravitySource,
+    action: 'install',
+    changed: true,
+    detail: 'Antigravity statusline installed',
+    backupPath
+  }
 }
 
 export function uninstallAntigravityHook({ paths, fs }) {
@@ -59,7 +76,13 @@ export function uninstallAntigravityHook({ paths, fs }) {
   const next = restoreOriginalAntigravityStatusLine(settings, readOriginalAntigravityStatusLine(paths, fs))
   const backupPath = writeJsonWithBackup(paths.antigravitySettingsPath, next, loaded.raw, fs)
   removeStaleOriginal(paths, fs)
-  return { source: antigravitySource, action: 'uninstall', changed: true, detail: 'Antigravity statusline restored', backupPath }
+  return {
+    source: antigravitySource,
+    action: 'uninstall',
+    changed: true,
+    detail: 'Antigravity statusline restored',
+    backupPath
+  }
 }
 
 export function getAntigravityHookStatus({ paths, fs }) {
@@ -124,18 +147,28 @@ function buildAntigravityStatuslineCommand({ paths, nodePath, platform }) {
 function isAntigravityStatuslineCommand(command, statuslineScriptPath) {
   if (!command) return false
   const argv = splitCommandArgs(command)
-  return argv.some((arg) => samePathArg(arg, statuslineScriptPath)) ||
+  return (
+    argv.some((arg) => samePathArg(arg, statuslineScriptPath)) ||
     normalizePathArg(command).includes(normalizePathArg(statuslineScriptPath))
+  )
 }
 
 function captureOriginalAntigravityStatusLine({ settings, paths, fs }) {
   fs.mkdir(dirname(paths.antigravityOriginalStatuslinePath), { recursive: true })
   if (Object.hasOwn(settings, 'statusLine')) {
-    writePrivateFile(paths.antigravityOriginalStatuslinePath, `${JSON.stringify({
-      statusLine: settings.statusLine,
-      command: readStatusLineCommand(readStatusLineForWrite(settings)),
-      capturedAt: new Date().toISOString()
-    }, null, 2)}\n`, fs)
+    writePrivateFile(
+      paths.antigravityOriginalStatuslinePath,
+      `${JSON.stringify(
+        {
+          statusLine: settings.statusLine,
+          command: readStatusLineCommand(readStatusLineForWrite(settings)),
+          capturedAt: new Date().toISOString()
+        },
+        null,
+        2
+      )}\n`,
+      fs
+    )
     return
   }
   removeStaleOriginal(paths, fs)

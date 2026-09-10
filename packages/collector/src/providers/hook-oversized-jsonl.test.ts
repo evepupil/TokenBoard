@@ -150,14 +150,16 @@ describe('oversized hook session JSONL rows', () => {
       await mkdir(dirname(sessionFile), { recursive: true })
       await writeFile(sessionFile, `${oversized}\n`)
 
-      await expect(collectClaudeCodeUsage({
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        stderr: (line) => warnings.push(line),
-        async runner() {
-          throw new Error('ccusage must not run when no usage rows changed')
-        }
-      })).resolves.toEqual([])
+      await expect(
+        collectClaudeCodeUsage({
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          stderr: (line) => warnings.push(line),
+          async runner() {
+            throw new Error('ccusage must not run when no usage rows changed')
+          }
+        })
+      ).resolves.toEqual([])
 
       expect(warnings).toEqual([
         `Skipped 1 oversized claude-code session JSONL row without token or usage metadata (largest ${Buffer.byteLength(oversized)} bytes)`
@@ -167,14 +169,16 @@ describe('oversized hook session JSONL rows', () => {
         size: Buffer.byteLength(`${oversized}\n`),
         snapshots: []
       })
-      await expect(collectClaudeCodeUsage({
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        stderr: (line) => warnings.push(line),
-        async runner() {
-          throw new Error('ccusage must not run when no usage rows changed')
-        }
-      })).resolves.toEqual([])
+      await expect(
+        collectClaudeCodeUsage({
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          stderr: (line) => warnings.push(line),
+          async runner() {
+            throw new Error('ccusage must not run when no usage rows changed')
+          }
+        })
+      ).resolves.toEqual([])
       expect(warnings).toHaveLength(1)
     } finally {
       vi.unstubAllEnvs()

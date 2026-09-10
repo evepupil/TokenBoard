@@ -1,13 +1,7 @@
 import { availableParallelism } from 'node:os'
 import { Worker } from 'node:worker_threads'
-import type {
-  ChildUsageEvent,
-  DatedUsage
-} from './codex-subagent-usage-child'
-import type {
-  ReadChildUsageByDate,
-  ReadChildUsageEvents
-} from './codex-subagent-usage-cache'
+import type { ChildUsageEvent, DatedUsage } from './codex-subagent-usage-child'
+import type { ReadChildUsageByDate, ReadChildUsageEvents } from './codex-subagent-usage-cache'
 
 const defaultMaxWorkers = 4
 const absoluteMaxWorkers = 8
@@ -197,9 +191,7 @@ function createUsageWorker() {
 }
 
 function normalizeWorkerError(value: unknown) {
-  return value instanceof Error
-    ? value
-    : new Error('Codex subagent usage worker failed', { cause: value })
+  return value instanceof Error ? value : new Error('Codex subagent usage worker failed', { cause: value })
 }
 
 function isWorkerResponse(value: unknown): value is WorkerResponse {
@@ -208,9 +200,11 @@ function isWorkerResponse(value: unknown): value is WorkerResponse {
   if (!Number.isSafeInteger(candidate.id) || Number(candidate.id) < 1) return false
   if (candidate.warning !== undefined) return typeof candidate.warning === 'string'
   if (candidate.error !== undefined) {
-    return Boolean(candidate.error) &&
+    return (
+      Boolean(candidate.error) &&
       typeof candidate.error.name === 'string' &&
       typeof candidate.error.message === 'string'
+    )
   }
   return Array.isArray(candidate.result)
 }

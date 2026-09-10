@@ -17,11 +17,9 @@ describe('development seed migration', () => {
       }
       insertSeedDependentData(dbPath)
       expectSeedState(dbPath, 1)
-      runSqlite(
-        dbPath,
-        readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8'),
-        { foreignKeys: false }
-      )
+      runSqlite(dbPath, readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8'), {
+        foreignKeys: false
+      })
 
       expectFullSeedDataRemoved(dbPath)
     } finally {
@@ -32,29 +30,33 @@ describe('development seed migration', () => {
   test.each([
     { label: 'immediate', deferForeignKeys: false },
     { label: 'deferred', deferForeignKeys: true }
-  ])('removes the full seed graph with $label foreign-key enforcement', ({ deferForeignKeys }) => {
-    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-seed-cleanup-'))
-    const dbPath = join(tempDir, 'tokenboard.db')
+  ])(
+    'removes the full seed graph with $label foreign-key enforcement',
+    ({ deferForeignKeys }) => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-seed-cleanup-'))
+      const dbPath = join(tempDir, 'tokenboard.db')
 
-    try {
-      for (const migration of migrationsBeforeSeedCleanup()) {
-        runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
+      try {
+        for (const migration of migrationsBeforeSeedCleanup()) {
+          runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
+        }
+        insertSeedDependentData(dbPath)
+        expectSeedState(dbPath, 1)
+
+        runSqlite(
+          dbPath,
+          `BEGIN;\n${readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8')}\nCOMMIT;`,
+          { foreignKeys: true, deferForeignKeys }
+        )
+
+        expectFullSeedDataRemoved(dbPath)
+        expect(runSqlite(dbPath, 'PRAGMA foreign_key_check;').stdout.trim()).toBe('')
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true })
       }
-      insertSeedDependentData(dbPath)
-      expectSeedState(dbPath, 1)
-
-      runSqlite(
-        dbPath,
-        `BEGIN;\n${readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8')}\nCOMMIT;`,
-        { foreignKeys: true, deferForeignKeys }
-      )
-
-      expectFullSeedDataRemoved(dbPath)
-      expect(runSqlite(dbPath, 'PRAGMA foreign_key_check;').stdout.trim()).toBe('')
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true })
-    }
-  }, 30_000)
+    },
+    30_000
+  )
 
   test('removes the fixed pairing credential without deleting an adopted seed user', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-seed-cleanup-'))
@@ -65,23 +67,29 @@ describe('development seed migration', () => {
         runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
       }
 
-      runSqlite(dbPath, `
+      runSqlite(
+        dbPath,
+        `
         UPDATE users
         SET email = 'claimed@example.test', name = 'Claimed User'
         WHERE id = 'seed-user';
-      `)
+      `
+      )
       insertSeedUsage(dbPath)
       expectSeedState(dbPath, 1)
       runSqlite(dbPath, readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8'))
 
-      const result = runSqlite(dbPath, `
+      const result = runSqlite(
+        dbPath,
+        `
         SELECT
           (SELECT COUNT(*) FROM users WHERE id = 'seed-user'),
           (SELECT COUNT(*) FROM profiles WHERE user_id = 'seed-user'),
           (SELECT COUNT(*) FROM pairing_codes WHERE id = 'pair_dev_seed'),
           (SELECT COUNT(*) FROM pairing_codes WHERE code_hash = '2fb2770cbfd167e945dd3495b21f241f03bb5ed864e153b0ef841eb1a19282bc'),
           (SELECT COUNT(*) FROM daily_usage WHERE user_id = 'seed-user');
-      `)
+      `
+      )
 
       expect(result.stdout.trim()).toBe('1|1|0|0|1')
     } finally {
@@ -103,7 +111,9 @@ describe('development seed migration', () => {
 
       runSqlite(dbPath, readFileSync(join(migrationsDir, '0028_remove_development_seed.sql'), 'utf8'))
 
-      const result = runSqlite(dbPath, `
+      const result = runSqlite(
+        dbPath,
+        `
         SELECT
           (SELECT COUNT(*) FROM users WHERE id = 'seed-user'),
           (SELECT COUNT(*) FROM profiles WHERE user_id = 'seed-user'),
@@ -111,7 +121,8 @@ describe('development seed migration', () => {
           (SELECT COUNT(*) FROM daily_usage WHERE user_id = 'seed-user'),
           (SELECT COUNT(*) FROM pairing_codes WHERE id = 'pair_dev_seed'),
           (SELECT COUNT(*) FROM pairing_codes WHERE code_hash = '2fb2770cbfd167e945dd3495b21f241f03bb5ed864e153b0ef841eb1a19282bc');
-      `)
+      `
+      )
 
       expect(result.stdout.trim()).toBe('1|1|1|1|0|0')
     } finally {
@@ -127,7 +138,9 @@ function migrationsBeforeSeedCleanup() {
 }
 
 function insertSeedUsage(dbPath: string) {
-  runSqlite(dbPath, `
+  runSqlite(
+    dbPath,
+    `
     INSERT INTO daily_usage (
       user_id,
       device_id,
@@ -159,12 +172,15 @@ function insertSeedUsage(dbPath: string) {
       1,
       '2026-04-28T00:00:00.000Z'
     );
-  `)
+  `
+  )
 }
 
 function insertSeedDependentData(dbPath: string) {
   insertSeedUsage(dbPath)
-  runSqlite(dbPath, `
+  runSqlite(
+    dbPath,
+    `
     INSERT INTO upload_tokens (id, user_id, name, token_hash, created_at)
     VALUES ('token_seed', 'seed-user', 'Seed token', 'hash_seed', '2026-04-28T00:00:00.000Z');
 
@@ -217,31 +233,40 @@ function insertSeedDependentData(dbPath: string) {
       'https://example.test/dashboard', 1, 1, 0, 0, 1, '{}', '[]',
       '2026-04-28T00:00:00.000Z', '2026-04-28T00:00:00.000Z'
     );
-  `)
+  `
+  )
 }
 
 function insertSeedAuthenticationAccount(dbPath: string) {
-  runSqlite(dbPath, `
+  runSqlite(
+    dbPath,
+    `
     INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at)
     VALUES ('account_seed', 'github-seed-account', 'github', 'seed-user', 0, 0);
-  `)
+  `
+  )
 }
 
 function expectSeedState(dbPath: string, usageCount: number) {
-  const result = runSqlite(dbPath, `
+  const result = runSqlite(
+    dbPath,
+    `
     SELECT
       (SELECT COUNT(*) FROM users WHERE id = 'seed-user'),
       (SELECT COUNT(*) FROM profiles WHERE user_id = 'seed-user'),
       (SELECT COUNT(*) FROM daily_usage WHERE user_id = 'seed-user'),
       (SELECT COUNT(*) FROM pairing_codes WHERE id = 'pair_dev_seed'),
       (SELECT COUNT(*) FROM pairing_codes WHERE code_hash = '2fb2770cbfd167e945dd3495b21f241f03bb5ed864e153b0ef841eb1a19282bc');
-  `)
+  `
+  )
 
   expect(result.stdout.trim()).toBe(`1|1|${usageCount}|1|1`)
 }
 
 function expectFullSeedDataRemoved(dbPath: string) {
-  const result = runSqlite(dbPath, `
+  const result = runSqlite(
+    dbPath,
+    `
     SELECT
       (SELECT COUNT(*) FROM users WHERE id = 'seed-user'),
       (SELECT COUNT(*) FROM profiles WHERE user_id = 'seed-user'),
@@ -260,16 +285,13 @@ function expectFullSeedDataRemoved(dbPath: string) {
       (SELECT COUNT(*) FROM webhook_subscriptions WHERE user_id = 'seed-user'),
       (SELECT COUNT(*) FROM webhook_delivery_logs WHERE user_id = 'seed-user'),
       (SELECT COUNT(*) FROM daily_report_history WHERE user_id = 'seed-user');
-  `)
+  `
+  )
 
   expect(result.stdout.trim()).toBe('0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0|0')
 }
 
-function runSqlite(
-  dbPath: string,
-  sql: string,
-  options: { foreignKeys?: boolean; deferForeignKeys?: boolean } = {}
-) {
+function runSqlite(dbPath: string, sql: string, options: { foreignKeys?: boolean; deferForeignKeys?: boolean } = {}) {
   const foreignKeys = options.foreignKeys !== false ? 'ON' : 'OFF'
   const deferForeignKeys = options.deferForeignKeys ? 'PRAGMA defer_foreign_keys = ON;\n' : ''
   const result = spawnSync('sqlite3', [dbPath], {

@@ -12,7 +12,7 @@ const newEventHash = 'c'.repeat(64)
 const oldCreatedAt = '2025-01-01T10:00:00.000Z'
 
 describe('Antigravity CLI history compaction', () => {
-  test('prunes acknowledged old history while retaining a compacted frontier for incremental reconciliation', async () => {
+  test('prunes acknowledged old history while retaining a compact baseline for reconciliation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-history-compaction-'))
     const event = historyEvent(oldEventHash, oldCreatedAt)
     try {
@@ -28,7 +28,9 @@ describe('Antigravity CLI history compaction', () => {
       const group = cliHistorySnapshotGroupFromEvent(event, 'UTC')
 
       expect(snapshots).toEqual([expect.objectContaining({ inputTokens: 10, totalTokens: 10, sessionCount: 1 })])
-      expect(cursor.files[cliHistoryAggregateKey(group)]).toBeUndefined()
+      expect(cursor.files[cliHistoryAggregateKey(group)]?.snapshots).toEqual([
+        expect.objectContaining({ usageDate: '2025-01-01', inputTokens: 10 })
+      ])
       expect(Object.keys(cursor.files).some((key) => key.startsWith('history-event\0'))).toBe(false)
       expect(Object.keys(cursor.files).some((key) => key.startsWith('session\0antigravity-cli\0'))).toBe(false)
       expect(Object.keys(cursor.files).some((key) => key.startsWith('db-row\0antigravity-cli\0'))).toBe(true)
@@ -50,14 +52,14 @@ describe('Antigravity CLI history compaction', () => {
       })
       await clearPendingUploadCursors({ stateDir: root, source: 'antigravity-cli', timezone: 'UTC' })
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: '2025-01-01',
-        readDbUsageEvents: async () => dbUsage([
-          historyEvent(newEventHash, '2025-01-01T11:00:00.000Z')
-        ], 2)
-      })).rejects.toThrow('rerun with --since all')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: '2025-01-01',
+          readDbUsageEvents: async () => dbUsage([historyEvent(newEventHash, '2025-01-01T11:00:00.000Z')], 2)
+        })
+      ).rejects.toThrow('rerun with --since all')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -84,12 +86,14 @@ describe('Antigravity CLI history compaction', () => {
       const cursor = await readCursor(root)
       expect(cursor.antigravityCliHistoryCompactedThroughDate).toBe('2026-04-23')
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'Asia/Shanghai',
-        since: '20260422',
-        readDbUsageEvents: async () => dbUsage([event], 2)
-      })).rejects.toThrow('rerun with --since all')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'Asia/Shanghai',
+          since: '20260422',
+          readDbUsageEvents: async () => dbUsage([event], 2)
+        })
+      ).rejects.toThrow('rerun with --since all')
     } finally {
       vi.useRealTimers()
       await rm(root, { recursive: true, force: true })
@@ -118,9 +122,7 @@ describe('Antigravity CLI history compaction', () => {
       const group = cliHistorySnapshotGroupFromEvent(event, 'America/Los_Angeles')
       const aggregate = cursor.files[cliHistoryAggregateKey(group)]
 
-      expect(aggregate?.snapshots).toEqual([
-        expect.objectContaining({ usageDate: '2026-04-20', inputTokens: 10 })
-      ])
+      expect(aggregate?.snapshots).toEqual([expect.objectContaining({ usageDate: '2026-04-20', inputTokens: 10 })])
       expect(cursor.antigravityCliHistoryCompactedThroughDate).toBe('2026-04-21')
     } finally {
       vi.useRealTimers()
@@ -155,7 +157,7 @@ describe('Antigravity CLI history compaction', () => {
     }
   })
 
-  test('rebuilds an old daily model from SQLite without adding a pruned local baseline', async () => {
+  test('rebuilds an old daily model from SQLite without duplicating the compact baseline', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-history-unreplaced-baseline-'))
     const oldEvent = historyEvent(oldEventHash, oldCreatedAt)
     const newEvent = historyEvent(newEventHash, '2025-01-02T10:00:00.000Z', 'gemini-pro')
@@ -177,10 +179,12 @@ describe('Antigravity CLI history compaction', () => {
       const cursor = await readCursor(root)
       const oldGroup = cliHistorySnapshotGroupFromEvent(oldEvent, 'UTC')
 
-      expect(rebuilt).toEqual(expect.arrayContaining([
-        expect.objectContaining({ model: 'gemini-3-flash-a', inputTokens: 10, totalTokens: 10 }),
-        expect.objectContaining({ model: 'gemini-pro', inputTokens: 10, totalTokens: 10 })
-      ]))
+      expect(rebuilt).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ model: 'gemini-3-flash-a', inputTokens: 10, totalTokens: 10 }),
+          expect.objectContaining({ model: 'gemini-pro', inputTokens: 10, totalTokens: 10 })
+        ])
+      )
       expect(cursor.files[cliHistoryAggregateKey(oldGroup)]).toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -191,19 +195,63 @@ describe('Antigravity CLI history compaction', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-correction-compaction-'))
     const cursorPath = join(root, 'antigravity-cli-cursor.json')
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'antigravity-cli',
-        antigravityCliMeteringVersion: 3,
-        files: {
-          ['history-authority-correction\0' + 'd'.repeat(64)]: cursorEntry()
-        }
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity-cli',
+            antigravityCliMeteringVersion: 3,
+            files: {
+              ['history-authority-correction\0' + 'd'.repeat(64)]: cursorEntry()
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
 
       await clearPendingUploadCursors({ stateDir: root, source: 'antigravity-cli', timezone: 'UTC' })
 
       const cursor = await readCursor(root)
       expect(cursor.antigravityCliHistoryCompactedThroughDate).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('merges multiple retained snapshots into one old-history reconciliation baseline', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-history-compaction-baseline-'))
+    const cursorPath = join(root, 'antigravity-cli-cursor.json')
+    const event = historyEvent(oldEventHash, oldCreatedAt)
+    const group = cliHistorySnapshotGroupFromEvent(event, 'UTC')
+    const aggregateKey = cliHistoryAggregateKey(group)
+    try {
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity-cli',
+            antigravityCliMeteringVersion: 3,
+            files: {
+              [aggregateKey]: {
+                ...cursorEntry(),
+                snapshots: [historySnapshot(10), historySnapshot(20)]
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
+
+      await clearPendingUploadCursors({ stateDir: root, source: 'antigravity-cli', timezone: 'UTC' })
+
+      const cursor = await readCursor(root)
+      expect(cursor.files[aggregateKey]?.snapshots).toEqual([
+        expect.objectContaining({ inputTokens: 30, totalTokens: 30, sessionCount: 2 })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -228,6 +276,22 @@ function dbUsage(events: ReturnType<typeof historyEvent>[], rowIndex: number) {
     cascadeIds: new Set(events.length > 0 ? ['cascade-a'] : []),
     events,
     lastReadRowIndexByCascade: new Map([['cascade-a', rowIndex]])
+  }
+}
+
+function historySnapshot(inputTokens: number) {
+  return {
+    source: 'antigravity-cli',
+    usageDate: '2025-01-01',
+    timezone: 'UTC',
+    model: 'gemini-3-flash-a',
+    inputTokens,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    totalTokens: inputTokens,
+    costUsd: 0,
+    sessionCount: 1
   }
 }
 

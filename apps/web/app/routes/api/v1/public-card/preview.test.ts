@@ -38,7 +38,7 @@ describe('public card preview route', () => {
 
     mockedRequireSessionUser.mockResolvedValue({ id: 'user_1' } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
     const svg = await response.text()
 
     expect(mockedRequireSessionUser).toHaveBeenCalledWith(context)

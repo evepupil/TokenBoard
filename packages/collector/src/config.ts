@@ -3,4 +3,3 @@ export type CollectorConfig = {
   uploadToken: string
   timezone: string
 }
-

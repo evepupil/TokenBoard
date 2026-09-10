@@ -1,16 +1,15 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { UsageSnapshot, UsageSource } from '@tokenboard/usage-core'
-import {
-  collectChangedSessionFiles,
-  updateCursorFile
-} from './session-cursor'
-import { readCursor, withCursorLock, writeCursor } from './session-cursor-store'
+import { collectChangedSessionFiles, updateCursorFile } from './session-cursor'
+import { readCursor, withCursorLock, writeCursor, type CursorSnapshot } from './session-cursor-store'
 import { parseSessionJsonlLines } from './session-jsonl-parser'
+import { isUnresolvedCodexContextPricingSnapshot } from './codex-context-pricing'
 
 type HookInput = {
   source: UsageSource
   sessionsDir: string
+  sessionDirs?: readonly string[]
   cursorName: string
   cursorProfileHash?: string
   stateDir?: string
@@ -21,12 +20,14 @@ type HookInput = {
   includePendingSnapshotEntries?: boolean
   includeReconciliationFileEntries?: boolean
   skipSessionScan?: boolean
+  allowedRootSymlinks?: readonly string[]
 }
 
 export type HookPendingSnapshotEntry = {
   relativePath: string
   sha256: string
   snapshot: UsageSnapshot
+  contextPricingPending?: true
 }
 
 export type HookReconciliationFileEntry = {
@@ -40,15 +41,17 @@ export type HookIncrementalResult = {
   changedDates: string[]
   changedKeys: Array<{ usageDate: string; model: string }>
   cachedSnapshots: UsageSnapshot[]
+  unresolvedContextPricingSnapshots?: UsageSnapshot[]
   pendingSnapshotEntries?: HookPendingSnapshotEntry[]
   reconciliationFileEntries?: HookReconciliationFileEntry[]
 }
 
 export async function collectHookIncremental(input: HookInput): Promise<HookIncrementalResult> {
   const cursorPath = join(input.stateDir ?? readStateDir(), input.cursorName)
-  return withCursorLock(cursorPath, () => input.skipSessionScan
-    ? collectPendingHookCursorLocked(input, cursorPath)
-    : collectHookIncrementalLocked(input, cursorPath)
+  return withCursorLock(cursorPath, () =>
+    input.skipSessionScan
+      ? collectPendingHookCursorLocked(input, cursorPath)
+      : collectHookIncrementalLocked(input, cursorPath)
   )
 }
 
@@ -64,32 +67,46 @@ async function collectPendingHookCursorLocked(input: HookInput, cursorPath: stri
       continue
     }
     for (const snapshot of entry.snapshots) {
+      const restored = restoreCursorSnapshot(snapshot, input.collectedAt)
       pendingSnapshotEntries.push({
         relativePath,
         sha256: entry.sha256,
-        snapshot: { ...snapshot, collectedAt: input.collectedAt }
+        snapshot: restored.snapshot,
+        ...(restored.contextPricingPending ? { contextPricingPending: true as const } : {})
       })
     }
   }
   if (cleanedSnapshotlessPending) await writeCursor(cursorPath, cursor)
-  return withPendingSnapshotEntries({
-    rangeArgs: [],
-    changed: pendingSnapshotEntries.length > 0,
-    changedDates: [],
-    changedKeys: [],
-    cachedSnapshots: pendingSnapshotEntries.map((entry) => entry.snapshot)
-  }, {
-    pendingSnapshotEntries: input.includePendingSnapshotEntries ? pendingSnapshotEntries : undefined,
-    reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
-  })
+  return withPendingSnapshotEntries(
+    {
+      rangeArgs: [],
+      changed: pendingSnapshotEntries.length > 0,
+      changedDates: [],
+      changedKeys: [],
+      cachedSnapshots: pendingSnapshotEntries.map((entry) => entry.snapshot),
+      ...(pendingSnapshotEntries.some((entry) => entry.contextPricingPending)
+        ? {
+            unresolvedContextPricingSnapshots: pendingSnapshotEntries
+              .filter((entry) => entry.contextPricingPending)
+              .map((entry) => entry.snapshot)
+          }
+        : {})
+    },
+    {
+      pendingSnapshotEntries: input.includePendingSnapshotEntries ? pendingSnapshotEntries : undefined,
+      reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
+    }
+  )
 }
 
 async function collectHookIncrementalLocked(input: HookInput, cursorPath: string): Promise<HookIncrementalResult> {
   const changed = await collectChangedSessionFiles({
     source: input.source,
     sessionsDir: input.sessionsDir,
+    sessionDirs: input.sessionDirs,
     cursorPath,
     cursorProfileHash: input.cursorProfileHash,
+    allowedRootSymlinks: input.allowedRootSymlinks,
     scanSinceMs: input.scanSinceMs
   })
 
@@ -101,7 +118,11 @@ async function collectHookIncrementalLocked(input: HookInput, cursorPath: string
     throw new Error(`${input.source} hook has pending upload entries that are not readable`)
   }
 
-  const cachedSnapshots = restoreCachedPendingSnapshots(changed.missingPendingSnapshots, input.collectedAt)
+  const restoredPendingSnapshots = restoreCachedPendingSnapshots(changed.missingPendingSnapshots, input.collectedAt)
+  const cachedSnapshots = restoredPendingSnapshots.map((entry) => entry.snapshot)
+  const unresolvedContextPricingSnapshots = restoredPendingSnapshots
+    .filter((entry) => entry.contextPricingPending)
+    .map((entry) => entry.snapshot)
   const pendingSnapshotEntries = input.includePendingSnapshotEntries
     ? restorePendingSnapshotEntries(changed.missingPendingSnapshotEntries, input.collectedAt)
     : undefined
@@ -110,16 +131,20 @@ async function collectHookIncrementalLocked(input: HookInput, cursorPath: string
       if (hasCursorMaintenance(changed)) {
         await changed.commit()
       }
-      return withPendingSnapshotEntries({
-        rangeArgs: [],
-        changed: true,
-        changedDates: [],
-        changedKeys: [],
-        cachedSnapshots
-      }, {
-        pendingSnapshotEntries,
-        reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
-      })
+      return withPendingSnapshotEntries(
+        {
+          rangeArgs: [],
+          changed: true,
+          changedDates: [],
+          changedKeys: [],
+          cachedSnapshots,
+          ...(unresolvedContextPricingSnapshots.length > 0 ? { unresolvedContextPricingSnapshots } : {})
+        },
+        {
+          pendingSnapshotEntries,
+          reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
+        }
+      )
     }
     if (changed.hasPendingUpload) {
       throw new Error(`${input.source} hook has pending upload entries but no readable changed session files`)
@@ -127,16 +152,20 @@ async function collectHookIncrementalLocked(input: HookInput, cursorPath: string
     if (hasCursorMaintenance(changed)) {
       await changed.commit()
     }
-    return withPendingSnapshotEntries({
-      rangeArgs: [],
-      changed: false,
-      changedDates: [],
-      changedKeys: [],
-      cachedSnapshots: []
-    }, {
-      pendingSnapshotEntries,
-      reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
-    })
+    return withPendingSnapshotEntries(
+      {
+        rangeArgs: [],
+        changed: false,
+        changedDates: [],
+        changedKeys: [],
+        cachedSnapshots: [],
+        ...(unresolvedContextPricingSnapshots.length > 0 ? { unresolvedContextPricingSnapshots } : {})
+      },
+      {
+        pendingSnapshotEntries,
+        reconciliationFileEntries: input.includeReconciliationFileEntries ? [] : undefined
+      }
+    )
   }
 
   const parsed = await parseChangedFiles(input, changed)
@@ -150,16 +179,20 @@ async function collectHookIncrementalLocked(input: HookInput, cursorPath: string
   await changed.commit()
   reportSkippedOversizedRows(input, parsed)
 
-  return withPendingSnapshotEntries({
-    rangeArgs: buildDateRangeArgs(parsed.changedDates),
-    changed: parsed.changedDates.size > 0 || cachedSnapshots.length > 0,
-    changedDates: [...parsed.changedDates].sort(),
-    changedKeys: [...parsed.changedKeys.values()].sort(compareSnapshotKeys),
-    cachedSnapshots
-  }, {
-    pendingSnapshotEntries,
-    reconciliationFileEntries: input.includeReconciliationFileEntries ? parsed.reconciliationFileEntries : undefined
-  })
+  return withPendingSnapshotEntries(
+    {
+      rangeArgs: buildDateRangeArgs(parsed.changedDates),
+      changed: parsed.changedDates.size > 0 || cachedSnapshots.length > 0,
+      changedDates: [...parsed.changedDates].sort(),
+      changedKeys: [...parsed.changedKeys.values()].sort(compareSnapshotKeys),
+      cachedSnapshots,
+      ...(unresolvedContextPricingSnapshots.length > 0 ? { unresolvedContextPricingSnapshots } : {})
+    },
+    {
+      pendingSnapshotEntries,
+      reconciliationFileEntries: input.includeReconciliationFileEntries ? parsed.reconciliationFileEntries : undefined
+    }
+  )
 }
 
 function hasCursorMaintenance(changed: Awaited<ReturnType<typeof collectChangedSessionFiles>>) {
@@ -167,23 +200,37 @@ function hasCursorMaintenance(changed: Awaited<ReturnType<typeof collectChangedS
 }
 
 function restoreCachedPendingSnapshots(
-  missingPendingSnapshots: Array<{ snapshots: Array<Omit<UsageSnapshot, 'collectedAt'>> }>,
+  missingPendingSnapshots: Array<{ snapshots: CursorSnapshot[] }>,
   collectedAt: string
 ) {
   return missingPendingSnapshots.flatMap((entry) =>
-    entry.snapshots.map((snapshot) => ({ ...snapshot, collectedAt }))
+    entry.snapshots.map((snapshot) => restoreCursorSnapshot(snapshot, collectedAt))
   )
 }
 
 function restorePendingSnapshotEntries(
-  missingPendingSnapshots: Array<{ relativePath: string; sha256: string; snapshots: Array<Omit<UsageSnapshot, 'collectedAt'>> }>,
+  missingPendingSnapshots: Array<{ relativePath: string; sha256: string; snapshots: CursorSnapshot[] }>,
   collectedAt: string
 ): HookPendingSnapshotEntry[] {
-  return missingPendingSnapshots.flatMap((entry) => entry.snapshots.map((snapshot) => ({
-    relativePath: entry.relativePath,
-    sha256: entry.sha256,
-    snapshot: { ...snapshot, collectedAt }
-  })))
+  return missingPendingSnapshots.flatMap((entry) =>
+    entry.snapshots.map((snapshot) => {
+      const restored = restoreCursorSnapshot(snapshot, collectedAt)
+      return {
+        relativePath: entry.relativePath,
+        sha256: entry.sha256,
+        snapshot: restored.snapshot,
+        ...(restored.contextPricingPending ? { contextPricingPending: true as const } : {})
+      }
+    })
+  )
+}
+
+function restoreCursorSnapshot(snapshot: CursorSnapshot, collectedAt: string) {
+  const { codexContextPricingPending, ...publicSnapshot } = snapshot
+  return {
+    snapshot: { ...publicSnapshot, collectedAt } as UsageSnapshot,
+    contextPricingPending: isUnresolvedCodexContextPricingSnapshot(snapshot)
+  }
 }
 
 function withPendingSnapshotEntries(
@@ -196,7 +243,9 @@ function withPendingSnapshotEntries(
   return {
     ...result,
     ...(entries.pendingSnapshotEntries === undefined ? {} : { pendingSnapshotEntries: entries.pendingSnapshotEntries }),
-    ...(entries.reconciliationFileEntries === undefined ? {} : { reconciliationFileEntries: entries.reconciliationFileEntries })
+    ...(entries.reconciliationFileEntries === undefined
+      ? {}
+      : { reconciliationFileEntries: entries.reconciliationFileEntries })
   }
 }
 
@@ -291,20 +340,19 @@ export function assertHookReconciliationSnapshots(input: {
   expectedKeys?: Array<{ usageDate: string; model: string }>
   snapshots: UsageSnapshot[]
 }) {
-  const expectedKeys = input.expectedKeys && input.expectedKeys.length > 0
-    ? input.expectedKeys
-    : input.expectedDates.map((usageDate) => ({
-        usageDate,
-        model: ''
-      }))
+  const expectedKeys =
+    input.expectedKeys && input.expectedKeys.length > 0
+      ? input.expectedKeys
+      : input.expectedDates.map((usageDate) => ({
+          usageDate,
+          model: ''
+        }))
   if (expectedKeys.length === 0) return
 
   const actualKeys = new Set(input.snapshots.map(snapshotKey))
   const actualDates = new Set(input.snapshots.map((snapshot) => snapshot.usageDate))
   const missingKeys = expectedKeys.filter((key) =>
-    isSpecificModel(key.model)
-      ? !actualKeys.has(snapshotKey(key))
-      : !actualDates.has(key.usageDate)
+    isSpecificModel(key.model) ? !actualKeys.has(snapshotKey(key)) : !actualDates.has(key.usageDate)
   )
   if (missingKeys.length === 0) return
 
@@ -326,12 +374,7 @@ function buildDateRangeArgs(dates: Set<string>) {
   if (values.length === 0) {
     return []
   }
-  return [
-    '--since',
-    toCompactDate(values[0]),
-    '--until',
-    toCompactDate(values[values.length - 1])
-  ]
+  return ['--since', toCompactDate(values[0]), '--until', toCompactDate(values[values.length - 1])]
 }
 
 function snapshotKey(input: { usageDate: string; model: string }) {
@@ -342,10 +385,7 @@ function formatSnapshotKey(input: { usageDate: string; model: string }) {
   return input.model ? `${input.usageDate}/${input.model}` : input.usageDate
 }
 
-function compareSnapshotKeys(
-  left: { usageDate: string; model: string },
-  right: { usageDate: string; model: string }
-) {
+function compareSnapshotKeys(left: { usageDate: string; model: string }, right: { usageDate: string; model: string }) {
   return left.usageDate.localeCompare(right.usageDate) || left.model.localeCompare(right.model)
 }
 

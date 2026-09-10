@@ -1,13 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configDir } from './config.mjs'
 import { assertCredentialsLockOwnership, withCredentialsLock } from './credentials-lock.mjs'
@@ -49,17 +41,13 @@ export function readDeviceLink(options = {}) {
   const path = options.path || deviceLinkPath(options.configDir || configDir())
   const fs = options.fs || { existsSync, readFileSync }
   const root = options.configDir || configDir()
-  const requestedOrigin = options.serverOrigin
-    ? normalizeServerOrigin(options.serverOrigin)
-    : null
+  const requestedOrigin = options.serverOrigin ? normalizeServerOrigin(options.serverOrigin) : null
   const configLink = readCanonicalDeviceLink(root, requestedOrigin, options)
   if (configLink) return configLink
   if (!fs.existsSync(path)) return null
   const store = normalizeDeviceLinkStore(JSON.parse(fs.readFileSync(path, 'utf8')))
   if (requestedOrigin) {
-    return store.servers[requestedOrigin]
-      ? deviceLinkFromStored(requestedOrigin, store.servers[requestedOrigin])
-      : null
+    return store.servers[requestedOrigin] ? deviceLinkFromStored(requestedOrigin, store.servers[requestedOrigin]) : null
   }
   const entries = Object.entries(store.servers)
   if (entries.length === 0) return null

@@ -156,12 +156,7 @@ function DeviceLinkReconnectCommandSection(props: { commands: { bash: string; po
 
 function UninstallCommandSection(props: { commands: { bash: string; powerShell: string } }) {
   return (
-    <CommandSection
-      title="一键卸载 collector"
-      commands={props.commands}
-      idPrefix="uninstall"
-      actionLabel="卸载命令"
-    />
+    <CommandSection title="一键卸载 collector" commands={props.commands} idPrefix="uninstall" actionLabel="卸载命令" />
   )
 }
 
@@ -196,17 +191,14 @@ function CommandSection(props: {
   )
 }
 
-export function CopyableCommandBlock(props: {
-  title: string
-  command: string
-  targetId: string
-  copyLabel: string
-}) {
+export function CopyableCommandBlock(props: { title: string; command: string; targetId: string; copyLabel: string }) {
   return (
     <div class="min-w-0">
       <div class="app-surface-subtle overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-sm leading-6 text-[var(--app-text)]">
         <CopyBlockHeader title={props.title} targetId={props.targetId} label={props.copyLabel} />
-        <pre id={props.targetId} class="overflow-x-auto p-4">{props.command}</pre>
+        <pre id={props.targetId} class="overflow-x-auto p-4">
+          {props.command}
+        </pre>
       </div>
     </div>
   )

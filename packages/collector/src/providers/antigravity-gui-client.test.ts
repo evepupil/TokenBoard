@@ -82,12 +82,15 @@ describe('createAntigravityLanguageServerClient', () => {
   })
 
   test('formats metadata transport errors with a stable source prefix', () => {
-    expect(formatMetadataRequestTransportError('antigravity', new Error('socket hang up')))
-      .toBe('Antigravity metadata request transport failed for antigravity: socket hang up')
-    expect(formatMetadataRequestTransportError('antigravity', new Error('')))
-      .toBe('Antigravity metadata request transport failed for antigravity: Error')
-    expect(formatMetadataRequestTransportError('antigravity', Object.create(null)))
-      .toBe('Antigravity metadata request transport failed for antigravity: Unknown error')
+    expect(formatMetadataRequestTransportError('antigravity', new Error('socket hang up'))).toBe(
+      'Antigravity metadata request transport failed for antigravity: socket hang up'
+    )
+    expect(formatMetadataRequestTransportError('antigravity', new Error(''))).toBe(
+      'Antigravity metadata request transport failed for antigravity: Error'
+    )
+    expect(formatMetadataRequestTransportError('antigravity', Object.create(null))).toBe(
+      'Antigravity metadata request transport failed for antigravity: Unknown error'
+    )
   })
 
   test('rejects and aborts metadata responses larger than the response limit', async () => {
@@ -180,11 +183,12 @@ describe('createAntigravityLanguageServerClient', () => {
     try {
       const serverPath = join(root, 'server.mjs')
       const pidPath = join(root, 'server.pid')
-      await writeFile(serverPath, [
-        '#!/bin/sh',
-        'printf "%s" "$$" > "$TOKENBOARD_ANTIGRAVITY_TEST_PID_FILE"',
-        'while :; do sleep 1; done'
-      ].join('\n'))
+      await writeFile(
+        serverPath,
+        ['#!/bin/sh', 'printf "%s" "$$" > "$TOKENBOARD_ANTIGRAVITY_TEST_PID_FILE"', 'while :; do sleep 1; done'].join(
+          '\n'
+        )
+      )
       await chmod(serverPath, 0o700)
       process.env.TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS = '500'
       process.env.TOKENBOARD_ANTIGRAVITY_TEST_PID_FILE = pidPath
@@ -210,23 +214,29 @@ describe('createAntigravityLanguageServerClient', () => {
     const previousTimeout = process.env.TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS
     try {
       const serverPath = join(root, 'server.mjs')
-      await writeFile(serverPath, [
-        '#!/usr/bin/env node',
-        'const portIndex = process.argv.indexOf("--https_server_port")',
-        'const port = process.argv[portIndex + 1]',
-        'process.stderr.write(`diagnostic: retrying upstream at 127.0.0.1:${port}`)',
-        'setInterval(() => undefined, 1000)'
-      ].join('\n'))
+      await writeFile(
+        serverPath,
+        [
+          '#!/usr/bin/env node',
+          'const portIndex = process.argv.indexOf("--https_server_port")',
+          'const port = process.argv[portIndex + 1]',
+          'process.stderr.write(`diagnostic: retrying upstream at 127.0.0.1:${port}`)',
+          'setInterval(() => undefined, 1000)'
+        ].join('\n')
+      )
       await chmod(serverPath, 0o700)
       process.env.TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS = '300'
 
       const result = await createAntigravityLanguageServerClient({
         source: 'antigravity',
         languageServerPath: serverPath
-      }).then(async (client) => {
-        await client.close()
-        return 'resolved'
-      }, (error) => error)
+      }).then(
+        async (client) => {
+          await client.close()
+          return 'resolved'
+        },
+        (error) => error
+      )
 
       expect(result).toBeInstanceOf(Error)
       expect((result as Error).message).toContain('Timed out starting Antigravity language server')
@@ -236,42 +246,49 @@ describe('createAntigravityLanguageServerClient', () => {
     }
   })
 
-  test.skipIf(process.platform === 'win32')('does not expose language server startup output in exit errors', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-ls-private-output-'))
-    try {
-      const serverPath = join(root, 'server.mjs')
-      await writeFile(serverPath, [
-        '#!/usr/bin/env node',
-        'process.stderr.write("/Users/test/private/prompt.txt RAW_LANGUAGE_SERVER_OUTPUT")',
-        'process.exit(1)'
-      ].join('\n'))
-      await chmod(serverPath, 0o700)
+  test.skipIf(process.platform === 'win32')(
+    'does not expose language server startup output in exit errors',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-ls-private-output-'))
+      try {
+        const serverPath = join(root, 'server.mjs')
+        await writeFile(
+          serverPath,
+          [
+            '#!/usr/bin/env node',
+            'process.stderr.write("/Users/test/private/prompt.txt RAW_LANGUAGE_SERVER_OUTPUT")',
+            'process.exit(1)'
+          ].join('\n')
+        )
+        await chmod(serverPath, 0o700)
 
-      const error = await createAntigravityLanguageServerClient({
-        source: 'antigravity',
-        languageServerPath: serverPath
-      }).then(() => null, (cause) => cause)
+        const error = await createAntigravityLanguageServerClient({
+          source: 'antigravity',
+          languageServerPath: serverPath
+        }).then(
+          () => null,
+          (cause) => cause
+        )
 
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe('Antigravity language server exited before it was ready')
-      expect((error as Error).message).not.toContain('/Users/test/private')
-      expect((error as Error).message).not.toContain('RAW_LANGUAGE_SERVER_OUTPUT')
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        expect(error).toBeInstanceOf(Error)
+        expect((error as Error).message).toBe('Antigravity language server exited before it was ready')
+        expect((error as Error).message).not.toContain('/Users/test/private')
+        expect((error as Error).message).not.toContain('RAW_LANGUAGE_SERVER_OUTPUT')
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 })
 
 describe('listAntigravityCascades', () => {
   test('marks cascades that have a SQLite history file', async () => {
     const id = cascadeId(0)
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         yield { name: `${id}.pb`, isFile: () => true }
       },
-      stat: async (path) => path.endsWith('.db')
-        ? { mtimeMs: 200, size: 30 }
-        : { mtimeMs: 100, size: 20 }
+      stat: async (path) => (path.endsWith('.db') ? { mtimeMs: 200, size: 30 } : { mtimeMs: 100, size: 20 })
     }
 
     const cascades = await listAntigravityCascades({
@@ -280,12 +297,14 @@ describe('listAntigravityCascades', () => {
       fileSystem
     })
 
-    expect(cascades).toEqual([{
-      id,
-      mtimeMs: 200,
-      size: 30,
-      hasDatabaseFile: true
-    }])
+    expect(cascades).toEqual([
+      {
+        id,
+        mtimeMs: 200,
+        size: 30,
+        hasDatabaseFile: true
+      }
+    ])
   })
 
   test('selects newest requestable cascades before applying the limit', async () => {
@@ -296,7 +315,7 @@ describe('listAntigravityCascades', () => {
       [cascadeId(2), 200]
     ])
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (const index of [0, 2, 1]) {
           const name = `${cascadeId(index)}.pb`
           yield {
@@ -332,7 +351,7 @@ describe('listAntigravityCascades', () => {
     const listed: string[] = []
     const statPaths: string[] = []
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index < 500; index += 1) {
           const name = `${cascadeId(index)}.pb`
           listed.push(name)
@@ -367,7 +386,7 @@ describe('listAntigravityCascades', () => {
 
   test('does not miss newest cascades when directory order lists them after old entries', async () => {
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index < 500; index += 1) {
           yield {
             name: `${cascadeId(index)}.pb`,
@@ -400,7 +419,7 @@ describe('listAntigravityCascades', () => {
     const statPaths: string[] = []
     const requiredId = cascadeId(499)
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index < 500; index += 1) {
           const name = `${cascadeId(index)}.pb`
           listed.push(name)
@@ -439,7 +458,7 @@ describe('listAntigravityCascades', () => {
     const listed: string[] = []
     const statPaths: string[] = []
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index < 2_000; index += 1) {
           const name = `${cascadeId(index)}.pb`
           listed.push(name)
@@ -470,7 +489,7 @@ describe('listAntigravityCascades', () => {
     const scanState: AntigravityFileScanState = { nextSequence: 0, files: {} }
     let statCount = 0
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index < 200; index += 1) {
           yield { name: `${cascadeId(index)}.pb`, isFile: () => true }
         }
@@ -508,7 +527,7 @@ describe('listAntigravityCascades', () => {
     let includeUnseen = false
     const statPaths: string[] = []
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         yield { name: `${knownId}.pb`, isFile: () => true }
         if (!includeUnseen) return
         for (let index = 1; index <= 100; index += 1) {
@@ -549,7 +568,7 @@ describe('listAntigravityCascades', () => {
   test('fails visibly instead of truncating directories beyond the safety bound', async () => {
     let listed = 0
     const fileSystem: AntigravityCascadeFileSystem = {
-      listFiles: async function * () {
+      listFiles: async function* () {
         for (let index = 0; index <= 10_000; index += 1) {
           listed += 1
           yield { name: `${cascadeId(index)}.pb`, isFile: () => true }
@@ -558,12 +577,14 @@ describe('listAntigravityCascades', () => {
       stat: async () => ({ mtimeMs: 1, size: 1 })
     }
 
-    await expect(listAntigravityCascades({
-      source: 'antigravity',
-      conversationDir: '/tmp/tokenboard-antigravity-overflow-cascades',
-      limit: 2,
-      fileSystem
-    })).rejects.toThrow('Antigravity conversations directory exceeds the 10000-entry scan limit')
+    await expect(
+      listAntigravityCascades({
+        source: 'antigravity',
+        conversationDir: '/tmp/tokenboard-antigravity-overflow-cascades',
+        limit: 2,
+        fileSystem
+      })
+    ).rejects.toThrow('Antigravity conversations directory exceeds the 10000-entry scan limit')
     expect(listed).toBe(10_001)
   })
 })

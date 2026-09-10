@@ -1,9 +1,14 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+// Parentheses are valid in normal Windows paths. Keep rejecting operators,
+// expansion markers, quotes, and line breaks that change cmd.exe parsing.
+const windowsShellMetacharacters = /[&|<>^%!"\r\n]/
+
 if (isMain()) {
   const { command, args } = buildInvocation({
     packageManager: process.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
@@ -11,16 +16,15 @@ if (isMain()) {
     passthroughArgs: process.argv.slice(2)
   })
   const spawnInvocation = buildSpawnInvocation({ command, args, platform: process.platform })
+  const env = buildCollectorEnv()
 
-  const result = spawnSync(
-    spawnInvocation.command,
-    spawnInvocation.args,
-    {
-      cwd: packageDir,
-      stdio: 'inherit',
-      shell: spawnInvocation.shell
-    }
-  )
+  const result = spawnSync(spawnInvocation.command, spawnInvocation.args, {
+    cwd: packageDir,
+    env,
+    stdio: 'inherit',
+    shell: spawnInvocation.shell,
+    windowsVerbatimArguments: spawnInvocation.windowsVerbatimArguments
+  })
 
   if (result.error) {
     console.error(formatSpawnFailure(command, result.error))
@@ -29,11 +33,7 @@ if (isMain()) {
   process.exit(result.status ?? 1)
 }
 
-export function buildInvocation({
-  packageManager = 'pnpm',
-  platform = process.platform,
-  passthroughArgs = []
-} = {}) {
+export function buildInvocation({ packageManager = 'pnpm', platform = process.platform, passthroughArgs = [] } = {}) {
   const command = platform === 'win32' ? windowsCommand(packageManager) : packageManager
   const args =
     packageManager === 'npm'
@@ -51,20 +51,34 @@ export function shouldUseShell(command, platform = process.platform) {
 
 export function buildSpawnInvocation({ command, args, platform = process.platform } = {}) {
   if (!shouldUseShell(command, platform)) {
-    return { command, args, shell: false }
+    return { command, args, shell: false, windowsVerbatimArguments: false }
   }
 
   assertWindowsShellSafeInvocation(command, args, true)
   return {
-    command: buildWindowsCommandLine(command, args),
-    args: [],
-    shell: true
+    command: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', buildWindowsCommandLine(command, args)],
+    shell: false,
+    windowsVerbatimArguments: true
   }
+}
+
+export function buildCollectorEnv({
+  env = process.env,
+  configPath = resolve(packageDir, 'ccusage.json'),
+  fileExists = existsSync
+} = {}) {
+  const result = { ...env }
+  if (!result.TOKENBOARD_CCUSAGE_CONFIG && fileExists(configPath)) {
+    result.TOKENBOARD_CCUSAGE_CONFIG = configPath
+  }
+  return result
 }
 
 export function buildWindowsCommandLine(command, args) {
   assertWindowsShellSafeInvocation(command, args, true)
-  return [command, ...args].map(quoteWindowsCommandArgument).join(' ')
+  const line = [command, ...args].map(quoteWindowsCommandArgument).join(' ')
+  return line.startsWith('"') ? `"${line}"` : line
 }
 
 export function assertWindowsShellSafeInvocation(command, args, shell) {
@@ -80,21 +94,18 @@ export function assertWindowsShellSafeInvocation(command, args, shell) {
 
 export function formatSpawnFailure(command, error) {
   const commandLabel = safeCommandLabel(command)
-  const code = typeof error?.code === 'string' && /^[A-Za-z0-9_]+$/.test(error.code)
-    ? error.code
-    : 'unknown'
+  const code = typeof error?.code === 'string' && /^[A-Za-z0-9_]+$/.test(error.code) ? error.code : 'unknown'
   return `Failed to run TokenBoard collector command (${commandLabel}; error ${code})`
 }
 
-// Parentheses are valid in normal Windows paths. Keep rejecting operators,
-// expansion markers, quotes, and line breaks that change cmd.exe parsing.
-const windowsShellMetacharacters = /[&|<>^%!"\r\n]/
-
 function quoteWindowsCommandArgument(value) {
+  const text = String(value)
+  const needsQuotes = text.length === 0 || /[\s()]/.test(text) || /\\$/.test(text)
+  if (!needsQuotes) return text
+
   // Quotes and shell metacharacters are rejected before this function runs.
   // Double trailing backslashes so the closing quote remains a delimiter under
   // Windows argv parsing instead of being escaped by the final backslash.
-  const text = String(value)
   const trailingBackslashes = text.match(/\\+$/)?.[0].length ?? 0
   return `"${text}${'\\'.repeat(trailingBackslashes)}"`
 }

@@ -15,6 +15,7 @@ import {
   runNotify,
   runNotifyCli
 } from './notify.mjs'
+import { memoryFileMap, memoryPathStartsWith, sameMemoryPath } from './coordinator-test-helpers.mjs'
 
 test('notify uses a fifteen-minute cooldown by default', () => {
   assert.equal(defaultNotifyCooldownMs, 900_000)
@@ -27,9 +28,7 @@ test('notify accepts an explicit bounded cooldown configuration', () => {
 })
 
 test('notify carries its cooldown configuration into a trailing process', () => {
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
-  ])
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   const spawned = []
   const env = { TOKENBOARD_NOTIFY_COOLDOWN_MS: '60000' }
   const result = runNotify({
@@ -176,11 +175,12 @@ test('notify passes the coordinator lock token to its child sync', () => {
 
 test('notify refuses to start a hook sync without coordinator lock ownership', () => {
   assert.throws(
-    () => executeTokenBoardSync('codex', {
-      spawn: () => {
-        throw new Error('should not spawn')
-      }
-    }),
+    () =>
+      executeTokenBoardSync('codex', {
+        spawn: () => {
+          throw new Error('should not spawn')
+        }
+      }),
     /coordinator lock token is required/
   )
 })
@@ -207,14 +207,15 @@ test('notify runs source-specific sync through coordinator', () => {
   })
 
   assert.equal(result.skippedSync, false)
-  assert.deepEqual(calls.map(({ trigger }) => trigger), [{ kind: 'notify', source: 'codex' }])
+  assert.deepEqual(
+    calls.map(({ trigger }) => trigger),
+    [{ kind: 'notify', source: 'codex' }]
+  )
   assert.match(calls[0].lockToken, /^[a-f0-9]{32}$/)
 })
 
 test('notify coalesces a pending signal through the fifteen-minute default cooldown', () => {
-  const files = new Map([
-    ['/state/last-success.json', '2026-05-22T10:00:00.000Z']
-  ])
+  const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   const trailing = []
   const result = runNotify({
     argv: ['--source', 'codex'],
@@ -249,7 +250,7 @@ test('notify coalesces a pending signal through the fifteen-minute default coold
 
 test('releaseDispatchLock only removes the matching dispatcher owner', () => {
   const workerPath = '/state/notify.dispatch.worker'
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/notify.dispatch.lock', JSON.stringify({ pid: 10, token: 'owner-a' })],
     [workerPath, JSON.stringify({ pid: 11, token: 'owner-a' })]
   ])
@@ -349,42 +350,306 @@ test('notify releases dispatcher ownership when a cooldown schedules trailing wo
       }
     )
 
-    assert.equal(result.status, 0)
     trailingPid = JSON.parse(await readFile(trailingLockPath, 'utf8')).pid
+    assert.equal(result.status, 0)
     assert.equal(existsSync(lockPath), false)
     assert.equal(existsSync(`${lockPath}.worker`), false)
   } finally {
     if (trailingPid) {
-      try { process.kill(trailingPid, 'SIGTERM') } catch {}
+      try {
+        process.kill(trailingPid, 'SIGTERM')
+      } catch {}
     }
     await rm(root, { recursive: true, force: true })
   }
 })
 
 test('dispatch worker claim stops when the foreground lock is replaced', () => {
-  const files = new Map([
-    ['/state/notify.dispatch.lock', JSON.stringify({ pid: 10, token: 'owner-a' })]
-  ])
+  const files = memoryFileMap([['/state/notify.dispatch.lock', JSON.stringify({ pid: 10, token: 'owner-a' })]])
   const fileOps = memoryFileOps(files)
   const writeFile = (path, value) => {
     files.set(path, String(value))
-    if (path.endsWith('.worker')) {
+    if (path.replaceAll('\\', '/').endsWith('.worker')) {
       files.set('/state/notify.dispatch.lock', JSON.stringify({ pid: 20, token: 'owner-b' }))
     }
   }
 
-  assert.equal(claimDispatchLock('/state/notify.dispatch.lock', 'owner-a', {
-    ...fileOps,
-    writeFile,
-    pid: 11,
-    now: () => Date.parse('2026-05-22T10:00:00.000Z')
-  }), false)
+  assert.equal(
+    claimDispatchLock('/state/notify.dispatch.lock', 'owner-a', {
+      ...fileOps,
+      writeFile,
+      pid: 11,
+      now: () => Date.parse('2026-05-22T10:00:00.000Z')
+    }),
+    false
+  )
   assert.equal(files.has('/state/notify.dispatch.lock.worker'), false)
   assert.equal(JSON.parse(files.get('/state/notify.dispatch.lock')).token, 'owner-b')
 })
 
+test('dispatch worker claim records the current process start identity', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+
+  assert.equal(
+    claimDispatchLock(lockPath, 'owner-a', {
+      ...fileOps,
+      writeFile: (path, value) => files.set(path, String(value)),
+      workerPath,
+      pid: process.pid,
+      processStartIdentity: 'linux:test:123'
+    }),
+    true
+  )
+  assert.equal(JSON.parse(files.get(workerPath)).processStartIdentity, 'linux:test:123')
+})
+
+test('dispatch worker claim probes the current process identity when no identity is supplied', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+
+  assert.equal(
+    claimDispatchLock(lockPath, 'owner-a', {
+      ...fileOps,
+      writeFile: (path, value) => files.set(path, String(value)),
+      workerPath,
+      pid: process.pid,
+      readProcessStartIdentity: () => 'linux:test:456'
+    }),
+    true
+  )
+  assert.equal(JSON.parse(files.get(workerPath)).processStartIdentity, 'linux:test:456')
+})
+
+test('dispatch worker claim tolerates an unavailable automatic process identity probe', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+
+  assert.equal(
+    claimDispatchLock(lockPath, 'owner-a', {
+      ...fileOps,
+      writeFile: (path, value) => files.set(path, String(value)),
+      workerPath,
+      pid: process.pid,
+      platform: 'linux',
+      nodeVersion: '24.0.0'
+    }),
+    true
+  )
+  assert.equal(Object.hasOwn(JSON.parse(files.get(workerPath)), 'processStartIdentity'), false)
+})
+
+test('dispatch worker claim does not overwrite a replacement marker with another pid', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+  let workerWrites = 0
+  const writeFile = (path, value) => {
+    files.set(path, String(value))
+    if (sameMemoryPath(path, workerPath)) {
+      workerWrites += 1
+      if (workerWrites === 1) {
+        files.set(
+          workerPath,
+          JSON.stringify({
+            token: 'owner-a',
+            pid: 99,
+            startedAt: '2026-05-22T10:00:00.000Z',
+            processStartIdentity: 'linux:replacement:99'
+          })
+        )
+      }
+    }
+  }
+
+  assert.equal(
+    claimDispatchLock(lockPath, 'owner-a', {
+      ...fileOps,
+      writeFile,
+      workerPath,
+      pid: 11,
+      processStartIdentity: 'linux:test:123'
+    }),
+    true
+  )
+  assert.deepEqual(JSON.parse(files.get(workerPath)), {
+    token: 'owner-a',
+    pid: 99,
+    startedAt: '2026-05-22T10:00:00.000Z',
+    processStartIdentity: 'linux:replacement:99'
+  })
+})
+
+test('dispatch worker claim removes its marker when the lock recheck fails', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+  let lockReads = 0
+  const readFile = (path) => {
+    if (sameMemoryPath(path, lockPath)) {
+      lockReads += 1
+      if (lockReads === 2) {
+        const error = new Error('dispatch lock read failed')
+        error.code = 'EACCES'
+        throw error
+      }
+    }
+    return fileOps.readFile(path)
+  }
+
+  assert.throws(
+    () =>
+      claimDispatchLock(lockPath, 'owner-a', {
+        ...fileOps,
+        readFile,
+        writeFile: (path, value) => files.set(path, String(value)),
+        workerPath,
+        pid: 11,
+        now: () => Date.parse('2026-05-22T10:00:00.000Z')
+      }),
+    /dispatch lock read failed/
+  )
+  assert.equal(files.has(workerPath), false)
+  assert.equal(files.has(lockPath), false)
+})
+
+test('dispatch worker claim releases the lock when the worker marker disappears during identity binding', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+  let workerRead = true
+  const readFile = (path) => {
+    if (sameMemoryPath(path, workerPath) && workerRead) {
+      workerRead = false
+      const error = new Error('worker marker disappeared')
+      error.code = 'ENOENT'
+      throw error
+    }
+    return fileOps.readFile(path)
+  }
+
+  assert.equal(
+    claimDispatchLock(lockPath, 'owner-a', {
+      ...fileOps,
+      readFile,
+      writeFile: (path, value) => files.set(path, String(value)),
+      workerPath,
+      pid: 11,
+      processStartIdentity: 'linux:test:123'
+    }),
+    false
+  )
+  assert.equal(files.has(workerPath), false)
+  assert.equal(files.has(lockPath), false)
+})
+
+test('dispatch worker claim preserves the primary error code when cleanup also fails', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+  let lockReads = 0
+  const readFile = (path) => {
+    if (sameMemoryPath(path, lockPath)) {
+      lockReads += 1
+      if (lockReads === 2) {
+        const error = new Error('dispatch lock read failed')
+        error.code = 'EACCES'
+        throw error
+      }
+    }
+    return fileOps.readFile(path)
+  }
+  const rename = (from, to) => {
+    if (sameMemoryPath(from, lockPath)) {
+      const error = new Error('dispatch lock cleanup failed')
+      error.code = 'EPERM'
+      throw error
+    }
+    return fileOps.rename(from, to)
+  }
+
+  assert.throws(
+    () =>
+      claimDispatchLock(lockPath, 'owner-a', {
+        ...fileOps,
+        readFile,
+        rename,
+        writeFile: (path, value) => files.set(path, String(value)),
+        workerPath,
+        pid: 11,
+        now: () => Date.parse('2026-05-22T10:00:00.000Z')
+      }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true)
+      assert.equal(error.code, 'EACCES')
+      assert.equal(error.errors[0].code, 'EACCES')
+      assert.equal(error.errors[1].code, 'EPERM')
+      return true
+    }
+  )
+  assert.equal(files.has(workerPath), false)
+  assert.equal(files.has(lockPath), true)
+})
+
+test('dispatch worker claim preserves a cleanup error when the primary failure is ENOENT', () => {
+  const lockPath = '/state/notify.dispatch.lock'
+  const workerPath = `${lockPath}.worker`
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })]])
+  const fileOps = memoryFileOps(files)
+  let workerRead = true
+  const readFile = (path) => {
+    if (sameMemoryPath(path, workerPath) && workerRead) {
+      workerRead = false
+      const error = new Error('worker marker disappeared')
+      error.code = 'ENOENT'
+      throw error
+    }
+    return fileOps.readFile(path)
+  }
+  const rename = (from, to) => {
+    if (sameMemoryPath(from, lockPath)) {
+      const error = new Error('dispatch lock cleanup failed')
+      error.code = 'EPERM'
+      throw error
+    }
+    return fileOps.rename(from, to)
+  }
+
+  assert.throws(
+    () =>
+      claimDispatchLock(lockPath, 'owner-a', {
+        ...fileOps,
+        readFile,
+        rename,
+        writeFile: (path, value) => files.set(path, String(value)),
+        workerPath,
+        pid: 11,
+        processStartIdentity: 'linux:test:123'
+      }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true)
+      assert.equal(error.code, 'EPERM')
+      assert.equal(error.errors[0].code, 'ENOENT')
+      assert.equal(error.errors[1].code, 'EPERM')
+      return true
+    }
+  )
+  assert.equal(files.has(workerPath), false)
+  assert.equal(files.has(lockPath), true)
+})
+
 test('releaseDispatchLock preserves a newer worker marker', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/notify.dispatch.lock', JSON.stringify({ pid: 20, token: 'owner-b' })],
     ['/state/notify.dispatch.lock.worker', JSON.stringify({ pid: 21, token: 'owner-b' })]
   ])
@@ -398,14 +663,14 @@ test('releaseDispatchLock preserves a newer worker marker', () => {
 test('releaseDispatchLock preserves a replacement created after it quarantines its lock', () => {
   const lockPath = '/state/notify.dispatch.lock'
   const workerPath = `${lockPath}.worker`
-  const files = new Map([
+  const files = memoryFileMap([
     [lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })],
     [workerPath, JSON.stringify({ pid: 11, token: 'owner-a' })]
   ])
   const fileOps = memoryFileOps(files)
   const rename = (from, to) => {
     fileOps.rename(from, to)
-    if (from === lockPath) {
+    if (sameMemoryPath(from, lockPath)) {
       files.set(lockPath, JSON.stringify({ pid: 20, token: 'owner-b' }))
       files.set(workerPath, JSON.stringify({ pid: 21, token: 'owner-b' }))
     }
@@ -419,13 +684,13 @@ test('releaseDispatchLock preserves a replacement created after it quarantines i
 test('releaseDispatchLock cleans the worker marker when foreground lock cleanup fails', () => {
   const lockPath = '/state/notify.dispatch.lock'
   const workerPath = `${lockPath}.worker`
-  const files = new Map([
+  const files = memoryFileMap([
     [lockPath, JSON.stringify({ pid: 10, token: 'owner-a' })],
     [workerPath, JSON.stringify({ pid: 11, token: 'owner-a' })]
   ])
   const fileOps = memoryFileOps(files)
   const rename = (from, to) => {
-    if (from === lockPath) {
+    if (sameMemoryPath(from, lockPath)) {
       const error = new Error('dispatch lock cleanup failed')
       error.code = 'EACCES'
       throw error
@@ -445,9 +710,7 @@ test('trailing notifier preserves a replacement lock during cleanup', async () =
   const stateDir = '/state'
   const lockPath = join(stateDir, 'trailing.lock')
   const replacement = JSON.stringify({ pid: 902, token: 'replacement' })
-  const files = new Map([
-    [lockPath, JSON.stringify({ pid: 901, token: 'owner-a' })]
-  ])
+  const files = memoryFileMap([[lockPath, JSON.stringify({ pid: 901, token: 'owner-a' })]])
   let replaced = false
   const replaceOwner = () => {
     if (replaced) return
@@ -529,7 +792,9 @@ test('notify CLI fails when trailing lock cleanup fails', async () => {
   })
 
   assert.equal(failedExitCode, 1)
-  assert.deepEqual(cleanupErrors, ['TokenBoard trailing lock cleanup failed: TokenBoard trailing lock cleanup requires atomic rename and link operations'])
+  assert.deepEqual(cleanupErrors, [
+    'TokenBoard trailing lock cleanup failed: TokenBoard trailing lock cleanup requires atomic rename and link operations'
+  ])
 })
 
 test('notify CLI fails when dispatch lock cleanup fails', async () => {
@@ -577,7 +842,7 @@ test('notify hides the sync child process on Windows', () => {
 })
 
 test('notify replaces malformed trailing lock during cooldown', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:00:00.000Z'],
     ['/state/trailing.lock', '{ invalid json']
   ])
@@ -621,7 +886,7 @@ test('notify replaces malformed trailing lock during cooldown', () => {
 test('notify replaces a trailing lock with an invalid numeric pid during cooldown', () => {
   const stateDir = '/state/notify-invalid-pid'
   const trailingLockPath = `${stateDir}/trailing.lock`
-  const files = new Map([
+  const files = memoryFileMap([
     [`${stateDir}/last-success.json`, '2026-05-22T10:00:00.000Z'],
     [trailingLockPath, JSON.stringify({ pid: -1 })]
   ])
@@ -662,7 +927,7 @@ test('notify replaces a trailing lock with an invalid numeric pid during cooldow
 })
 
 test('trailing process retains its lock when pending signals remain in cooldown', () => {
-  const files = new Map([
+  const files = memoryFileMap([
     ['/state/last-success.json', '2026-05-22T10:02:00.000Z'],
     ['/state/notify.signal', `${JSON.stringify({ source: 'codex' })}\n`],
     ['/state/trailing.lock', JSON.stringify({ pid: 800, token: 'owner-a' })]
@@ -710,7 +975,7 @@ test('trailing CLI waits under its existing lock and completes pending work with
   const stateDir = '/state'
   const trailingLockPath = join(stateDir, 'trailing.lock')
   let nowMs = Date.parse('2026-05-22T10:00:05.000Z')
-  const files = new Map([
+  const files = memoryFileMap([
     [join(stateDir, 'last-success.json'), '2026-05-22T10:00:00.000Z'],
     [join(stateDir, 'notify.signal'), `${JSON.stringify({ source: 'codex' })}\n`],
     [trailingLockPath, JSON.stringify({ pid: 800, token: 'owner-a' })]
@@ -762,28 +1027,29 @@ test('trailing CLI waits under its existing lock and completes pending work with
       waits.push(delayMs)
       nowMs += Math.max(0, delayMs)
     },
-    runNotify: (options) => runNotify({
-      ...options,
-      argv: ['--source', 'codex'],
-      cooldownMs: 10_000,
-      now: () => nowMs,
-      mkdir: () => {},
-      exists: (path) => files.has(path),
-      readFile,
-      writeFile,
-      unlink: (path) => files.delete(path),
-      rename: memoryFileOps(files).rename,
-      link: memoryFileOps(files).link,
-      process: runtime.process,
-      spawnDetached: () => {
-        spawned.push('spawned')
-        return { pid: 801, unref: () => {} }
-      },
-      executeSync: (trigger) => {
-        synced.push(trigger.source)
-        return { source: trigger.source }
-      }
-    })
+    runNotify: (options) =>
+      runNotify({
+        ...options,
+        argv: ['--source', 'codex'],
+        cooldownMs: 10_000,
+        now: () => nowMs,
+        mkdir: () => {},
+        exists: (path) => files.has(path),
+        readFile,
+        writeFile,
+        unlink: (path) => files.delete(path),
+        rename: memoryFileOps(files).rename,
+        link: memoryFileOps(files).link,
+        process: runtime.process,
+        spawnDetached: () => {
+          spawned.push('spawned')
+          return { pid: 801, unref: () => {} }
+        },
+        executeSync: (trigger) => {
+          synced.push(trigger.source)
+          return { source: trigger.source }
+        }
+      })
   })
 
   assert.equal(exitCode, 0)
@@ -796,9 +1062,7 @@ test('trailing CLI waits under its existing lock and completes pending work with
 test('trailing CLI does not spin when a continuation reports zero delay', async () => {
   const stateDir = '/state'
   const trailingLockPath = join(stateDir, 'trailing.lock')
-  const files = new Map([
-    [trailingLockPath, JSON.stringify({ pid: 800, token: 'owner-a' })]
-  ])
+  const files = memoryFileMap([[trailingLockPath, JSON.stringify({ pid: 800, token: 'owner-a' })]])
   const waits = []
   const runtime = {
     stateDir,

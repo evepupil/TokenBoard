@@ -99,7 +99,7 @@ function createPowerShellEnsureDefaultBranchCommands() {
   return [
     '$defaultBranchLine = git -C $repo ls-remote --symref origin HEAD | Where-Object { $_ -match "^ref: refs/heads/.+\\sHEAD$" } | Select-Object -First 1',
     'if (-not $defaultBranchLine) { throw "Unable to resolve origin default branch" }',
-    "$defaultBranch = $defaultBranchLine -replace \"^ref: refs/heads/([^\\s]+)\\sHEAD$\", '$1'",
+    '$defaultBranch = $defaultBranchLine -replace "^ref: refs/heads/([^\\s]+)\\sHEAD$", \'$1\'',
     'Invoke-Git -C $repo config --replace-all remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"',
     'Invoke-Git -C $repo fetch origin "+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}"',
     'Invoke-Git -C $repo remote set-head origin --auto',
@@ -130,7 +130,10 @@ function createPowerShellCheckoutFetchedBranchCommands(branchName: string) {
 }
 
 function createPowerShellCheckoutRawRefCommands(refName: string) {
-  return [`Invoke-Git -C $repo fetch --depth 1 origin ${escapePowerShellArg(refName)}`, 'Invoke-Git -C $repo checkout FETCH_HEAD']
+  return [
+    `Invoke-Git -C $repo fetch --depth 1 origin ${escapePowerShellArg(refName)}`,
+    'Invoke-Git -C $repo checkout FETCH_HEAD'
+  ]
 }
 
 function normalizeRepoRefForCommands(repoRef: string | null) {
@@ -140,10 +143,18 @@ function normalizeRepoRefForCommands(repoRef: string | null) {
   return { kind: 'branch-or-ref' as const, name: repoRef }
 }
 
-function branchFetchRefspec(name: string) { return `+refs/heads/${name}:refs/remotes/origin/${name}` }
-function remoteBranchRef(name: string) { return `refs/remotes/origin/${name}` }
-export function indent(lines: string[]) { return lines.map((line) => `  ${line}`) }
-export function escapeBashArg(value: string) { return `'${value.replaceAll("'", "'\\''")}'` }
+function branchFetchRefspec(name: string) {
+  return `+refs/heads/${name}:refs/remotes/origin/${name}`
+}
+function remoteBranchRef(name: string) {
+  return `refs/remotes/origin/${name}`
+}
+export function indent(lines: string[]) {
+  return lines.map((line) => `  ${line}`)
+}
+export function escapeBashArg(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
 export function escapePowerShellArg(value: string) {
   return `"${value.replaceAll('`', '``').replaceAll('"', '`"').replaceAll('$', '`$')}"`
 }

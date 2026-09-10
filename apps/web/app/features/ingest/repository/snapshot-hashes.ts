@@ -1,13 +1,5 @@
-import {
-  listSummaryKeysNeedingRefresh,
-  listUserIdsNeedingTotalRefresh
-} from './refresh'
-import {
-  snapshotHashQueryChunkSize,
-  summaryKeyId,
-  type ExistingSnapshotHash,
-  type UsageSummaryKey
-} from './types'
+import { listSummaryKeysNeedingRefresh, listUserIdsNeedingTotalRefresh } from './refresh'
+import { snapshotHashQueryChunkSize, summaryKeyId, type ExistingSnapshotHash, type UsageSummaryKey } from './types'
 import type { UsageSnapshotKey } from '@tokenboard/usage-core'
 
 export async function findExistingSnapshotHashes(
@@ -51,11 +43,7 @@ export async function findExistingSnapshotHashes(
   return filterExistingHashesWithCurrentCaches(db, input.userId, existing)
 }
 
-async function filterExistingHashesWithCurrentCaches(
-  db: D1Database,
-  userId: string,
-  rows: ExistingSnapshotHash[]
-) {
+async function filterExistingHashesWithCurrentCaches(db: D1Database, userId: string, rows: ExistingSnapshotHash[]) {
   if (rows.length === 0) return []
   const staleSummaryKeys = await listSummaryKeysNeedingRefresh(
     db,

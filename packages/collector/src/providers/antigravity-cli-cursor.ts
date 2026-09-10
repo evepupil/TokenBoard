@@ -76,15 +76,13 @@ export function cliHistoryEventKey(event: AntigravityUsageEvent) {
   return `${historyEventPrefix}${event.cascadeHash}\0${event.eventHash}`
 }
 
-export function cliHistorySessionKey(input: {
-  cascadeHash: string
-  usageDate: string
-  model: string
-}) {
+export function cliHistorySessionKey(input: { cascadeHash: string; usageDate: string; model: string }) {
   return `${sessionPrefix}${input.usageDate}\0${input.model}\0${input.cascadeHash}`
 }
 
-export function cliHistorySnapshotGroupKey(snapshot: Pick<CursorSnapshot, 'source' | 'usageDate' | 'timezone' | 'model'>) {
+export function cliHistorySnapshotGroupKey(
+  snapshot: Pick<CursorSnapshot, 'source' | 'usageDate' | 'timezone' | 'model'>
+) {
   return [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
 }
 
@@ -115,11 +113,13 @@ export function isCliHistoryStateKey(key: string) {
 export function cliHistorySessionKeysForEntry(key: string, entry: CursorEntry) {
   const cascadeHash = cliHistoryCascadeHash(key)
   if (!cascadeHash) return []
-  return entry.snapshots.map((snapshot) => cliHistorySessionKey({
-    cascadeHash,
-    usageDate: snapshot.usageDate,
-    model: snapshot.model
-  }))
+  return entry.snapshots.map((snapshot) =>
+    cliHistorySessionKey({
+      cascadeHash,
+      usageDate: snapshot.usageDate,
+      model: snapshot.model
+    })
+  )
 }
 
 export function assertCliHistoryEventsCanApplyIncrementally(input: {
@@ -137,11 +137,7 @@ export function assertCliHistoryEventsCanApplyIncrementally(input: {
   }
 }
 
-function isWithinCliHistoryCompactedFrontier(
-  cursor: CursorState,
-  event: AntigravityUsageEvent,
-  timezone: string
-) {
+function isWithinCliHistoryCompactedFrontier(cursor: CursorState, event: AntigravityUsageEvent, timezone: string) {
   const compactedThroughDate = cursor.antigravityCliHistoryCompactedThroughDate
   if (!compactedThroughDate) return false
   return formatDate(new Date(event.createdAt), timezone) <= compactedThroughDate
@@ -183,7 +179,11 @@ function buildSnapshot(input: {
     outputTokens: input.event.outputTokens,
     cacheCreationTokens: input.event.cacheCreationTokens,
     cacheReadTokens: input.event.cacheReadTokens,
-    totalTokens: input.event.inputTokens + input.event.outputTokens + input.event.cacheCreationTokens + input.event.cacheReadTokens,
+    totalTokens:
+      input.event.inputTokens +
+      input.event.outputTokens +
+      input.event.cacheCreationTokens +
+      input.event.cacheReadTokens,
     costUsd: 0,
     sessionCount: sessionEntry ? 0 : 1,
     collectedAt: input.collectedAt
@@ -224,9 +224,7 @@ function newCursorEntry(input: {
 function cliHistoryCascadeHash(key: string) {
   if (!isCliHistoryEventKey(key)) return undefined
   const [cascadeHash, eventHash] = key.slice(historyEventPrefix.length).split('\0')
-  return /^[a-f0-9]{64}$/.test(cascadeHash) && /^[a-f0-9]{64}$/.test(eventHash)
-    ? cascadeHash
-    : undefined
+  return /^[a-f0-9]{64}$/.test(cascadeHash) && /^[a-f0-9]{64}$/.test(eventHash) ? cascadeHash : undefined
 }
 
 function hash(value: string) {

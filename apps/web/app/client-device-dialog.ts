@@ -25,7 +25,8 @@ export function initDeviceDetailsDialogs() {
       if (!dialog.open) dialog.showModal()
       try {
         const response = await fetch(openButton.href, {
-          headers: { 'x-tokenboard-fragment': 'device-details' }, signal: controller.signal
+          headers: { 'x-tokenboard-fragment': 'device-details' },
+          signal: controller.signal
         })
         if (response.status >= 500) throw new Error(`Failed to load device details: ${response.status}`)
         if (!active || active.nonce !== nonce || controller.signal.aborted) return

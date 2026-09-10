@@ -66,17 +66,19 @@ function historyEventHash(input: {
   createdAt: string
   model: string
 }) {
-  return hash(JSON.stringify([
-    input.options.cascadeId,
-    input.options.rowIndex,
-    readString(input.root, 4) ?? '',
-    input.usage.responseId,
-    input.createdAt,
-    input.model,
-    input.usage.inputTokens,
-    input.usage.outputTokens,
-    input.usage.cacheReadTokens
-  ]))
+  return hash(
+    JSON.stringify([
+      input.options.cascadeId,
+      input.options.rowIndex,
+      readString(input.root, 4) ?? '',
+      input.usage.responseId,
+      input.createdAt,
+      input.model,
+      input.usage.inputTokens,
+      input.usage.outputTokens,
+      input.usage.cacheReadTokens
+    ])
+  )
 }
 
 function readUsages(chatModel: ProtoMessage) {
@@ -129,7 +131,7 @@ function readCreatedAt(chatModel: ProtoMessage, fallback: string | undefined) {
     if (nanos !== undefined && nanos >= 1_000_000_000) {
       throw new Error('Invalid Antigravity generator metadata blob: createdAt is invalid')
     }
-    const date = new Date((seconds * 1000) + Math.trunc((nanos ?? 0) / 1_000_000))
+    const date = new Date(seconds * 1000 + Math.trunc((nanos ?? 0) / 1_000_000))
     if (!Number.isFinite(date.getTime())) {
       throw new Error('Invalid Antigravity generator metadata blob: createdAt is invalid')
     }
@@ -155,10 +157,9 @@ function readTimestampPathMessage(message: ProtoMessage, field: number) {
 }
 
 function readModel(chatModel: ProtoMessage) {
-  const candidates = [
-    readString(chatModel, 19),
-    readString(chatModel, 21)
-  ].filter((value): value is string => Boolean(value))
+  const candidates = [readString(chatModel, 19), readString(chatModel, 21)].filter((value): value is string =>
+    Boolean(value)
+  )
   if (candidates.some((value) => value.length > maxModelLength)) {
     throw new Error('Invalid Antigravity generator metadata blob: model is invalid')
   }
@@ -166,17 +167,19 @@ function readModel(chatModel: ProtoMessage) {
   const fallback = candidates[0]
   if (!model && !fallback) throw new Error('Invalid Antigravity generator metadata blob: model is required')
   const selected = model ?? fallback
-  const modelAliases = [...new Set(candidates.filter((value) => (
-    value !== selected && !value.startsWith(placeholderModelPrefix)
-  )))]
+  const modelAliases = [
+    ...new Set(candidates.filter((value) => value !== selected && !value.startsWith(placeholderModelPrefix)))
+  ]
   return { model: selected, modelAliases }
 }
 
 function sameUsage(left: AntigravityRawUsage, right: AntigravityRawUsage) {
-  return left.inputTokens === right.inputTokens &&
+  return (
+    left.inputTokens === right.inputTokens &&
     left.outputTokens === right.outputTokens &&
     left.cacheReadTokens === right.cacheReadTokens &&
     left.responseId === right.responseId
+  )
 }
 
 function readOptionalToken(message: ProtoMessage, field: number) {
@@ -209,13 +212,17 @@ function readNestedMessage(message: ProtoMessage, path: number[]) {
 }
 
 function readMessage(message: ProtoMessage, field: number) {
-  const bytes = message.get(field)?.find((item): item is Extract<ProtoField, { wireType: 2 }> => item.wireType === 2)?.bytes
+  const bytes = message
+    .get(field)
+    ?.find((item): item is Extract<ProtoField, { wireType: 2 }> => item.wireType === 2)?.bytes
   if (!bytes) return null
   return parseProtoMessage(bytes)
 }
 
 function readString(message: ProtoMessage, field: number) {
-  const bytes = message.get(field)?.find((item): item is Extract<ProtoField, { wireType: 2 }> => item.wireType === 2)?.bytes
+  const bytes = message
+    .get(field)
+    ?.find((item): item is Extract<ProtoField, { wireType: 2 }> => item.wireType === 2)?.bytes
   if (!bytes || !isText(bytes)) return undefined
   return Buffer.from(bytes).toString('utf8')
 }

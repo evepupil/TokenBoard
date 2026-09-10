@@ -41,13 +41,11 @@ describe('cursor state across usage sources', () => {
 
     expect(new Set(scoped).size).toBe(usageSources.length)
     // Codex scopes its cursor per CODEX_HOME profile; every other source scopes per server.
-    expect(usageSources.every((source, index) =>
-      scoped[index].includes(source === 'codex' ? '.profile-' : '.server-')
-    )).toBe(true)
-    expect(cursorFileName('opencode', 'https://a.test'))
-      .not.toBe(cursorFileName('opencode', 'https://b.test'))
-    expect(cursorFileName('codex', 'profile-a'))
-      .not.toBe(cursorFileName('codex', 'profile-b'))
+    expect(
+      usageSources.every((source, index) => scoped[index].includes(source === 'codex' ? '.profile-' : '.server-'))
+    ).toBe(true)
+    expect(cursorFileName('opencode', 'https://a.test')).not.toBe(cursorFileName('opencode', 'https://b.test'))
+    expect(cursorFileName('codex', 'profile-a')).not.toBe(cursorFileName('codex', 'profile-b'))
   })
 
   test('round-trips cursor state for every source', async () => {

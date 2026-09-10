@@ -25,8 +25,22 @@ describe('DashboardPreview', () => {
             { source: 'codex', totalTokens: 400, totalTokensWithoutCacheRead: 300, cacheReadRate: 100 / 400 }
           ],
           dailyTrend: [
-            { usageDate: '2026-04-27', totalTokens: 120, totalTokensWithoutCacheRead: 100, cacheReadRate: 20 / 120, costUsd: 0.12 },
-            { usageDate: '2026-04-28', totalTokens: 340, totalTokensWithoutCacheRead: 240, cacheReadRate: 100 / 340, costUsd: 0.34 }
+            {
+              usageDate: '2026-04-27',
+              totalTokens: 120,
+              totalTokensWithoutCacheRead: 100,
+              cacheReadRate: 20 / 120,
+              costUsd: 0.12,
+              costAvailable: true
+            },
+            {
+              usageDate: '2026-04-28',
+              totalTokens: 340,
+              totalTokensWithoutCacheRead: 240,
+              cacheReadRate: 100 / 340,
+              costUsd: 0.34,
+              costAvailable: true
+            }
           ]
         }}
       />

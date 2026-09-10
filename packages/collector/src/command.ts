@@ -41,6 +41,7 @@ export const runJsonCommand: CommandRunner = async (command, args, options = {})
     try {
       const { stdout } = await execFileAsync(invocation.command, invocation.args, {
         shell: invocation.shell,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         maxBuffer: 128 * 1024 * 1024,
         timeout: options.timeoutMs ?? readCommandTimeoutMs(),
         env: options.env
@@ -52,9 +53,7 @@ export const runJsonCommand: CommandRunner = async (command, args, options = {})
         throw error
       }
 
-      options.onRetry?.(
-        `Retrying command after transient failure (${attempt}/${retries}): ${errorMessage(error)}`
-      )
+      options.onRetry?.(`Retrying command after transient failure (${attempt}/${retries}): ${errorMessage(error)}`)
       await wait(options.retryDelayMs ?? readRetryDelayMs())
     }
   }
@@ -78,12 +77,14 @@ export function assertWindowsShellSafeInvocation(command: string, args: string[]
 }
 
 export function buildShellInvocation(command: string, args: string[], shell: boolean) {
-  if (!shell) return { command, args, shell: false }
+  if (!shell) return { command, args, shell: false, windowsVerbatimArguments: false }
   assertWindowsShellSafeInvocation(command, args, true)
+  const commandLine = [command, ...args].map(quoteWindowsShellArgument).join(' ')
   return {
-    command: [command, ...args].map(quoteWindowsShellArgument).join(' '),
-    args: [],
-    shell: true
+    command: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', commandLine.startsWith('"') ? `"${commandLine}"` : commandLine],
+    shell: false,
+    windowsVerbatimArguments: true
   }
 }
 
@@ -135,6 +136,9 @@ const windowsShellCommandMetacharacters = /[&|<>^%!"\r\n]/
 
 function quoteWindowsShellArgument(value: string) {
   const text = String(value)
+  const needsQuotes = text.length === 0 || /[\s()]/.test(text) || /\\$/.test(text)
+  if (!needsQuotes) return text
+
   const trailingBackslashes = text.match(/\\+$/)?.[0].length ?? 0
   return `"${text}${'\\'.repeat(trailingBackslashes)}"`
 }

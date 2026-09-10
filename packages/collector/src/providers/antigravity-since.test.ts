@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import {
-  isReusableAntigravityHistoryScope,
-  resolveAntigravityCollectionRange
-} from './antigravity-since'
+import { isReusableAntigravityHistoryScope, resolveAntigravityCollectionRange } from './antigravity-since'
 
 describe('resolveAntigravityCollectionRange', () => {
   test.each(['20260624', '2026-06-24'])('accepts supported since date format %s', (since) => {
@@ -15,19 +12,22 @@ describe('resolveAntigravityCollectionRange', () => {
   test.each(['20260230', '2026-02-30', '2026--06-24', '2026/06/24'])(
     'rejects invalid since date %s instead of normalizing it',
     (since) => {
-      expect(() => resolveAntigravityCollectionRange({ since, timezone: 'UTC' }))
-        .toThrow(`Invalid Antigravity since date: ${since}`)
+      expect(() => resolveAntigravityCollectionRange({ since, timezone: 'UTC' })).toThrow(
+        `Invalid Antigravity since date: ${since}`
+      )
     }
   )
 
   test('uses the default since window when the primary environment value is empty', () => {
-    expect(resolveAntigravityCollectionRange({
-      timezone: 'UTC',
-      env: {
-        TOKENBOARD_SINCE: '',
-        TOKENBOARD_DEFAULT_SINCE: '20260501'
-      }
-    })).toMatchObject({
+    expect(
+      resolveAntigravityCollectionRange({
+        timezone: 'UTC',
+        env: {
+          TOKENBOARD_SINCE: '',
+          TOKENBOARD_DEFAULT_SINCE: '20260501'
+        }
+      })
+    ).toMatchObject({
       sinceDate: '2026-05-01',
       historyScope: '2026-05-01@UTC'
     })

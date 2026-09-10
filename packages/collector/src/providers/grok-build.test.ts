@@ -60,22 +60,24 @@ describe('collectGrokBuildUsage', () => {
 
     const snapshots = await collect(home)
 
-    expect(snapshots).toEqual([{
-      source: 'grok-build',
-      usageDate: '2026-07-31',
-      timezone: 'Asia/Shanghai',
-      model: 'grok-4.5',
-      // Grok folds cache reads into inputTokens; TokenBoard keeps them disjoint.
-      inputTokens: 21,
-      outputTokens: 181,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 22_016,
-      // Matches the turn's own totalTokens of 22,218.
-      totalTokens: 22_218,
-      costUsd: 0,
-      sessionCount: 1,
-      collectedAt: '2026-07-30T10:00:00.000Z'
-    }])
+    expect(snapshots).toEqual([
+      {
+        source: 'grok-build',
+        usageDate: '2026-07-31',
+        timezone: 'Asia/Shanghai',
+        model: 'grok-4.5',
+        // Grok folds cache reads into inputTokens; TokenBoard keeps them disjoint.
+        inputTokens: 21,
+        outputTokens: 181,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 22_016,
+        // Matches the turn's own totalTokens of 22,218.
+        totalTokens: 22_218,
+        costUsd: 0,
+        sessionCount: 1,
+        collectedAt: '2026-07-30T10:00:00.000Z'
+      }
+    ])
   })
 
   test('records each completed turn at face value', async () => {
@@ -147,7 +149,11 @@ describe('collectGrokBuildUsage', () => {
           timestamp: eventSeconds,
           params: { update: { sessionUpdate: 'agent_message_chunk', usage: counters() } }
         }),
-        JSON.stringify({ method: 'session/update', timestamp: eventSeconds, params: { update: { usage: counters() } } }),
+        JSON.stringify({
+          method: 'session/update',
+          timestamp: eventSeconds,
+          params: { update: { usage: counters() } }
+        }),
         turnCompleted({ modelUsage: { 'grok-4.5': counters() } })
       ]
     })
@@ -161,8 +167,15 @@ describe('collectGrokBuildUsage', () => {
   test('skips events without a usable timestamp or usage object', async () => {
     const home = await grokHome({
       [`sessions/enc-cwd/${sessionId}/updates.jsonl`]: [
-        JSON.stringify({ method: '_x.ai/session/update', params: { update: { sessionUpdate: 'turn_completed', usage: counters() } } }),
-        JSON.stringify({ method: '_x.ai/session/update', timestamp: eventSeconds, params: { update: { sessionUpdate: 'turn_completed' } } }),
+        JSON.stringify({
+          method: '_x.ai/session/update',
+          params: { update: { sessionUpdate: 'turn_completed', usage: counters() } }
+        }),
+        JSON.stringify({
+          method: '_x.ai/session/update',
+          timestamp: eventSeconds,
+          params: { update: { sessionUpdate: 'turn_completed' } }
+        }),
         'not-json',
         ''
       ]
@@ -174,10 +187,14 @@ describe('collectGrokBuildUsage', () => {
   test('reads both live and archived session roots', async () => {
     const home = await grokHome({
       [`sessions/enc-cwd/${sessionId}/updates.jsonl`]: [
-        turnCompleted({ modelUsage: { 'grok-4.5': counters({ inputTokens: 1000, cachedReadTokens: 0, outputTokens: 1 }) } })
+        turnCompleted({
+          modelUsage: { 'grok-4.5': counters({ inputTokens: 1000, cachedReadTokens: 0, outputTokens: 1 }) }
+        })
       ],
       'archived_sessions/enc-cwd/older-session/updates.jsonl': [
-        turnCompleted({ modelUsage: { 'grok-4.5': counters({ inputTokens: 2000, cachedReadTokens: 0, outputTokens: 2 }) } })
+        turnCompleted({
+          modelUsage: { 'grok-4.5': counters({ inputTokens: 2000, cachedReadTokens: 0, outputTokens: 2 }) }
+        })
       ]
     })
 
@@ -196,7 +213,9 @@ describe('collectGrokBuildUsage', () => {
         JSON.stringify({
           method: '_x.ai/session/update',
           timestamp: '2026-07-27T17:30:00.000Z',
-          params: { update: { sessionUpdate: 'turn_completed', usage: { modelUsage: { m: counters({ cachedReadTokens: 0 }) } } } }
+          params: {
+            update: { sessionUpdate: 'turn_completed', usage: { modelUsage: { m: counters({ cachedReadTokens: 0 }) } } }
+          }
         })
       ]
     })

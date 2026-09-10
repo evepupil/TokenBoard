@@ -9,9 +9,15 @@ describe('client navigation', () => {
   test('ignores an older document response that resolves after a newer navigation', async () => {
     const dom = installNavigationDom()
     const requests = new Map<string, (response: Response) => void>()
-    vi.stubGlobal('fetch', vi.fn((input: string | URL) => new Promise<Response>((resolve) => {
-      requests.set(new URL(String(input)).pathname, resolve)
-    })))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (input: string | URL) =>
+          new Promise<Response>((resolve) => {
+            requests.set(new URL(String(input)).pathname, resolve)
+          })
+      )
+    )
 
     initAppNavigation(() => undefined)
     const firstNavigation = dom.click('/first')
@@ -29,9 +35,15 @@ describe('client navigation', () => {
   test('clears a superseded document busy state when a leaderboard fragment wins', async () => {
     const dom = installNavigationDom({ initialPath: '/leaderboards', hasLeaderboardPanel: true })
     const requests = new Map<string, (response: Response) => void>()
-    vi.stubGlobal('fetch', vi.fn((input: string | URL) => new Promise<Response>((resolve) => {
-      requests.set(new URL(String(input)).pathname, resolve)
-    })))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (input: string | URL) =>
+          new Promise<Response>((resolve) => {
+            requests.set(new URL(String(input)).pathname, resolve)
+          })
+      )
+    )
 
     initAppNavigation(() => undefined)
     const documentNavigation = dom.click('/dashboard')
@@ -46,10 +58,12 @@ describe('client navigation', () => {
   })
 })
 
-function installNavigationDom(options: {
-  initialPath?: string
-  hasLeaderboardPanel?: boolean
-} = {}) {
+function installNavigationDom(
+  options: {
+    initialPath?: string
+    hasLeaderboardPanel?: boolean
+  } = {}
+) {
   const listeners = new Map<string, (event: Event) => Promise<void> | void>()
   const body = new FakeBody()
   const leaderboardPanel = options.hasLeaderboardPanel ? new FakePanel() : null
@@ -66,7 +80,7 @@ function installNavigationDom(options: {
     addEventListener(type: string, listener: (event: Event) => Promise<void> | void) {
       listeners.set(type, listener)
     },
-    querySelector: (selector: string) => selector === '[data-leaderboard-panel]' ? leaderboardPanel : null,
+    querySelector: (selector: string) => (selector === '[data-leaderboard-panel]' ? leaderboardPanel : null),
     querySelectorAll: () => [],
     getElementById: () => null
   }
@@ -84,11 +98,14 @@ function installNavigationDom(options: {
   vi.stubGlobal('Element', FakeElement)
   vi.stubGlobal('document', document)
   vi.stubGlobal('window', window)
-  vi.stubGlobal('DOMParser', class {
-    parseFromString(value: string) {
-      return { body: { innerHTML: value }, title: value }
+  vi.stubGlobal(
+    'DOMParser',
+    class {
+      parseFromString(value: string) {
+        return { body: { innerHTML: value }, title: value }
+      }
     }
-  })
+  )
 
   return {
     body,

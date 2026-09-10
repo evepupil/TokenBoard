@@ -10,17 +10,21 @@ type AppNavProps = {
 }
 
 const repositoryUrl = 'https://github.com/evepupil/TokenBoard'
-const iconButtonClass = 'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
-const signOutButtonClass = 'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+const iconButtonClass =
+  'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+const signOutButtonClass =
+  'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
 
 export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
 
   return (
-    <nav class={cn(
-      'app-surface-raised mx-auto flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-3 py-3 text-[var(--app-text)] backdrop-blur sm:px-4 xl:flex-row xl:items-center xl:justify-between',
-      props.compact ? 'mb-3 xl:py-2' : 'mb-6'
-    )}>
+    <nav
+      class={cn(
+        'app-surface-raised mx-auto flex max-w-6xl flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] px-3 py-3 text-[var(--app-text)] backdrop-blur sm:px-4 xl:flex-row xl:items-center xl:justify-between',
+        props.compact ? 'mb-3 xl:py-2' : 'mb-6'
+      )}
+    >
       <div class="flex min-w-0 items-center justify-between gap-3">
         <a class="group flex min-w-0 items-center gap-3" href={isAuthenticated ? '/dashboard' : '/'}>
           <img
@@ -46,17 +50,59 @@ export function AppNav(props: AppNavProps) {
 
       <div class="-mx-1 px-1" data-app-nav-scroll="true">
         <div class="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-          {isAuthenticated ? <NavLink compact={props.compact} href="/dashboard" active={props.active === 'dashboard'}>控制台</NavLink> : null}
-          {isAuthenticated ? <NavLink compact={props.compact} href="/dashboard/details" active={props.active === 'details'}>详情</NavLink> : null}
-          <NavLink compact={props.compact} href="/leaderboards" active={props.active === 'leaderboards'}>排行榜</NavLink>
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/install" active={props.active === 'install'} shortLabel="安装">安装采集器</NavLink> : null}
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/devices" active={props.active === 'devices'}>设备</NavLink> : null}
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/notifications" active={props.active === 'notifications'}>通知</NavLink> : null}
-          {isAuthenticated ? <NavLink compact={props.compact} href="/settings/profile" active={props.active === 'profile'} shortLabel="资料">公开资料</NavLink> : null}
-          {isAuthenticated ? null : <NavLink compact={props.compact} href="/auth/sign-in" loginFocus>登录</NavLink>}
+          {isAuthenticated ? (
+            <NavLink compact={props.compact} href="/dashboard" active={props.active === 'dashboard'}>
+              控制台
+            </NavLink>
+          ) : null}
+          {isAuthenticated ? (
+            <NavLink compact={props.compact} href="/dashboard/details" active={props.active === 'details'}>
+              详情
+            </NavLink>
+          ) : null}
+          <NavLink compact={props.compact} href="/leaderboards" active={props.active === 'leaderboards'}>
+            排行榜
+          </NavLink>
+          {isAuthenticated ? (
+            <NavLink
+              compact={props.compact}
+              href="/settings/install"
+              active={props.active === 'install'}
+              shortLabel="安装"
+            >
+              安装采集器
+            </NavLink>
+          ) : null}
+          {isAuthenticated ? (
+            <NavLink compact={props.compact} href="/settings/devices" active={props.active === 'devices'}>
+              设备
+            </NavLink>
+          ) : null}
+          {isAuthenticated ? (
+            <NavLink compact={props.compact} href="/settings/notifications" active={props.active === 'notifications'}>
+              通知
+            </NavLink>
+          ) : null}
+          {isAuthenticated ? (
+            <NavLink
+              compact={props.compact}
+              href="/settings/profile"
+              active={props.active === 'profile'}
+              shortLabel="资料"
+            >
+              公开资料
+            </NavLink>
+          ) : null}
+          {isAuthenticated ? null : (
+            <NavLink compact={props.compact} href="/auth/sign-in" loginFocus>
+              登录
+            </NavLink>
+          )}
           {isAuthenticated ? (
             <form class="xl:hidden" method="post" action="/auth/sign-out" data-submit-feedback="true">
-              <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">退出登录</button>
+              <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">
+                退出登录
+              </button>
             </form>
           ) : null}
         </div>
@@ -68,7 +114,9 @@ export function AppNav(props: AppNavProps) {
         <RepositoryLink />
         {isAuthenticated ? (
           <form method="post" action="/auth/sign-out" data-submit-feedback="true">
-            <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">退出登录</button>
+            <button class={signOutButtonClass} type="submit" data-submitting-label="正在退出...">
+              退出登录
+            </button>
           </form>
         ) : null}
       </div>
@@ -76,7 +124,14 @@ export function AppNav(props: AppNavProps) {
   )
 }
 
-function NavLink(props: { href: string; active?: boolean; compact?: boolean; loginFocus?: boolean; shortLabel?: string; children: string }) {
+function NavLink(props: {
+  href: string
+  active?: boolean
+  compact?: boolean
+  loginFocus?: boolean
+  shortLabel?: string
+  children: string
+}) {
   return (
     <a
       class={cn(
@@ -93,7 +148,9 @@ function NavLink(props: { href: string; active?: boolean; compact?: boolean; log
           <span class="sm:hidden">{props.shortLabel}</span>
           <span class="hidden sm:inline">{props.children}</span>
         </>
-      ) : props.children}
+      ) : (
+        props.children
+      )}
     </a>
   )
 }
@@ -122,8 +179,12 @@ function ThemeToggle() {
       aria-label="切换明暗主题"
       title="切换明暗主题"
     >
-      <span data-theme-icon="light"><LucideIcon icon={Sun} size={17} /></span>
-      <span data-theme-icon="dark"><LucideIcon icon={Moon} size={17} /></span>
+      <span data-theme-icon="light">
+        <LucideIcon icon={Sun} size={17} />
+      </span>
+      <span data-theme-icon="dark">
+        <LucideIcon icon={Moon} size={17} />
+      </span>
     </button>
   )
 }

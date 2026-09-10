@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createReconnectPairingCodeFromClaim } from '../../../../features/device/service'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit
-} from '../../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit } from '../../../../lib/rate-limit'
 import { POST } from './reconnect-pairing-codes'
 
 vi.mock('../../../../features/device/repository', () => ({
@@ -63,7 +60,7 @@ describe('reconnect pairing code route', () => {
       expiresAt: '2026-06-30T10:30:00.000Z'
     })
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
     const body = await response.json()
 
     expect(response.status).toBe(200)

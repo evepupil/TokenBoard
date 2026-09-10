@@ -13,7 +13,11 @@ import { UsageDetailsFiltersForm } from './usage-details-filters'
 import { formatInteger, formatPercent, formatSource } from './usage-details-format'
 import { formatUsageMetricInteger, formatUsageMetricUsdWithAvailability } from './usage-metric-format'
 
-export function UsageDetailsPanel(props: { details: UsageDetails; filters: UsageDetailsFilters; devices: UserDevice[] }) {
+export function UsageDetailsPanel(props: {
+  details: UsageDetails
+  filters: UsageDetailsFilters
+  devices: UserDevice[]
+}) {
   const dailyRows = [...props.details.dailyRows].reverse()
   const selectedDevice = props.devices.find((device) => device.id === props.filters.deviceId)
   const hasUnavailableCost = hasUnavailableCostSource(props.details.modelRows)
@@ -23,10 +27,24 @@ export function UsageDetailsPanel(props: { details: UsageDetails; filters: Usage
       <UsageDetailsHeader filters={props.filters} devices={props.devices} selectedDevice={selectedDevice} />
 
       <UsageMetricGrid columns={3}>
-        <UsageMetricCard label="范围 tokens" value={formatUsageMetricInteger(props.details.summary.totalTokens)} tone="lime" />
-        <UsageMetricCard label="不含缓存读" value={formatUsageMetricInteger(props.details.summary.totalTokensWithoutCacheRead)} />
+        <UsageMetricCard
+          label="范围 tokens"
+          value={formatUsageMetricInteger(props.details.summary.totalTokens)}
+          tone="lime"
+        />
+        <UsageMetricCard
+          label="不含缓存读"
+          value={formatUsageMetricInteger(props.details.summary.totalTokensWithoutCacheRead)}
+        />
         <UsageMetricCard label="缓存率" value={formatPercentRate(props.details.summary.cacheReadRate)} />
-        <UsageMetricCard label={hasUnavailableCost ? `范围费用(不含 ${formatCostUnavailableSourceName(props.details.modelRows)})` : '范围费用'} value={formatUsageMetricUsdWithAvailability(props.details.summary.costUsd, props.details.modelRows)} />
+        <UsageMetricCard
+          label={
+            hasUnavailableCost
+              ? `范围费用(不含 ${formatCostUnavailableSourceName(props.details.modelRows)})`
+              : '范围费用'
+          }
+          value={formatUsageMetricUsdWithAvailability(props.details.summary.costUsd, props.details.modelRows)}
+        />
         <UsageMetricCard label="Sessions" value={formatUsageMetricInteger(props.details.summary.sessionCount)} />
         <UsageMetricCard label="活跃天数" value={formatUsageMetricInteger(props.details.summary.activeDays)} />
       </UsageMetricGrid>
@@ -36,7 +54,11 @@ export function UsageDetailsPanel(props: { details: UsageDetails; filters: Usage
   )
 }
 
-function UsageDetailsHeader(props: { filters: UsageDetailsFilters; devices: UserDevice[]; selectedDevice?: UserDevice }) {
+function UsageDetailsHeader(props: {
+  filters: UsageDetailsFilters
+  devices: UserDevice[]
+  selectedDevice?: UserDevice
+}) {
   return (
     <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
       <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -59,7 +81,9 @@ function usageDetailsSubtitle(filters: UsageDetailsFilters, selectedDevice?: Use
     formatSource(filters.source),
     selectedDevice?.name,
     filters.modelQuery ? `模型包含 ${filters.modelQuery}` : null
-  ].filter(Boolean).join(' / ')
+  ]
+    .filter(Boolean)
+    .join(' / ')
 }
 
 function DailySummaryCard(props: { dailyRows: UsageDetails['dailyRows'] }) {
@@ -150,7 +174,8 @@ function SourceSplit(props: {
     <span class="flex min-w-0 flex-wrap gap-2">
       {props.sourceSplit.map((item) => (
         <span class="max-w-full break-words rounded-full border border-[var(--app-border)] px-2 py-1 text-xs text-[var(--app-muted)] [overflow-wrap:anywhere]">
-          {formatSource(item.source)} {formatPercent(item.totalTokensWithoutCacheRead, props.totalTokensWithoutCacheRead)}
+          {formatSource(item.source)}{' '}
+          {formatPercent(item.totalTokensWithoutCacheRead, props.totalTokensWithoutCacheRead)}
           {' · '}
           缓存率 {formatPercentRate(item.cacheReadRate)}
         </span>

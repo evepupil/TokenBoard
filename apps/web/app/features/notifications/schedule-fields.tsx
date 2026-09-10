@@ -13,10 +13,7 @@ const weekdayOptions = [
   { value: 0, label: '周日' }
 ]
 
-export function ScheduleTimeFields(props: {
-  scheduleTimesLocal: string[]
-  disabled?: boolean
-}) {
+export function ScheduleTimeFields(props: { scheduleTimesLocal: string[]; disabled?: boolean }) {
   return (
     <fieldset class="md:col-span-2">
       <legend class="text-sm text-[var(--app-muted)]">推送时间（可填多个）</legend>
@@ -38,10 +35,7 @@ export function ScheduleTimeFields(props: {
   )
 }
 
-export function ScheduleWeekdayFields(props: {
-  scheduleWeekdays?: number[]
-  disabled?: boolean
-}) {
+export function ScheduleWeekdayFields(props: { scheduleWeekdays?: number[]; disabled?: boolean }) {
   const scheduleWeekdays = props.scheduleWeekdays ?? defaultScheduleWeekdays
   return (
     <fieldset class="md:col-span-2">
@@ -49,7 +43,10 @@ export function ScheduleWeekdayFields(props: {
       <input type="hidden" name="scheduleWeekdaysTouched" value="1" disabled={props.disabled} />
       <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {weekdayOptions.map((weekday) => (
-          <label key={weekday.value} class="app-surface-subtle flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
+          <label
+            key={weekday.value}
+            class="app-surface-subtle flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]"
+          >
             <input
               type="checkbox"
               name="scheduleWeekdays[]"
@@ -70,9 +67,8 @@ export function defaultScheduleWeekdayValues() {
 }
 
 export function scheduleRuleLabel(subscription: WebhookSubscriptionSummary) {
-  const times = subscription.scheduleTimesLocal?.length > 0
-    ? subscription.scheduleTimesLocal
-    : [subscription.scheduleTimeLocal]
+  const times =
+    subscription.scheduleTimesLocal?.length > 0 ? subscription.scheduleTimesLocal : [subscription.scheduleTimeLocal]
   return `${times.join('、')}；${weekdaysLabel(subscription.scheduleWeekdays ?? defaultScheduleWeekdays)}`
 }
 

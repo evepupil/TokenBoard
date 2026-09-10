@@ -61,9 +61,10 @@ function handleCustomSelectKeydown(event: KeyboardEvent) {
   event.preventDefault()
   const options = getSiblingOptions(option)
   const current = options.indexOf(option)
-  const next = event.key === 'ArrowDown'
-    ? options[(current + 1) % options.length]
-    : options[(current - 1 + options.length) % options.length]
+  const next =
+    event.key === 'ArrowDown'
+      ? options[(current + 1) % options.length]
+      : options[(current - 1 + options.length) % options.length]
   next?.focus()
 }
 

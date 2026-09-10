@@ -8,21 +8,27 @@ describe('usage metrics', () => {
   })
 
   test('calculates cache read rate from total and no-cache-read totals', () => {
-    expect(cacheReadRateFromTotals({
-      totalTokens: 1000,
-      totalTokensWithoutCacheRead: 750
-    })).toBe(0.25)
-    expect(cacheReadRateFromTotals({
-      totalTokens: 0,
-      totalTokensWithoutCacheRead: 0
-    })).toBe(0)
+    expect(
+      cacheReadRateFromTotals({
+        totalTokens: 1000,
+        totalTokensWithoutCacheRead: 750
+      })
+    ).toBe(0.25)
+    expect(
+      cacheReadRateFromTotals({
+        totalTokens: 0,
+        totalTokensWithoutCacheRead: 0
+      })
+    ).toBe(0)
   })
 
   test('clamps invalid derived cache reads to zero', () => {
-    expect(cacheReadRateFromTotals({
-      totalTokens: 100,
-      totalTokensWithoutCacheRead: 120
-    })).toBe(0)
+    expect(
+      cacheReadRateFromTotals({
+        totalTokens: 100,
+        totalTokensWithoutCacheRead: 120
+      })
+    ).toBe(0)
   })
 
   test('formats whole and sub-one-percent rates', () => {

@@ -4,27 +4,22 @@ import type { UsageSnapshot } from '@tokenboard/usage-core'
 import { runJsonCommand, type CommandRunner } from '../command'
 import { normalizeCcusageDailyJson } from '../normalize-ccusage'
 import { ccusagePackageSpecifier, resolvePackageRunner, type PackageRunner } from '../package-runner'
-import {
-  assertHookReconciliationSnapshots,
-  collectHookIncremental,
-  isHookMode
-} from './hook-incremental'
+import { assertHookReconciliationSnapshots, collectHookIncremental, isHookMode } from './hook-incremental'
 import { mergeSnapshots } from './session-cursor'
-import { assertValidDateFilter } from '../iso-calendar-date'
+import { assertValidDateFilterRange } from '../iso-calendar-date'
 
 export type CollectUsageOptions = {
   timezone?: string
   collectedAt?: string
   since?: string
+  until?: string
   runner?: CommandRunner
   stderr?: (line: string) => void
 }
 
 const DEFAULT_PACKAGE_COMMAND_RETRIES = 2
 
-export async function collectClaudeCodeUsage(
-  options: CollectUsageOptions = {}
-): Promise<UsageSnapshot[]> {
+export async function collectClaudeCodeUsage(options: CollectUsageOptions = {}): Promise<UsageSnapshot[]> {
   const runner = options.runner ?? runJsonCommand
   const packageRunner = resolvePackageRunner()
   const collectedAt = options.collectedAt ?? new Date().toISOString()
@@ -40,7 +35,7 @@ export async function collectClaudeCodeUsage(
 
   const rangeArgs = buildRangeArgs({
     since: options.since ?? (process.env.TOKENBOARD_SINCE || process.env.TOKENBOARD_DEFAULT_SINCE || ''),
-    until: process.env.TOKENBOARD_UNTIL || ''
+    until: options.until ?? process.env.TOKENBOARD_UNTIL ?? ''
   })
 
   return collectClaudeCcusageRange({
@@ -74,16 +69,17 @@ async function collectClaudeHookUsage(input: {
     return []
   }
 
-  const snapshots = incremental.rangeArgs.length > 0
-    ? await collectClaudeCcusageRange({
-        runner: input.runner,
-        packageRunner: input.packageRunner,
-        rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
-        options: input.options,
-        collectedAt: input.collectedAt,
-        env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, CLAUDE_HOME: claudeHome }
-      })
-    : []
+  const snapshots =
+    incremental.rangeArgs.length > 0
+      ? await collectClaudeCcusageRange({
+          runner: input.runner,
+          packageRunner: input.packageRunner,
+          rangeArgs: withTimezoneArgs(incremental.rangeArgs, timezone),
+          options: input.options,
+          collectedAt: input.collectedAt,
+          env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, CLAUDE_HOME: claudeHome }
+        })
+      : []
   if (incremental.rangeArgs.length > 0) {
     assertHookReconciliationSnapshots({
       sourceLabel: 'Claude',
@@ -105,7 +101,13 @@ async function collectClaudeCcusageRange(input: {
 }) {
   const json = await input.runner(
     input.packageRunner.command,
-    input.packageRunner.runPackageArgs(ccusagePackageSpecifier, 'ccusage', ['claude', 'daily', '--json', '--breakdown', ...input.rangeArgs]),
+    input.packageRunner.runPackageArgs(ccusagePackageSpecifier, 'ccusage', [
+      'claude',
+      'daily',
+      '--json',
+      '--breakdown',
+      ...input.rangeArgs
+    ]),
     packageCommandOptions({
       env: input.env,
       stderr: input.options.stderr
@@ -113,7 +115,12 @@ async function collectClaudeCcusageRange(input: {
   )
   const sessions = await input.runner(
     input.packageRunner.command,
-    input.packageRunner.runPackageArgs(ccusagePackageSpecifier, 'ccusage', ['claude', 'session', '--json', ...input.rangeArgs]),
+    input.packageRunner.runPackageArgs(ccusagePackageSpecifier, 'ccusage', [
+      'claude',
+      'session',
+      '--json',
+      ...input.rangeArgs
+    ]),
     packageCommandOptions({
       env: input.env,
       stderr: input.options.stderr
@@ -151,13 +158,14 @@ function readPackageCommandRetries() {
 }
 
 function buildRangeArgs(options: { since?: string; until?: string }) {
+  const range = assertValidDateFilterRange({
+    ...options,
+    sinceField: 'Claude since date',
+    untilField: 'Claude until date'
+  })
   const args: string[] = []
-  if (options.since && options.since !== 'all') {
-    args.push('--since', assertValidDateFilter(options.since, 'Claude since date', true))
-  }
-  if (options.until) {
-    args.push('--until', assertValidDateFilter(options.until, 'Claude until date'))
-  }
+  if (range.since) args.push('--since', range.since)
+  if (range.until) args.push('--until', range.until)
   return args
 }
 

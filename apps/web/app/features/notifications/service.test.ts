@@ -15,9 +15,11 @@ const testEncryptionKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
 describe('notification service', () => {
   test('parses only valid daily report share ids', () => {
-    expect(parseDailyReportId({
-      reportId: ' drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa '
-    })).toBe('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(
+      parseDailyReportId({
+        reportId: ' drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa '
+      })
+    ).toBe('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
 
     expect(() => parseDailyReportId({ reportId: 'drr_1' })).toThrow('Invalid daily report id')
   })
@@ -130,24 +132,26 @@ describe('notification service', () => {
       }
     } as unknown as D1Database
 
-    await expect(createWebhookSubscription({
-      env: {
-        DB: db,
-        WEBHOOK_ENCRYPTION_KEY: testEncryptionKey
-      },
-      userId: 'user_1',
-      form: {
-        name: 'bad',
-        provider: 'wecom',
-        webhookUrl: 'https://example.com/webhook',
-        timezone: 'UTC',
-        scheduleTimeLocal: '09:30',
-        scheduleTimesLocal: ['09:30'],
-        scheduleWeekdays: [0, 1, 2, 3, 4, 5, 6],
-        sendEmptyReport: false,
-        enabled: true
-      }
-    })).rejects.toThrow('Webhook URL host or path is not supported')
+    await expect(
+      createWebhookSubscription({
+        env: {
+          DB: db,
+          WEBHOOK_ENCRYPTION_KEY: testEncryptionKey
+        },
+        userId: 'user_1',
+        form: {
+          name: 'bad',
+          provider: 'wecom',
+          webhookUrl: 'https://example.com/webhook',
+          timezone: 'UTC',
+          scheduleTimeLocal: '09:30',
+          scheduleTimesLocal: ['09:30'],
+          scheduleWeekdays: [0, 1, 2, 3, 4, 5, 6],
+          sendEmptyReport: false,
+          enabled: true
+        }
+      })
+    ).rejects.toThrow('Webhook URL host or path is not supported')
   })
 
   test('returns failure for failed test sends', async () => {
@@ -208,11 +212,7 @@ describe('notification service', () => {
     const statements: string[] = []
     const bindings: unknown[][] = []
     const originalFetch = globalThis.fetch
-    const thisSensitiveFetch = function (
-      this: unknown,
-      url: RequestInfo | URL,
-      init?: RequestInit
-    ) {
+    const thisSensitiveFetch = function (this: unknown, url: RequestInfo | URL, init?: RequestInit) {
       if (this !== globalThis) {
         throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
       }
@@ -268,7 +268,9 @@ describe('notification service', () => {
       expect(fetchCalls[0].url).toBe('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef')
       expect(fetchCalls[0].body).toContain('## 测试预览：Example token 日报')
       expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
-      expect(fetchCalls[0].body).toContain('https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+      expect(fetchCalls[0].body).toContain(
+        'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      )
       expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
       expect(bindings.some((values) => values.includes('test-preview'))).toBe(true)
       expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('last_error = NULL'))).toBe(true)
@@ -374,15 +376,16 @@ describe('notification service', () => {
       userId: 'user_1',
       subscriptionId: 'sub_1',
       now: new Date('2026-04-29T01:31:00.000Z'),
-      fetcher: async () => new Response(
-        [
-          'provider failed',
-          'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef',
-          'https://oapi.dingtalk.com/robot/send?access_token=dingtalk-secret&sign=dingtalk-signature',
-          'https://open.feishu.cn/open-apis/bot/v2/hook/feishu-secret'
-        ].join(' '),
-        { status: 500 }
-      )
+      fetcher: async () =>
+        new Response(
+          [
+            'provider failed',
+            'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef',
+            'https://oapi.dingtalk.com/robot/send?access_token=dingtalk-secret&sign=dingtalk-signature',
+            'https://open.feishu.cn/open-apis/bot/v2/hook/feishu-secret'
+          ].join(' '),
+          { status: 500 }
+        )
     })
     const persisted = bindings.flat().map(String).join('\n')
 
@@ -462,24 +465,24 @@ describe('notification service', () => {
     expect(fetchCalls[0].signal).toBeInstanceOf(AbortSignal)
     expect(statements.some((sql) => sql.includes('INSERT INTO webhook_delivery_logs'))).toBe(true)
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
-    expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history WHERE user_id = ? AND report_date < ?'))).toBe(true)
+    expect(
+      statements.some((sql) => sql.includes('DELETE FROM daily_report_history WHERE user_id = ? AND report_date < ?'))
+    ).toBe(true)
     expect(statements.some((sql) => sql.includes('last_success_at'))).toBe(true)
     expect(statements.some((sql) => sql.includes('locked_until = ?'))).toBe(true)
     expect(statements.some((sql) => sql.includes('last_success_at') && sql.includes('locked_at = ?'))).toBe(true)
     expect(bindings.some((values) => values.includes('2026-04-23'))).toBe(true)
     expect(bindings.some((values) => values.includes('user_1') && values.includes('2026-04-29'))).toBe(true)
-    expect(reportDateBindings).toEqual([
-      ['user_1', '2026-04-29', 'user_1', '2026-04-29']
-    ])
+    expect(reportDateBindings).toEqual([['user_1', '2026-04-29', 'user_1', '2026-04-29']])
     expect(historyJsonValues(bindings)).toEqual({
-      sourceSplit: [
-        { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.25 }
-      ],
+      sourceSplit: [{ source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.25 }],
       topModels: [
         { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.25, costUsd: 1.23 }
       ]
     })
-    expect(bindings.some((values) => values.includes('sub_1') && values.includes('2026-04-29T01:31:00.000Z'))).toBe(true)
+    expect(bindings.some((values) => values.includes('sub_1') && values.includes('2026-04-29T01:31:00.000Z'))).toBe(
+      true
+    )
     expect(bindings.flat()).toContain('2026-04-30T01:30:00.000Z')
   })
 
@@ -490,11 +493,7 @@ describe('notification service', () => {
     const bindings: unknown[][] = []
     const fetchCalls: Array<{ url: string; body: string }> = []
     const originalFetch = globalThis.fetch
-    const thisSensitiveFetch = function (
-      this: unknown,
-      url: RequestInfo | URL,
-      init?: RequestInit
-    ) {
+    const thisSensitiveFetch = function (this: unknown, url: RequestInfo | URL, init?: RequestInit) {
       if (this !== globalThis) {
         throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
       }
@@ -578,10 +577,12 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      nextRunAt: '2026-04-29T01:30:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        nextRunAt: '2026-04-29T01:30:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -765,13 +766,15 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      pendingReportDate: '2026-04-29',
-                      pendingScheduleSlot: '2026-04-29T09:30',
-                      failureCount: 2,
-                      nextRunAt: '2026-04-29T02:00:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        pendingReportDate: '2026-04-29',
+                        pendingScheduleSlot: '2026-04-29T09:30',
+                        failureCount: 2,
+                        nextRunAt: '2026-04-29T02:00:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -835,13 +838,15 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      pendingReportDate: '2026-04-29',
-                      pendingScheduleSlot: '2026-04-29T09:30',
-                      failureCount: 0,
-                      nextRunAt: '2026-04-29T10:00:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        pendingReportDate: '2026-04-29',
+                        pendingScheduleSlot: '2026-04-29T09:30',
+                        failureCount: 0,
+                        nextRunAt: '2026-04-29T10:00:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -898,13 +903,15 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      pendingReportDate: '2026-04-29',
-                      pendingScheduleSlot: '2026-04-29T09:30',
-                      failureCount: 2,
-                      nextRunAt: '2026-04-29T02:00:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        pendingReportDate: '2026-04-29',
+                        pendingScheduleSlot: '2026-04-29T09:30',
+                        failureCount: 2,
+                        nextRunAt: '2026-04-29T02:00:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -969,13 +976,15 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      pendingReportDate: '2026-04-29',
-                      pendingScheduleSlot: '2026-04-29T09:30',
-                      failureCount: 2,
-                      nextRunAt: '2026-04-29T02:00:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        pendingReportDate: '2026-04-29',
+                        pendingScheduleSlot: '2026-04-29T09:30',
+                        failureCount: 2,
+                        nextRunAt: '2026-04-29T02:00:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -1258,11 +1267,13 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      nextRunAt: '2026-04-29T15:50:00.000Z',
-                      scheduleTimeLocal: '23:50',
-                      scheduleTimesLocal: ['23:50']
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        nextRunAt: '2026-04-29T15:50:00.000Z',
+                        scheduleTimeLocal: '23:50',
+                        scheduleTimesLocal: ['23:50']
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -1287,9 +1298,7 @@ describe('notification service', () => {
     })
 
     expect(result).toEqual({ checked: 1, sent: 1, failed: 0, skipped: 0 })
-    expect(reportDateBindings).toEqual([
-      ['user_1', '2026-04-29', 'user_1', '2026-04-29']
-    ])
+    expect(reportDateBindings).toEqual([['user_1', '2026-04-29', 'user_1', '2026-04-29']])
   })
 
   test('prunes old webhook delivery logs during the daily prune window', async () => {
@@ -1756,7 +1765,9 @@ describe('notification service', () => {
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(false)
     expect(updateStatements.some((sql) => sql.includes('last_success_at'))).toBe(false)
     expect(updateStatements.some((sql) => sql.includes('locked_at = ?'))).toBe(true)
-    expect(bindings.some((values) => values.includes('sub_1') && values.includes('2026-04-29T01:31:00.000Z'))).toBe(true)
+    expect(bindings.some((values) => values.includes('sub_1') && values.includes('2026-04-29T01:31:00.000Z'))).toBe(
+      true
+    )
   })
 
   test('preserves the queued next slot after an exhausted pending slot is skipped', async () => {
@@ -1786,13 +1797,15 @@ describe('notification service', () => {
               async all() {
                 if (sql.includes('FROM webhook_subscriptions')) {
                   return {
-                    results: [dueSubscriptionRow(encryptedUrl, {
-                      scheduleTimesLocal: ['09:30', '18:00'],
-                      pendingReportDate: '2026-04-29',
-                      pendingScheduleSlot: '2026-04-29T09:30',
-                      failureCount: 0,
-                      nextRunAt: '2026-04-29T10:00:00.000Z'
-                    })]
+                    results: [
+                      dueSubscriptionRow(encryptedUrl, {
+                        scheduleTimesLocal: ['09:30', '18:00'],
+                        pendingReportDate: '2026-04-29',
+                        pendingScheduleSlot: '2026-04-29T09:30',
+                        failureCount: 0,
+                        nextRunAt: '2026-04-29T10:00:00.000Z'
+                      })
+                    ]
                   }
                 }
                 return { results: [] }
@@ -1878,11 +1891,9 @@ describe('notification service', () => {
     expect(result).toEqual({ checked: 1, sent: 0, failed: 1, skipped: 0 })
     expect(statements.some((sql) => sql.includes('INSERT INTO daily_report_history'))).toBe(true)
     expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history'))).toBe(true)
-    expect(bindings.some((values) => (
-      values[0] === 'user_1' &&
-      typeof values[1] === 'string' &&
-      values[1].startsWith('drr_')
-    ))).toBe(true)
+    expect(
+      bindings.some((values) => values[0] === 'user_1' && typeof values[1] === 'string' && values[1].startsWith('drr_'))
+    ).toBe(true)
   })
 
   test('keeps provider failure state when prewritten report history cleanup fails', async () => {
@@ -2073,7 +2084,9 @@ describe('notification service', () => {
     expect(statements.some((sql) => sql.includes('FROM daily_report_history'))).toBe(true)
     expect(statements.some((sql) => sql.includes('UPDATE daily_report_history'))).toBe(false)
     expect(statements.some((sql) => sql.includes('DELETE FROM daily_report_history'))).toBe(false)
-    expect(fetchBodies[0]).toContain('https://tokenboard.example.com/reports/daily/drr_dddddddddddddddddddddddddddddddd')
+    expect(fetchBodies[0]).toContain(
+      'https://tokenboard.example.com/reports/daily/drr_dddddddddddddddddddddddddddddddd'
+    )
   })
 
   test('does not record webhook failure when skipped delivery state fails', async () => {
@@ -2186,12 +2199,8 @@ function reportTotalsRow() {
     totalTokensWithoutCacheRead: 900,
     costUsd: 1.23,
     sessionCount: 4,
-    sourceSplit: JSON.stringify([
-      { source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }
-    ]),
-    topModels: JSON.stringify([
-      { model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }
-    ])
+    sourceSplit: JSON.stringify([{ source: 'codex', totalTokens: 1200, totalTokensWithoutCacheRead: 900 }]),
+    topModels: JSON.stringify([{ model: 'gpt-5', totalTokens: 1200, totalTokensWithoutCacheRead: 900, costUsd: 1.23 }])
   }
 }
 
@@ -2204,9 +2213,9 @@ function testReportShareRow() {
 }
 
 function historyJsonValues(bindings: unknown[][]) {
-  const historyBindings = bindings.find((values) =>
-    values.includes('https://tokenboard.example.com/leaderboards') &&
-    values.includes('2026-04-29T01:31:00.000Z')
+  const historyBindings = bindings.find(
+    (values) =>
+      values.includes('https://tokenboard.example.com/leaderboards') && values.includes('2026-04-29T01:31:00.000Z')
   )
   if (!historyBindings) throw new Error('Missing daily report history bindings')
   return {
@@ -2215,10 +2224,7 @@ function historyJsonValues(bindings: unknown[][]) {
   }
 }
 
-function withBatch(
-  db: D1Database,
-  options: { synthesizeDailyReportInsert?: boolean } = {}
-): D1Database {
+function withBatch(db: D1Database, options: { synthesizeDailyReportInsert?: boolean } = {}): D1Database {
   const synthesizeDailyReportInsert = options.synthesizeDailyReportInsert ?? true
   return {
     ...db,

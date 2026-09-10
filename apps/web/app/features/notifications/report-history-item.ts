@@ -1,8 +1,5 @@
 import type { DailyTokenReport } from './adapters'
-import {
-  parseReportHistorySourceSplit,
-  parseReportHistoryTopModels
-} from './report-history-parser'
+import { parseReportHistorySourceSplit, parseReportHistoryTopModels } from './report-history-parser'
 
 export type DailyReportHistoryItem = DailyTokenReport & {
   id: string

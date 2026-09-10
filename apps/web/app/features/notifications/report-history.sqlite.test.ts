@@ -20,12 +20,15 @@ describe('daily report history sqlite contract', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-report-history-'))
     tempDirs.push(tempDir)
     const dbPath = join(tempDir, 'report-history.db')
-    runSql(dbPath, [
-      readMigration('0000_initial.sql'),
-      readMigration('0003_better_auth.sql'),
-      readMigration('0015_daily_report_history.sql'),
-      readMigration('0020_daily_report_share_controls.sql')
-    ].join('\n'))
+    runSql(
+      dbPath,
+      [
+        readMigration('0000_initial.sql'),
+        readMigration('0003_better_auth.sql'),
+        readMigration('0015_daily_report_history.sql'),
+        readMigration('0020_daily_report_share_controls.sql')
+      ].join('\n')
+    )
     seedUserAndProfile(dbPath)
     const db = createSqliteD1(dbPath)
 
@@ -99,10 +102,13 @@ function readMigration(name: string) {
 }
 
 function seedUserAndProfile(dbPath: string) {
-  runSql(dbPath, [
-    "INSERT INTO users (id, email, email_verified, created_at, updated_at) VALUES ('user_1', 'user@example.com', 1, '2026-04-29T00:00:00.000Z', '2026-04-29T00:00:00.000Z');",
-    "INSERT INTO profiles (user_id, slug, display_name, created_at, updated_at) VALUES ('user_1', 'example', 'Example', '2026-04-29T00:00:00.000Z', '2026-04-29T00:00:00.000Z');"
-  ].join('\n'))
+  runSql(
+    dbPath,
+    [
+      "INSERT INTO users (id, email, email_verified, created_at, updated_at) VALUES ('user_1', 'user@example.com', 1, '2026-04-29T00:00:00.000Z', '2026-04-29T00:00:00.000Z');",
+      "INSERT INTO profiles (user_id, slug, display_name, created_at, updated_at) VALUES ('user_1', 'example', 'Example', '2026-04-29T00:00:00.000Z', '2026-04-29T00:00:00.000Z');"
+    ].join('\n')
+  )
 }
 
 function report(totalTokens: number) {
@@ -116,18 +122,22 @@ function report(totalTokens: number) {
     cacheReadRate: 100 / totalTokens,
     costUsd: 1.23,
     sessionCount: 4,
-    sourceSplit: [{
-      source: 'codex',
-      totalTokens,
-      totalTokensWithoutCacheRead: totalTokens - 100,
-      cacheReadRate: 100 / totalTokens
-    }],
-    topModels: [{
-      model: 'gpt-5',
-      totalTokens,
-      totalTokensWithoutCacheRead: totalTokens - 100,
-      cacheReadRate: 100 / totalTokens,
-      costUsd: 1.23
-    }]
+    sourceSplit: [
+      {
+        source: 'codex',
+        totalTokens,
+        totalTokensWithoutCacheRead: totalTokens - 100,
+        cacheReadRate: 100 / totalTokens
+      }
+    ],
+    topModels: [
+      {
+        model: 'gpt-5',
+        totalTokens,
+        totalTokensWithoutCacheRead: totalTokens - 100,
+        cacheReadRate: 100 / totalTokens,
+        costUsd: 1.23
+      }
+    ]
   }
 }

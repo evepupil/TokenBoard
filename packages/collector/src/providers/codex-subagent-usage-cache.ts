@@ -7,11 +7,7 @@ import {
   sameCodexSessionFileFingerprint,
   type CodexSessionFileFingerprint
 } from './codex-session-attribution-cache'
-import {
-  readChildLastUsageEvents,
-  type ChildUsageEvent,
-  type DatedUsage
-} from './codex-subagent-usage-child'
+import { readChildLastUsageEvents, type ChildUsageEvent, type DatedUsage } from './codex-subagent-usage-child'
 
 const cacheFileName = 'codex-subagent-usage-cache.json'
 const cacheVersion = 1
@@ -25,14 +21,16 @@ export type ReadChildUsageByDate = (
   filePath: string,
   timestamp: string,
   timezone: string,
-  stderr?: (line: string) => void
+  stderr?: (line: string) => void,
+  sourceFilePath?: string
 ) => Promise<DatedUsage[]>
 
 export type ReadChildUsageEvents = (
   filePath: string,
   timestamp: string,
   timezone: string,
-  stderr?: (line: string) => void
+  stderr?: (line: string) => void,
+  sourceFilePath?: string
 ) => Promise<ChildUsageEvent[]>
 
 type FileFingerprint = {
@@ -109,9 +107,10 @@ export async function withCodexSubagentUsageCache<T>(input: {
     const cache = await readCache(cachePath, input.timezone, updatedAt)
     const usedKeys = new Set<string>()
     const reader: CacheReader = {
-      read: async (filePath, timestamp, timezone, stderr) => {
-        const cacheFile = input.cacheFiles?.get(filePath)
-        const key = cacheKey(cacheFile?.sourceFile ?? filePath)
+      read: async (filePath, timestamp, timezone, stderr, sourceFilePath) => {
+        const cacheFile =
+          input.cacheFiles?.get(filePath) ?? (sourceFilePath ? input.cacheFiles?.get(sourceFilePath) : undefined)
+        const key = cacheKey(cacheFile?.sourceFile ?? sourceFilePath ?? filePath)
         usedKeys.add(key)
         const before = await fingerprintFile(filePath)
         if (cacheFile) assertFrozenCacheFile(before, cacheFile.sourceFingerprint)
@@ -146,8 +145,9 @@ export async function withCodexSubagentUsageCache<T>(input: {
         }
         return stable.usages
       },
-      readEvents: async (filePath, timestamp, timezone, stderr) => {
-        const cacheFile = input.cacheFiles?.get(filePath)
+      readEvents: async (filePath, timestamp, timezone, stderr, sourceFilePath) => {
+        const cacheFile =
+          input.cacheFiles?.get(filePath) ?? (sourceFilePath ? input.cacheFiles?.get(sourceFilePath) : undefined)
         const before = await fingerprintFile(filePath)
         if (cacheFile) assertFrozenCacheFile(before, cacheFile.sourceFingerprint)
         const stable = await readStableChildUsage({
@@ -169,10 +169,7 @@ export async function withCodexSubagentUsageCache<T>(input: {
   })
 }
 
-function assertFrozenCacheFile(
-  frozen: FileFingerprint,
-  source: CodexSessionFileFingerprint
-) {
+function assertFrozenCacheFile(frozen: FileFingerprint, source: CodexSessionFileFingerprint) {
   if (frozen.size !== source.size || frozen.tailSha256 !== source.tailSha256) {
     throw new Error('Codex frozen child session does not match its copy-time fingerprint')
   }
@@ -193,22 +190,12 @@ async function readStableChildUsage<T>(input: {
   timestamp: string
   timezone: string
   stderr?: (line: string) => void
-  read: (
-    filePath: string,
-    timestamp: string,
-    timezone: string,
-    stderr?: (line: string) => void
-  ) => Promise<T>
+  read: (filePath: string, timestamp: string, timezone: string, stderr?: (line: string) => void) => Promise<T>
   firstFingerprint: FileFingerprint
 }) {
   let before = input.firstFingerprint
   for (let attempt = 0; attempt < stableReadAttempts; attempt += 1) {
-    const usages = await input.read(
-      input.filePath,
-      input.timestamp,
-      input.timezone,
-      input.stderr
-    )
+    const usages = await input.read(input.filePath, input.timestamp, input.timezone, input.stderr)
     const after = await fingerprintFile(input.filePath)
     if (sameFingerprint(before, after)) {
       return { fingerprint: after, usages }
@@ -260,11 +247,7 @@ async function readBoundedCacheFile(cachePath: string) {
     }
 
     const after = await handle.stat()
-    if (
-      after.size !== before.size ||
-      after.mtimeMs !== before.mtimeMs ||
-      after.ctimeMs !== before.ctimeMs
-    ) {
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
       throw new Error('Codex subagent usage cache changed while reading; retry the sync')
     }
     return buffer.toString('utf8')
@@ -320,10 +303,11 @@ async function fingerprintFile(filePath: string): Promise<FileFingerprint> {
       await handle.close()
     }
   } catch (error) {
-    if (error instanceof Error && (
-      error.message.startsWith('Unable to fingerprint Codex child session:') ||
-      error.message.startsWith('Codex child session changed while fingerprinting;')
-    )) {
+    if (
+      error instanceof Error &&
+      (error.message.startsWith('Unable to fingerprint Codex child session:') ||
+        error.message.startsWith('Codex child session changed while fingerprinting;'))
+    ) {
       throw error
     }
     throw new Error('Unable to fingerprint Codex child session', { cause: error })
@@ -348,11 +332,13 @@ function sameChildSessionIdentity(
   left: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number },
   right: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }
 ) {
-  return left.dev === right.dev &&
+  return (
+    left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
     left.mtimeMs === right.mtimeMs &&
     left.ctimeMs === right.ctimeMs
+  )
 }
 
 async function hashOpenFileTail(handle: Awaited<ReturnType<typeof open>>, size: number) {
@@ -371,19 +357,17 @@ function cacheKey(filePath: string) {
 }
 
 function sameFingerprint(left: ComparableFingerprint, right: FileFingerprint) {
-  return left.dev === right.dev &&
+  return (
+    left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
     left.mtimeMs === right.mtimeMs &&
     left.ctimeMs === right.ctimeMs &&
     left.tailSha256 === right.tailSha256
+  )
 }
 
-export function retainCacheEntries(
-  entries: Record<string, CacheEntry>,
-  usedKeys: ReadonlySet<string>,
-  nowMs: number
-) {
+export function retainCacheEntries(entries: Record<string, CacheEntry>, usedKeys: ReadonlySet<string>, nowMs: number) {
   const cutoffMs = nowMs - cacheRetentionMs
   const used: Array<[string, CacheEntry]> = []
   const recent: Array<[string, CacheEntry]> = []
@@ -399,8 +383,7 @@ export function retainCacheEntries(
     }
   }
   const newestFirst = (left: [string, CacheEntry], right: [string, CacheEntry]) =>
-    Date.parse(right[1].updatedAt || '') - Date.parse(left[1].updatedAt || '') ||
-    left[0].localeCompare(right[0])
+    Date.parse(right[1].updatedAt || '') - Date.parse(left[1].updatedAt || '') || left[0].localeCompare(right[0])
   used.sort(newestFirst)
   recent.sort(newestFirst)
   return Object.fromEntries([
@@ -436,18 +419,21 @@ function normalizeDatedUsage(usage: SerializedDatedUsage): DatedUsage {
 function isSerializedCacheState(value: unknown): value is SerializedCacheState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<SerializedCacheState>
-  return candidate.version === cacheVersion &&
+  return (
+    candidate.version === cacheVersion &&
     typeof candidate.timezone === 'string' &&
     Boolean(candidate.entries) &&
     typeof candidate.entries === 'object' &&
     !Array.isArray(candidate.entries) &&
     Object.values(candidate.entries).every(isSerializedCacheEntry)
+  )
 }
 
 function isSerializedCacheEntry(value: unknown): value is SerializedCacheEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<SerializedCacheEntry>
-  return isFiniteNumber(candidate.size) &&
+  return (
+    isFiniteNumber(candidate.size) &&
     (candidate.dev === undefined || isFiniteNumber(candidate.dev)) &&
     (candidate.ino === undefined || isFiniteNumber(candidate.ino)) &&
     isFiniteNumber(candidate.mtimeMs) &&
@@ -456,17 +442,20 @@ function isSerializedCacheEntry(value: unknown): value is SerializedCacheEntry {
     (candidate.updatedAt === undefined || typeof candidate.updatedAt === 'string') &&
     Array.isArray(candidate.usages) &&
     candidate.usages.every(isSerializedDatedUsage)
+  )
 }
 
 function isSerializedDatedUsage(value: unknown): value is SerializedDatedUsage {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<SerializedDatedUsage>
-  return typeof candidate.usageDate === 'string' &&
+  return (
+    typeof candidate.usageDate === 'string' &&
     isFiniteNumber(candidate.inputTokens) &&
     isFiniteNumber(candidate.outputTokens) &&
     (candidate.cacheCreationTokens === undefined || isFiniteNumber(candidate.cacheCreationTokens)) &&
     isFiniteNumber(candidate.cacheReadTokens) &&
     isFiniteNumber(candidate.totalTokens)
+  )
 }
 
 function isFiniteNumber(value: unknown) {

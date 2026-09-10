@@ -7,29 +7,17 @@ if (!parentPort) {
   throw new Error('Codex subagent usage worker requires a parent message port')
 }
 
-const {
-  readChildLastUsageByDate,
-  readChildLastUsageEvents
-} = await import('./codex-subagent-usage-child.ts')
+const { readChildLastUsageByDate, readChildLastUsageEvents } = await import('./codex-subagent-usage-child.ts')
 
 parentPort.on('message', async (request) => {
   const id = request?.id
   try {
     assertRequest(request)
     const stderr = (line) => parentPort.postMessage({ id, warning: line })
-    const result = request.kind === 'by-date'
-      ? await readChildLastUsageByDate(
-          request.filePath,
-          request.timestamp,
-          request.timezone,
-          stderr
-        )
-      : await readChildLastUsageEvents(
-          request.filePath,
-          request.timestamp,
-          request.timezone,
-          stderr
-        )
+    const result =
+      request.kind === 'by-date'
+        ? await readChildLastUsageByDate(request.filePath, request.timestamp, request.timezone, stderr)
+        : await readChildLastUsageEvents(request.filePath, request.timestamp, request.timezone, stderr)
     parentPort.postMessage({ id, result })
   } catch (error) {
     parentPort.postMessage({

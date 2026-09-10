@@ -2,7 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { win32 as windowsPath } from 'node:path'
 import { runInNewContext } from 'node:vm'
-import { buildNotifyHandler, hookPaths, hookStatus, installHooks, refreshInstalledNotifyHandler, uninstallHooks } from './hooks.mjs'
+import { normalizeMemoryPath } from './coordinator-test-helpers.mjs'
+import {
+  buildNotifyHandler,
+  hookPaths,
+  hookStatus,
+  installHooks,
+  refreshInstalledNotifyHandler,
+  uninstallHooks
+} from './hooks.mjs'
 
 test('notify handler only enqueues signal and spawns background notify script', () => {
   const source = buildNotifyHandler({
@@ -15,7 +23,11 @@ test('notify handler only enqueues signal and spawns background notify script', 
   assert.match(source, /writeQueuedSignal\(signalPayload, source\)/)
   assert.match(source, /spawn\(NODE_PATH, \[NOTIFY_SCRIPT/)
   assert.match(source, /detached: true/)
-  assert.equal(source.match(/windowsHide: true/g)?.length, 3)
+  assert.equal(source.match(/windowsHide: true/g)?.length, 4)
+  assert.match(source, /const PROCESS_START_IDENTITY_CACHE = new Map\(\)/)
+  assert.match(source, /const shouldCache = pid === process\.pid/)
+  assert.match(source, /const cached = shouldCache \? PROCESS_START_IDENTITY_CACHE\.get\(cacheKey\) : undefined/)
+  assert.match(source, /if \(shouldCache\) PROCESS_START_IDENTITY_CACHE\.set\(cacheKey, result\)/)
   assert.doesNotMatch(source, /ccusage/)
 })
 
@@ -27,7 +39,10 @@ test('notify handler preserves legacy signal append when queued signal rename fa
   })
 
   assert.match(source, /let queueError;/)
-  assert.match(source, /if \(queueError\) \{\s+appendFileSync\(join\(STATE_DIR, "notify\.signal"\), signalPayload, "utf8"\);/)
+  assert.match(
+    source,
+    /if \(queueError\) \{\s+appendFileSync\(join\(STATE_DIR, "notify\.signal"\), signalPayload, "utf8"\);/
+  )
   assert.match(source, /unlinkSync\(tempPath\);/)
 })
 
@@ -73,7 +88,7 @@ test('notify handler resolves Windows tasklist from an absolute System32 path in
   })
 
   assert.match(source, /System32[\s\S]*tasklist\.exe/)
-  assert.match(source, /windowsPath\.isAbsolute\(process\.env\.SystemRoot \|\| ""\)/)
+  assert.match(source, /\^\[A-Za-z\]:\[\\\\\//)
   assert.doesNotMatch(source, /TASKLIST_COMMAND = process\.platform/)
   assert.doesNotMatch(source, /:\s*"tasklist";/)
 })
@@ -82,6 +97,7 @@ test('notify handler falls back to an absolute Windows system root for missing o
   assertTasklistPaths(generatedTasklistPaths(), 'C:\\Windows')
   assertTasklistPaths(generatedTasklistPaths('C:relative'), 'C:\\Windows')
   assertTasklistPaths(generatedTasklistPaths('D:\\Windows'), 'D:\\Windows')
+  assertTasklistPaths(generatedTasklistPaths('\\\\server\\share\\Windows'), 'C:\\Windows')
 })
 
 test('notify handler forwards Codex payload args to the preserved original notify command', () => {
@@ -92,7 +108,49 @@ test('notify handler forwards Codex payload args to the preserved original notif
   })
 
   assert.match(source, /const payloadArgs = \[\];/)
-  assert.match(source, /spawn\(cmd\[0\], \[\.\.\.cmd\.slice\(1\), \.\.\.payloadArgs\]/)
+  assert.match(source, /spawnOriginalNotify\(cmd\[0\], \[\.\.\.cmd\.slice\(1\), \.\.\.payloadArgs\]\)/)
+})
+
+test('notify handler quotes Windows shim arguments and rejects shell metacharacters', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/home/user/.tokenboard',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const start = source.indexOf('function spawnOriginalNotify(')
+  const end = source.indexOf('function acquireDispatchLock', start)
+  assert.ok(start >= 0 && end > start)
+
+  const calls = []
+  const context = {
+    process: { platform: 'win32', env: { ComSpec: 'C:\\\\Windows\\\\System32\\\\cmd.exe' } },
+    spawn: (...args) => {
+      calls.push(args)
+      return { once() {}, unref() {} }
+    },
+    result: undefined
+  }
+  runInNewContext(
+    `${source.slice(start, end)}\nresult = spawnOriginalNotify('C:\\\\Program Files (x86)\\\\notify.cmd', ['C:\\\\work\\\\', 'value with spaces']);`,
+    context
+  )
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], 'C:\\\\Windows\\\\System32\\\\cmd.exe')
+  assert.equal(calls[0][1][0], '/d')
+  assert.equal(calls[0][1][1], '/s')
+  assert.equal(calls[0][1][2], '/c')
+  assert.equal(calls[0][1][3].startsWith('""C:\\Program Files (x86)\\notify.cmd" '), true)
+  assert.equal(calls[0][1][3].includes('"C:\\work\\\\"'), true)
+  assert.equal(calls[0][1][3].endsWith('"value with spaces""'), true)
+  assert.throws(
+    () =>
+      runInNewContext(
+        `${source.slice(start, end)}\nspawnOriginalNotify('C:\\\\notify.cmd', ['safe&unsafe']);`,
+        context
+      ),
+    /Refusing unsafe Windows original notify argument/
+  )
 })
 
 test('notify handler treats shell-string references to itself as self notify commands', () => {
@@ -105,6 +163,139 @@ test('notify handler treats shell-string references to itself as self notify com
   assert.match(source, /part\.includes\(SELF_PATH\)/)
 })
 
+test('notify handler keeps forwarding when live stale-lock restoration throws', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/state',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const removeStart = source.indexOf('function removeStaleDispatchLock()')
+  const releaseStart = source.indexOf('function releaseOwnedDispatchFile', removeStart)
+  const restoreStart = source.indexOf('function restoreDispatchFile')
+  const quarantineStart = source.indexOf('function dispatchQuarantinePath')
+  assert.ok(
+    removeStart >= 0 && releaseStart > removeStart && restoreStart > releaseStart && quarantineStart > restoreStart
+  )
+
+  const files = new Map([['/state/notify.dispatch.lock', '{"token":"owner"}']])
+  const errors = []
+  const context = {
+    DISPATCH_LOCK_PATH: '/state/notify.dispatch.lock',
+    process: { pid: 123 },
+    renameSync(from, to) {
+      files.set(to, files.get(from))
+      files.delete(from)
+    },
+    readDispatchFile: () => ({ token: 'owner' }),
+    isDispatchLockOwnerAlive: () => true,
+    unlinkSync: (path) => files.delete(path),
+    linkSync: () => {
+      const error = new Error('restore failed')
+      error.code = 'EACCES'
+      throw error
+    },
+    removeDispatchWorker: () => {},
+    recordHandlerError: (stage, error) => errors.push({ stage, message: error.message }),
+    isMissingFileError: () => false,
+    result: undefined
+  }
+  const declarations = [
+    source.slice(removeStart, releaseStart),
+    source.slice(restoreStart, quarantineStart),
+    source.slice(quarantineStart, source.indexOf('function isDispatchLockOwnerAlive', quarantineStart))
+  ].join('\n')
+  runInNewContext(`${declarations}\nresult = removeStaleDispatchLock();`, context)
+  assert.equal(context.result, false)
+  assert.deepEqual(errors, [{ stage: 'dispatch-lock', message: 'restore failed' }])
+})
+
+test('generated handler keeps a live trailing worker when identity probing is unknown', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/state',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const start = source.indexOf('function hasLiveTrailingWorker()')
+  const end = source.indexOf('function setDispatchWorkerPid', start)
+  assert.ok(start >= 0 && end > start)
+  const context = {
+    STATE_DIR: '/state',
+    process: { pid: 1 },
+    join: (...parts) => parts.join('/'),
+    readFileSync: () =>
+      JSON.stringify({
+        pid: 99,
+        processStartIdentity: 'linux:boot-a:100'
+      }),
+    isProcessAlive: () => true,
+    probeProcessStartIdentity: () => ({ status: 'unknown' }),
+    result: undefined
+  }
+
+  runInNewContext(`${source.slice(start, end)}\nresult = hasLiveTrailingWorker();`, context)
+  assert.equal(context.result, true)
+})
+
+test('generated handler keeps a live dispatch worker when identity probing is unknown', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/state',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const start = source.indexOf('function isDispatchLockOwnerAlive')
+  const end = source.indexOf('function readDispatchFile', start)
+  assert.ok(start >= 0 && end > start)
+  const context = {
+    process: { pid: 1 },
+    readDispatchWorker: () => ({
+      token: 'dispatch-token',
+      pid: 99,
+      processStartIdentity: 'linux:boot-a:100'
+    }),
+    isDispatchLockStarting: () => false,
+    isProcessAlive: () => true,
+    isDispatchWorkerIdentityProbeStarting: () => false,
+    probeProcessStartIdentity: () => ({ status: 'unknown' }),
+    result: undefined
+  }
+
+  runInNewContext(
+    `${source.slice(start, end)}\nresult = isDispatchLockOwnerAlive({ token: 'dispatch-token' });`,
+    context
+  )
+  assert.equal(context.result, true)
+})
+
+test('generated handler keeps an unverified dispatch worker during its identity probe grace period', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/state',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const start = source.indexOf('function isDispatchLockOwnerAlive')
+  const end = source.indexOf('function readDispatchFile', start)
+  assert.ok(start >= 0 && end > start)
+  const context = {
+    process: { pid: 1 },
+    readDispatchWorker: () => ({
+      token: 'dispatch-token',
+      pid: 99,
+      identityProbeStartedAt: new Date().toISOString()
+    }),
+    isDispatchLockStarting: () => false,
+    isProcessAlive: () => true,
+    isDispatchWorkerIdentityProbeStarting: () => true,
+    probeProcessStartIdentity: () => ({ status: 'unknown' }),
+    result: undefined
+  }
+
+  runInNewContext(
+    `${source.slice(start, end)}\nresult = isDispatchLockOwnerAlive({ token: 'dispatch-token' });`,
+    context
+  )
+  assert.equal(context.result, true)
+})
+
 test('hook paths prefer CLAUDE_CONFIG_DIR for Claude settings', () => {
   const paths = hookPaths({
     homeDir: '/home/user',
@@ -115,7 +306,7 @@ test('hook paths prefer CLAUDE_CONFIG_DIR for Claude settings', () => {
     }
   })
 
-  assert.equal(paths.claudeSettingsPath, '/custom/claude-config/settings.json')
+  assert.equal(normalizeMemoryPath(paths.claudeSettingsPath).endsWith('/custom/claude-config/settings.json'), true)
 })
 
 test('hook paths include Antigravity CLI, IDE, and standalone homes', () => {
@@ -129,9 +320,9 @@ test('hook paths include Antigravity CLI, IDE, and standalone homes', () => {
     }
   })
 
-  assert.equal(paths.antigravitySettingsPath, '/custom/agy-cli/settings.json')
-  assert.equal(paths.antigravityIdePath, '/custom/agy-ide')
-  assert.equal(paths.antigravityPath, '/custom/agy-app')
+  assert.equal(normalizeMemoryPath(paths.antigravitySettingsPath).endsWith('/custom/agy-cli/settings.json'), true)
+  assert.equal(normalizeMemoryPath(paths.antigravityIdePath).endsWith('/custom/agy-ide'), true)
+  assert.equal(normalizeMemoryPath(paths.antigravityPath).endsWith('/custom/agy-app'), true)
 })
 
 function generatedTasklistPaths(systemRoot) {
@@ -190,14 +381,23 @@ test('installs and restores Codex notify while preserving original command', () 
   })
   const paths = createPaths()
 
-  const installed = installHooks({ paths, fs, nodePath: '/usr/bin/node', flags: { source: 'codex' } })
+  const installed = installHooks({
+    paths,
+    fs,
+    nodePath: '/usr/bin/node',
+    platform: 'linux',
+    flags: { source: 'codex' }
+  })
 
   assert.equal(installed.hooks[0].changed, true)
-  assert.match(fs.files.get(paths.codexConfigPath), /notify = \["\/usr\/bin\/env", "node", "\/home\/user\/\.tokenboard\/bin\/notify\.cjs", "--source=codex"\]/)
+  assert.match(
+    fs.files.get(paths.codexConfigPath),
+    /notify = \["\/usr\/bin\/env", "node", "\/home\/user\/\.tokenboard\/bin\/notify\.cjs", "--source=codex"\]/
+  )
   assert.match(fs.files.get(paths.codexOriginalPath), /"old"/)
   assert.equal(hookStatus({ paths, fs }).codex, 'installed')
 
-  const removed = uninstallHooks({ paths, fs, flags: { source: 'codex' } })
+  const removed = uninstallHooks({ paths, fs, platform: 'linux', flags: { source: 'codex' } })
 
   assert.equal(removed.hooks[0].changed, true)
   assert.match(fs.files.get(paths.codexConfigPath), /notify = \["old", "--flag"\]/)
@@ -241,8 +441,8 @@ test('installs and restores Codex notify with an inline TOML comment', () => {
     [paths.codexConfigPath]: 'model = "gpt-5"\nnotify = ["old", "--flag"] # existing notify\n'
   })
 
-  installHooks({ paths, fs, nodePath: '/usr/bin/node', flags: { source: 'codex' } })
-  uninstallHooks({ paths, fs, flags: { source: 'codex' } })
+  installHooks({ paths, fs, nodePath: '/usr/bin/node', platform: 'linux', flags: { source: 'codex' } })
+  uninstallHooks({ paths, fs, platform: 'linux', flags: { source: 'codex' } })
 
   assert.match(fs.files.get(paths.codexConfigPath), /notify = \["old", "--flag"\]/)
 })
@@ -265,7 +465,10 @@ test('does not treat Codex commands that only mention notify args as installed h
 
   uninstallHooks({ paths, fs, flags: { source: 'codex' } })
 
-  assert.match(fs.files.get(paths.codexConfigPath), /notify = \["echo", "\/home\/user\/\.tokenboard\/bin\/notify\.cjs", "--source=codex"\]/)
+  assert.match(
+    fs.files.get(paths.codexConfigPath),
+    /notify = \["echo", "\/home\/user\/\.tokenboard\/bin\/notify\.cjs", "--source=codex"\]/
+  )
 })
 
 test('does not treat Codex commands that pass node notify as arguments as installed hooks', () => {
@@ -357,10 +560,7 @@ test('uninstall fails visibly when Codex notify exists but is not a string array
     [paths.codexConfigPath]: originalConfig
   })
 
-  assert.throws(
-    () => uninstallHooks({ paths, fs, flags: { source: 'codex' } }),
-    /Unsupported Codex notify format/
-  )
+  assert.throws(() => uninstallHooks({ paths, fs, flags: { source: 'codex' } }), /Unsupported Codex notify format/)
 
   assert.equal(fs.files.get(paths.codexConfigPath), originalConfig)
 })
@@ -386,10 +586,7 @@ test('uninstall fails visibly when Codex original backup is invalid', () => {
     [paths.codexOriginalPath]: '{ invalid json'
   })
 
-  assert.throws(
-    () => uninstallHooks({ paths, fs, flags: { source: 'codex' } }),
-    /Invalid Codex original backup/
-  )
+  assert.throws(() => uninstallHooks({ paths, fs, flags: { source: 'codex' } }), /Invalid Codex original backup/)
 
   assert.equal(fs.files.get(paths.codexConfigPath), originalConfig)
 })
@@ -444,7 +641,7 @@ test('installs and removes only top-level Codex notify without changing table no
     ].join('\n')
   })
 
-  installHooks({ paths, fs, nodePath: '/usr/bin/node', flags: { source: 'codex' } })
+  installHooks({ paths, fs, nodePath: '/usr/bin/node', platform: 'linux', flags: { source: 'codex' } })
   const installedConfig = fs.files.get(paths.codexConfigPath)
 
   assert.match(
@@ -453,7 +650,7 @@ test('installs and removes only top-level Codex notify without changing table no
   )
   assert.equal(fs.files.get(paths.codexOriginalPath), undefined)
 
-  uninstallHooks({ paths, fs, flags: { source: 'codex' } })
+  uninstallHooks({ paths, fs, platform: 'linux', flags: { source: 'codex' } })
 
   assert.equal(
     fs.files.get(paths.codexConfigPath),
@@ -489,7 +686,8 @@ test('installs Windows-compatible Codex and Claude hook commands', () => {
 
 test('recognizes and removes Windows Claude hook after Node path changes', () => {
   const paths = createWindowsPaths()
-  const previousCommand = '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\user\\.tokenboard\\bin\\notify.cjs" --source=claude-code'
+  const previousCommand =
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\user\\.tokenboard\\bin\\notify.cjs" --source=claude-code'
   const fs = memoryFs({
     [paths.claudeSettingsPath]: JSON.stringify({
       hooks: {
@@ -531,11 +729,7 @@ test('recognizes and removes Windows Claude hook after Node path changes', () =>
 
 test('recognizes Windows Codex hook after Node path changes without replacing original backup', () => {
   const paths = createWindowsPaths()
-  const previousNotify = [
-    'C:\\Program Files\\nodejs\\node.exe',
-    paths.notifyPath,
-    '--source=codex'
-  ]
+  const previousNotify = ['C:\\Program Files\\nodejs\\node.exe', paths.notifyPath, '--source=codex']
   const fs = memoryFs({
     [paths.codexConfigPath]: `model = "gpt-5"\nnotify = ${JSON.stringify(previousNotify)}\n`
   })

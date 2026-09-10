@@ -3,11 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, utimesSync, writeFile
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import {
-  closeScheduledLogRuntime,
-  createScheduledLogRuntime,
-  rotateScheduledLogs
-} from './logs.mjs'
+import { closeScheduledLogRuntime, createScheduledLogRuntime, rotateScheduledLogs } from './logs.mjs'
 
 test('rotates scheduled logs over the size limit and removes expired rotations', () => {
   const logDir = mkdtempSync(join(tmpdir(), 'tokenboard-logs-'))
@@ -27,17 +23,10 @@ test('rotates scheduled logs over the size limit and removes expired rotations',
   })
 
   const entries = readdirSync(logDir).sort()
-  assert.deepEqual(entries, [
-    'daily-sync.err.log',
-    'daily-sync.out.log',
-    'daily-sync.out.log.20260513090000'
-  ])
+  assert.deepEqual(entries, ['daily-sync.err.log', 'daily-sync.out.log', 'daily-sync.out.log.20260513090000'])
   assert.equal(statSync(join(logDir, 'daily-sync.err.log')).size, 5)
   assert.equal(statSync(join(logDir, 'daily-sync.out.log')).size, 0)
-  assert.equal(
-    readFileSync(join(logDir, 'daily-sync.out.log.20260513090000'), 'utf8'),
-    'xxxxxxxxxx'
-  )
+  assert.equal(readFileSync(join(logDir, 'daily-sync.out.log.20260513090000'), 'utf8'), 'xxxxxxxxxx')
 })
 
 test('scheduled log runtime opens managed stdout and stderr files', () => {
@@ -141,11 +130,7 @@ test('rotates logs by reading only the retained tail bytes', () => {
     fileSystem
   })
 
-  assert.deepEqual(calls, [
-    { length: 10, position: 10 },
-    { content: 'klmnopqrst' },
-    { content: '' }
-  ])
+  assert.deepEqual(calls, [{ length: 10, position: 10 }, { content: 'klmnopqrst' }, { content: '' }])
 })
 
 test('ignores log rotation races when another process already moved the active file', () => {
@@ -179,13 +164,15 @@ test('ignores log rotation races when another process already moved the active f
     unlinkSync() {}
   }
 
-  assert.doesNotThrow(() => rotateScheduledLogs({
-    logDir: '/tmp/tokenboard-logs',
-    now: localDate(2026, 5, 13, 9, 0, 0),
-    maxBytes: 10,
-    retentionDays: 7,
-    fileSystem
-  }))
+  assert.doesNotThrow(() =>
+    rotateScheduledLogs({
+      logDir: '/tmp/tokenboard-logs',
+      now: localDate(2026, 5, 13, 9, 0, 0),
+      maxBytes: 10,
+      retentionDays: 7,
+      fileSystem
+    })
+  )
 })
 
 function localDate(year, month, day, hour, minute, second) {

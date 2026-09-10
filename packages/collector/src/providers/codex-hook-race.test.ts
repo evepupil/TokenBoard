@@ -41,14 +41,16 @@ describe('Codex hook child-session race recovery', () => {
     try {
       await writeJsonl(sessionFile, [tokenCountEvent()])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        stateDir,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        stderr: reportDiagnostic(diagnostics),
-        runner
-      })).resolves.toEqual([
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          stateDir,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          stderr: reportDiagnostic(diagnostics),
+          runner
+        })
+      ).resolves.toEqual([
         expect.objectContaining({
           source: 'codex',
           usageDate: '2026-05-22',
@@ -83,13 +85,15 @@ describe('Codex hook child-session race recovery', () => {
     try {
       await writeJsonl(sessionFile, [tokenCountEvent()])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        stateDir,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        runner
-      })).rejects.toThrow('Codex child session changed while reading; retry the sync')
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          stateDir,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          runner
+        })
+      ).rejects.toThrow('Codex child session changed while reading; retry the sync')
 
       expect(correction).toHaveBeenCalledTimes(2)
       expect(runner).toHaveBeenCalledTimes(4)
@@ -115,17 +119,65 @@ describe('Codex hook child-session race recovery', () => {
     try {
       await writeJsonl(sessionFile, [tokenCountEvent()])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        stateDir,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        runner
-      })).rejects.toThrow('Codex child session contains invalid UTF-8')
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          stateDir,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          runner
+        })
+      ).rejects.toThrow('Codex child session contains invalid UTF-8')
 
       expect(correction).toHaveBeenCalledTimes(1)
       expect(runner).toHaveBeenCalledTimes(2)
       expect(await readPendingUpload(stateDir)).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('retries an unbounded collection after one child reader race', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-unbounded-race-'))
+    const codexHome = join(root, 'codex')
+    const sessionFile = join(codexHome, 'sessions', '2026', '05', '22', 'session.jsonl')
+    const diagnostics: string[] = []
+    const runner = vi.fn(async (_command: string, args: string[]) =>
+      args.includes('session') ? sessionResult() : dailyResult()
+    )
+
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    vi.stubEnv('TOKENBOARD_SINCE', '')
+    vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '')
+    vi.stubEnv('TOKENBOARD_UNTIL', '')
+    correction
+      .mockRejectedValueOnce(new Error('Codex child session changed while reading; retry the sync'))
+      .mockImplementation(async (input: { snapshots: unknown[] }) => input.snapshots)
+
+    try {
+      await writeJsonl(sessionFile, [tokenCountEvent()])
+
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          stderr: reportDiagnostic(diagnostics),
+          runner
+        })
+      ).resolves.toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-22',
+          model: 'gpt-5',
+          totalTokens: 15,
+          sessionCount: 1
+        })
+      ])
+
+      expect(correction).toHaveBeenCalledTimes(2)
+      expect(runner).toHaveBeenCalledTimes(4)
+      expect(diagnostics).toEqual(['Codex session files changed during unbounded collection; retrying once'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -174,29 +226,33 @@ function tokenCountEvent() {
 
 function dailyResult() {
   return {
-    data: [{
-      date: '2026-05-22',
-      model: 'gpt-5',
-      inputTokens: 10,
-      outputTokens: 5,
-      totalTokens: 15,
-      costUSD: 0.03
-    }]
+    data: [
+      {
+        date: '2026-05-22',
+        model: 'gpt-5',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        costUSD: 0.03
+      }
+    ]
   }
 }
 
 function sessionResult() {
   return {
-    data: [{
-      sessionId: 'session',
-      lastActivity: '2026-05-22T01:00:00.000Z',
-      models: {
-        'gpt-5': {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15
+    data: [
+      {
+        sessionId: 'session',
+        lastActivity: '2026-05-22T01:00:00.000Z',
+        models: {
+          'gpt-5': {
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15
+          }
         }
       }
-    }]
+    ]
   }
 }

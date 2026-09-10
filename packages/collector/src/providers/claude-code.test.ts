@@ -52,11 +52,11 @@ describe('collectClaudeCodeUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown']
+        args: ['ccusage@20.0.20', 'claude', 'daily', '--json', '--breakdown']
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.19', 'claude', 'session', '--json']
+        args: ['ccusage@20.0.20', 'claude', 'session', '--json']
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -87,7 +87,7 @@ describe('collectClaudeCodeUsage', () => {
           'exec',
           '--yes',
           '--package',
-          'ccusage@20.0.19',
+          'ccusage@20.0.20',
           '--',
           'ccusage',
           'claude',
@@ -104,7 +104,7 @@ describe('collectClaudeCodeUsage', () => {
           'exec',
           '--yes',
           '--package',
-          'ccusage@20.0.19',
+          'ccusage@20.0.20',
           '--',
           'ccusage',
           'claude',
@@ -131,18 +131,20 @@ describe('collectClaudeCodeUsage', () => {
     })
 
     expect(calls).toEqual([
-      ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown', '--since', '20260501'],
-      ['ccusage@20.0.19', 'claude', 'session', '--json', '--since', '20260501']
+      ['ccusage@20.0.20', 'claude', 'daily', '--json', '--breakdown', '--since', '20260501'],
+      ['ccusage@20.0.20', 'claude', 'session', '--json', '--since', '20260501']
     ])
   })
 
-  test('prefers an explicit since window over process environment', async () => {
+  test('prefers explicit date windows over process environment', async () => {
     const calls: string[][] = []
     vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
     vi.stubEnv('TOKENBOARD_SINCE', '20260509')
+    vi.stubEnv('TOKENBOARD_UNTIL', '20260510')
 
     await collectClaudeCodeUsage({
       since: '20260708',
+      until: '20260709',
       async runner(_command, args) {
         calls.push(args)
         return { data: [] }
@@ -150,8 +152,8 @@ describe('collectClaudeCodeUsage', () => {
     })
 
     expect(calls).toEqual([
-      ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown', '--since', '20260708'],
-      ['ccusage@20.0.19', 'claude', 'session', '--json', '--since', '20260708']
+      ['ccusage@20.0.20', 'claude', 'daily', '--json', '--breakdown', '--since', '20260708', '--until', '20260709'],
+      ['ccusage@20.0.20', 'claude', 'session', '--json', '--since', '20260708', '--until', '20260709']
     ])
   })
 
@@ -161,9 +163,19 @@ describe('collectClaudeCodeUsage', () => {
       'Invalid Claude since date'
     )
     vi.stubEnv('TOKENBOARD_UNTIL', '20260708&echo injected')
-    await expect(collectClaudeCodeUsage({ since: '20260708' })).rejects.toThrow(
-      'Invalid Claude until date'
-    )
+    await expect(collectClaudeCodeUsage({ since: '20260708' })).rejects.toThrow('Invalid Claude until date')
+  })
+
+  test('rejects a reversed date window before running ccusage', async () => {
+    await expect(
+      collectClaudeCodeUsage({
+        since: '20260709',
+        until: '20260708',
+        runner: async () => {
+          throw new Error('runner should not be called')
+        }
+      })
+    ).rejects.toThrow('since date must not be after until date')
   })
 
   test('allows explicit full scan without passing all to ccusage', async () => {
@@ -184,11 +196,11 @@ describe('collectClaudeCodeUsage', () => {
     expect(calls).toEqual([
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown']
+        args: ['ccusage@20.0.20', 'claude', 'daily', '--json', '--breakdown']
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.19', 'claude', 'session', '--json']
+        args: ['ccusage@20.0.20', 'claude', 'session', '--json']
       }
     ])
   })

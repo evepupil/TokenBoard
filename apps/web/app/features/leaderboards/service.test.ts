@@ -21,11 +21,7 @@ describe('getLeaderboard', () => {
       }
     } as unknown as D1Database
 
-    await getLeaderboard(
-      db,
-      { period: 'monthly', metric: 'cost' },
-      new Date('2026-04-29T10:00:00.000Z')
-    )
+    await getLeaderboard(db, { period: 'monthly', metric: 'cost' }, new Date('2026-04-29T10:00:00.000Z'))
 
     expect(bindings[0]).toEqual(['2026-04-01', '2026-05-01', '2026-04-01', '2026-05-01', 50])
     expect(sqlStatements[0]).toContain('ORDER BY costUsd DESC, totalTokens DESC')

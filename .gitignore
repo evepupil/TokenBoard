@@ -9,5 +9,7 @@ apps/web/wrangler.*.jsonc
 !apps/web/wrangler.production.example.jsonc
 *.local
 *.log
+bun.lock
+apps/web/db/migrations/meta/
 coverage/
 .turbo/

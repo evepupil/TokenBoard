@@ -28,13 +28,15 @@ export function prepareGuiHistoryScope(input: {
   if (input.historyScope === 'all') return
   const candidates = Object.entries(input.cursor.files)
     .map(([key, entry]) => ({ key, entry, parsed: parseBoundedGuiCursorKey(key, input.source) }))
-    .filter((candidate): candidate is {
-      key: string
-      entry: CursorEntry
-      parsed: { scope: string; parts: string[] }
-    } => (
-      candidate.parsed !== null
-    ))
+    .filter(
+      (
+        candidate
+      ): candidate is {
+        key: string
+        entry: CursorEntry
+        parsed: { scope: string; parts: string[] }
+      } => candidate.parsed !== null
+    )
   const migrated = new Map<string, { entry: CursorEntry; kind: string }>()
 
   for (const candidate of candidates) {
@@ -80,7 +82,8 @@ export function pushGuiUsageEvent(input: {
   const eventKey = usageEventKey(input.event)
   const existing = input.cursor.files[eventKey]
   if (existing) {
-    if (existing.pendingUpload) pushCachedSnapshots(input.snapshots, existing, input.collectedAt, input.emittedKeys, eventKey)
+    if (existing.pendingUpload)
+      pushCachedSnapshots(input.snapshots, existing, input.collectedAt, input.emittedKeys, eventKey)
     return
   }
   const snapshot = buildSnapshot(input)
@@ -178,10 +181,9 @@ export function hasDbCascadeRowsProcessed(input: {
   source: AntigravityGuiSource
   historyScope?: string
 }) {
-  const entry = input.cursor.files[dbCoveredCascadeCursorKey(input.source, input.cascade.id, input.historyScope ?? 'all')]
-  return entry !== undefined &&
-    entry.mtimeMs === input.cascade.mtimeMs &&
-    entry.size === input.cascade.size
+  const entry =
+    input.cursor.files[dbCoveredCascadeCursorKey(input.source, input.cascade.id, input.historyScope ?? 'all')]
+  return entry !== undefined && entry.mtimeMs === input.cascade.mtimeMs && entry.size === input.cascade.size
 }
 
 export function lastSeenDbRowIndexByCascadeHash(input: {
@@ -190,9 +192,8 @@ export function lastSeenDbRowIndexByCascadeHash(input: {
   historyScope?: string
 }) {
   const historyScope = input.historyScope ?? 'all'
-  const reusableScope = historyScope !== 'all'
-    ? latestReusableDbScope(input.cursor, input.source, historyScope)
-    : historyScope
+  const reusableScope =
+    historyScope !== 'all' ? latestReusableDbScope(input.cursor, input.source, historyScope) : historyScope
   const prefix = dbCascadeCursorPrefixForScope(input.source, reusableScope ?? historyScope)
   const indexes = new Map<string, number>()
   for (const [key, entry] of Object.entries(input.cursor.files)) {
@@ -203,10 +204,44 @@ export function lastSeenDbRowIndexByCascadeHash(input: {
   return indexes
 }
 
-export function resetGuiDbCursorState(input: {
+export function hasUnanchoredDbRowCursor(input: {
   cursor: AntigravityGuiCursor
   source: AntigravityGuiSource
+  historyScope?: string
 }) {
+  return unanchoredDbRowCursorHashes(input).size > 0
+}
+
+export function unanchoredDbRowCursorHashes(input: {
+  cursor: AntigravityGuiCursor
+  source: AntigravityGuiSource
+  historyScope?: string
+}) {
+  const rowIndexes = lastSeenDbRowIndexByCascadeHash(input)
+  if (rowIndexes.size === 0) return new Set<string>()
+  const scanFiles = input.cursor.antigravityDbFileScan?.files
+  const unanchored = new Set<string>()
+  for (const [cascadeHash, rowIndex] of rowIndexes.entries()) {
+    const entry = scanFiles?.[cascadeHash] as
+      | {
+          metadataCursorRowIndex?: unknown
+          metadataCursorRowSha256?: unknown
+        }
+      | undefined
+    if (
+      !entry ||
+      !Number.isSafeInteger(entry.metadataCursorRowIndex) ||
+      entry.metadataCursorRowIndex !== rowIndex ||
+      typeof entry.metadataCursorRowSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(entry.metadataCursorRowSha256)
+    ) {
+      unanchored.add(cascadeHash)
+    }
+  }
+  return unanchored
+}
+
+export function resetGuiDbCursorState(input: { cursor: AntigravityGuiCursor; source: AntigravityGuiSource }) {
   assertGuiDbResetStateIsClassified(input)
   assertGuiDbResetHasNoPendingDatabaseUsage(input)
   const corrections = collectGuiDbResetCorrections(input.cursor)
@@ -249,10 +284,7 @@ export function queueGuiDbResetCorrections(input: {
   }
 }
 
-function assertGuiDbResetStateIsClassified(input: {
-  cursor: AntigravityGuiCursor
-  source: AntigravityGuiSource
-}) {
+function assertGuiDbResetStateIsClassified(input: { cursor: AntigravityGuiCursor; source: AntigravityGuiSource }) {
   for (const [key, entry] of Object.entries(input.cursor.files)) {
     if (isGuiUsageStateKey(key, input.source) && entry.antigravityOrigin === undefined) {
       throw new Error(
@@ -342,7 +374,11 @@ function buildSnapshot(input: {
     outputTokens: input.event.outputTokens,
     cacheCreationTokens: input.event.cacheCreationTokens,
     cacheReadTokens: input.event.cacheReadTokens,
-    totalTokens: input.event.inputTokens + input.event.outputTokens + input.event.cacheCreationTokens + input.event.cacheReadTokens,
+    totalTokens:
+      input.event.inputTokens +
+      input.event.outputTokens +
+      input.event.cacheCreationTokens +
+      input.event.cacheReadTokens,
     costUsd: 0,
     sessionCount: sessionEntry ? 0 : 1,
     collectedAt: input.collectedAt
@@ -388,8 +424,7 @@ function usageEventKey(event: AntigravityUsageEvent) {
 }
 
 function isDatabaseGuiUsageEntry(key: string, entry: CursorEntry) {
-  return entry.antigravityOrigin === 'database' &&
-    (isGuiUsageEventKey(key) || isGuiAggregateEntry(key))
+  return entry.antigravityOrigin === 'database' && (isGuiUsageEventKey(key) || isGuiAggregateEntry(key))
 }
 
 export function isGuiDbResetCorrectionKey(key: string) {
@@ -460,9 +495,7 @@ function emptyCascadeFrontierCursorKey(source: AntigravityGuiSource, historyScop
 
 function dbCoveredCascadeCursorKey(source: AntigravityGuiSource, cascadeId: string, historyScope: string) {
   const prefix = dbCoveredCascadeCursorPrefix(source)
-  return historyScope === 'all'
-    ? `${prefix}${hash(cascadeId)}`
-    : `${prefix}since:${historyScope}\0${hash(cascadeId)}`
+  return historyScope === 'all' ? `${prefix}${hash(cascadeId)}` : `${prefix}since:${historyScope}\0${hash(cascadeId)}`
 }
 
 function dbCoveredCascadeCursorPrefix(source: AntigravityGuiSource) {
@@ -499,22 +532,12 @@ function parseBoundedGuiCursorKey(key: string, source: AntigravityGuiSource) {
   return scope ? { scope, parts } : null
 }
 
-const boundedGuiCursorKinds = new Set([
-  'cascade',
-  'cascade-empty-frontier',
-  'db',
-  'db-covered'
-])
+const boundedGuiCursorKinds = new Set(['cascade', 'cascade-empty-frontier', 'db', 'db-covered'])
 
 function usageSessionKey(event: AntigravityUsageEvent, usageDate: string, source: AntigravityGuiSource) {
   return ['session', source, usageDate, event.model, event.cascadeHash].join('\0')
 }
 
 function snapshotGroupKey(snapshot: CursorSnapshot | UsageSnapshot) {
-  return [
-    snapshot.source,
-    snapshot.usageDate,
-    snapshot.timezone,
-    snapshot.model
-  ].join('\0')
+  return [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
 }

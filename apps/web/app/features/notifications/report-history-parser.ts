@@ -8,11 +8,7 @@ export function parseReportHistoryTopModels(value: string) {
   return parseHistoryArray(value, 'top_models', parseTopModelItem)
 }
 
-function parseHistoryArray<T>(
-  value: string,
-  column: string,
-  parseItem: (value: unknown, column: string) => T
-) {
+function parseHistoryArray<T>(value: string, column: string, parseItem: (value: unknown, column: string) => T) {
   let parsed: unknown
   try {
     parsed = JSON.parse(value) as unknown

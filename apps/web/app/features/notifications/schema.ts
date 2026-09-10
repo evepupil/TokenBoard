@@ -78,10 +78,7 @@ export function parseWebhookSubscriptionForm(form: Record<string, unknown>): Web
 
 export function scheduleTimesFromForm(form: Record<string, unknown>) {
   const scheduleTimes = normalizeScheduleTimes(
-    form.scheduleTimesLocal ??
-      form['scheduleTimesLocal[]'] ??
-      form.scheduleTimeLocal ??
-      defaultWebhookScheduleTime
+    form.scheduleTimesLocal ?? form['scheduleTimesLocal[]'] ?? form.scheduleTimeLocal ?? defaultWebhookScheduleTime
   )
   if (scheduleTimes.length > maxWebhookScheduleTimes) {
     throw new Error('Invalid schedule time')
@@ -94,7 +91,5 @@ export function scheduleWeekdaysFromForm(form: Record<string, unknown>) {
   if (String(form.scheduleWeekdaysTouched ?? '') === '1' && weekdays === undefined) {
     throw new Error('Invalid schedule weekday')
   }
-  return normalizeScheduleWeekdays(
-    weekdays ?? defaultWebhookScheduleWeekdays
-  )
+  return normalizeScheduleWeekdays(weekdays ?? defaultWebhookScheduleWeekdays)
 }

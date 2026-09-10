@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
+import { getModelPricing, runModelPricingSync } from './features/model-pricing/service'
 import worker from './server'
+
+vi.mock('./features/model-pricing/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./features/model-pricing/service')>()
+  return {
+    ...actual,
+    getModelPricing: vi.fn(),
+    runModelPricingSync: vi.fn(actual.runModelPricingSync)
+  }
+})
+
+const mockedGetModelPricing = vi.mocked(getModelPricing)
+const mockedRunModelPricingSync = vi.mocked(runModelPricingSync)
 
 const originalCaches = globalThis.caches
 
@@ -8,6 +21,70 @@ afterEach(() => {
 })
 
 describe('worker server', () => {
+  afterEach(() => {
+    mockedGetModelPricing.mockReset()
+    mockedRunModelPricingSync.mockClear()
+  })
+
+  test('serves public model pricing before dynamic public slug handling', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv()
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?limit=2'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ models: [], nextCursor: null })
+    expect(mockedGetModelPricing).toHaveBeenCalledWith({
+      db: env.DB,
+      provider: undefined,
+      includeInactive: false,
+      limit: 2,
+      cursor: undefined
+    })
+  })
+
+  test('preserves an existing public model-pricing slug', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ publicProfile: true, profileSlug: 'model-pricing' })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      slug: 'model-pricing',
+      displayName: 'Eve'
+    })
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
+  test('does not expose pricing when an existing model-pricing profile is private', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ profileSlug: 'model-pricing', profileExists: true })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Public profile not found'
+      }
+    })
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
   test('serves public SVG cards through the worker entrypoint', async () => {
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/eve.svg'),
@@ -186,11 +263,7 @@ describe('worker server', () => {
     const env = createEnv({ publicProfile: true, usageUpdatedAt: '2026-04-29T01:00:00.000Z' })
     const ctx = createExecutionContext()
 
-    const firstResponse = await worker.fetch(
-      workerRequest('https://tokenboard.example/api/public/eve.svg'),
-      env,
-      ctx
-    )
+    const firstResponse = await worker.fetch(workerRequest('https://tokenboard.example/api/public/eve.svg'), env, ctx)
     await Promise.all(ctx.waitUntilPromises)
     env.usageUpdatedAt = '2026-04-29T01:05:00.000Z'
     const secondResponse = await worker.fetch(
@@ -217,11 +290,7 @@ describe('worker server', () => {
     })
     const ctx = createExecutionContext()
 
-    const firstResponse = await worker.fetch(
-      workerRequest('https://tokenboard.example/api/public/eve.svg'),
-      env,
-      ctx
-    )
+    const firstResponse = await worker.fetch(workerRequest('https://tokenboard.example/api/public/eve.svg'), env, ctx)
     await Promise.all(ctx.waitUntilPromises)
     env.summaryUpdatedAt = '2026-04-29T01:05:00.000Z'
     const secondResponse = await worker.fetch(
@@ -434,8 +503,80 @@ describe('worker server', () => {
     expect(env.DB.batch).toHaveBeenCalledOnce()
   })
 
+  test('scheduled handler refreshes the model pricing catalogue when enabled', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(modelPricingFixture()), { status: 200 }))
+    try {
+      const env = createEnv({ modelPricingSyncEnabled: 'true' })
+      const ctx = createExecutionContext()
+
+      worker.scheduled?.(
+        {
+          scheduledTime: Date.parse('2026-04-29T10:00:00.000Z'),
+          cron: '*/15 * * * *',
+          noRetry() {}
+        },
+        env,
+        ctx
+      )
+      await Promise.all(ctx.waitUntilPromises)
+
+      expect(globalThis.fetch).toHaveBeenCalledOnce()
+      expect(env.sqlStatements.join('\n')).toContain('model_pricing_sync_state')
+      expect(env.DB.batch).toHaveBeenCalledTimes(3)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('scheduled model pricing sync uses execution time for a delayed cron event', async () => {
+    const executionTime = new Date('2026-04-29T12:00:00.000Z')
+    vi.useFakeTimers()
+    vi.setSystemTime(executionTime)
+    mockedRunModelPricingSync.mockImplementationOnce(async () => ({
+      status: 'success',
+      modelCount: 1,
+      sourceUpdatedAt: null,
+      completedAt: executionTime.toISOString()
+    }))
+
+    try {
+      const env = createEnv({ modelPricingSyncEnabled: 'true' })
+      const ctx = createExecutionContext()
+
+      worker.scheduled?.(
+        {
+          scheduledTime: Date.parse('2026-04-29T10:00:00.000Z'),
+          cron: '*/15 * * * *',
+          noRetry() {}
+        },
+        env,
+        ctx
+      )
+      await Promise.all(ctx.waitUntilPromises)
+
+      expect(mockedRunModelPricingSync).toHaveBeenCalledWith({
+        env,
+        now: executionTime
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('scheduled usage summary backfill exposes invalid limit configuration', async () => {
-    const env = createEnv({ dueSubscription: false, usageSummaryBackfillLimit: '0' })
+    const originalFetch = globalThis.fetch
+    let pricingCompleted = false
+    globalThis.fetch = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      pricingCompleted = true
+      return new Response(JSON.stringify(modelPricingFixture()), { status: 200 })
+    })
+    const env = createEnv({
+      dueSubscription: false,
+      usageSummaryBackfillLimit: '0',
+      modelPricingSyncEnabled: 'true'
+    })
     const ctx = createExecutionContext()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -456,6 +597,50 @@ describe('worker server', () => {
       expect(consoleError).toHaveBeenCalledWith(
         'TokenBoard usage summary backfill failed: TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'
       )
+      expect(globalThis.fetch).toHaveBeenCalledOnce()
+      expect(pricingCompleted).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+      consoleError.mockRestore()
+    }
+  })
+
+  test('propagates all scheduled task failures after every task settles', async () => {
+    const env = createEnv({
+      usageSummaryBackfillLimit: '0',
+      modelPricingSyncEnabled: 'true',
+      modelPricingSyncIntervalHours: '0'
+    })
+    const ctx = createExecutionContext()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      worker.scheduled?.(
+        {
+          scheduledTime: Date.parse('2026-04-29T10:00:00.000Z'),
+          cron: '*/15 * * * *',
+          noRetry() {}
+        },
+        env,
+        ctx
+      )
+
+      await expect(Promise.all(ctx.waitUntilPromises)).rejects.toMatchObject({
+        errors: expect.arrayContaining([
+          expect.objectContaining({
+            message: 'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'
+          }),
+          expect.objectContaining({
+            message: 'TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS must be an integer from 1 to 168'
+          })
+        ])
+      })
+      expect(consoleError).toHaveBeenCalledWith(
+        'TokenBoard usage summary backfill failed: TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'
+      )
+      expect(consoleError).toHaveBeenCalledWith(
+        'TokenBoard model pricing sync failed: TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS must be an integer from 1 to 168'
+      )
     } finally {
       consoleError.mockRestore()
     }
@@ -465,6 +650,8 @@ describe('worker server', () => {
 function createEnv(
   options: {
     publicProfile?: boolean
+    profileExists?: boolean
+    profileSlug?: string
     dueSubscription?: boolean
     profileUserId?: string
     profileUpdatedAt?: string
@@ -472,6 +659,8 @@ function createEnv(
     summaryUpdatedAt?: string
     usageSummaryBackfillLimit?: string
     usageSummaryStrict?: string
+    modelPricingSyncEnabled?: string
+    modelPricingSyncIntervalHours?: string
   } = {}
 ) {
   const boundValues: unknown[][] = []
@@ -484,12 +673,17 @@ function createEnv(
     boundValues,
     sqlStatements,
     publicProfile: Boolean(options.publicProfile),
+    profileExists: options.profileExists ?? Boolean(options.publicProfile),
+    profileSlug: options.profileSlug ?? 'eve',
     profileUserId: options.profileUserId ?? 'user_1',
     profileUpdatedAt: options.profileUpdatedAt ?? '2026-04-29T00:00:00.000Z',
     usageUpdatedAt: options.usageUpdatedAt ?? '2026-04-29T00:00:00.000Z',
     summaryUpdatedAt: options.summaryUpdatedAt ?? '2026-04-29T00:00:00.000Z',
     TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT: options.usageSummaryBackfillLimit,
     TOKENBOARD_USAGE_SUMMARY_STRICT: options.usageSummaryStrict,
+    TOKENBOARD_MODEL_PRICING_SYNC_ENABLED: options.modelPricingSyncEnabled,
+    TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS: options.modelPricingSyncIntervalHours ?? '24',
+    TOKENBOARD_MODEL_PRICING_SOURCE_URL: 'https://models.dev/api.json',
     dueSubscription: options.dueSubscription
   }
   return Object.assign(env, {
@@ -500,6 +694,8 @@ function createEnv(
 function createDb(
   options: {
     publicProfile?: boolean
+    profileExists?: boolean
+    profileSlug?: string
     dueSubscription?: boolean
     profileUserId?: string
     profileUpdatedAt?: string
@@ -517,14 +713,14 @@ function createDb(
         return {
           first: vi.fn(async () => {
             if (sql.includes('FROM profiles')) {
-              if (!options.publicProfile) return null
+              if (!(options.profileExists ?? options.publicProfile)) return null
               return {
                 userId: options.profileUserId ?? 'user_1',
-                slug: 'eve',
+                slug: options.profileSlug ?? 'eve',
                 displayName: 'Eve',
                 timezone: 'UTC',
                 publicCardConfig: null,
-                isPublic: 1,
+                isPublic: options.publicProfile ? 1 : 0,
                 updatedAt: options.profileUpdatedAt ?? '2026-04-29T00:00:00.000Z',
                 usageUpdatedAt: options.usageUpdatedAt ?? '2026-04-29T00:00:00.000Z',
                 summaryUpdatedAt: options.summaryUpdatedAt ?? '2026-04-29T00:00:00.000Z'
@@ -558,12 +754,45 @@ function createDb(
             }
             return { results: [] }
           }),
-          run: vi.fn(async () => ({ success: true, meta: { changes: 0 } }))
+          run: vi.fn(async () => ({
+            success: true,
+            meta: { changes: sql.includes('model_pricing_sync_state') ? 1 : 0 }
+          }))
         }
       })
     })),
-    batch: vi.fn(async (statements: unknown[]) => statements.map(() => ({ success: true })))
+    batch: vi.fn(async (statements: unknown[]) =>
+      statements.map(() => ({
+        success: true,
+        meta: { changes: 1 }
+      }))
+    )
   } as unknown as D1Database
+}
+
+function modelPricingFixture() {
+  return {
+    openai: {
+      doc: 'https://developers.openai.com/api/docs/pricing',
+      models: { 'gpt-5.6-sol': pricedModel('gpt-5.6-sol', 1_050_000, 5, 30) }
+    },
+    anthropic: {
+      doc: 'https://docs.anthropic.com/en/docs/about-claude/pricing',
+      models: { 'claude-sonnet-5': pricedModel('claude-sonnet-5', 1_000_000, 2, 10) }
+    },
+    xai: { doc: 'https://docs.x.ai/docs/models', models: { 'grok-4.5': pricedModel('grok-4.5', 500_000, 2, 6) } }
+  }
+}
+
+function pricedModel(id: string, context: number, input: number, output: number) {
+  return {
+    id,
+    name: id,
+    family: id,
+    last_updated: '2026-08-01',
+    limit: { context, output: 128_000 },
+    cost: { input, output, cache_read: 0.1 }
+  }
 }
 
 function createExecutionContext() {
@@ -583,7 +812,7 @@ function workerRequest(url: string, init?: RequestInit) {
 }
 
 function createCache(clock: { now: number } = { now: Date.now() }) {
-  const values = new Map<string, { response: Response, expiresAt: number | null }>()
+  const values = new Map<string, { response: Response; expiresAt: number | null }>()
   return {
     match: vi.fn(async (request: Request) => {
       const cached = values.get(request.url)
@@ -611,7 +840,7 @@ function cacheExpiresAt(cacheControl: string | null, now: number) {
 }
 
 function createImmutableMatchCache() {
-  const values = new Map<string, { body: string, contentType: string }>()
+  const values = new Map<string, { body: string; contentType: string }>()
   return {
     match: vi.fn(async (request: Request) => {
       const response = values.get(request.url)

@@ -67,12 +67,6 @@ export function prepareDeliveryLog(input: DeliveryLogInput) {
     )
 }
 
-export async function pruneWebhookDeliveryLogs(input: {
-  db: D1Database
-  cutoffIso: string
-}) {
-  await input.db
-    .prepare('DELETE FROM webhook_delivery_logs WHERE created_at < ?')
-    .bind(input.cutoffIso)
-    .run()
+export async function pruneWebhookDeliveryLogs(input: { db: D1Database; cutoffIso: string }) {
+  await input.db.prepare('DELETE FROM webhook_delivery_logs WHERE created_at < ?').bind(input.cutoffIso).run()
 }

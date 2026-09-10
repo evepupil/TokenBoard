@@ -11,19 +11,18 @@ const clientOptions = {
   jsxImportSource: 'hono/jsx/dom'
 }
 
-const disabledHonoxPlugins = new Set([
-  'honox-vite-client',
-  'transform-island-components',
-  'inject-importing-islands'
-])
+const disabledHonoxPlugins = new Set(['honox-vite-client', 'transform-island-components', 'inject-importing-islands'])
 
 export default defineConfig({
   plugins: [
-    ...withoutPlugins(honox({
-      devServer: { adapter },
-      client: clientOptions,
-      islands: false
-    }), disabledHonoxPlugins),
+    ...withoutPlugins(
+      honox({
+        devServer: { adapter },
+        client: clientOptions,
+        islands: false
+      }),
+      disabledHonoxPlugins
+    ),
     tokenboardClient(clientOptions),
     tailwindcss(),
     filteredWorkerBuild({
@@ -109,9 +108,7 @@ type HookObject<THandler> = {
   handler: THandler
 }
 
-function getHookHandler<THandler>(
-  hook: HookObject<THandler> | THandler | undefined
-): THandler | undefined {
+function getHookHandler<THandler>(hook: HookObject<THandler> | THandler | undefined): THandler | undefined {
   if (!hook) return undefined
   if (typeof hook === 'function') return hook
   if (typeof hook === 'object' && 'handler' in hook) return hook.handler

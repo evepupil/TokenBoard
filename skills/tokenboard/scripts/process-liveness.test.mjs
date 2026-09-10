@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
-import { currentProcessStartIdentity, probeProcessStartIdentity } from './process-liveness.mjs'
+import {
+  currentProcessStartIdentity,
+  powershellCommand,
+  probeProcessStartIdentity,
+  tasklistCommand
+} from './process-liveness.mjs'
 
 function linuxStat(startTicks) {
-  const fields = Array.from({ length: 19 }, (_, index) => index === 18 ? String(startTicks) : String(index + 1))
+  const fields = Array.from({ length: 19 }, (_, index) => (index === 18 ? String(startTicks) : String(index + 1)))
   return `123 (node) S ${fields.join(' ')}\n`
 }
 
@@ -34,11 +39,14 @@ test('Linux process identity is unknown when the boot ID cannot be read', () => 
   assert.deepEqual(
     probeProcessStartIdentity(123, {
       platform: 'linux',
-      readFile: (path) => path === '/proc/123/stat' ? linuxStat(456789) : (() => {
-        const error = new Error('boot id unavailable')
-        error.code = 'EACCES'
-        throw error
-      })()
+      readFile: (path) =>
+        path === '/proc/123/stat'
+          ? linuxStat(456789)
+          : (() => {
+              const error = new Error('boot id unavailable')
+              error.code = 'EACCES'
+              throw error
+            })()
     }),
     { status: 'unknown' }
   )
@@ -66,14 +74,10 @@ test('external process identity probes use a non-catchable timeout signal', () =
     return { status: 1, stdout: '', stderr: '' }
   }
 
-  assert.deepEqual(
-    probeProcessStartIdentity(123, { platform: 'darwin', runProcessIdentity, kill: deadKill }),
-    { status: 'dead' }
-  )
-  assert.deepEqual(
-    probeProcessStartIdentity(456, { platform: 'win32', runProcessIdentity }),
-    { status: 'unknown' }
-  )
+  assert.deepEqual(probeProcessStartIdentity(123, { platform: 'darwin', runProcessIdentity, kill: deadKill }), {
+    status: 'dead'
+  })
+  assert.deepEqual(probeProcessStartIdentity(456, { platform: 'win32', runProcessIdentity }), { status: 'unknown' })
   assert.equal(calls.length, 2)
   for (const call of calls) {
     assert.equal(call.options.timeout, 2_000)
@@ -103,6 +107,7 @@ test('Darwin process identity uses libproc microsecond start time', () => {
   assert.equal(calls[0].args[0], '-l')
   assert.equal(calls[0].args[1], 'JavaScript')
   assert.match(calls[0].args[3], /proc_pidinfo/)
+  assert.match(calls[0].args[3], /try \{ ObjC\.bindFunction\("proc_pidinfo", procPidInfoTypes\); \}/)
   assert.match(calls[0].args[3], /libproc\.dylib/)
   assert.equal(calls[0].options.timeout, 2_000)
   assert.equal(calls[0].options.killSignal, 'SIGKILL')
@@ -139,16 +144,24 @@ test('Windows process identity distinguishes a missing pid from lookup failure',
   }
 
   assert.deepEqual(
-    probeProcessStartIdentity(123, { platform: 'win32', runProcessIdentity }),
+    probeProcessStartIdentity(123, {
+      platform: 'win32',
+      runProcessIdentity,
+      env: { SystemRoot: 'C:\\Windows' }
+    }),
     { status: 'dead' }
   )
   assert.deepEqual(
-    probeProcessStartIdentity(456, { platform: 'win32', runProcessIdentity }),
+    probeProcessStartIdentity(456, {
+      platform: 'win32',
+      runProcessIdentity,
+      env: { SystemRoot: 'C:\\Windows' }
+    }),
     { status: 'unknown' }
   )
   assert.equal(calls.length, 2)
   for (const call of calls) {
-    assert.equal(call.command, 'powershell.exe')
+    assert.equal(call.command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
     assert.match(call.args[3], /Get-Process -Id \d+ -ErrorAction Stop/)
     assert.match(call.args[3], /try \{/)
     assert.match(call.args[3], /catch \{/)
@@ -156,17 +169,37 @@ test('Windows process identity distinguishes a missing pid from lookup failure',
   }
 })
 
-test('process identity probe returns when the helper ignores termination', { skip: process.platform === 'win32' }, () => {
-  const startedAt = Date.now()
-  const result = probeProcessStartIdentity(123, {
-    platform: 'darwin',
-    runProcessIdentity: (_command, _args, options) => spawnSync(
-      process.execPath,
-      ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'],
-      options
-    )
-  })
-
-  assert.deepEqual(result, { status: 'unknown' })
-  assert.ok(Date.now() - startedAt < 3_500)
+test('Windows process identity resolves PowerShell from SystemRoot', () => {
+  assert.equal(
+    powershellCommand({ SystemRoot: 'D:\\Windows' }),
+    'D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  )
+  assert.equal(
+    powershellCommand({ SystemRoot: 'Windows' }),
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  )
+  assert.equal(
+    powershellCommand({ SystemRoot: '\\\\server\\share\\Windows' }),
+    '\\\\server\\share\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  )
+  assert.equal(
+    tasklistCommand({ SystemRoot: '\\\\server\\share\\Windows' }),
+    '\\\\server\\share\\Windows\\System32\\tasklist.exe'
+  )
 })
+
+test(
+  'process identity probe returns when the helper ignores termination',
+  { skip: process.platform === 'win32' },
+  () => {
+    const startedAt = Date.now()
+    const result = probeProcessStartIdentity(123, {
+      platform: 'darwin',
+      runProcessIdentity: (_command, _args, options) =>
+        spawnSync(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], options)
+    })
+
+    assert.deepEqual(result, { status: 'unknown' })
+    assert.ok(Date.now() - startedAt < 3_500)
+  }
+)

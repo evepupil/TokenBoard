@@ -1,5 +1,6 @@
 ﻿import { describe, expect, test } from 'vitest'
 import { defaultPublicCardConfig } from '../public-card/config'
+import { vi } from 'vitest'
 import {
   getCanonicalPublicOrigin,
   getProfileDisplayName,
@@ -50,16 +51,18 @@ describe('settings service', () => {
   })
 
   test('parses profile page form with public card config', () => {
-    expect(parseProfilePageForm({
-      slug: 'eve-tokenboard',
-      displayName: 'Eve',
-      timezone: 'Asia/Hong_Kong',
-      isPublic: 'on',
-      cardLanguage: 'en',
-      cardTheme: 'light',
-      cardMetric1: 'todayTokens',
-      cardMetric2: 'totalCost'
-    })).toMatchObject({
+    expect(
+      parseProfilePageForm({
+        slug: 'eve-tokenboard',
+        displayName: 'Eve',
+        timezone: 'Asia/Hong_Kong',
+        isPublic: 'on',
+        cardLanguage: 'en',
+        cardTheme: 'light',
+        cardMetric1: 'todayTokens',
+        cardMetric2: 'totalCost'
+      })
+    ).toMatchObject({
       profile: {
         slug: 'eve-tokenboard',
         displayName: 'Eve',
@@ -113,15 +116,7 @@ describe('settings service', () => {
     expect(sqlStatements[1]).toContain('UPDATE profiles')
     expect(sqlStatements[1]).toContain("timezone_source = 'user'")
     expect(bindings[0]).toEqual(['eve-tokenboard', 'user_1'])
-    expect(bindings[1]).toEqual([
-      'eve-tokenboard',
-      'Eve',
-      'Asia/Hong_Kong',
-      1,
-      0,
-      '2026-04-29T10:00:00.000Z',
-      'user_1'
-    ])
+    expect(bindings[1]).toEqual(['eve-tokenboard', 'Eve', 'Asia/Hong_Kong', 1, 0, '2026-04-29T10:00:00.000Z', 'user_1'])
   })
 
   test('uses the canonical origin for public URLs', async () => {
@@ -147,18 +142,10 @@ describe('settings service', () => {
       }
     } as unknown as D1Database
 
-    const settings = await getProfileSettings(
-      db,
-      'user_1',
-      'https://tokenboard.example.com'
-    )
+    const settings = await getProfileSettings(db, 'user_1', 'https://tokenboard.example.com')
 
-    expect(settings.publicJsonUrl).toBe(
-      'https://tokenboard.example.com/api/public/eve-tokenboard.json'
-    )
-    expect(settings.publicSvgUrl).toBe(
-      'https://tokenboard.example.com/api/public/eve-tokenboard.svg'
-    )
+    expect(settings.publicJsonUrl).toBe('https://tokenboard.example.com/api/public/eve-tokenboard.json')
+    expect(settings.publicSvgUrl).toBe('https://tokenboard.example.com/api/public/eve-tokenboard.svg')
     expect(settings.publicMarkdown).toBe(
       '[![TokenBoard](https://tokenboard.example.com/api/public/eve-tokenboard.svg)](https://tokenboard.example.com)'
     )
@@ -285,11 +272,7 @@ describe('settings service', () => {
       }
     } as unknown as D1Database
 
-    const settings = await getProfileSettings(
-      db,
-      'user_1',
-      'https://tokenboard.example.com'
-    )
+    const settings = await getProfileSettings(db, 'user_1', 'https://tokenboard.example.com')
 
     expect(settings.shouldUseBrowserTimezoneDefault).toBe(true)
   })
@@ -318,11 +301,7 @@ describe('settings service', () => {
       }
     } as unknown as D1Database
 
-    const settings = await getProfileSettings(
-      db,
-      'user_1',
-      'https://tokenboard.example.com'
-    )
+    const settings = await getProfileSettings(db, 'user_1', 'https://tokenboard.example.com')
 
     expect(settings.shouldUseBrowserTimezoneDefault).toBe(false)
   })
@@ -344,9 +323,7 @@ describe('settings service', () => {
       }
     } as unknown as D1Database
 
-    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe(
-      'New Public Name'
-    )
+    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe('New Public Name')
   })
 
   test('falls back to the session name when profile display name is missing', async () => {
@@ -364,9 +341,7 @@ describe('settings service', () => {
       }
     } as unknown as D1Database
 
-    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe(
-      'Old Session Name'
-    )
+    await expect(getProfileDisplayName(db, 'user_1', 'Old Session Name')).resolves.toBe('Old Session Name')
   })
 
   test('makes a profile public when enabling leaderboard participation', async () => {
@@ -402,15 +377,7 @@ describe('settings service', () => {
       '2026-04-29T10:00:00.000Z'
     )
 
-    expect(bindings[1]).toEqual([
-      'eve-tokenboard',
-      'Eve',
-      'UTC',
-      1,
-      1,
-      '2026-04-29T10:00:00.000Z',
-      'user_1'
-    ])
+    expect(bindings[1]).toEqual(['eve-tokenboard', 'Eve', 'UTC', 1, 1, '2026-04-29T10:00:00.000Z', 'user_1'])
   })
 
   test('updates profile and card settings together', async () => {
@@ -535,5 +502,50 @@ describe('settings service', () => {
         participatesInLeaderboards: false
       })
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+  })
+
+  test('rejects slugs reserved for public API endpoints', async () => {
+    const prepare = vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => null)
+      }))
+    }))
+    const db = { prepare } as unknown as D1Database
+
+    await expect(
+      updateProfileSettings(db, 'user_1', {
+        slug: 'model-pricing',
+        displayName: 'Eve',
+        timezone: 'UTC',
+        isPublic: false,
+        participatesInLeaderboards: false
+      })
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'Slug is reserved' })
+    expect(prepare).toHaveBeenCalledOnce()
+  })
+
+  test('allows an existing owner to keep a legacy reserved slug', async () => {
+    const run = vi.fn(async () => ({ success: true }))
+    const db = {
+      prepare: vi.fn((sql: string) =>
+        sql.startsWith('SELECT')
+          ? {
+              bind: vi.fn(() => ({ first: vi.fn(async () => ({ userId: 'user_1' })) }))
+            }
+          : {
+              bind: vi.fn(() => ({ run }))
+            }
+      )
+    } as unknown as D1Database
+
+    await updateProfileSettings(db, 'user_1', {
+      slug: 'model-pricing',
+      displayName: 'Eve',
+      timezone: 'UTC',
+      isPublic: true,
+      participatesInLeaderboards: false
+    })
+
+    expect(run).toHaveBeenCalledOnce()
   })
 })

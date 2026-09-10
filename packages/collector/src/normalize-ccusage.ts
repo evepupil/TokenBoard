@@ -1,5 +1,6 @@
 import { usageSnapshotSchema, type UsageSnapshot, type UsageSource } from '@tokenboard/usage-core'
 import { assertValidIsoCalendarDate } from './iso-calendar-date'
+import { normalizeCodexTotalTokens } from './codex-token-usage'
 
 type NormalizeOptions = {
   source: UsageSource
@@ -22,10 +23,29 @@ type SessionCountState = {
 }
 
 const dateFormatterByTimezone = new Map<string, Intl.DateTimeFormat>()
+const inputTokenKeys = ['inputTokens', 'input_tokens']
+const outputTokenKeys = ['outputTokens', 'output_tokens']
+const cacheCreationTokenKeys = [
+  'cacheCreationTokens',
+  'cacheCreationInputTokens',
+  'inputCacheCreationTokens',
+  'cache_creation_tokens',
+  'cache_creation_input_tokens',
+  'input_cache_creation_tokens',
+  'cache_write_input_tokens'
+]
+const cacheReadTokenKeys = [
+  'cacheReadTokens',
+  'cacheReadInputTokens',
+  'cachedInputTokens',
+  'cache_read_tokens',
+  'cache_read_input_tokens',
+  'cached_input_tokens'
+]
 
 export function normalizeCcusageDailyJson(input: unknown, options: NormalizeOptions): UsageSnapshot[] {
   const collectedAt = options.collectedAt ?? new Date().toISOString()
-  const sessionCounts = getSessionCounts(options.sessions, options.timezone)
+  const sessionCounts = getSessionCounts(options.sessions, options.timezone, options.source)
 
   const snapshots = extractDailyRows(input).flatMap((row) =>
     extractModelRows(row).map(({ model, metrics, parent }) =>
@@ -34,20 +54,12 @@ export function normalizeCcusageDailyJson(input: unknown, options: NormalizeOpti
         usageDate: readDate(row),
         timezone: options.timezone,
         model,
-        inputTokens: readNumber(metrics, ['inputTokens']),
-        outputTokens: readNumber(metrics, ['outputTokens']),
-        cacheCreationTokens: readNumber(metrics, [
-          'cacheCreationTokens',
-          'cacheCreationInputTokens',
-          'inputCacheCreationTokens'
-        ]),
-        cacheReadTokens: readNumber(metrics, [
-          'cacheReadTokens',
-          'cacheReadInputTokens',
-          'cachedInputTokens'
-        ]),
-        totalTokens: readTotalTokens(metrics),
-        costUsd: readCostUsd(metrics, parent),
+        inputTokens: readNumber(metrics, inputTokenKeys),
+        outputTokens: readNumber(metrics, outputTokenKeys),
+        cacheCreationTokens: readNumber(metrics, cacheCreationTokenKeys),
+        cacheReadTokens: readNumber(metrics, cacheReadTokenKeys),
+        totalTokens: readTotalTokens(metrics, options.source),
+        costUsd: readCostUsd(metrics, parent, options.source),
         sessionCount: readSessionCount({
           sessionCounts,
           usageDate: readDate(row),
@@ -66,12 +78,12 @@ export function normalizeCcusageDailyJson(input: unknown, options: NormalizeOpti
   })
 }
 
-function getSessionCounts(input: unknown, timezone: string) {
+function getSessionCounts(input: unknown, timezone: string, source: UsageSource) {
   const counts = new Map<string, number>()
   const attributions = new Map<string, CcusageSessionAttribution>()
 
   for (const row of extractDailyRows(input)) {
-    const attribution = readCcusageSessionAttribution(row, timezone)
+    const attribution = readCcusageSessionAttribution(row, timezone, source)
     if (!attribution) continue
     const key = sessionCountKey(attribution.usageDate, attribution.model)
     counts.set(key, (counts.get(key) ?? 0) + 1)
@@ -104,20 +116,22 @@ function appendSessionOnlySnapshots(
     if (existing.has(key) || sessionCount <= 0) continue
     const attribution = sessionCounts.attributions.get(key)
     if (!attribution) continue
-    sessionOnly.push(usageSnapshotSchema.parse({
-      source: input.source,
-      usageDate: attribution.usageDate,
-      timezone: input.timezone,
-      model: attribution.model,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-      totalTokens: 0,
-      costUsd: 0,
-      sessionCount,
-      collectedAt: input.collectedAt
-    }))
+    sessionOnly.push(
+      usageSnapshotSchema.parse({
+        source: input.source,
+        usageDate: attribution.usageDate,
+        timezone: input.timezone,
+        model: attribution.model,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+        sessionCount,
+        collectedAt: input.collectedAt
+      })
+    )
   }
   return [...snapshots, ...sessionOnly]
 }
@@ -145,25 +159,28 @@ function readSessionDate(row: UnknownRecord, timezone: string) {
 
 export function readCcusageSessionAttribution(
   row: unknown,
-  timezone: string
+  timezone: string,
+  source: UsageSource = 'claude-code'
 ): CcusageSessionAttribution | null {
   if (!isRecord(row)) return null
   const usageDate = readSessionDate(row, timezone)
   if (!usageDate) return null
   return {
     usageDate,
-    model: readSessionCountModel(row)
+    model: readSessionCountModel(row, source)
   }
 }
 
-function readSessionCountModel(row: UnknownRecord) {
+function readSessionCountModel(row: UnknownRecord, source: UsageSource) {
   const rows = extractModelRows(row)
   const first = rows[0] ?? { model: readModel(row), metrics: row, parent: row }
-  return rows.slice(1).reduce((selected, candidate) =>
-    readTotalTokens(candidate.metrics) > readTotalTokens(selected.metrics)
-      ? candidate
-      : selected
-  , first).model
+  return rows
+    .slice(1)
+    .reduce(
+      (selected, candidate) =>
+        readTotalTokens(candidate.metrics, source) > readTotalTokens(selected.metrics, source) ? candidate : selected,
+      first
+    ).model
 }
 
 function sessionCountKey(date: string, model: string) {
@@ -252,21 +269,26 @@ function readModel(row: UnknownRecord) {
   return 'all'
 }
 
-function readTotalTokens(row: UnknownRecord) {
-  const explicitTotal = readNumber(row, ['totalTokens'])
-  if (explicitTotal > 0) {
-    return explicitTotal
+function readTotalTokens(row: UnknownRecord, source: UsageSource = 'claude-code') {
+  const inputTokens = readNumber(row, inputTokenKeys)
+  const outputTokens = readNumber(row, outputTokenKeys)
+  const cacheCreationTokens = readNumber(row, cacheCreationTokenKeys)
+  const cacheReadTokens = readNumber(row, cacheReadTokenKeys)
+  const explicitTotal = readNumber(row, ['totalTokens', 'total_tokens'])
+  if (source === 'codex') {
+    return normalizeCodexTotalTokens({
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens,
+      cacheReadTokens,
+      explicitTotalTokens: explicitTotal > 0 ? explicitTotal : undefined
+    })
   }
-
-  return (
-    readNumber(row, ['inputTokens']) +
-    readNumber(row, ['outputTokens']) +
-    readNumber(row, ['cacheCreationTokens', 'cacheCreationInputTokens', 'inputCacheCreationTokens']) +
-    readNumber(row, ['cacheReadTokens', 'cacheReadInputTokens', 'cachedInputTokens'])
-  )
+  if (explicitTotal > 0) return explicitTotal
+  return inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
 }
 
-function readNumber(row: UnknownRecord, keys: string[]) {
+function readNumber(row: UnknownRecord, keys: readonly string[]) {
   for (const key of keys) {
     const value = row[key]
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -277,7 +299,7 @@ function readNumber(row: UnknownRecord, keys: string[]) {
   return 0
 }
 
-function readCostUsd(row: UnknownRecord, parent: UnknownRecord) {
+function readCostUsd(row: UnknownRecord, parent: UnknownRecord, source: UsageSource = 'claude-code') {
   const directCost = readNumber(row, ['costUsd', 'costUSD', 'totalCost', 'cost'])
   if (directCost > 0) {
     return directCost
@@ -288,8 +310,8 @@ function readCostUsd(row: UnknownRecord, parent: UnknownRecord) {
   }
 
   const parentCost = readNumber(parent, ['costUsd', 'costUSD', 'totalCost', 'cost'])
-  const parentTokens = readNumber(parent, ['totalTokens'])
-  const rowTokens = readTotalTokens(row)
+  const parentTokens = readTotalTokens(parent, source)
+  const rowTokens = readTotalTokens(row, source)
   if (parentCost <= 0 || parentTokens <= 0 || rowTokens <= 0) {
     return 0
   }
@@ -342,7 +364,9 @@ function formatDate(value: string, timezone: string) {
     }
     throw error
   }
-  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value])
+  )
   return `${values.year}-${values.month}-${values.day}`
 }
 

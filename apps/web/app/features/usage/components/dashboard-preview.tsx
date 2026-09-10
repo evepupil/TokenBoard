@@ -8,10 +8,7 @@ import { UsageMetricCard, UsageMetricGrid } from './usage-metric-card'
 import { formatUsageMetricInteger, formatUsageMetricUsdWithCostAvailability } from './usage-metric-format'
 
 export function DashboardPreview(props: { summary: DashboardSummary; userName?: string }) {
-  const totalSourceTokens = props.summary.sourceSplit.reduce(
-    (total, item) => total + item.totalTokens,
-    0
-  )
+  const totalSourceTokens = props.summary.sourceSplit.reduce((total, item) => total + item.totalTokens, 0)
   const totalSourceTokensWithoutCacheRead = props.summary.sourceSplit.reduce(
     (total, item) => total + item.totalTokensWithoutCacheRead,
     0
@@ -20,10 +17,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
   // The summary reports cost availability as a flag per period, so the notice is
   // derived from the month source split rather than the period's own sources.
   const costUnavailableNotice = formatCostUnavailableNotice(props.summary.sourceSplit)
-  const trendTotalTokens = props.summary.dailyTrend.reduce(
-    (total, item) => total + item.totalTokens,
-    0
-  )
+  const trendTotalTokens = props.summary.dailyTrend.reduce((total, item) => total + item.totalTokens, 0)
   const trendTotalTokensWithoutCacheRead = props.summary.dailyTrend.reduce(
     (total, item) => total + item.totalTokensWithoutCacheRead,
     0
@@ -38,25 +32,55 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
               {props.userName ? `${props.userName} 的 token 面板` : 'AI token 使用面板'}
             </h1>
             <p class="mt-2 text-sm text-[var(--app-muted)]">
-              最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} / <a class="app-accent-link font-bold text-[var(--app-text)] underline decoration-lime-300/50 underline-offset-4" href="/settings/devices">设备数：{props.summary.deviceCount}</a>
+              最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} /{' '}
+              <a
+                class="app-accent-link font-bold text-[var(--app-text)] underline decoration-lime-300/50 underline-offset-4"
+                href="/settings/devices"
+              >
+                设备数：{props.summary.deviceCount}
+              </a>
             </p>
           </div>
           <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard/details">查看详情</LinkButton>
-            <LinkButton class="w-full sm:w-auto" href="/settings/install">连接设备</LinkButton>
+            <LinkButton class="w-full sm:w-auto" variant="secondary" href="/dashboard/details">
+              查看详情
+            </LinkButton>
+            <LinkButton class="w-full sm:w-auto" href="/settings/install">
+              连接设备
+            </LinkButton>
           </div>
         </div>
       </header>
 
       <UsageMetricGrid>
         <UsageMetricCard label="今日 tokens" value={formatUsageMetricInteger(props.summary.todayTokens)} tone="lime" />
-        <UsageMetricCard label="今日不含缓存读" value={formatUsageMetricInteger(props.summary.todayTokensWithoutCacheRead)} />
+        <UsageMetricCard
+          label="今日不含缓存读"
+          value={formatUsageMetricInteger(props.summary.todayTokensWithoutCacheRead)}
+        />
         <UsageMetricCard label="今日缓存率" value={formatPercentRate(props.summary.todayCacheReadRate)} />
-        <UsageMetricCard label="今日费用" value={formatUsageMetricUsdWithCostAvailability(props.summary.todayCostUsd, props.summary.todayCostAvailable, costUnavailableNotice)} />
+        <UsageMetricCard
+          label="今日费用"
+          value={formatUsageMetricUsdWithCostAvailability(
+            props.summary.todayCostUsd,
+            props.summary.todayCostAvailable,
+            costUnavailableNotice
+          )}
+        />
         <UsageMetricCard label="本月 tokens" value={formatUsageMetricInteger(props.summary.monthTokens)} />
-        <UsageMetricCard label="本月不含缓存读" value={formatUsageMetricInteger(props.summary.monthTokensWithoutCacheRead)} />
+        <UsageMetricCard
+          label="本月不含缓存读"
+          value={formatUsageMetricInteger(props.summary.monthTokensWithoutCacheRead)}
+        />
         <UsageMetricCard label="本月缓存率" value={formatPercentRate(props.summary.monthCacheReadRate)} />
-        <UsageMetricCard label="本月费用" value={formatUsageMetricUsdWithCostAvailability(props.summary.monthCostUsd, props.summary.monthCostAvailable, costUnavailableNotice)} />
+        <UsageMetricCard
+          label="本月费用"
+          value={formatUsageMetricUsdWithCostAvailability(
+            props.summary.monthCostUsd,
+            props.summary.monthCostAvailable,
+            costUnavailableNotice
+          )}
+        />
       </UsageMetricGrid>
 
       <section class="grid gap-3 lg:grid-cols-[1.45fr_0.85fr]">
@@ -65,11 +89,14 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
             <div>
               <CardTitle>30 天趋势</CardTitle>
               <CardDescription>
-                最近 30 天共 {formatInteger(trendTotalTokens)} tokens，不含缓存读 {formatInteger(trendTotalTokensWithoutCacheRead)}。
+                最近 30 天共 {formatInteger(trendTotalTokens)} tokens，不含缓存读{' '}
+                {formatInteger(trendTotalTokensWithoutCacheRead)}。
               </CardDescription>
             </div>
             <div class="flex flex-wrap justify-end gap-2">
-              <Badge class="min-h-9 px-3 py-1" variant="outline">total</Badge>
+              <Badge class="min-h-9 px-3 py-1" variant="outline">
+                total
+              </Badge>
               <Badge class="min-h-9 px-3 py-1">不含缓存读</Badge>
             </div>
           </CardHeader>
@@ -111,9 +138,7 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
         <Card>
           <CardHeader class="p-4 lg:p-3 xl:p-4">
             <CardTitle>来源占比</CardTitle>
-            <CardDescription>
-              按本月不含缓存读 token 计算，同时保留 total token 对照。
-            </CardDescription>
+            <CardDescription>按本月不含缓存读 token 计算，同时保留 total token 对照。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-3 p-4 pt-0 text-sm text-[var(--app-muted)] lg:p-3 lg:pt-0 xl:p-4 xl:pt-0">
             {props.summary.sourceSplit.length > 0 ? (
@@ -126,7 +151,8 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
                     </span>
                   </div>
                   <p class="mt-1 break-words text-xs [overflow-wrap:anywhere]">
-                    {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 / {formatInteger(item.totalTokens)} total / 缓存率 {formatPercentRate(item.cacheReadRate)}
+                    {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 / {formatInteger(item.totalTokens)}{' '}
+                    total / 缓存率 {formatPercentRate(item.cacheReadRate)}
                   </p>
                   <div class="mt-2 h-2 overflow-hidden rounded-full bg-[var(--app-border)]">
                     <div
@@ -138,7 +164,9 @@ export function DashboardPreview(props: { summary: DashboardSummary; userName?: 
                 </div>
               ))
             ) : (
-              <p class="app-surface-subtle rounded-md border border-dashed border-[var(--app-border)] p-4">还没有上传使用数据。</p>
+              <p class="app-surface-subtle rounded-md border border-dashed border-[var(--app-border)] p-4">
+                还没有上传使用数据。
+              </p>
             )}
           </CardContent>
         </Card>

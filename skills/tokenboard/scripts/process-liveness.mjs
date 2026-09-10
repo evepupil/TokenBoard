@@ -7,6 +7,7 @@ const processIdentityTimeoutMs = 2_000
 const darwinProcessInfoSize = 136
 const darwinStartSecondsOffset = 120
 const darwinStartMicrosecondsOffset = 128
+const currentProcessIdentityCache = new Map()
 
 export function isProcessAlive(pid, options = {}) {
   return probeProcessLiveness(pid, options) !== 'dead'
@@ -37,8 +38,31 @@ export function supportsReliableSignalZero(platform, nodeVersion) {
 
 export function currentProcessStartIdentity(options = {}) {
   const pid = options.pid ?? process.pid
+  const cacheKey = cacheKeyForCurrentProcess(pid, options)
+  if (cacheKey) {
+    const cached = currentProcessIdentityCache.get(cacheKey)
+    if (cached) return cached
+  }
   const identity = probeProcessStartIdentity(pid, options)
-  return identity.status === 'known' ? identity.value : undefined
+  if (identity.status !== 'known') return undefined
+  if (cacheKey) currentProcessIdentityCache.set(cacheKey, identity.value)
+  return identity.value
+}
+
+function cacheKeyForCurrentProcess(pid, options) {
+  if (
+    pid !== process.pid ||
+    options.readProcessStartIdentity ||
+    options.runProcessIdentity ||
+    options.readFile ||
+    options.kill ||
+    options.runTasklist
+  ) {
+    return null
+  }
+  const platform = options.platform || process.platform
+  const nodeVersion = options.nodeVersion || process.versions.node
+  return `${pid}:${platform}:${nodeVersion}`
 }
 
 export function probeProcessStartIdentity(pid, options = {}) {
@@ -67,10 +91,18 @@ export function tasklistContainsPid(output, pid) {
 
 export function tasklistCommand(env = process.env) {
   const systemRoot = typeof env.SystemRoot === 'string' ? env.SystemRoot.trim() : ''
-  const root = windowsPath.isAbsolute(systemRoot)
-    ? systemRoot
-    : 'C:\\Windows'
+  const root = isDriveRootedWindowsPath(systemRoot) ? systemRoot : 'C:\\Windows'
   return windowsPath.join(root, 'System32', 'tasklist.exe')
+}
+
+export function powershellCommand(env = process.env) {
+  const systemRoot = typeof env.SystemRoot === 'string' ? env.SystemRoot.trim() : ''
+  const root = isDriveRootedWindowsPath(systemRoot) ? systemRoot : 'C:\\Windows'
+  return windowsPath.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+}
+
+function isDriveRootedWindowsPath(value) {
+  return windowsPath.isAbsolute(value)
 }
 
 function isWindowsProcessAlive(pid, runTasklist, env) {
@@ -84,10 +116,15 @@ function isWindowsProcessAlive(pid, runTasklist, env) {
 }
 
 function normalizeProcessStartIdentity(value) {
-  if (value && typeof value === 'object' &&
-    (value.status === 'known' || value.status === 'dead' || value.status === 'unknown')) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    (value.status === 'known' || value.status === 'dead' || value.status === 'unknown')
+  ) {
     if (value.status !== 'known') return { status: value.status }
-    return typeof value.value === 'string' && value.value ? { status: 'known', value: value.value } : { status: 'unknown' }
+    return typeof value.value === 'string' && value.value
+      ? { status: 'known', value: value.value }
+      : { status: 'unknown' }
   }
   if (typeof value === 'string' && value) return { status: 'known', value }
   return { status: 'unknown' }
@@ -103,7 +140,10 @@ function readLinuxProcessStartIdentity(pid, options = {}) {
   }
   const commandEnd = raw.lastIndexOf(')')
   if (commandEnd < 0) return { status: 'unknown' }
-  const fields = raw.slice(commandEnd + 1).trim().split(/\s+/)
+  const fields = raw
+    .slice(commandEnd + 1)
+    .trim()
+    .split(/\s+/)
   const startTicks = fields[19]
   if (!/^\d+$/.test(startTicks || '')) return { status: 'unknown' }
 
@@ -121,17 +161,16 @@ function readLinuxProcessStartIdentity(pid, options = {}) {
 
 function readDarwinProcessStartIdentity(pid, options = {}) {
   const runProcessIdentity = options.runProcessIdentity || spawnSync
-  const result = runProcessIdentity('/usr/bin/osascript', [
-    '-l',
-    'JavaScript',
-    '-e',
-    darwinProcessIdentityScript(pid)
-  ], {
-    encoding: 'utf8',
-    timeout: processIdentityTimeoutMs,
-    // osascript can outlive a terminated Node caller; force a bounded probe.
-    killSignal: 'SIGKILL'
-  })
+  const result = runProcessIdentity(
+    '/usr/bin/osascript',
+    ['-l', 'JavaScript', '-e', darwinProcessIdentityScript(pid)],
+    {
+      encoding: 'utf8',
+      timeout: processIdentityTimeoutMs,
+      // osascript can outlive a terminated Node caller; force a bounded probe.
+      killSignal: 'SIGKILL'
+    }
+  )
   if (result.error || result.status == null) return { status: 'unknown' }
   if (result.status !== 0) return processIdentityFailureStatus(pid, options)
 
@@ -152,7 +191,7 @@ function readDarwinProcessStartIdentity(pid, options = {}) {
 }
 
 function darwinProcessIdentityScript(pid) {
-  return `ObjC.import("Foundation"); ObjC.bindFunction("proc_pidinfo", ["int", ["int", "int", "uint64_t", "void*", "int"]], "/usr/lib/libproc.dylib"); const data = $.NSMutableData.dataWithLength(${darwinProcessInfoSize}); const size = $.proc_pidinfo(${pid}, 3, 0, data.mutableBytes, ${darwinProcessInfoSize}); if (size !== ${darwinProcessInfoSize}) { throw new Error("proc_pidinfo unavailable") }; ObjC.unwrap(data.base64EncodedStringWithOptions(0));`
+  return `ObjC.import("Foundation"); const procPidInfoTypes = ["int", ["int", "int", "unsigned long", "pointer", "int"]]; try { ObjC.bindFunction("proc_pidinfo", procPidInfoTypes); } catch (_) { ObjC.bindFunction("proc_pidinfo", procPidInfoTypes, "/usr/lib/libproc.dylib"); } const data = $.NSMutableData.dataWithLength(${darwinProcessInfoSize}); const size = $.proc_pidinfo(${pid}, 3, 0, data.mutableBytes, ${darwinProcessInfoSize}); if (size !== ${darwinProcessInfoSize}) { throw new Error("proc_pidinfo unavailable") }; ObjC.unwrap(data.base64EncodedStringWithOptions(0));`
 }
 
 function processIdentityFailureStatus(pid, options) {
@@ -183,18 +222,17 @@ function readPsProcessStartIdentity(pid, options) {
 
 function readWindowsProcessStartIdentity(pid, options) {
   const command = `try { $process = Get-Process -Id ${pid} -ErrorAction Stop; [Console]::Out.Write($process.StartTime.ToUniversalTime().Ticks) } catch { if ($_.CategoryInfo.Category -eq 'ObjectNotFound' -or $_.FullyQualifiedErrorId -like 'NoProcessFoundForGivenId*') { exit 3 }; exit 4 }`
-  const result = (options.runProcessIdentity || spawnSync)('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    command
-  ], {
-    encoding: 'utf8',
-    timeout: processIdentityTimeoutMs,
-    // PowerShell can ignore the default SIGTERM; force a bounded probe.
-    killSignal: 'SIGKILL',
-    windowsHide: true
-  })
+  const result = (options.runProcessIdentity || spawnSync)(
+    powershellCommand(options.env),
+    ['-NoProfile', '-NonInteractive', '-Command', command],
+    {
+      encoding: 'utf8',
+      timeout: processIdentityTimeoutMs,
+      // PowerShell can ignore the default SIGTERM; force a bounded probe.
+      killSignal: 'SIGKILL',
+      windowsHide: true
+    }
+  )
   if (result.error) return { status: 'unknown' }
   if (result.status === 3) return { status: 'dead' }
   if (result.status !== 0) return { status: 'unknown' }

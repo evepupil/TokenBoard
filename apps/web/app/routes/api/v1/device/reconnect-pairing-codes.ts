@@ -1,17 +1,10 @@
 import { createRoute } from 'honox/factory'
 import { z } from 'zod'
 import { D1DevicePairingRepository } from '../../../../features/device/repository'
-import {
-  createPairingCodeDeps,
-  createReconnectPairingCodeFromClaim
-} from '../../../../features/device/service'
+import { createPairingCodeDeps, createReconnectPairingCodeFromClaim } from '../../../../features/device/service'
 import { getCanonicalPublicOrigin } from '../../../../features/settings/service'
 import { jsonError } from '../../../../lib/http'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit,
-  writeRateLimitPolicies
-} from '../../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit, writeRateLimitPolicies } from '../../../../lib/rate-limit'
 
 const reconnectPairingCodeRequestSchema = z.object({
   deviceId: z.string().min(1).max(128),
@@ -27,11 +20,7 @@ export const POST = createRoute(async (c) => {
     })
     const request = reconnectPairingCodeRequestSchema.parse(await c.req.json())
     const repository = new D1DevicePairingRepository(c.env.DB)
-    const result = await createReconnectPairingCodeFromClaim(
-      repository,
-      request,
-      createPairingCodeDeps()
-    )
+    const result = await createReconnectPairingCodeFromClaim(repository, request, createPairingCodeDeps())
     const baseUrl = getCanonicalPublicOrigin({
       configuredOrigin: c.env.BETTER_AUTH_URL,
       requestOrigin: new URL(c.req.url).origin

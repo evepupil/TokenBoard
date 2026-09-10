@@ -17,9 +17,7 @@ test('removes macOS LaunchAgent without deleting config', () => {
     assert.equal(result.plistPath, plistPath)
     assert.equal(existsSync(plistPath), false)
     assert.equal(readFileSync(harness.configPath, 'utf8'), '{}')
-    assert.deepEqual(harness.calls.map(commandLine), [
-      `launchctl bootout gui/501 ${plistPath}`
-    ])
+    assert.deepEqual(harness.calls.map(commandLine), [`launchctl bootout gui/501 ${plistPath}`])
   } finally {
     harness.cleanup()
   }

@@ -1,4 +1,4 @@
-import { costUnavailableSources } from '@tokenboard/usage-core'
+import { billableCostSql, costUnavailableSourcesSql as sharedCostUnavailableSourcesSql } from '../../lib/usage-cost'
 
 const usageSqlValueBrand = Symbol('usage-sql-value')
 const dailyUsageScopeBrand = Symbol('daily-usage-scope-filter')
@@ -10,9 +10,7 @@ const usageSummaryScopeBrand = Symbol('usage-summary-scope-filter')
  * has to be declared once. Values are compile-time constants from a const
  * tuple, never user input.
  */
-export const costUnavailableSourcesSql = costUnavailableSources
-  .map((source) => `'${source}'`)
-  .join(', ')
+export const costUnavailableSourcesSql = sharedCostUnavailableSourcesSql
 
 type UsageSqlValue = {
   readonly [usageSqlValueBrand]: true
@@ -72,8 +70,8 @@ export function dailyUsageScopeSql(input: {
   userId?: UsageSqlValue
   usageDateGte?: UsageSqlValue
   usageDateLte?: UsageSqlValue
-  optionalSource?: { selector: UsageSqlValue, value: UsageSqlValue }
-  modelQuery?: { selector: UsageSqlValue, value: UsageSqlValue }
+  optionalSource?: { selector: UsageSqlValue; value: UsageSqlValue }
+  modelQuery?: { selector: UsageSqlValue; value: UsageSqlValue }
 }): DailyUsageScopeFilter {
   const predicates = [
     simpleUsagePredicate('user_id', '=', input.userId),
@@ -82,9 +80,7 @@ export function dailyUsageScopeSql(input: {
     input.optionalSource
       ? optionalEqualsPredicate('source', input.optionalSource.selector, input.optionalSource.value, 'all')
       : null,
-    input.modelQuery
-      ? modelContainsPredicate(input.modelQuery.selector, input.modelQuery.value)
-      : null
+    input.modelQuery ? modelContainsPredicate(input.modelQuery.selector, input.modelQuery.value) : null
   ].filter((predicate): predicate is NonNullable<typeof predicate> => Boolean(predicate))
 
   return {
@@ -94,9 +90,7 @@ export function dailyUsageScopeSql(input: {
 }
 
 function dedupedDailyUsageCteWithFilter(filterInput?: DailyUsageScopeFilter) {
-  const filter = filterInput?.dailyUsageSql
-    ? `AND (${filterInput.dailyUsageSql})`
-    : ''
+  const filter = filterInput?.dailyUsageSql ? `AND (${filterInput.dailyUsageSql})` : ''
   return `
 deduped_daily_usage AS (
   SELECT daily_usage.*
@@ -129,19 +123,14 @@ const summaryColumns = [
   'cache_read_tokens',
   'total_tokens',
   'total_tokens_without_cache_read',
-  'cost_usd',
+  `${billableCostSql()} as cost_usd`,
   'session_count',
   'updated_at'
 ]
 
-export function effectiveDailyUsageSummaryWith(input?: {
-  filter?: UsageSummaryScopeFilter
-  summaryStrict?: boolean
-}) {
+export function effectiveDailyUsageSummaryWith(input?: { filter?: UsageSummaryScopeFilter; summaryStrict?: boolean }) {
   assertUsageSummaryInput(input)
-  const summaryFilter = input?.filter?.summarySql
-    ? `WHERE ${input.filter.summarySql}`
-    : ''
+  const summaryFilter = input?.filter?.summarySql ? `WHERE ${input.filter.summarySql}` : ''
   if (input?.summaryStrict) {
     return `
 effective_daily_usage_summary AS (
@@ -165,7 +154,7 @@ fallback_daily_usage_summary AS (
     COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
     COALESCE(SUM(total_tokens), 0) as total_tokens,
     COALESCE(SUM(total_tokens - cache_read_tokens), 0) as total_tokens_without_cache_read,
-    COALESCE(SUM(cost_usd), 0) as cost_usd,
+    COALESCE(SUM(${billableCostSql()}), 0) as cost_usd,
     COALESCE(SUM(session_count), 0) as session_count,
     MAX(synced_at) as updated_at
   FROM deduped_daily_usage
@@ -262,10 +251,12 @@ function modelContainsPredicate(selector: UsageSqlValue, value: UsageSqlValue): 
 }
 
 function scopedSql(predicates: UsagePredicate[], table: 'daily_usage' | 'daily_usage_summary') {
-  return predicates.map((predicate) => {
-    if (predicate.render) return predicate.render(table)
-    return `${table}.${predicate.column} ${predicate.op} ${predicate.value?.sql}`
-  }).join(' AND ')
+  return predicates
+    .map((predicate) => {
+      if (predicate.render) return predicate.render(table)
+      return `${table}.${predicate.column} ${predicate.op} ${predicate.value?.sql}`
+    })
+    .join(' AND ')
 }
 
 function assertUsageSqlValue(value: UsageSqlValue) {
@@ -280,11 +271,8 @@ function assertDailyUsageFilter(filter?: DailyUsageScopeFilter) {
   }
 }
 
-function assertUsageSummaryInput(input?: {
-  filter?: UsageSummaryScopeFilter
-  summaryStrict?: boolean
-}) {
-  const legacyInput = input as { dailyUsageFilter?: unknown, summaryFilter?: unknown } | undefined
+function assertUsageSummaryInput(input?: { filter?: UsageSummaryScopeFilter; summaryStrict?: boolean }) {
+  const legacyInput = input as { dailyUsageFilter?: unknown; summaryFilter?: unknown } | undefined
   if (legacyInput?.dailyUsageFilter !== undefined || legacyInput?.summaryFilter !== undefined) {
     throw new Error('Usage summary filters must be built with usageSummaryScopeSql')
   }

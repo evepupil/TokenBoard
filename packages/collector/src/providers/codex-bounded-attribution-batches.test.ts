@@ -22,8 +22,8 @@ describe('Codex bounded canonical attribution batches', () => {
 
     try {
       await Promise.all([
-        writeJsonl(first, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)]),
-        writeJsonl(second, [tokenCountEvent('2026-05-20T04:25:07.234Z', 10)])
+        writeJsonl(first, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')]),
+        writeJsonl(second, [tokenCountEvent('2026-05-21T04:25:07.234Z', 10, 'gpt-5.6')])
       ])
 
       const snapshots = await collectCodexUsage({
@@ -66,13 +66,15 @@ describe('Codex bounded canonical attribution batches', () => {
       expect(commandArgs.every((args) => args.includes('--single-thread'))).toBe(true)
       expect(canonicalBatches).toContainEqual({ first: true, second: false })
       expect(canonicalBatches).toContainEqual({ first: false, second: true })
-      expect(snapshots).toContainEqual(expect.objectContaining({
-        source: 'codex',
-        usageDate: '2026-05-21',
-        model: 'gpt-5.6',
-        totalTokens: 20,
-        sessionCount: 2
-      }))
+      expect(snapshots).toContainEqual(
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-21',
+          model: 'gpt-5.6',
+          totalTokens: 20,
+          sessionCount: 2
+        })
+      )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
       await rm(stateDir, { recursive: true, force: true })
@@ -92,8 +94,8 @@ describe('Codex bounded canonical attribution batches', () => {
 
     try {
       await Promise.all([
-        writeJsonl(first, [tokenCountEvent('2026-05-20T04:24:07.234Z', 10)]),
-        writeJsonl(second, [tokenCountEvent('2026-05-20T04:25:07.234Z', 10)])
+        writeJsonl(first, [tokenCountEvent('2026-05-21T04:24:07.234Z', 10, 'gpt-5.6')]),
+        writeJsonl(second, [tokenCountEvent('2026-05-21T04:25:07.234Z', 10, 'gpt-5.6')])
       ])
 
       const runner = async (_command: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
@@ -119,7 +121,9 @@ describe('Codex bounded canonical attribution batches', () => {
         }
         dailyCalls += 1
         if (dailyCalls === 2) {
-          await writeFile(second, `${JSON.stringify(tokenCountEvent('2026-05-20T04:26:07.234Z', 20))}\n`, { flag: 'a' })
+          await writeFile(second, `${JSON.stringify(tokenCountEvent('2026-05-21T04:26:07.234Z', 20, 'gpt-5.6'))}\n`, {
+            flag: 'a'
+          })
         }
         return dailyResult(20)
       }
@@ -132,7 +136,9 @@ describe('Codex bounded canonical attribution batches', () => {
         runner
       })
 
-      await writeFile(second, `${JSON.stringify(tokenCountEvent('2026-05-20T04:25:30.234Z', 15))}\n`, { flag: 'a' })
+      await writeFile(second, `${JSON.stringify(tokenCountEvent('2026-05-21T04:25:30.234Z', 15, 'gpt-5.6'))}\n`, {
+        flag: 'a'
+      })
 
       await collectCodexUsage({
         codexHome,
@@ -188,7 +194,9 @@ function sessionRow(sessionFile: string, lastActivity: string, model = 'gpt-5.4'
 }
 
 async function exists(filePath: string) {
-  return access(filePath).then(() => true).catch(() => false)
+  return access(filePath)
+    .then(() => true)
+    .catch(() => false)
 }
 
 async function readScopedToken(scopedHome: string, sessionFile: string) {

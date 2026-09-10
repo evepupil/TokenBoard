@@ -43,7 +43,13 @@ export async function createPublicUsageResponse(input: {
       configuredOrigin: input.configuredOrigin,
       requestOrigin: input.requestOrigin
     })
-    const svg = await getPublicUsageCard(input.db, input.route.slug, input.now ?? new Date(), origin, input.summaryStrict)
+    const svg = await getPublicUsageCard(
+      input.db,
+      input.route.slug,
+      input.now ?? new Date(),
+      origin,
+      input.summaryStrict
+    )
     return new Response(svg, {
       status: 200,
       headers: {
@@ -62,16 +68,10 @@ export async function createPublicUsageResponse(input: {
 
 export function publicApiErrorResponse(error: unknown) {
   if (error instanceof ApiError) {
-    return Response.json(
-      { error: { code: error.code, message: error.message } },
-      { status: error.status }
-    )
+    return Response.json({ error: { code: error.code, message: error.message } }, { status: error.status })
   }
 
-  return Response.json(
-    { error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' } },
-    { status: 500 }
-  )
+  return Response.json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' } }, { status: 500 })
 }
 
 function decodePathSegment(value: string) {

@@ -27,12 +27,11 @@ describe('Codex subagent usage validation', () => {
         })
       ])
 
-      await expect(readChildLastUsageByDate(
-        filePath,
-        '2026-05-25T00:00:00.000Z',
-        'Asia/Shanghai',
-        (line) => diagnostics.push(line)
-      )).resolves.toEqual([
+      await expect(
+        readChildLastUsageByDate(filePath, '2026-05-25T00:00:00.000Z', 'Asia/Shanghai', (line) =>
+          diagnostics.push(line)
+        )
+      ).resolves.toEqual([
         expect.objectContaining({
           usageDate: '2026-05-25',
           inputTokens: 50,
@@ -64,15 +63,17 @@ describe('Codex subagent usage validation', () => {
         })
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-25T01:20:00.000Z',
-        stderr: (line) => diagnostics.push(line),
-        async runner(_command, args) {
-          return args.includes('session') ? childSessionResult() : childDailyResult()
-        }
-      })).resolves.toEqual([
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-25T01:20:00.000Z',
+          stderr: (line) => diagnostics.push(line),
+          async runner(_command, args) {
+            return args.includes('session') ? childSessionResult() : childDailyResult()
+          }
+        })
+      ).resolves.toEqual([
         expect.objectContaining({
           source: 'codex',
           usageDate: '2026-05-25',
@@ -107,15 +108,17 @@ describe('Codex subagent usage validation', () => {
         })
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-25T01:20:00.000Z',
-        stderr: (line) => diagnostics.push(line),
-        async runner(_command, args) {
-          return args.includes('session') ? childSessionResult() : childDailyResult()
-        }
-      })).resolves.toEqual([
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-25T01:20:00.000Z',
+          stderr: (line) => diagnostics.push(line),
+          async runner(_command, args) {
+            return args.includes('session') ? childSessionResult() : childDailyResult()
+          }
+        })
+      ).resolves.toEqual([
         expect.objectContaining({
           source: 'codex',
           usageDate: '2026-05-25',
@@ -136,38 +139,42 @@ describe('Codex subagent usage validation', () => {
 
 function childDailyResult() {
   return {
-    daily: [{
-      date: '2026-05-25',
-      models: {
-        'gpt-5': {
-          inputTokens: 1100,
-          cachedInputTokens: 1950,
-          outputTokens: 120,
-          totalTokens: 3170
-        }
-      },
-      totalTokens: 3170,
-      costUSD: 3.17
-    }]
+    daily: [
+      {
+        date: '2026-05-25',
+        models: {
+          'gpt-5': {
+            inputTokens: 1100,
+            cachedInputTokens: 1950,
+            outputTokens: 120,
+            totalTokens: 3170
+          }
+        },
+        totalTokens: 3170,
+        costUSD: 3.17
+      }
+    ]
   }
 }
 
 function childSessionResult() {
   return {
-    sessions: [{
-      sessionId: '2026/05/25/rollout-child',
-      lastActivity: '2026-05-25T01:10:00.000Z',
-      totalTokens: 3170,
-      costUSD: 3.17,
-      models: {
-        'gpt-5': {
-          inputTokens: 1100,
-          cachedInputTokens: 1950,
-          outputTokens: 120,
-          totalTokens: 3170,
-          costUSD: 3.17
+    sessions: [
+      {
+        sessionId: '2026/05/25/rollout-child',
+        lastActivity: '2026-05-25T01:10:00.000Z',
+        totalTokens: 3170,
+        costUSD: 3.17,
+        models: {
+          'gpt-5': {
+            inputTokens: 1100,
+            cachedInputTokens: 1950,
+            outputTokens: 120,
+            totalTokens: 3170,
+            costUSD: 3.17
+          }
         }
       }
-    }]
+    ]
   }
 }

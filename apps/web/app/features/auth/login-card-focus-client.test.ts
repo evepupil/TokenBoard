@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { focusLoginCard, initLoginCardFocus, shouldEnhanceLoginFocusClick, shouldHandleLoginFocusNavigation } from './login-card-focus-client'
+import {
+  focusLoginCard,
+  initLoginCardFocus,
+  shouldEnhanceLoginFocusClick,
+  shouldHandleLoginFocusNavigation
+} from './login-card-focus-client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -7,18 +12,24 @@ afterEach(() => {
 
 describe('login card focus client', () => {
   test('handles only same sign-in page navigation', () => {
-    expect(shouldHandleLoginFocusNavigation({
-      currentHref: 'https://tokenboard.example/auth/sign-in',
-      targetHref: 'https://tokenboard.example/auth/sign-in'
-    })).toBe(true)
-    expect(shouldHandleLoginFocusNavigation({
-      currentHref: 'https://tokenboard.example/auth/sign-in?error=github',
-      targetHref: 'https://tokenboard.example/auth/sign-in'
-    })).toBe(false)
-    expect(shouldHandleLoginFocusNavigation({
-      currentHref: 'https://tokenboard.example/',
-      targetHref: 'https://tokenboard.example/auth/sign-in'
-    })).toBe(false)
+    expect(
+      shouldHandleLoginFocusNavigation({
+        currentHref: 'https://tokenboard.example/auth/sign-in',
+        targetHref: 'https://tokenboard.example/auth/sign-in'
+      })
+    ).toBe(true)
+    expect(
+      shouldHandleLoginFocusNavigation({
+        currentHref: 'https://tokenboard.example/auth/sign-in?error=github',
+        targetHref: 'https://tokenboard.example/auth/sign-in'
+      })
+    ).toBe(false)
+    expect(
+      shouldHandleLoginFocusNavigation({
+        currentHref: 'https://tokenboard.example/',
+        targetHref: 'https://tokenboard.example/auth/sign-in'
+      })
+    ).toBe(false)
   })
 
   test.each([
@@ -127,17 +138,20 @@ function fakeDocument(card: ReturnType<typeof fakeLoginCard>) {
         clickListener = listener as (event: MouseEvent) => void
       }
     },
-    querySelector: vi.fn((selector: string) => selector === '[data-login-card="true"]' ? card : null),
+    querySelector: vi.fn((selector: string) => (selector === '[data-login-card="true"]' ? card : null)),
     dispatchClick(event: MouseEvent) {
       clickListener?.(event)
     }
   }
 }
 
-function fakeWindow(timers: Array<{ callback: () => void; delay: number }>, options: {
-  document?: ReturnType<typeof fakeDocument>
-  reducedMotion?: boolean
-} = {}) {
+function fakeWindow(
+  timers: Array<{ callback: () => void; delay: number }>,
+  options: {
+    document?: ReturnType<typeof fakeDocument>
+    reducedMotion?: boolean
+  } = {}
+) {
   return {
     innerHeight: 800,
     innerWidth: 1200,
@@ -160,7 +174,7 @@ function fakeLoginCard(primary: { focus: ReturnType<typeof vi.fn> }, rect: Parti
     classList,
     offsetWidth: 1,
     scrollIntoView: vi.fn(),
-    querySelector: vi.fn((selector: string) => selector === '[data-login-primary="true"]' ? primary : null),
+    querySelector: vi.fn((selector: string) => (selector === '[data-login-primary="true"]' ? primary : null)),
     getBoundingClientRect: () => ({
       top: 10,
       left: 10,

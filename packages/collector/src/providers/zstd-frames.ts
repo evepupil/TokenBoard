@@ -19,9 +19,17 @@ const skippableMagicMax = 0x184d2a5f
 export function decompressZstdFrames(buffer: Buffer): Buffer {
   const decoded: Buffer[] = []
   for (const frame of scanZstdFrames(buffer)) {
-    decoded.push(zstdDecompressSync(buffer.subarray(frame.start, frame.end)))
+    decoded.push(decompressZstdFrame(buffer, frame))
   }
   return Buffer.concat(decoded)
+}
+
+export function decompressZstdFrame(
+  buffer: Buffer,
+  frame: ZstdFrameRange,
+  options?: { maxOutputLength?: number }
+): Buffer {
+  return zstdDecompressSync(buffer.subarray(frame.start, frame.end), options)
 }
 
 export type ZstdFrameRange = { start: number; end: number }
@@ -59,7 +67,10 @@ export function scanZstdFrames(buffer: Buffer): ZstdFrameRange[] {
     if (offset === buffer.length) return frames
     const descriptor = buffer.readUInt8(offset)
     offset += 1
-    if ((descriptor & 0x18) !== 0) {
+    // Bit 3 is reserved and must be zero. Bit 4 is currently unused, but
+    // valid producers may leave it set, so do not reject that forward-
+    // compatible header bit.
+    if ((descriptor & 0x08) !== 0) {
       throw new Error(`Corrupt Zstandard session log: reserved frame-header bit at byte ${offset - 1}`)
     }
 
@@ -68,9 +79,7 @@ export function scanZstdFrames(buffer: Buffer): ZstdFrameRange[] {
     const hasChecksum = (descriptor & 0x04) !== 0
     const dictionaryFlag = descriptor & 0x03
     const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag
-    const contentSizeBytes = contentSizeFlag === 0
-      ? (singleSegment ? 1 : 0)
-      : 1 << contentSizeFlag
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag
     const remainingHeaderBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes
     if (buffer.length - offset < remainingHeaderBytes) return frames
     offset += remainingHeaderBytes

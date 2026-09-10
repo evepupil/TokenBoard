@@ -23,8 +23,8 @@ function hasTokenMetricField(value: unknown, depth = 0): boolean {
     return value.some((item) => hasTokenMetricField(item, depth + 1))
   }
 
-  return Object.entries(value as UnknownRecord).some(([key, child]) =>
-    isTokenMetricKey(key) || hasTokenMetricField(child, depth + 1)
+  return Object.entries(value as UnknownRecord).some(
+    ([key, child]) => isTokenMetricKey(key) || hasTokenMetricField(child, depth + 1)
   )
 }
 
@@ -44,5 +44,5 @@ function isTokenMetricKey(key: string) {
 }
 
 function readRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord) : null
 }

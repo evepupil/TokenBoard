@@ -2,10 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  appendBoundedStatuslineError,
-  appendBoundedStatuslineEvent
-} from './antigravity-statusline-log.mjs'
+import { appendBoundedStatuslineError, appendBoundedStatuslineEvent } from './antigravity-statusline-log.mjs'
 import { startOriginalStatuslineCommand } from './antigravity-statusline-original.mjs'
 import { errorMessage } from './error-message.mjs'
 
@@ -47,11 +44,7 @@ export async function runStatuslineCli(argv = process.argv.slice(2), env = proce
     input = await readStdin(options.maxInputBytes, original)
     if (input.captureError) throw input.captureError
     if (input.tooLarge) throw new Error('Antigravity statusline payload too large')
-    const event = extractStatuslineEvent(
-      input.raw,
-      new Date().toISOString(),
-      randomBytes(16).toString('hex')
-    )
+    const event = extractStatuslineEvent(input.raw, new Date().toISOString(), randomBytes(16).toString('hex'))
     if (event) {
       appendBoundedStatuslineEvent(options.logPath, event, options.maxLogBytes)
     }
@@ -96,9 +89,8 @@ export function extractStatuslineEvent(raw, capturedAt, captureId) {
     capturedAt,
     ...(captureId ? { captureId } : {}),
     conversationHash,
-    conversationHashAliases: conversationHashAliases && conversationHashAliases !== conversationHash
-      ? [conversationHashAliases]
-      : undefined,
+    conversationHashAliases:
+      conversationHashAliases && conversationHashAliases !== conversationHash ? [conversationHashAliases] : undefined,
     ...(statuslineEventHash ? { statuslineEventHash } : {}),
     model,
     usage: {
@@ -116,7 +108,8 @@ export function readOptions(argv, env = process.env) {
   if (!stateDir) {
     throw new Error('Missing --state-dir for Antigravity statusline handler')
   }
-  const logPath = flags['log-path'] || env.TOKENBOARD_ANTIGRAVITY_STATUSLINE_LOG || `${stateDir}/antigravity-cli-statusline.jsonl`
+  const logPath =
+    flags['log-path'] || env.TOKENBOARD_ANTIGRAVITY_STATUSLINE_LOG || `${stateDir}/antigravity-cli-statusline.jsonl`
   const errorPath = flags['error-path'] || `${stateDir}/antigravity-statusline-errors.log`
   const originalCommandFile = flags['original-command-file'] || `${stateDir}/antigravity_statusline_original.json`
   return {
@@ -124,9 +117,7 @@ export function readOptions(argv, env = process.env) {
     logPath,
     errorPath,
     originalCommandFile,
-    maxInputBytes: Number(Object.hasOwn(flags, 'max-input-bytes')
-      ? flags['max-input-bytes']
-      : defaultMaxInputBytes),
+    maxInputBytes: Number(Object.hasOwn(flags, 'max-input-bytes') ? flags['max-input-bytes'] : defaultMaxInputBytes),
     maxLogBytes: readMaxLogBytes(flags['max-log-bytes'] || env.TOKENBOARD_ANTIGRAVITY_STATUSLINE_MAX_BYTES),
     selfPath: resolve(fileURLToPath(import.meta.url))
   }
@@ -146,9 +137,10 @@ function parsePayload(raw) {
 }
 
 async function readStdin(maxBytes, original) {
-  const captureError = !Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > defaultMaxInputBytes
-    ? new Error('Invalid Antigravity statusline input limit')
-    : undefined
+  const captureError =
+    !Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > defaultMaxInputBytes
+      ? new Error('Invalid Antigravity statusline input limit')
+      : undefined
   const captured = captureError ? null : Buffer.alloc(maxBytes)
   let total = 0
   let tooLarge = false
@@ -183,8 +175,10 @@ async function readStdin(maxBytes, original) {
 function readModel(value) {
   if (typeof value === 'string') return readBoundedString(value, maxModelLength, 'model')
   const model = readObject(value)
-  return readBoundedString(model.display_name, maxModelLength, 'model.display_name') ||
+  return (
+    readBoundedString(model.display_name, maxModelLength, 'model.display_name') ||
     readBoundedString(model.id, maxModelLength, 'model.id')
+  )
 }
 
 function readStatuslineEventHash(payload) {
@@ -225,17 +219,12 @@ function readObject(value) {
 
 function hashIdentifier(value) {
   if (!value) return null
-  return createHash('sha256')
-    .update(value)
-    .digest('hex')
+  return createHash('sha256').update(value).digest('hex')
 }
 
 function hashLegacyIdentifier(value) {
   if (!value) return null
-  return createHash('sha256')
-    .update('tokenboard-antigravity-cli\0')
-    .update(value)
-    .digest('hex')
+  return createHash('sha256').update('tokenboard-antigravity-cli\0').update(value).digest('hex')
 }
 
 function hashStatuslineEventIdentifier(field, value) {
@@ -258,11 +247,15 @@ function readMaxLogBytes(value) {
 
 function recordStatuslineError(filePath, stage, error, maxBytes) {
   try {
-    appendBoundedStatuslineError(filePath, {
-      stage,
-      message: errorMessage(error),
-      capturedAt: new Date().toISOString()
-    }, maxBytes)
+    appendBoundedStatuslineError(
+      filePath,
+      {
+        stage,
+        message: errorMessage(error),
+        capturedAt: new Date().toISOString()
+      },
+      maxBytes
+    )
   } catch (_) {}
 }
 

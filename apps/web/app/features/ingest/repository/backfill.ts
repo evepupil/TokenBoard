@@ -1,13 +1,5 @@
-import {
-  prepareSummaryRefresh,
-  prepareUserTotalFromSummaryRefresh
-} from './refresh'
-import {
-  backfillLookahead,
-  runStatementBatches,
-  usageSummaryBackfillStateId,
-  type UsageSummaryKey
-} from './types'
+import { prepareSummaryRefresh, prepareUserTotalFromSummaryRefresh } from './refresh'
+import { backfillLookahead, runStatementBatches, usageSummaryBackfillStateId, type UsageSummaryKey } from './types'
 import {
   summaryBackfillCursorSql,
   summaryBackfillInitialSql,
@@ -39,10 +31,7 @@ type UsageSummaryBackfillRow = {
 export const defaultUsageSummaryBackfillLimit = 50
 export const maxUsageSummaryBackfillLimit = 500
 
-export async function backfillUsageSummaryCache(input: {
-  db: D1Database
-  limit: number
-}) {
+export async function backfillUsageSummaryCache(input: { db: D1Database; limit: number }) {
   const state = await readUsageSummaryBackfillState(input.db)
   if (state.completedAt) return { backfilled: 0, totalsRefreshed: 0 }
   if (state.phase === 'totals') {
@@ -76,7 +65,10 @@ async function refreshBackfillSummaries(
     state
   })
   const keysToRefresh = keys.slice(0, input.limit)
-  await runStatementBatches(input.db, keysToRefresh.map((key) => prepareSummaryRefresh(input.db, key)))
+  await runStatementBatches(
+    input.db,
+    keysToRefresh.map((key) => prepareSummaryRefresh(input.db, key))
+  )
 
   const hasMoreSummaries = keys.length > input.limit
   if (hasMoreSummaries) {
@@ -90,10 +82,7 @@ async function refreshBackfillSummaries(
     return { backfilled: keysToRefresh.length, totalsRefreshed: 0 }
   }
 
-  const totals = await refreshBackfillTotals(
-    { db: input.db, limit: totalsLimit },
-    null
-  )
+  const totals = await refreshBackfillTotals({ db: input.db, limit: totalsLimit }, null)
   return {
     backfilled: keysToRefresh.length,
     totalsRefreshed: totals.totalsRefreshed
@@ -127,11 +116,7 @@ async function refreshBackfillTotals(
   return { backfilled: 0, totalsRefreshed: userIdsToRefresh.length }
 }
 
-async function listSummaryKeysForBackfill(input: {
-  db: D1Database
-  limit: number
-  state: UsageSummaryBackfillState
-}) {
+async function listSummaryKeysForBackfill(input: { db: D1Database; limit: number; state: UsageSummaryBackfillState }) {
   const cursor = summaryBackfillCursor(input.state)
   const statement = cursor
     ? input.db.prepare(summaryBackfillCursorSql).bind(...cursor, input.limit)
@@ -141,11 +126,7 @@ async function listSummaryKeysForBackfill(input: {
   return rows.results ?? []
 }
 
-async function listUserIdsForTotalsBackfill(input: {
-  db: D1Database
-  limit: number
-  cursorUserId: string | null
-}) {
+async function listUserIdsForTotalsBackfill(input: { db: D1Database; limit: number; cursorUserId: string | null }) {
   const statement = input.cursorUserId
     ? input.db.prepare(totalsBackfillCursorSql).bind(input.cursorUserId, input.limit)
     : input.db.prepare(totalsBackfillInitialSql).bind(input.limit)
@@ -175,10 +156,7 @@ async function readUsageSummaryBackfillState(db: D1Database): Promise<UsageSumma
   return normalizeBackfillState(row)
 }
 
-async function writeUsageSummaryBackfillState(
-  db: D1Database,
-  state: UsageSummaryBackfillState
-) {
+async function writeUsageSummaryBackfillState(db: D1Database, state: UsageSummaryBackfillState) {
   await db
     .prepare(
       `
@@ -215,9 +193,7 @@ async function writeUsageSummaryBackfillState(
     .run()
 }
 
-function normalizeBackfillState(
-  row: UsageSummaryBackfillRow | null
-): UsageSummaryBackfillState {
+function normalizeBackfillState(row: UsageSummaryBackfillRow | null): UsageSummaryBackfillState {
   if (!row) return summariesBackfillState(null)
   const phase = row.phase === 'totals' ? 'totals' : 'summaries'
   return {
@@ -230,16 +206,12 @@ function normalizeBackfillState(
   }
 }
 
-function summaryStateFromCursor(
-  cursor: UsageSummaryKey | undefined
-): UsageSummaryBackfillState {
+function summaryStateFromCursor(cursor: UsageSummaryKey | undefined): UsageSummaryBackfillState {
   if (!cursor) return summariesBackfillState(null)
   return summariesBackfillState(cursor)
 }
 
-function summariesBackfillState(
-  cursor: UsageSummaryKey | null
-): UsageSummaryBackfillState {
+function summariesBackfillState(cursor: UsageSummaryKey | null): UsageSummaryBackfillState {
   return {
     phase: 'summaries',
     cursorUserId: cursor?.userId ?? null,

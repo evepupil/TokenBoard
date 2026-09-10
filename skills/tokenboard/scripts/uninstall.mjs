@@ -14,9 +14,7 @@ export function uninstallClient(options = {}) {
   const plan = createUninstallPlan(flags)
   const runtime = createUninstallRuntime(options)
 
-  const hookResult = plan.removeHooks
-    ? runtime.uninstallHooks(options.hookOptions || {})
-    : null
+  const hookResult = plan.removeHooks ? runtime.uninstallHooks(options.hookOptions || {}) : null
   runtime.uninstallSchedule(options.scheduleOptions || {})
   if (hasIncompleteHookRemoval(hookResult)) {
     throw new Error('Antigravity statusline restoration is incomplete; local recovery state was preserved')
@@ -113,10 +111,9 @@ function isInsidePath(candidatePath, targetPath, platform = process.platform) {
     return false
   }
   const relativePath = pathApi.relative(resolvedTarget, resolvedCandidate)
-  return relativePath === '' || (
-    !relativePath.startsWith('..') &&
-    !relativePath.startsWith(pathApi.sep) &&
-    relativePath !== '..'
+  return (
+    relativePath === '' ||
+    (!relativePath.startsWith(`..${pathApi.sep}`) && !relativePath.startsWith(pathApi.sep) && relativePath !== '..')
   )
 }
 

@@ -37,10 +37,10 @@ export function subagentSessionMeta(id: string, parentThreadId: string, timestam
 export function totalUsageEvent(
   timestamp: string,
   usage: UsageInput,
-  options: { lastUsage?: UsageInput | null } = {}
+  options: { lastUsage?: UsageInput | null; model?: string } = {}
 ) {
   const info: Record<string, unknown> = {
-    model: 'gpt-5',
+    model: options.model ?? 'gpt-5',
     total_token_usage: tokenUsage(usage)
   }
   if (options.lastUsage !== null) {

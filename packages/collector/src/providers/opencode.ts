@@ -2,14 +2,10 @@ import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { usageSnapshotSchema, type UsageSnapshot } from '@tokenboard/usage-core'
+import { assertValidDateFilter, isAllDateFilter } from '../iso-calendar-date'
 import { mergeSnapshots } from './session-cursor'
 import { formatDate } from './session-jsonl-parser-utils'
-import {
-  isMissingFileError,
-  querySqliteJsonRows,
-  sqliteDatabaseMtimeMs,
-  type RunSqliteQuery
-} from './sqlite-reader'
+import { isMissingFileError, querySqliteJsonRows, sqliteDatabaseMtimeMs, type RunSqliteQuery } from './sqlite-reader'
 
 const source = 'opencode'
 const label = 'OpenCode'
@@ -72,9 +68,7 @@ type OpenCodeUsageRow = {
  * totals carry no date breakdown, so per-message rows are read and attributed
  * to a local date instead.
  */
-export async function collectOpenCodeUsage(
-  options: CollectOpenCodeUsageOptions = {}
-): Promise<UsageSnapshot[]> {
+export async function collectOpenCodeUsage(options: CollectOpenCodeUsageOptions = {}): Promise<UsageSnapshot[]> {
   const timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const dbPath = options.dbPath ?? defaultDbPath()
@@ -206,11 +200,11 @@ function readSessionId(value: unknown) {
 
 function readSinceDate(since: string | undefined, timezone: string) {
   const value = since ?? process.env.TOKENBOARD_SINCE ?? process.env.TOKENBOARD_DEFAULT_SINCE ?? ''
-  if (!value || value === 'all') return ''
-  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(value)
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
-  throw new Error(`Invalid ${label} since value: ${value}`)
+  if (!value) return ''
+  const normalized = assertValidDateFilter(value, `${label} since value`, true)
+  if (isAllDateFilter(normalized)) return ''
+  const compact = normalized.replaceAll('-', '')
+  return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
 }
 
 function defaultDbPath() {

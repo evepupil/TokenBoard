@@ -4,25 +4,22 @@ import { changedSnapshot, unchangedSnapshot } from './upload-test-helpers'
 
 describe('filterChangedSnapshots', () => {
   test('skips snapshots whose server hash already matches', async () => {
-    const checked = await filterChangedSnapshots(
-      [unchangedSnapshot, changedSnapshot],
-      async () => ({
-        existing: [
-          {
-            source: unchangedSnapshot.source,
-            usageDate: unchangedSnapshot.usageDate,
-            model: unchangedSnapshot.model,
-            snapshotHash: await snapshotHash(unchangedSnapshot)
-          },
-          {
-            source: changedSnapshot.source,
-            usageDate: changedSnapshot.usageDate,
-            model: changedSnapshot.model,
-            snapshotHash: 'different'
-          }
-        ]
-      })
-    )
+    const checked = await filterChangedSnapshots([unchangedSnapshot, changedSnapshot], async () => ({
+      existing: [
+        {
+          source: unchangedSnapshot.source,
+          usageDate: unchangedSnapshot.usageDate,
+          model: unchangedSnapshot.model,
+          snapshotHash: await snapshotHash(unchangedSnapshot)
+        },
+        {
+          source: changedSnapshot.source,
+          usageDate: changedSnapshot.usageDate,
+          model: changedSnapshot.model,
+          snapshotHash: 'different'
+        }
+      ]
+    }))
 
     expect(checked).toEqual({
       snapshots: [changedSnapshot],
@@ -32,19 +29,16 @@ describe('filterChangedSnapshots', () => {
 
   test('accepts Antigravity CLI hashes from the server check response', async () => {
     const snapshot = { ...unchangedSnapshot, source: 'antigravity-cli' as const, model: 'Gemini 3.5 Flash (Medium)' }
-    const checked = await filterChangedSnapshots(
-      [snapshot],
-      async () => ({
-        existing: [
-          {
-            source: snapshot.source,
-            usageDate: snapshot.usageDate,
-            model: snapshot.model,
-            snapshotHash: await snapshotHash(snapshot)
-          }
-        ]
-      })
-    )
+    const checked = await filterChangedSnapshots([snapshot], async () => ({
+      existing: [
+        {
+          source: snapshot.source,
+          usageDate: snapshot.usageDate,
+          model: snapshot.model,
+          snapshotHash: await snapshotHash(snapshot)
+        }
+      ]
+    }))
 
     expect(checked).toEqual({ snapshots: [], skipped: 1 })
   })
@@ -109,7 +103,12 @@ describe('uploadSnapshots', () => {
           url,
           body: init.body ? JSON.parse(String(init.body)) : null
         })
-        return { ok: true, async json() { return { upserted: 0 } } } as Response
+        return {
+          ok: true,
+          async json() {
+            return { upserted: 0 }
+          }
+        } as Response
       }
     )
 
@@ -191,11 +190,9 @@ describe('uploadSnapshots', () => {
     expect(requests[1].body).toEqual({ snapshots: [unchangedSnapshot] })
   })
 
-  test.each([405, 501])(
-    'falls back to full upload when the hash check endpoint returns %i',
-    async (status) => expectUnsupportedHashCheckFallback(status)
+  test.each([405, 501])('falls back to full upload when the hash check endpoint returns %i', async (status) =>
+    expectUnsupportedHashCheckFallback(status)
   )
-
 })
 
 async function expectUnsupportedHashCheckFallback(status: number) {

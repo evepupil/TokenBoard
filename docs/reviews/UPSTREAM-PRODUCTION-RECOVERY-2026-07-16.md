@@ -101,7 +101,7 @@ must rerun the full T08 quality gate before deployment or PR submission.
 - `node --test skills/tokenboard/scripts/*.test.mjs`: passed (347 tests).
 - `pnpm --filter @tokenboard/web exec vitest run development-seed-migration.test.ts pairing-code-index-migration.test.ts deploy-config.test.ts`: passed (32 tests).
 - `pnpm build`: passed for the client and Worker bundles.
-- `pnpm audit --audit-level=high`: reported no known vulnerabilities.
+- `pnpm audit --audit-level=high`: reported no known high- or critical-severity vulnerabilities.
 - `git diff --check c43b67c`: passed without whitespace errors.
 
 The collector coverage also rejects impossible ISO calendar dates in ccusage data and Codex

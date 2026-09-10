@@ -38,12 +38,7 @@ export type PublicCardConfig = {
   metrics: PublicCardMetric[]
 }
 
-export const defaultPublicCardMetricOrder: PublicCardMetric[] = [
-  'totalTokens',
-  'totalCost',
-  'monthTokens',
-  'monthCost'
-]
+export const defaultPublicCardMetricOrder: PublicCardMetric[] = ['totalTokens', 'totalCost', 'monthTokens', 'monthCost']
 
 export const defaultPublicCardConfig: PublicCardConfig = {
   language: 'zh',
@@ -62,23 +57,28 @@ export const defaultPublicCardConfig: PublicCardConfig = {
 
 const publicCardMetricSchema = z.enum(publicCardMetrics)
 
-export const publicCardConfigSchema = z.object({
-  language: z.enum(publicCardLanguages).default(defaultPublicCardConfig.language),
-  theme: z.enum(publicCardThemes).default(defaultPublicCardConfig.theme),
-  layout: z.enum(publicCardLayouts).default(defaultPublicCardConfig.layout),
-  title: z.string().trim().max(48).default(defaultPublicCardConfig.title),
-  subtitle: z.string().trim().max(96).default(defaultPublicCardConfig.subtitle),
-  showPublicUrl: z.boolean().default(defaultPublicCardConfig.showPublicUrl),
-  glow: z.object({
-    enabled: z.boolean().default(defaultPublicCardConfig.glow.enabled),
-    intensity: z.number().min(0).max(1).default(defaultPublicCardConfig.glow.intensity),
-    position: z.enum(publicCardGlowPositions).default(defaultPublicCardConfig.glow.position)
-  }).default(defaultPublicCardConfig.glow),
-  metrics: z.array(publicCardMetricSchema)
-    .transform((metrics) => metrics.slice(0, publicCardMetricSlotCount))
-    .default([...defaultPublicCardConfig.metrics])
-    .transform((metrics) => uniqueMetrics(metrics))
-}).default(defaultPublicCardConfig)
+export const publicCardConfigSchema = z
+  .object({
+    language: z.enum(publicCardLanguages).default(defaultPublicCardConfig.language),
+    theme: z.enum(publicCardThemes).default(defaultPublicCardConfig.theme),
+    layout: z.enum(publicCardLayouts).default(defaultPublicCardConfig.layout),
+    title: z.string().trim().max(48).default(defaultPublicCardConfig.title),
+    subtitle: z.string().trim().max(96).default(defaultPublicCardConfig.subtitle),
+    showPublicUrl: z.boolean().default(defaultPublicCardConfig.showPublicUrl),
+    glow: z
+      .object({
+        enabled: z.boolean().default(defaultPublicCardConfig.glow.enabled),
+        intensity: z.number().min(0).max(1).default(defaultPublicCardConfig.glow.intensity),
+        position: z.enum(publicCardGlowPositions).default(defaultPublicCardConfig.glow.position)
+      })
+      .default(defaultPublicCardConfig.glow),
+    metrics: z
+      .array(publicCardMetricSchema)
+      .transform((metrics) => metrics.slice(0, publicCardMetricSlotCount))
+      .default([...defaultPublicCardConfig.metrics])
+      .transform((metrics) => uniqueMetrics(metrics))
+  })
+  .default(defaultPublicCardConfig)
 
 export function parsePublicCardConfig(value: unknown): PublicCardConfig {
   if (value === null || value === undefined || value === '') return publicCardConfigSchema.parse(undefined)
@@ -115,9 +115,7 @@ function readMetricOrder(form: Record<string, unknown>) {
   const hasMetricSlots = slotIndexes.some((index) =>
     Object.prototype.hasOwnProperty.call(form, `cardMetric${index + 1}`)
   )
-  const slotMetrics = slotIndexes
-    .map((index) => String(form[`cardMetric${index + 1}`] || '').trim())
-    .filter(Boolean)
+  const slotMetrics = slotIndexes.map((index) => String(form[`cardMetric${index + 1}`] || '').trim()).filter(Boolean)
 
   if (hasMetricSlots) return slotMetrics.filter(isPublicCardMetric)
 

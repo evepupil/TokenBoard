@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import worker from '../../server'
 import { createSqliteD1, runSql } from '../../test/sqlite-d1'
+import { getUsageSummary } from '../usage/queries'
 import { backfillUsageSummaryCache, upsertUsageSnapshots, type IngestRecord } from './repository'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -58,12 +59,9 @@ describe('usage summary cache integration', () => {
     await Promise.all(ctx.waitUntilPromises)
 
     await expectScalar(db, 'SELECT COUNT(*) FROM daily_usage_summary', 2)
-    await expectScalar(
-      db,
-      'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?',
-      1600,
-      ['smoke-user']
-    )
+    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 1600, [
+      'smoke-user'
+    ])
 
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/smoke-user.json?cache-bust=summary-cache'),
@@ -176,12 +174,9 @@ describe('usage summary cache integration', () => {
     await Promise.all(ctx.waitUntilPromises)
 
     await expectScalar(db, 'SELECT COUNT(*) FROM daily_usage_summary', 2)
-    await expectScalar(
-      db,
-      'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?',
-      1600,
-      ['smoke-user']
-    )
+    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 1600, [
+      'smoke-user'
+    ])
   })
 
   test('strict summary mode does not read raw historical usage before cron backfill', async () => {
@@ -270,45 +265,26 @@ describe('usage summary cache integration', () => {
 
     expect(firstPass).toEqual({ backfilled: 1, totalsRefreshed: 0 })
     await expectScalar(db, 'SELECT COUNT(*) FROM daily_usage_summary', 1)
-    await expectScalar(
-      db,
-      'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?',
-      0,
-      ['smoke-user']
-    )
-    await expectScalar(
-      db,
-      'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?',
-      'summaries',
-      ['initial']
-    )
+    await expectScalar(db, 'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?', 0, ['smoke-user'])
+    await expectScalar(db, 'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?', 'summaries', [
+      'initial'
+    ])
 
     const secondPass = await backfillUsageSummaryCache({ db, limit: 1 })
 
     expect(secondPass).toEqual({ backfilled: 1, totalsRefreshed: 0 })
     await expectScalar(db, 'SELECT COUNT(*) FROM daily_usage_summary', 2)
-    await expectScalar(
-      db,
-      'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?',
-      0,
-      ['smoke-user']
-    )
-    await expectScalar(
-      db,
-      'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?',
-      'totals',
-      ['initial']
-    )
+    await expectScalar(db, 'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?', 0, ['smoke-user'])
+    await expectScalar(db, 'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?', 'totals', [
+      'initial'
+    ])
 
     const thirdPass = await backfillUsageSummaryCache({ db, limit: 1 })
 
     expect(thirdPass).toEqual({ backfilled: 0, totalsRefreshed: 1 })
-    await expectScalar(
-      db,
-      'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?',
-      1600,
-      ['smoke-user']
-    )
+    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 1600, [
+      'smoke-user'
+    ])
     await expectScalar(
       db,
       'SELECT total_tokens_without_cache_read AS value FROM user_usage_totals WHERE user_id = ?',
@@ -335,22 +311,14 @@ describe('usage summary cache integration', () => {
     await seedLegacyUsage(db, { today, monthStart })
     await backfillUsageSummaryCache({ db, limit: 1 })
     await expectScalar(db, 'SELECT COUNT(*) FROM daily_usage_summary', 1)
-    await expectScalar(
-      db,
-      'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?',
-      'summaries',
-      ['initial']
-    )
+    await expectScalar(db, 'SELECT phase AS value FROM usage_summary_backfill_state WHERE id = ?', 'summaries', [
+      'initial'
+    ])
 
     const syncResult = await upsertUsageSnapshots(db, [makeIngestRecord({ usageDate: today })])
 
     expect(syncResult).toEqual({ upserted: 1 })
-    await expectScalar(
-      db,
-      'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?',
-      0,
-      ['smoke-user']
-    )
+    await expectScalar(db, 'SELECT COUNT(*) FROM user_usage_totals WHERE user_id = ?', 0, ['smoke-user'])
   })
 
   test('public totals ignore stale total rows after summary-only ingest refreshes', async () => {
@@ -368,12 +336,7 @@ describe('usage summary cache integration', () => {
     const syncResult = await upsertUsageSnapshots(db, [makeIngestRecord({ usageDate: today })])
 
     expect(syncResult).toEqual({ upserted: 1 })
-    await expectScalar(
-      db,
-      'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?',
-      100,
-      ['smoke-user']
-    )
+    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 100, ['smoke-user'])
 
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/smoke-user.json?cache-bust=stale-total-row'),
@@ -398,6 +361,317 @@ describe('usage summary cache integration', () => {
         tokensWithoutCacheRead: 900,
         costUsd: 1.25
       }
+    })
+  })
+
+  test('public totals do not mix an older summary cost with fresh cached totals', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-summary-cache-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+
+    await seedProfile(db)
+    await db
+      .prepare(
+        `
+      INSERT INTO daily_usage_summary (
+        user_id, usage_date, source, model, timezone,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        total_tokens, total_tokens_without_cache_read, cost_usd, session_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind(
+        'smoke-user',
+        '2026-06-01',
+        'codex',
+        'gpt-5',
+        'UTC',
+        700,
+        200,
+        0,
+        100,
+        1000,
+        900,
+        1.25,
+        3,
+        '2026-06-01T10:00:00.000Z'
+      )
+      .run()
+    await db
+      .prepare(
+        `
+      INSERT INTO user_usage_totals (
+        user_id, total_tokens, total_tokens_without_cache_read,
+        cost_usd, session_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind('smoke-user', 2000, 1800, 2.5, 6, '2026-06-02T10:00:00.000Z')
+      .run()
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/smoke-user.json?cache-bust=fresh-total-cache'),
+      createEnv(db),
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      total: {
+        tokens: 2000,
+        tokensWithoutCacheRead: 1800,
+        costUsd: 2.5
+      }
+    })
+  })
+
+  test('public totals reapply billable filtering to cached totals with Antigravity usage', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-summary-cache-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+
+    await seedProfile(db)
+    await db
+      .prepare(
+        `
+      INSERT INTO daily_usage_summary (
+        user_id, usage_date, source, model, timezone,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        total_tokens, total_tokens_without_cache_read, cost_usd, session_count, updated_at
+      ) VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind(
+        'smoke-user',
+        '2026-06-02',
+        'antigravity',
+        'gemini',
+        'UTC',
+        10,
+        0,
+        0,
+        0,
+        10,
+        10,
+        10,
+        1,
+        '2026-06-02T10:00:00.000Z',
+        'smoke-user',
+        '2026-06-02',
+        'codex',
+        'gpt-5',
+        'UTC',
+        20,
+        0,
+        0,
+        0,
+        20,
+        20,
+        2,
+        1,
+        '2026-06-02T10:00:00.000Z'
+      )
+      .run()
+    await db
+      .prepare(
+        `
+      INSERT INTO user_usage_totals (
+        user_id, total_tokens, total_tokens_without_cache_read, cost_usd, session_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind('smoke-user', 30, 30, 12, 2, '2026-06-02T10:00:00.000Z')
+      .run()
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/smoke-user.json?cache-bust=billable-cache'),
+      createEnv(db),
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      total: { tokens: 30, costUsd: 2 },
+      today: { tokens: 30, costUsd: 2 },
+      month: { tokens: 30, costUsd: 2 }
+    })
+  })
+
+  test('dashboard summary ignores historical costs from unavailable sources', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-summary-cache-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+
+    await seedProfile(db)
+    await db
+      .prepare(
+        `
+      INSERT INTO daily_usage_summary (
+        user_id, usage_date, source, model, timezone,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        total_tokens, total_tokens_without_cache_read, cost_usd, session_count, updated_at
+      ) VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind(
+        'smoke-user',
+        '2026-06-02',
+        'antigravity',
+        'gemini',
+        'UTC',
+        100,
+        20,
+        0,
+        0,
+        120,
+        120,
+        99,
+        1,
+        '2026-06-02T10:00:00.000Z',
+        'smoke-user',
+        '2026-06-02',
+        'codex',
+        'gpt-5',
+        'UTC',
+        200,
+        50,
+        0,
+        0,
+        250,
+        250,
+        2,
+        1,
+        '2026-06-02T10:00:00.000Z'
+      )
+      .run()
+
+    await expect(
+      getUsageSummary(db, {
+        userId: 'smoke-user',
+        today: '2026-06-02',
+        monthStart: '2026-06-01'
+      })
+    ).resolves.toMatchObject({
+      todayTokens: 370,
+      todayCostUsd: 2,
+      todayCostAvailable: false,
+      monthTokens: 370,
+      monthCostUsd: 2,
+      monthCostAvailable: false
+    })
+  })
+
+  test('dashboard month totals stop at the next calendar month', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-summary-month-boundary-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+
+    await seedProfile(db)
+    await db
+      .prepare(
+        `
+      INSERT INTO daily_usage_summary (
+        user_id, usage_date, source, model, timezone,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        total_tokens, total_tokens_without_cache_read, cost_usd, session_count, updated_at
+      ) VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .bind(
+        'smoke-user',
+        '2026-05-31',
+        'codex',
+        'gpt-5',
+        'UTC',
+        70,
+        20,
+        0,
+        10,
+        100,
+        90,
+        1,
+        1,
+        '2026-06-01T00:00:00.000Z',
+        'smoke-user',
+        '2026-06-01',
+        'codex',
+        'gpt-5',
+        'UTC',
+        140,
+        40,
+        0,
+        20,
+        200,
+        180,
+        2,
+        2,
+        '2026-06-02T00:00:00.000Z',
+        'smoke-user',
+        '2026-06-30',
+        'codex',
+        'gpt-5',
+        'UTC',
+        210,
+        60,
+        0,
+        30,
+        300,
+        270,
+        3,
+        3,
+        '2026-07-01T00:00:00.000Z',
+        'smoke-user',
+        '2026-07-01',
+        'codex',
+        'gpt-5',
+        'UTC',
+        280,
+        80,
+        0,
+        40,
+        400,
+        360,
+        4,
+        4,
+        '2026-07-02T00:00:00.000Z'
+      )
+      .run()
+
+    await expect(
+      getUsageSummary(db, {
+        userId: 'smoke-user',
+        today: '2026-06-15',
+        monthStart: '2026-06-01'
+      })
+    ).resolves.toMatchObject({
+      todayTokens: 0,
+      monthTokens: 500,
+      monthTokensWithoutCacheRead: 450,
+      monthCostUsd: 5,
+      monthCostAvailable: true,
+      sourceSplit: [
+        {
+          source: 'codex',
+          totalTokens: 500,
+          totalTokensWithoutCacheRead: 450
+        }
+      ]
     })
   })
 
@@ -490,8 +764,12 @@ describe('usage summary cache integration', () => {
     const result = await upsertUsageSnapshots(db, [snapshot])
 
     expect(result).toEqual({ upserted: 0 })
-    await expectScalar(db, 'SELECT total_tokens AS value FROM daily_usage_summary WHERE user_id = ?', 1000, ['smoke-user'])
-    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 1000, ['smoke-user'])
+    await expectScalar(db, 'SELECT total_tokens AS value FROM daily_usage_summary WHERE user_id = ?', 1000, [
+      'smoke-user'
+    ])
+    await expectScalar(db, 'SELECT total_tokens AS value FROM user_usage_totals WHERE user_id = ?', 1000, [
+      'smoke-user'
+    ])
 
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/smoke-user.json?cache-bust=unchanged-retry'),
@@ -514,17 +792,203 @@ describe('usage summary cache integration', () => {
     })
   })
 
+  test('does not let a Codex session-only row erase an existing token aggregate', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-session-only-upsert-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+    const today = toIsoDate(verificationDate)
+    const stored = makeIngestRecord({ usageDate: today })
+    await seedProfile(db)
+    await insertRawUsage(db, stored)
+    await markSummaryBackfillCompleted(db)
+
+    const sessionOnly = makeIngestRecord({
+      usageDate: today,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+      costUsd: 0,
+      sessionCount: 4,
+      collectedAt: '2026-06-02T10:05:00.000Z'
+    })
+
+    await expect(upsertUsageSnapshots(db, [sessionOnly])).resolves.toEqual({ upserted: 1 })
+    await expectScalar(
+      db,
+      `SELECT total_tokens AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      stored.totalTokens,
+      [stored.userId, stored.deviceId, stored.source, stored.usageDate, stored.model]
+    )
+    await expectScalar(
+      db,
+      'SELECT session_count AS value FROM daily_usage WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?',
+      sessionOnly.sessionCount,
+      [stored.userId, stored.deviceId, stored.source, stored.usageDate, stored.model]
+    )
+
+    const zeroSessionOnly = {
+      ...sessionOnly,
+      sessionCount: 0,
+      collectedAt: '2026-06-02T10:06:00.000Z'
+    }
+    await expect(upsertUsageSnapshots(db, [zeroSessionOnly])).resolves.toEqual({ upserted: 0 })
+    await expectScalar(
+      db,
+      `SELECT total_tokens AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      stored.totalTokens,
+      [stored.userId, stored.deviceId, stored.source, stored.usageDate, stored.model]
+    )
+
+    const anomalousCostOnly = {
+      ...zeroSessionOnly,
+      costUsd: 0.5,
+      collectedAt: '2026-06-02T10:06:30.000Z'
+    }
+    await expect(upsertUsageSnapshots(db, [anomalousCostOnly])).resolves.toEqual({ upserted: 0 })
+    await expectScalar(
+      db,
+      `SELECT cost_usd AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      stored.costUsd,
+      [stored.userId, stored.deviceId, stored.source, stored.usageDate, stored.model]
+    )
+
+    const contextCorrection = {
+      ...zeroSessionOnly,
+      correction: 'codex-context-pricing' as const,
+      collectedAt: '2026-06-02T10:07:00.000Z'
+    }
+    await expect(upsertUsageSnapshots(db, [contextCorrection])).resolves.toEqual({ upserted: 1 })
+    await expectScalar(
+      db,
+      `SELECT total_tokens AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      0,
+      [stored.userId, stored.deviceId, stored.source, stored.usageDate, stored.model]
+    )
+  })
+
+  test('does not let an older snapshot overwrite a newer usage row', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-monotonic-ingest-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+    const today = toIsoDate(verificationDate)
+    await seedProfile(db)
+
+    const newer = makeIngestRecord({
+      usageDate: today,
+      totalTokens: 900,
+      inputTokens: 600,
+      outputTokens: 300,
+      collectedAt: '2026-06-02T10:05:00.000Z'
+    })
+    await expect(upsertUsageSnapshots(db, [newer])).resolves.toEqual({ upserted: 1 })
+
+    const older = {
+      ...newer,
+      totalTokens: 100,
+      inputTokens: 80,
+      outputTokens: 20,
+      collectedAt: '2026-06-02T10:00:00.000Z'
+    }
+    await expect(upsertUsageSnapshots(db, [older])).resolves.toEqual({ upserted: 0 })
+    await expectScalar(
+      db,
+      `SELECT total_tokens AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      newer.totalTokens,
+      [newer.userId, newer.deviceId, newer.source, newer.usageDate, newer.model]
+    )
+    await expectScalar(
+      db,
+      `SELECT synced_at AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      newer.collectedAt,
+      [newer.userId, newer.deviceId, newer.source, newer.usageDate, newer.model]
+    )
+  })
+
+  test('orders snapshots by time when ISO fractional-second precision differs', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-mixed-precision-ingest-'))
+    tempDirs.push(tempDir)
+    const dbPath = join(tempDir, 'tokenboard.db')
+    applyMigrations(dbPath)
+    const db = createSqliteD1(dbPath)
+    await seedProfile(db)
+
+    const secondPrecision = makeIngestRecord({
+      totalTokens: 100,
+      inputTokens: 80,
+      outputTokens: 20,
+      collectedAt: '2026-06-02T10:00:00Z'
+    })
+    const millisecondPrecision = {
+      ...secondPrecision,
+      totalTokens: 900,
+      inputTokens: 600,
+      outputTokens: 300,
+      collectedAt: '2026-06-02T10:00:00.100Z'
+    }
+    const olderMillisecondPrecision = {
+      ...millisecondPrecision,
+      totalTokens: 200,
+      inputTokens: 160,
+      outputTokens: 40,
+      collectedAt: '2026-06-02T10:00:00.050Z'
+    }
+
+    await expect(upsertUsageSnapshots(db, [secondPrecision])).resolves.toEqual({ upserted: 1 })
+    await expect(upsertUsageSnapshots(db, [millisecondPrecision])).resolves.toEqual({ upserted: 1 })
+    await expect(upsertUsageSnapshots(db, [olderMillisecondPrecision])).resolves.toEqual({ upserted: 0 })
+    await expectScalar(
+      db,
+      `SELECT total_tokens AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      millisecondPrecision.totalTokens,
+      [
+        millisecondPrecision.userId,
+        millisecondPrecision.deviceId,
+        millisecondPrecision.source,
+        millisecondPrecision.usageDate,
+        millisecondPrecision.model
+      ]
+    )
+    await expectScalar(
+      db,
+      `SELECT synced_at AS value FROM daily_usage
+       WHERE user_id = ? AND device_id = ? AND source = ? AND usage_date = ? AND model = ?`,
+      millisecondPrecision.collectedAt,
+      [
+        millisecondPrecision.userId,
+        millisecondPrecision.deviceId,
+        millisecondPrecision.source,
+        millisecondPrecision.usageDate,
+        millisecondPrecision.model
+      ]
+    )
+  })
+
   test('webhook schedule migration backfills pending retry slots from the original daily schedule', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-webhook-schedule-'))
     tempDirs.push(tempDir)
     const dbPath = join(tempDir, 'tokenboard.db')
-    runSql(dbPath, [
-      `.read ${quoteSqlitePath(join(migrationsDir, '0000_initial.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0001_devices.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0002_upload_token_device.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0003_better_auth.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0013_webhook_notifications.sql'))}`,
-      `
+    runSql(
+      dbPath,
+      [
+        `.read ${quoteSqlitePath(join(migrationsDir, '0000_initial.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0001_devices.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0002_upload_token_device.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0003_better_auth.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0013_webhook_notifications.sql'))}`,
+        `
         INSERT INTO webhook_subscriptions (
           id,
           user_id,
@@ -558,8 +1022,9 @@ describe('usage summary cache integration', () => {
           '2026-04-29T09:31:00.000Z'
         );
       `,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0014_webhook_schedule_rules.sql'))}`
-    ].join('\n'))
+        `.read ${quoteSqlitePath(join(migrationsDir, '0014_webhook_schedule_rules.sql'))}`
+      ].join('\n')
+    )
 
     const db = createSqliteD1(dbPath)
 
@@ -575,14 +1040,16 @@ describe('usage summary cache integration', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-webhook-schedule-'))
     tempDirs.push(tempDir)
     const dbPath = join(tempDir, 'tokenboard.db')
-    runSql(dbPath, [
-      `.read ${quoteSqlitePath(join(migrationsDir, '0000_initial.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0001_devices.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0002_upload_token_device.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0003_better_auth.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0013_webhook_notifications.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0014_webhook_schedule_rules.sql'))}`,
-      `
+    runSql(
+      dbPath,
+      [
+        `.read ${quoteSqlitePath(join(migrationsDir, '0000_initial.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0001_devices.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0002_upload_token_device.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0003_better_auth.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0013_webhook_notifications.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0014_webhook_schedule_rules.sql'))}`,
+        `
         INSERT INTO webhook_subscriptions (
           id,
           user_id,
@@ -622,8 +1089,9 @@ describe('usage summary cache integration', () => {
           '2026-04-29T09:31:00.000Z'
         );
       `,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0019_backfill_webhook_pending_schedule_slots.sql'))}`
-    ].join('\n'))
+        `.read ${quoteSqlitePath(join(migrationsDir, '0019_backfill_webhook_pending_schedule_slots.sql'))}`
+      ].join('\n')
+    )
 
     const db = createSqliteD1(dbPath)
 
@@ -640,12 +1108,14 @@ describe('usage summary cache integration', () => {
     tempDirs.push(tempDir)
     const dbPath = join(tempDir, 'tokenboard.db')
     applyMigrations(dbPath)
-    runSql(dbPath, [
-      `
+    runSql(
+      dbPath,
+      [
+        `
         INSERT INTO users (id, email, name, image, created_at, updated_at)
         VALUES ('agy-user', 'agy@example.com', 'Agy User', null, '2026-06-02T10:00:00.000Z', '2026-06-02T10:00:00.000Z');
       `,
-      `
+        `
         INSERT INTO daily_usage (
           user_id,
           device_id,
@@ -674,7 +1144,7 @@ describe('usage summary cache integration', () => {
           ('agy-user', 'legacy', 'codex', '2026-06-02', 'UTC', 'gpt-5', 20, 5, 0, 0, 25, 1.25, 1, 'hash-legacy-codex', '2026-06-02T10:00:00.000Z'),
           ('agy-user', 'legacy', 'claude-code', '2026-06-02', 'UTC', 'claude-sonnet', 30, 10, 0, 0, 40, 2.5, 1, 'hash-legacy-claude', '2026-06-02T10:00:00.000Z');
       `,
-      `
+        `
         INSERT INTO daily_usage_summary (
           user_id,
           usage_date,
@@ -696,7 +1166,7 @@ describe('usage summary cache integration', () => {
           ('agy-user', '2026-06-02', 'antigravity', 'gemini', 'UTC', 8, 4, 0, 0, 12, 12, 4.0, 1, '2026-06-02T10:00:00.000Z'),
           ('agy-user', '2026-06-02', 'antigravity-ide', 'gemini', 'UTC', 6, 3, 0, 0, 9, 9, 6.0, 1, '2026-06-02T10:00:00.000Z');
       `,
-      `
+        `
         INSERT INTO user_usage_totals (
           user_id,
           total_tokens,
@@ -707,7 +1177,7 @@ describe('usage summary cache integration', () => {
         )
         VALUES ('agy-user', 166, 166, 27, 7, '2026-06-02T10:00:00.000Z');
       `,
-      `
+        `
         INSERT INTO daily_report_history (
           id,
           user_id,
@@ -818,9 +1288,10 @@ describe('usage summary cache integration', () => {
             '2026-06-02T10:00:00.000Z'
           );
       `,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0025_antigravity_costs_unavailable.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0027_daily_report_model_sources.sql'))}`
-    ].join('\n'))
+        `.read ${quoteSqlitePath(join(migrationsDir, '0025_antigravity_costs_unavailable.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0027_daily_report_model_sources.sql'))}`
+      ].join('\n')
+    )
     const db = createSqliteD1(dbPath)
 
     await expectScalar(
@@ -833,16 +1304,8 @@ describe('usage summary cache integration', () => {
       "SELECT COALESCE(SUM(cost_usd), -1) AS value FROM daily_usage_summary WHERE source IN ('antigravity-cli', 'antigravity', 'antigravity-ide')",
       0
     )
-    await expectScalar(
-      db,
-      "SELECT COUNT(*) AS value FROM daily_usage_summary WHERE source = 'codex'",
-      0
-    )
-    await expectScalar(
-      db,
-      "SELECT cost_usd AS value FROM user_usage_totals WHERE user_id = 'agy-user'",
-      10.75
-    )
+    await expectScalar(db, "SELECT COUNT(*) AS value FROM daily_usage_summary WHERE source = 'codex'", 0)
+    await expectScalar(db, "SELECT cost_usd AS value FROM user_usage_totals WHERE user_id = 'agy-user'", 10.75)
     await expectScalar(
       db,
       "SELECT COALESCE(SUM(cost_usd), -1) AS value FROM daily_usage WHERE source IN ('codex', 'claude-code')",
@@ -853,11 +1316,7 @@ describe('usage summary cache integration', () => {
       "SELECT cost_usd AS value FROM daily_usage WHERE source = 'codex' AND device_id = 'device-d'",
       1.25
     )
-    await expectScalar(
-      db,
-      "SELECT cost_usd AS value FROM daily_report_history WHERE id = 'drr_agy_costs'",
-      7.5
-    )
+    await expectScalar(db, "SELECT cost_usd AS value FROM daily_report_history WHERE id = 'drr_agy_costs'", 7.5)
     await expectScalar(
       db,
       "SELECT json_extract(top_models, '$[0].costUsd') AS value FROM daily_report_history WHERE id = 'drr_agy_costs'",
@@ -891,11 +1350,7 @@ describe('usage summary cache integration', () => {
       "SELECT json_extract(top_models, '$[0].sourceSplit[0].source') AS value FROM daily_report_history WHERE id = 'drr_codex_costs'",
       'codex'
     )
-    await expectScalar(
-      db,
-      "SELECT cost_usd AS value FROM daily_report_history WHERE id = 'drr_codex_costs'",
-      1.25
-    )
+    await expectScalar(db, "SELECT cost_usd AS value FROM daily_report_history WHERE id = 'drr_codex_costs'", 1.25)
     await expectScalar(
       db,
       "SELECT json_extract(top_models, '$[0].costUsd') AS value FROM daily_report_history WHERE id = 'drr_agy_zero_total_stale_models'",
@@ -928,14 +1383,16 @@ describe('usage summary cache integration', () => {
     tempDirs.push(tempDir)
     const dbPath = join(tempDir, 'tokenboard.db')
     applyMigrations(dbPath)
-    runSql(dbPath, [
-      `.read ${quoteSqlitePath(join(migrationsDir, '0022_device_installations.sql'))}`,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0023_device_install_claim.sql'))}`,
-      `
+    runSql(
+      dbPath,
+      [
+        `.read ${quoteSqlitePath(join(migrationsDir, '0022_device_installations.sql'))}`,
+        `.read ${quoteSqlitePath(join(migrationsDir, '0023_device_install_claim.sql'))}`,
+        `
         INSERT INTO users (id, email, name, image, created_at, updated_at)
         VALUES ('rotate-user', 'rotate@example.com', 'Rotate User', null, '2026-06-03T10:00:00.000Z', '2026-06-03T10:00:00.000Z');
       `,
-      `
+        `
         INSERT INTO upload_tokens (
           id,
           user_id,
@@ -952,8 +1409,9 @@ describe('usage summary cache integration', () => {
           ('ut_successor_old', 'rotate-user', 'Office PC', 'hash-successor-old', null, null, 'ut_old', '2026-06-03T10:01:00.000Z', null),
           ('ut_successor_new', 'rotate-user', 'Office PC', 'hash-successor-new', null, null, 'ut_old', '2026-06-03T10:02:00.000Z', null);
       `,
-      `.read ${quoteSqlitePath(join(migrationsDir, '0024_upload_token_active_successor.sql'))}`
-    ].join('\n'))
+        `.read ${quoteSqlitePath(join(migrationsDir, '0024_upload_token_active_successor.sql'))}`
+      ].join('\n')
+    )
     const db = createSqliteD1(dbPath)
 
     await expectScalar(
@@ -1007,11 +1465,14 @@ function applyMigrations(dbPath: string, includeSummaryCache = true) {
 }
 
 function applySummaryCacheMigration(dbPath: string) {
-  runSql(dbPath, [
-    summaryCacheMigrationCommand(),
-    refreshSummaryCacheMigrationCommand(),
-    summaryBackfillStateMigrationCommand()
-  ].join('\n'))
+  runSql(
+    dbPath,
+    [
+      summaryCacheMigrationCommand(),
+      refreshSummaryCacheMigrationCommand(),
+      summaryBackfillStateMigrationCommand()
+    ].join('\n')
+  )
 }
 
 function summaryCacheMigrationCommand() {
@@ -1040,15 +1501,7 @@ async function seedLegacyUsage(
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .bind(
-      'smoke-user',
-      null,
-      'Smoke User',
-      null,
-      '2026-04-28T00:00:00.000Z',
-      '2026-04-28T00:00:00.000Z',
-      0
-    )
+    .bind('smoke-user', null, 'Smoke User', null, '2026-04-28T00:00:00.000Z', '2026-04-28T00:00:00.000Z', 0)
     .run()
 
   await db
@@ -1149,15 +1602,7 @@ async function seedProfile(db: D1Database) {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .bind(
-      'smoke-user',
-      null,
-      'Smoke User',
-      null,
-      '2026-04-28T00:00:00.000Z',
-      '2026-04-28T00:00:00.000Z',
-      0
-    )
+    .bind('smoke-user', null, 'Smoke User', null, '2026-04-28T00:00:00.000Z', '2026-04-28T00:00:00.000Z', 0)
     .run()
 
   await db
@@ -1252,16 +1697,7 @@ async function markSummaryBackfillCompleted(db: D1Database) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .bind(
-      'initial',
-      'totals',
-      null,
-      null,
-      null,
-      null,
-      '2026-06-02T10:00:00.000Z',
-      '2026-06-02T10:00:00.000Z'
-    )
+    .bind('initial', 'totals', null, null, null, null, '2026-06-02T10:00:00.000Z', '2026-06-02T10:00:00.000Z')
     .run()
 }
 
@@ -1282,16 +1718,7 @@ async function markSummaryBackfillIncomplete(db: D1Database) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
-    .bind(
-      'initial',
-      'summaries',
-      'seed',
-      '2026-01-01',
-      'codex',
-      'seed-model',
-      null,
-      '2026-06-02T10:00:00.000Z'
-    )
+    .bind('initial', 'summaries', 'seed', '2026-01-01', 'codex', 'seed-model', null, '2026-06-02T10:00:00.000Z')
     .run()
 }
 
@@ -1310,25 +1737,13 @@ async function insertStaleUserTotal(db: D1Database) {
         VALUES (?, ?, ?, ?, ?, ?)
       `
     )
-    .bind(
-      'smoke-user',
-      100,
-      80,
-      0.2,
-      1,
-      '2026-04-28T00:00:00.000Z'
-    )
+    .bind('smoke-user', 100, 80, 0.2, 1, '2026-04-28T00:00:00.000Z')
     .run()
 }
 
 async function hashSnapshot(record: IngestRecord) {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(snapshotHashPayload(record))
-  )
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshotHashPayload(record)))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function makeIngestRecord(overrides: Partial<IngestRecord> = {}): IngestRecord {
@@ -1351,28 +1766,17 @@ function makeIngestRecord(overrides: Partial<IngestRecord> = {}): IngestRecord {
   }
 }
 
-async function expectScalar(
-  db: D1Database,
-  sql: string,
-  expected: unknown,
-  bindings: unknown[] = []
-) {
-  const row = await db.prepare(sql).bind(...bindings).first<{ value: unknown }>()
+async function expectScalar(db: D1Database, sql: string, expected: unknown, bindings: unknown[] = []) {
+  const row = await db
+    .prepare(sql)
+    .bind(...bindings)
+    .first<{ value: unknown }>()
   expect(row?.value).toBe(expected)
 }
 
-function explainQueryPlan(
-  dbPath: string,
-  sql: string,
-  ...bindings: string[]
-) {
+function explainQueryPlan(dbPath: string, sql: string, ...bindings: string[]) {
   const parameterCommands = bindings.map((value, index) => `.parameter set ?${index + 1} ${value}`)
-  return runSql(dbPath, [
-    '.parameter init',
-    ...parameterCommands,
-    `.eqp on`,
-    sql
-  ].join('\n'))
+  return runSql(dbPath, ['.parameter init', ...parameterCommands, `.eqp on`, sql].join('\n'))
 }
 
 function toIsoDate(date: Date) {

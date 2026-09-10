@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { DailyTokenReport } from './adapters'
-import {
-  prepareDailyReportHistoryShare,
-  saveDailyReportHistory
-} from './report-history'
+import { prepareDailyReportHistoryShare, saveDailyReportHistory } from './report-history'
 
 describe('daily report history saving', () => {
   test('saves a daily report history snapshot with an upsert key', async () => {
@@ -167,19 +164,23 @@ function sampleReport(): DailyTokenReport {
     cacheReadRate: 0.25,
     costUsd: 1.23,
     sessionCount: 4,
-    sourceSplit: [{
-      source: 'codex',
-      totalTokens: 1200,
-      totalTokensWithoutCacheRead: 900,
-      cacheReadRate: 0.25
-    }],
-    topModels: [{
-      model: 'gpt-5',
-      totalTokens: 1200,
-      totalTokensWithoutCacheRead: 900,
-      cacheReadRate: 0.25,
-      costUsd: 1.23
-    }]
+    sourceSplit: [
+      {
+        source: 'codex',
+        totalTokens: 1200,
+        totalTokensWithoutCacheRead: 900,
+        cacheReadRate: 0.25
+      }
+    ],
+    topModels: [
+      {
+        model: 'gpt-5',
+        totalTokens: 1200,
+        totalTokensWithoutCacheRead: 900,
+        cacheReadRate: 0.25,
+        costUsd: 1.23
+      }
+    ]
   }
 }
 

@@ -6,7 +6,9 @@ export function Table(props: { class?: string; children?: Child }) {
 }
 
 export function TableHeader(props: { class?: string; children?: Child }) {
-  return <thead class={cn('text-xs uppercase tracking-wide text-[var(--app-muted)]', props.class)}>{props.children}</thead>
+  return (
+    <thead class={cn('text-xs uppercase tracking-wide text-[var(--app-muted)]', props.class)}>{props.children}</thead>
+  )
 }
 
 export function TableBody(props: { class?: string; children?: Child }) {
@@ -22,5 +24,9 @@ export function TableHead(props: { class?: string; children?: Child }) {
 }
 
 export function TableCell(props: { class?: string; colSpan?: number; children?: Child }) {
-  return <td class={cn('px-3 py-3 align-middle', props.class)} colSpan={props.colSpan}>{props.children}</td>
+  return (
+    <td class={cn('px-3 py-3 align-middle', props.class)} colSpan={props.colSpan}>
+      {props.children}
+    </td>
+  )
 }

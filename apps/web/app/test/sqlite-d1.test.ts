@@ -22,10 +22,7 @@ describe('sqlite D1 test adapter', () => {
     const db = createSqliteD1(dbPath)
     await db.prepare('INSERT INTO events (usage_date) VALUES (?)').bind('2026-06-02').run()
 
-    const row = await db
-      .prepare('SELECT usage_date as value FROM events')
-      .bind()
-      .first<{ value: string }>()
+    const row = await db.prepare('SELECT usage_date as value FROM events').bind().first<{ value: string }>()
 
     expect(row?.value).toBe('2026-06-02')
   })
@@ -40,10 +37,7 @@ describe('sqlite D1 test adapter', () => {
     const db = createSqliteD1(dbPath)
     await db.prepare('INSERT INTO payloads (value) VALUES (?)').bind(value).run()
 
-    const row = await db
-      .prepare('SELECT value FROM payloads')
-      .bind()
-      .first<{ value: string }>()
+    const row = await db.prepare('SELECT value FROM payloads').bind().first<{ value: string }>()
 
     expect(row?.value).toBe(value)
   })
@@ -55,14 +49,9 @@ describe('sqlite D1 test adapter', () => {
     runSql(dbPath, 'CREATE TABLE payloads (value TEXT NOT NULL);')
 
     const db = createSqliteD1(dbPath)
-    await db.prepare('INSERT INTO payloads (value) VALUES (?), (?)')
-      .bind('alpha [beta] gamma', 'tail')
-      .run()
+    await db.prepare('INSERT INTO payloads (value) VALUES (?), (?)').bind('alpha [beta] gamma', 'tail').run()
 
-    const rows = await db
-      .prepare('SELECT value FROM payloads ORDER BY value')
-      .bind()
-      .all<{ value: string }>()
+    const rows = await db.prepare('SELECT value FROM payloads ORDER BY value').bind().all<{ value: string }>()
 
     expect(rows.results.map((row) => row.value)).toEqual(['alpha [beta] gamma', 'tail'])
   })
@@ -74,10 +63,7 @@ describe('sqlite D1 test adapter', () => {
     runSql(dbPath, 'CREATE TABLE events (id TEXT NOT NULL);')
 
     const db = createSqliteD1(dbPath)
-    const result = await db
-      .prepare('INSERT INTO events (id) VALUES (?) RETURNING id')
-      .bind('evt_1')
-      .run()
+    const result = await db.prepare('INSERT INTO events (id) VALUES (?) RETURNING id').bind('evt_1').run()
 
     expect(result.meta.changes).toBe(1)
   })

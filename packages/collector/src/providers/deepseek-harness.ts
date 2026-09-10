@@ -1,8 +1,8 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import { readSessionLines, scanSessionFiles } from './bounded-session-scan'
+import { maxSessionFileBytes, readSessionLines, scanSessionFiles } from './bounded-session-scan'
 import { formatDate } from './session-jsonl-parser-utils'
 import {
   parseJsonLine,
@@ -14,7 +14,7 @@ import {
   unknownModel,
   type UsageEvent
 } from './session-usage-aggregate'
-import { decompressZstdFrames, isZstdBuffer } from './zstd-frames'
+import { decompressZstdFrame, isZstdBuffer, scanZstdFrames } from './zstd-frames'
 
 const source = 'deepseek-harness'
 const label = 'DeepSeek Harness'
@@ -121,14 +121,44 @@ async function* readLogLines(filePath: string): AsyncGenerator<string> {
     yield* readSessionLines(filePath)
     return
   }
+  const fileStat = await stat(filePath)
+  if (fileStat.size > maxSessionFileBytes) {
+    throw new Error(`DeepSeek Harness compressed session log exceeds ${maxSessionFileBytes} bytes`)
+  }
   const compressed = await readFile(filePath)
   if (compressed.length === 0) return
+  if (compressed.length > maxSessionFileBytes) {
+    throw new Error(`DeepSeek Harness compressed session log exceeds ${maxSessionFileBytes} bytes`)
+  }
   if (!isZstdBuffer(compressed)) {
     throw new Error('not a Zstandard session log')
   }
-  for (const line of decompressZstdFrames(compressed).toString('utf8').split('\n')) {
-    yield line
+  let decodedBytes = 0
+  let pending = ''
+  for (const frame of scanZstdFrames(compressed)) {
+    let decoded: Buffer
+    try {
+      decoded = decompressZstdFrame(compressed, frame, { maxOutputLength: maxSessionFileBytes })
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ERR_BUFFER_TOO_LARGE') {
+        throw new Error(`DeepSeek Harness decompressed session log exceeds ${maxSessionFileBytes} bytes`, {
+          cause: error
+        })
+      }
+      throw error
+    }
+    decodedBytes += decoded.length
+    if (decodedBytes > maxSessionFileBytes) {
+      throw new Error(`DeepSeek Harness decompressed session log exceeds ${maxSessionFileBytes} bytes`)
+    }
+    pending += decoded.toString('utf8')
+    let newline: number
+    while ((newline = pending.indexOf('\n')) >= 0) {
+      yield pending.slice(0, newline)
+      pending = pending.slice(newline + 1)
+    }
   }
+  if (pending) yield pending
 }
 
 /**
@@ -148,8 +178,7 @@ function sessionRoot(options: CollectDeepSeekHarnessUsageOptions) {
   if (options.sessionRoot) return options.sessionRoot
   const explicitRoot = process.env.TOKENBOARD_DSH_SESSION_ROOT ?? process.env.DSH_SESSION_ROOT
   if (!options.dshHome && explicitRoot) return explicitRoot
-  const home = options.dshHome ?? process.env.TOKENBOARD_DSH_HOME ?? process.env.DSH_HOME ??
-    join(homedir(), '.dsh')
+  const home = options.dshHome ?? process.env.TOKENBOARD_DSH_HOME ?? process.env.DSH_HOME ?? join(homedir(), '.dsh')
   return join(home, 'sessions')
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   collectorDir as defaultCollectorDir,
@@ -11,7 +11,7 @@ import {
   readConfig,
   readPackageManager
 } from './config.mjs'
-import { runArchiveFallback } from './upgrade-archive.mjs'
+import { recoverOrphanedBackup, runArchiveFallback, selectAvailableBackupPath } from './upgrade-archive.mjs'
 import {
   buildCloneSteps,
   buildDefaultBranchPullSteps,
@@ -34,6 +34,7 @@ export function buildUpgradePlan({
   collectorExists,
   collectorIsGitRepo = collectorExists,
   workDir,
+  backupDir,
   platform = process.platform
 }) {
   if (configDir && samePath(skillDir, configDir, platform)) {
@@ -44,28 +45,27 @@ export function buildUpgradePlan({
   }
 
   const replacementDir = workDir ? joinForPlatform(workDir, 'TokenBoard') : null
-  const steps = collectorExists && collectorIsGitRepo
-    ? [
-        { command: 'git', args: ['remote', 'set-url', 'origin', repoUrl], options: { cwd: collectorDir } },
-        ...buildFetchAndCheckoutRefSteps({ dir: collectorDir, repoRef }),
-        ...(repoRef ? [] : buildDefaultBranchPullSteps({ dir: collectorDir }))
-      ]
-    : collectorExists
-      ? replacementDir
-        ? [
-            { command: 'remove', args: [workDir], options: { recursive: true, force: true } },
-            ...buildCloneSteps({ repoUrl, repoRef, dir: replacementDir }),
-            { command: 'remove', args: [collectorDir], options: { recursive: true, force: true } },
-            { command: 'copy', args: [replacementDir, collectorDir], options: { recursive: true, force: true } },
-            { command: 'remove', args: [workDir], options: { recursive: true, force: true } }
-          ]
-        : [
-            { command: 'remove', args: [collectorDir], options: { recursive: true, force: true } },
-            ...buildCloneSteps({ repoUrl, repoRef, dir: collectorDir })
-          ]
-      : [
-          ...buildCloneSteps({ repoUrl, repoRef, dir: collectorDir })
+  const resolvedBackupDir = backupDir || `${collectorDir}.tokenboard-upgrade-backup-${process.pid}`
+  const steps =
+    collectorExists && collectorIsGitRepo
+      ? [
+          { command: 'git', args: ['remote', 'set-url', 'origin', repoUrl], options: { cwd: collectorDir } },
+          ...buildFetchAndCheckoutRefSteps({ dir: collectorDir, repoRef }),
+          ...(repoRef ? [] : buildDefaultBranchPullSteps({ dir: collectorDir }))
         ]
+      : collectorExists
+        ? replacementDir
+          ? [
+              { command: 'remove', args: [workDir], options: { recursive: true, force: true } },
+              ...buildCloneSteps({ repoUrl, repoRef, dir: replacementDir }),
+              { command: 'replace', args: [replacementDir, collectorDir, resolvedBackupDir], options: {} },
+              { command: 'remove', args: [workDir], options: { recursive: true, force: true } }
+            ]
+          : [
+              { command: 'remove', args: [collectorDir], options: { recursive: true, force: true } },
+              ...buildCloneSteps({ repoUrl, repoRef, dir: collectorDir })
+            ]
+        : [...buildCloneSteps({ repoUrl, repoRef, dir: collectorDir })]
 
   const collectorSkillDir = joinForPlatform(collectorDir, 'skills', 'tokenboard')
   if (!samePath(collectorSkillDir, skillDir, platform)) {
@@ -97,6 +97,7 @@ export function runUpgrade({
   mkdir = mkdirSync,
   readDir = readdirSync,
   remove = rmSync,
+  rename = renameSync,
   readConfigFile = readConfig,
   mergeConfigFile = mergeConfig,
   configDirectory = defaultConfigDir(),
@@ -107,9 +108,18 @@ export function runUpgrade({
   const repoRef = resolveRepoRef({ flags, env, config })
   const packageManager = readPackageManager(flags, config)
   const collector = config.collectorDir || defaultCollectorDir()
-  const skillDir = flags['skill-dir'] || env.TOKENBOARD_SKILL_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..')
+  const skillDir =
+    flags['skill-dir'] || env.TOKENBOARD_SKILL_DIR || resolve(dirname(fileURLToPath(import.meta.url)), '..')
+  if (!samePath(collector, configDirectory, platform)) {
+    recoverOrphanedBackup({ collectorDir: collector, platform, readDir, rename, copy, remove, log })
+  }
   const collectorExists = exists(collector)
-  const collectorIsGitRepo = exists(join(collector, '.git'))
+  const collectorIsGitRepo = exists(joinForPlatform(collector, '.git'))
+  const workDir = createUpgradeWorkDir(configDirectory, platform, exists)
+  const backupDir =
+    collectorExists && !collectorIsGitRepo
+      ? selectAvailableBackupPath({ collectorDir: collector, platform, readDir })
+      : undefined
 
   if (collectorExists && collectorIsGitRepo) {
     assertCleanGitWorktree({ collectorDir: collector, spawn })
@@ -131,10 +141,11 @@ export function runUpgrade({
       repoRef,
       collectorExists,
       collectorIsGitRepo,
-      workDir: join(configDirectory, 'upgrade-work'),
+      workDir,
+      backupDir,
       platform
     })) {
-      runStep(step, { spawn, copy, remove, platform })
+      runStep(step, { spawn, copy, remove, rename, log, platform })
     }
   } catch (error) {
     if (collectorExists && collectorIsGitRepo) {
@@ -146,23 +157,32 @@ export function runUpgrade({
       collectorDir: collector,
       configDir: configDirectory,
       skillDir,
-      workDir: join(configDirectory, 'upgrade-work'),
+      workDir,
       platform,
       spawn,
       copy,
       mkdir,
       readDir,
-      remove
+      remove,
+      rename,
+      log
     })
   }
 
-  refreshInstalledNotifyHandler({
-    collectorDir: collector,
-    configDirectory,
-    env,
-    nodePath,
-    spawn
-  })
+  const refreshScriptPath = joinForPlatform(
+    joinForPlatform(collector, 'skills', 'tokenboard'),
+    'scripts',
+    'refresh-notify-handler.mjs'
+  )
+  if (exists(refreshScriptPath)) {
+    refreshInstalledNotifyHandler({
+      collectorDir: collector,
+      configDirectory,
+      env,
+      nodePath,
+      spawn
+    })
+  }
 
   mergeConfigFile({
     collectorDir: collector,
@@ -174,6 +194,17 @@ export function runUpgrade({
   })
   log(`TokenBoard upgraded from ${repoUrl}${repoRef ? `#${repoRef}` : ''}`)
   return { collectorDir: collector, skillDir, repoUrl, repoRef, packageManager }
+}
+
+function createUpgradeWorkDir(configDirectory, platform, exists) {
+  const stablePath = joinForPlatform(configDirectory, 'upgrade-work')
+  // A real config directory is shared by scheduled and manual upgrades. Give
+  // each run its own workspace so an interrupted or concurrent archive
+  // fallback cannot remove another run's extracted checkout. Test doubles
+  // commonly omit the config directory; retaining the stable path there keeps
+  // the plan deterministic without changing production behavior.
+  if (!exists(configDirectory)) return stablePath
+  return `${stablePath}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export function refreshInstalledNotifyHandler({
@@ -226,7 +257,7 @@ export function assertAutomaticUpgradeBranch({ collectorDir, repoRef, spawn = sp
   if (!currentBranch) {
     throw new Error(
       'Refusing automatic TokenBoard upgrade from a detached HEAD. ' +
-      'Run upgrade.mjs manually after switching the checkout to the intended branch.'
+        'Run upgrade.mjs manually after switching the checkout to the intended branch.'
     )
   }
 
@@ -236,15 +267,15 @@ export function assertAutomaticUpgradeBranch({ collectorDir, repoRef, spawn = sp
     throw new Error(
       explicitRef
         ? `Refusing automatic TokenBoard upgrade from branch ${currentBranch}: the configured ref is not a branch. ` +
-          'Run upgrade.mjs manually after switching the checkout to the intended ref.'
+            'Run upgrade.mjs manually after switching the checkout to the intended ref.'
         : `Refusing automatic TokenBoard upgrade from branch ${currentBranch}: unable to resolve the remote default branch. ` +
-          'Run upgrade.mjs manually after verifying the origin remote and its default branch.'
+            'Run upgrade.mjs manually after verifying the origin remote and its default branch.'
     )
   }
   if (currentBranch !== targetBranch) {
     throw new Error(
       `Refusing automatic TokenBoard upgrade from branch ${currentBranch} to ${targetBranch}. ` +
-      'Run upgrade.mjs manually after switching the checkout to the intended branch.'
+        'Run upgrade.mjs manually after switching the checkout to the intended branch.'
     )
   }
 }
@@ -282,7 +313,13 @@ function readGitBranch({ collectorDir, spawn }) {
   return String(result.stdout ?? '').trim()
 }
 
-export function resolveArchiveUrls({ flags = {}, env = process.env, config = {}, repoUrl = defaultRepoUrl, repoRef = null } = {}) {
+export function resolveArchiveUrls({
+  flags = {},
+  env = process.env,
+  config = {},
+  repoUrl = defaultRepoUrl,
+  repoRef = null
+} = {}) {
   const explicit = trimmedString(flags['archive-url'] || env.TOKENBOARD_ARCHIVE_URL)
   if (explicit) {
     return [explicit]
@@ -295,14 +332,21 @@ export function resolveArchiveUrls({ flags = {}, env = process.env, config = {},
 
   const github = parseGitHubRepoUrl(repoUrl)
   if (github) {
-    return buildArchiveRefPaths(repoRef)
-      .map((refPath) => `https://github.com/${github[1]}/${github[2]}/archive/${refPath}.zip`)
+    return buildArchiveRefPaths(repoRef).map(
+      (refPath) => `https://github.com/${github[1]}/${github[2]}/archive/${refPath}.zip`
+    )
   }
 
   throw new Error(`Archive fallback requires a GitHub repo URL or explicit archive URL: ${repoUrl}`)
 }
 
-export function resolveArchiveUrl({ flags = {}, env = process.env, config = {}, repoUrl = defaultRepoUrl, repoRef = null } = {}) {
+export function resolveArchiveUrl({
+  flags = {},
+  env = process.env,
+  config = {},
+  repoUrl = defaultRepoUrl,
+  repoRef = null
+} = {}) {
   return resolveArchiveUrls({ flags, env, config, repoUrl, repoRef })[0]
 }
 
@@ -327,20 +371,21 @@ export function resolveRepoUrl({ flags = {}, env = process.env, config = {} } = 
 
 function isGitRepoUrl(value) {
   const url = trimmedString(value)
-  return !!url && !url.endsWith('.zip') && (
-    url.endsWith('.git') ||
-    url.startsWith('git@') ||
-    url.startsWith('ssh://') ||
-    /^https?:\/\//.test(url)
+  return (
+    !!url &&
+    !url.endsWith('.zip') &&
+    (url.endsWith('.git') || url.startsWith('git@') || url.startsWith('ssh://') || /^https?:\/\//.test(url))
   )
 }
 
 function parseGitHubRepoUrl(value) {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  return /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(trimmed) ||
+  return (
+    /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(trimmed) ||
     /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(trimmed) ||
     /^ssh:\/\/git@github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(trimmed)
+  )
 }
 
 function trimmedString(value) {
@@ -355,10 +400,7 @@ function buildArchiveRefPaths(repoRef) {
   if (ref.startsWith('refs/tags/')) {
     return [`refs/tags/${encodeURIComponent(ref.slice('refs/tags/'.length))}`]
   }
-  return [
-    `refs/heads/${encodeURIComponent(ref)}`,
-    encodeURIComponent(ref)
-  ]
+  return [`refs/heads/${encodeURIComponent(ref)}`, encodeURIComponent(ref)]
 }
 
 function runCli() {

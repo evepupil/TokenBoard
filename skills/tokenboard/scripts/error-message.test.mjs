@@ -18,8 +18,16 @@ test('does not throw while formatting hostile thrown values', () => {
   }
   const throwingError = new Error('failed')
   Object.defineProperties(throwingError, {
-    message: { get: () => { throw new Error('message getter failed') } },
-    name: { get: () => { throw new Error('name getter failed') } }
+    message: {
+      get: () => {
+        throw new Error('message getter failed')
+      }
+    },
+    name: {
+      get: () => {
+        throw new Error('name getter failed')
+      }
+    }
   })
 
   assert.equal(errorMessage(Object.create(null)), 'Unknown error')

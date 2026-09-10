@@ -6,12 +6,7 @@ import { requireUser } from '../../../features/auth/middleware'
 import { listDeviceAuditLogs, listUserDevices } from '../../../features/device/service'
 import { ApiError } from '../../../lib/errors'
 import { X } from 'lucide'
-import {
-  DeviceDetailsDialogContent,
-  DeviceDetailsPage,
-  type DevicesPageState,
-  type DevicesView
-} from '../devices'
+import { DeviceDetailsDialogContent, DeviceDetailsPage, type DevicesPageState, type DevicesView } from '../devices'
 
 export const GET = createRoute(async (c) => {
   const fragmentRequest = c.req.header('x-tokenboard-fragment') === 'device-details'
@@ -73,7 +68,9 @@ function DeviceDetailsError(props: { message: string }) {
     <>
       <header class="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-panel)] p-4">
         <div class="min-w-0">
-          <p id="device-details-dialog-title" class="text-base font-black text-[var(--app-text)]">设备详情</p>
+          <p id="device-details-dialog-title" class="text-base font-black text-[var(--app-text)]">
+            设备详情
+          </p>
           <p class="mt-1 text-sm font-bold text-[var(--app-muted)]">{props.message}</p>
         </div>
         <button

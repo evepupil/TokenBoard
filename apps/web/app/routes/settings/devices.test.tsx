@@ -356,14 +356,7 @@ describe('DevicesPage layout', () => {
 
   test('renders the empty state when no device matches the search', async () => {
     const html = await renderToString(
-      <DevicesPage
-        email="user@example.com"
-        saved={false}
-        revoked={null}
-        view="cards"
-        query="missing"
-        devices={[]}
-      />
+      <DevicesPage email="user@example.com" saved={false} revoked={null} view="cards" query="missing" devices={[]} />
     )
 
     expect(html).toContain('data-devices-empty-state="true"')
@@ -412,7 +405,9 @@ describe('DevicesPage layout', () => {
     expect(html).toContain('--server-origin &#39;https://tokenboard.example.com&#39;')
     expect(html).toContain('--upload-token &#39;tb_upload_new_secret&#39;')
     expect(html).toContain('--install-claim &#39;tb_install_new_secret&#39;')
-    expect(html).toContain('Join-Path $HOME &quot;.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\rotate-token.mjs&quot;')
+    expect(html).toContain(
+      'Join-Path $HOME &quot;.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\rotate-token.mjs&quot;'
+    )
     expect(html).toContain('--server-origin &quot;https://tokenboard.example.com&quot;')
     expect(html).toContain('--upload-token &quot;tb_upload_new_secret&quot;')
     expect(html).toContain('--install-claim &quot;tb_install_new_secret&quot;')

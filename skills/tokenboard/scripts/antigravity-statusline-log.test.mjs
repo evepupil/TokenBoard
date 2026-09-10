@@ -17,15 +17,14 @@ test('statusline CLI compacts its private JSONL within the configured byte limit
   try {
     const logPath = join(root, 'events.jsonl')
     for (let index = 1; index <= 12; index += 1) {
-      const result = spawnSync(process.execPath, [
-        scriptPath,
-        '--state-dir', root,
-        '--log-path', logPath,
-        '--max-log-bytes', '1024'
-      ], {
-        input: JSON.stringify(statuslinePayload({ conversation_id: `conversation-${index}` })),
-        encoding: 'utf8'
-      })
+      const result = spawnSync(
+        process.execPath,
+        [scriptPath, '--state-dir', root, '--log-path', logPath, '--max-log-bytes', '1024'],
+        {
+          input: JSON.stringify(statuslinePayload({ conversation_id: `conversation-${index}` })),
+          encoding: 'utf8'
+        }
+      )
       assert.equal(result.status, 0)
     }
 
@@ -45,10 +44,13 @@ test('statusline compaction records lineage for generation-aware cursor translat
   try {
     const logPath = join(root, 'events.jsonl')
     const previousGeneration = 'a'.repeat(32)
-    await writeFile(logPath, `${JSON.stringify({
-      schemaVersion: 'antigravity-statusline-log/v1',
-      generation: previousGeneration
-    })}\n${JSON.stringify({ value: 'x'.repeat(160) })}\n`)
+    await writeFile(
+      logPath,
+      `${JSON.stringify({
+        schemaVersion: 'antigravity-statusline-log/v1',
+        generation: previousGeneration
+      })}\n${JSON.stringify({ value: 'x'.repeat(160) })}\n`
+    )
 
     appendBoundedStatuslineEvent(logPath, { value: 'new-event' }, 240)
 
@@ -67,10 +69,15 @@ test('statusline compaction leaves the original log untouched when lineage does 
   try {
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace('const compactionLineageMaxAttempts = 8', 'const compactionLineageMaxAttempts = 1')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      'const compactionLineageMaxAttempts = 8',
+      'const compactionLineageMaxAttempts = 1'
+    )
     await writeFile(modulePath, source)
-    await writeFile(join(root, 'process-liveness.mjs'), await readFile(new URL('./process-liveness.mjs', import.meta.url)))
+    await writeFile(
+      join(root, 'process-liveness.mjs'),
+      await readFile(new URL('./process-liveness.mjs', import.meta.url))
+    )
 
     const logPath = join(root, 'events.jsonl')
     const previousGeneration = 'a'.repeat(32)
@@ -95,13 +102,18 @@ test('statusline CLI keeps concurrent events while compacting', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-concurrent-'))
   try {
     const logPath = join(root, 'events.jsonl')
-    await writeFile(logPath, Array.from({ length: 4 }, (_, index) => JSON.stringify({
-      schemaVersion: 'antigravity-statusline/v1',
-      capturedAt: '2026-06-23T10:00:00.000Z',
-      conversationHash: plainHash(`old-${index}`),
-      model: 'Gemini 3.5 Flash (Medium)',
-      usage: { inputTokens: 10, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 }
-    })).join('\n'))
+    await writeFile(
+      logPath,
+      Array.from({ length: 4 }, (_, index) =>
+        JSON.stringify({
+          schemaVersion: 'antigravity-statusline/v1',
+          capturedAt: '2026-06-23T10:00:00.000Z',
+          conversationHash: plainHash(`old-${index}`),
+          model: 'Gemini 3.5 Flash (Medium)',
+          usage: { inputTokens: 10, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0 }
+        })
+      ).join('\n')
+    )
 
     await Promise.all([
       runStatuslineProcess(root, logPath, 'concurrent-a'),
@@ -138,10 +150,15 @@ test('statusline log retry budget covers orphan lock recovery grace', async () =
   try {
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace(/const orphanLockGraceMs = [^\n]+/, 'const orphanLockGraceMs = 600')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      /const orphanLockGraceMs = [^\n]+/,
+      'const orphanLockGraceMs = 600'
+    )
     await writeFile(modulePath, source)
-    await writeFile(join(root, 'process-liveness.mjs'), await readFile(new URL('./process-liveness.mjs', import.meta.url)))
+    await writeFile(
+      join(root, 'process-liveness.mjs'),
+      await readFile(new URL('./process-liveness.mjs', import.meta.url))
+    )
 
     const logPath = join(root, 'events.jsonl')
     await mkdir(`${logPath}.lock`)
@@ -160,10 +177,15 @@ test('statusline log keeps a fresh malformed lock until its recovery grace expir
   try {
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace(/const orphanLockGraceMs = [^\n]+/, 'const orphanLockGraceMs = 600')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      /const orphanLockGraceMs = [^\n]+/,
+      'const orphanLockGraceMs = 600'
+    )
     await writeFile(modulePath, source)
-    await writeFile(join(root, 'process-liveness.mjs'), await readFile(new URL('./process-liveness.mjs', import.meta.url)))
+    await writeFile(
+      join(root, 'process-liveness.mjs'),
+      await readFile(new URL('./process-liveness.mjs', import.meta.url))
+    )
 
     const logPath = join(root, 'events.jsonl')
     const lockPath = `${logPath}.lock`
@@ -190,7 +212,10 @@ test('statusline log does not reclaim an old lock while its owner pid is alive',
       .replace(/const lockWaitTimeoutMs = [^\n]+/, 'const lockWaitTimeoutMs = 100')
       .replace(/const orphanLockGraceMs = [^\n]+/, 'const orphanLockGraceMs = 20')
     await writeFile(modulePath, source)
-    await writeFile(join(root, 'process-liveness.mjs'), await readFile(new URL('./process-liveness.mjs', import.meta.url)))
+    await writeFile(
+      join(root, 'process-liveness.mjs'),
+      await readFile(new URL('./process-liveness.mjs', import.meta.url))
+    )
 
     const logPath = join(root, 'events.jsonl')
     const lockPath = `${logPath}.lock`
@@ -257,10 +282,7 @@ test('statusline log removes a partial lock when pid write fails', async () => {
     }
     syncBuiltinESMExports()
 
-    assert.throws(
-      () => appendBoundedStatuslineEvent(logPath, { value: 'not-written' }, 1024),
-      /pid write failed/
-    )
+    assert.throws(() => appendBoundedStatuslineEvent(logPath, { value: 'not-written' }, 1024), /pid write failed/)
     await assert.rejects(stat(`${logPath}.lock`), { code: 'ENOENT' })
   } finally {
     fs.writeFileSync = originalWriteFileSync
@@ -290,10 +312,7 @@ function plainHash(value) {
 }
 
 function legacyHash(value) {
-  return createHash('sha256')
-    .update('tokenboard-antigravity-cli\0')
-    .update(value)
-    .digest('hex')
+  return createHash('sha256').update('tokenboard-antigravity-cli\0').update(value).digest('hex')
 }
 
 function compactedGeneration(previousGeneration, retainedFromOffsetBytes) {
@@ -308,14 +327,15 @@ function compactedGeneration(previousGeneration, retainedFromOffsetBytes) {
 
 function runStatuslineProcess(root, logPath, conversationId) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--log-path', logPath,
-      '--max-log-bytes', '1024'
-    ], { stdio: ['pipe', 'ignore', 'pipe'] })
+    const child = spawn(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--max-log-bytes', '1024'],
+      { stdio: ['pipe', 'ignore', 'pipe'] }
+    )
     let stderr = ''
-    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
     child.on('error', reject)
     child.on('close', (status) => {
       if (status === 0) resolve(undefined)

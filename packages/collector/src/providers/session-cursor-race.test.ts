@@ -68,35 +68,38 @@ describe('session cursor file identity', () => {
     }
   })
 
-  test.skipIf(process.platform === 'win32')('rejects a symbolic-link replacement between scanning and reading', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-race-'))
-    const sessionsDir = join(root, 'sessions')
-    const cursorPath = join(root, 'codex-cursor.json')
-    const sessionFile = join(sessionsDir, '2026', '07', '25', 'session.jsonl')
-    const outsideFile = join(root, 'outside.jsonl')
-    const timestamp = new Date('2026-07-25T01:00:00.000Z')
+  test.skipIf(process.platform === 'win32')(
+    'rejects a symbolic-link replacement between scanning and reading',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-race-'))
+      const sessionsDir = join(root, 'sessions')
+      const cursorPath = join(root, 'codex-cursor.json')
+      const sessionFile = join(sessionsDir, '2026', '07', '25', 'session.jsonl')
+      const outsideFile = join(root, 'outside.jsonl')
+      const timestamp = new Date('2026-07-25T01:00:00.000Z')
 
-    try {
-      await mkdir(dirname(sessionFile), { recursive: true })
-      await writeFile(sessionFile, '{"type":"event_msg"}\n')
-      await utimes(sessionFile, timestamp, timestamp)
-      const changed = await collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })
+      try {
+        await mkdir(dirname(sessionFile), { recursive: true })
+        await writeFile(sessionFile, '{"type":"event_msg"}\n')
+        await utimes(sessionFile, timestamp, timestamp)
+        const changed = await collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
 
-      await writeFile(outsideFile, '{"type":"event_msg"}\n')
-      await rm(sessionFile)
-      await symlink(outsideFile, sessionFile)
+        await writeFile(outsideFile, '{"type":"event_msg"}\n')
+        await rm(sessionFile)
+        await symlink(outsideFile, sessionFile)
 
-      await expect(readAllLines(changed.files[0])).rejects.toThrow('Session file changed before reading')
-      expect(() => changed.commit()).toThrow('session cursor cannot commit after a changed file read failure')
-      await expect(readFile(cursorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        await expect(readAllLines(changed.files[0])).rejects.toThrow('Session file changed before reading')
+        expect(() => changed.commit()).toThrow('session cursor cannot commit after a changed file read failure')
+        await expect(readFile(cursorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('does not allow a cursor commit after a consumer stops before the verified read completes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-race-'))
@@ -124,7 +127,6 @@ describe('session cursor file identity', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
-
 })
 
 async function readAllLines(file: { readLines: () => AsyncIterable<unknown> } | undefined) {

@@ -5,18 +5,23 @@ export { errorMessage } from '../error-message'
 
 export function isUnavailableDbError(error: unknown) {
   if (!(error instanceof Error)) return false
-  return error.message.startsWith('Antigravity SQLite reader unavailable:') ||
+  return (
+    error.message.startsWith('Antigravity SQLite reader unavailable:') ||
     error.message.startsWith('Antigravity conversations directory not found:')
+  )
 }
 
 export function isUnavailableLanguageServerError(error: unknown) {
   if (!(error instanceof Error)) return false
-  return error.message.includes('Antigravity language server exited before it was ready') ||
+  return (
+    error.message.includes('Antigravity language server exited before it was ready') ||
     error.message.includes('Timed out starting Antigravity language server') ||
     error.message.startsWith('Antigravity metadata request failed for ') ||
     error.message.startsWith('Antigravity metadata request transport failed for ') ||
     error.message.startsWith('Antigravity metadata request timed out for ') ||
-    error.message.match(/^spawn .*(Antigravity.*language_server|tokenboard-antigravity-language-server) ENOENT/) !== null
+    error.message.match(/^spawn .*(Antigravity.*language_server|tokenboard-antigravity-language-server) ENOENT/) !==
+      null
+  )
 }
 
 export function readStateDir() {

@@ -1,4 +1,10 @@
-import { getDailyUsageTrend, getUsageSummary, type DailyUsageTrendItem, type UsageDetails, type UsageSummary } from './queries'
+import {
+  getDailyUsageTrend,
+  getUsageSummary,
+  type DailyUsageTrendItem,
+  type UsageDetails,
+  type UsageSummary
+} from './queries'
 import { toIsoDate } from '../../lib/time'
 import { usageSourceSchema } from './schema'
 import { normalizeDeviceFilter, usageSummaryStrictMode } from './deduped-daily-usage'

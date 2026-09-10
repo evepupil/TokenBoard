@@ -11,8 +11,5 @@ export function jsonError(c: Context, error: unknown) {
     return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } }, 400)
   }
 
-  return c.json(
-    { error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' } },
-    500
-  )
+  return c.json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' } }, 500)
 }

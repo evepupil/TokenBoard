@@ -7,10 +7,12 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
-import { buildNotifyHandler } from './hooks.mjs'
+import { buildNotifyHandler, notifyHandlerErrorLogMaxBytes } from './hooks.mjs'
+import { currentProcessStartIdentity } from './process-liveness.mjs'
 
 const backgroundResultTimeoutMs = 5_000
 const backgroundResultRetryMs = 25
+const processIdentityAvailable = Boolean(currentProcessStartIdentity())
 
 test('notify handler does not forward payload args to the TokenBoard background process', () => {
   const source = buildNotifyHandler({
@@ -29,7 +31,18 @@ test('notify handler does not forward payload args to the TokenBoard background 
   assert.match(source, /const TASKLIST_TIMEOUT_MS = 2000;/)
   assert.match(source, /timeout: TASKLIST_TIMEOUT_MS/)
   assert.match(source, /recordHandlerError\(\s*"process-liveness"/)
+  assert.match(source, /DISPATCH_WORKER_IDENTITY_PROBE_GRACE_MS/)
+  assert.match(source, /identityProbeStartedAt/)
+  const workerMarkerStart = source.indexOf('function setDispatchWorkerPid')
+  const workerMarkerEnd = source.indexOf('function releaseDispatchLock', workerMarkerStart)
+  assert.ok(workerMarkerStart >= 0 && workerMarkerEnd > workerMarkerStart)
+  assert.match(source.slice(workerMarkerStart, workerMarkerEnd), /identityProbeStartedAt: workerStartedAt/)
+  assert.match(source, /PROCESS_IDENTITY_CACHE_PATH/)
   assert.doesNotMatch(source, /updateDispatchLockPid/)
+  assert.match(
+    source,
+    /if \(currentIdentity\.status === "known"\) return currentIdentity\.value === worker\.processStartIdentity/
+  )
 })
 
 test('notify handler coalesces background workers while the current worker is alive', async () => {
@@ -39,25 +52,179 @@ test('notify handler coalesces background workers while the current worker is al
   const countPath = join(root, 'background-count.txt')
 
   try {
-    await writeFile(backgroundScript, [
-      'import { readFileSync, writeFileSync } from "node:fs"',
-      `const countPath = ${JSON.stringify(countPath)}`,
-      'let count = 0',
-      'try { count = Number(readFileSync(countPath, "utf8")) || 0 } catch {}',
-      'writeFileSync(countPath, String(count + 1))',
-      'await new Promise((resolve) => setTimeout(resolve, 250))'
-    ].join('\n'))
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: backgroundScript,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      backgroundScript,
+      [
+        'import { readFileSync, writeFileSync } from "node:fs"',
+        `const countPath = ${JSON.stringify(countPath)}`,
+        'let count = 0',
+        'try { count = Number(readFileSync(countPath, "utf8")) || 0 } catch {}',
+        'writeFileSync(countPath, String(count + 1))',
+        'await new Promise((resolve) => setTimeout(resolve, 1000))'
+      ].join('\n')
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
 
     assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
     assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
-    assert.equal(await readTextFile(countPath), '1')
+    await waitFor(
+      async () => {
+        if (!existsSync(countPath)) return false
+        return (await readFile(countPath, 'utf8')).trim() === '1'
+      },
+      () => readDispatchDiagnostic(root)
+    )
     assert.deepEqual(await readdir(join(root, 'notify.signal.d')), ['codex.json'])
     await assert.rejects(readFile(join(root, 'notify.signal'), 'utf8'))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test(
+  'notify handler replaces a dispatch worker marker when its pid was reused',
+  { skip: !processIdentityAvailable },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-dispatch-worker-reused-'))
+    const handlerPath = join(root, 'notify.cjs')
+    const backgroundScript = join(root, 'background.mjs')
+    const countPath = join(root, 'background-count.txt')
+    const dispatchToken = 'reused-dispatch-owner'
+    const staleIdentity = 'reused-process-identity'
+
+    try {
+      await writeFile(
+        backgroundScript,
+        ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+      )
+      await writeFile(
+        join(root, 'notify.dispatch.lock'),
+        JSON.stringify({
+          pid: process.pid,
+          token: dispatchToken,
+          startedAt: '2000-01-01T00:00:00.000Z',
+          processStartIdentity: staleIdentity
+        })
+      )
+      await writeFile(
+        join(root, `notify.dispatch.worker.${dispatchToken}`),
+        JSON.stringify({
+          pid: process.pid,
+          token: dispatchToken,
+          startedAt: '2000-01-01T00:00:00.000Z',
+          processStartIdentity: staleIdentity
+        })
+      )
+      await writeFile(
+        handlerPath,
+        buildNotifyHandler({
+          stateDir: root,
+          notifyScriptPath: backgroundScript,
+          nodePath: process.execPath
+        })
+      )
+
+      assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
+      await waitFor(
+        () => existsSync(countPath),
+        () => readDispatchDiagnostic(root)
+      )
+      assert.equal(await readTextFile(countPath), 'started')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+)
+
+test('notify handler does not trust a live pid-only dispatch worker marker after startup grace', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-dispatch-worker-legacy-'))
+  const handlerPath = join(root, 'notify.cjs')
+  const backgroundScript = join(root, 'background.mjs')
+  const countPath = join(root, 'background-count.txt')
+  const dispatchToken = 'legacy-dispatch-owner'
+
+  try {
+    await writeFile(
+      backgroundScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+    )
+    await writeFile(
+      join(root, 'notify.dispatch.lock'),
+      JSON.stringify({
+        pid: process.pid,
+        token: dispatchToken,
+        startedAt: '2000-01-01T00:00:00.000Z'
+      })
+    )
+    await writeFile(
+      join(root, `notify.dispatch.worker.${dispatchToken}`),
+      JSON.stringify({
+        pid: process.pid,
+        token: dispatchToken,
+        startedAt: '2000-01-01T00:00:00.000Z'
+      })
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
+
+    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
+    await waitFor(
+      () => existsSync(countPath),
+      () => readDispatchDiagnostic(root)
+    )
+    assert.equal(await readTextFile(countPath), 'started')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('notify handler reclaims a markerless dispatch lock after startup grace', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-dispatch-markerless-'))
+  const handlerPath = join(root, 'notify.cjs')
+  const backgroundScript = join(root, 'background.mjs')
+  const countPath = join(root, 'background-count.txt')
+
+  try {
+    await writeFile(
+      backgroundScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+    )
+    await writeFile(
+      join(root, 'notify.dispatch.lock'),
+      JSON.stringify({
+        pid: process.pid,
+        token: 'markerless-dispatch-owner',
+        startedAt: '2000-01-01T00:00:00.000Z'
+      })
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
+
+    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
+    await waitFor(
+      () => existsSync(countPath),
+      () => readDispatchDiagnostic(root)
+    )
+    assert.equal(await readTextFile(countPath), 'started')
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -70,26 +237,75 @@ test('notify handler recovers a malformed dispatch lock before starting a worker
   const countPath = join(root, 'background-count.txt')
 
   try {
-    await writeFile(backgroundScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(countPath)}, "started")`
-    ].join('\n'))
+    await writeFile(
+      backgroundScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+    )
     await writeFile(join(root, 'notify.dispatch.lock'), '{ truncated')
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: backgroundScript,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
 
     assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
-    await waitFor(async () => {
-      try {
-        return (await readFile(countPath, 'utf8')).trim() === 'started'
-      } catch {
-        return false
-      }
-    }, () => readDispatchDiagnostic(root))
+    await waitFor(
+      async () => {
+        try {
+          return (await readFile(countPath, 'utf8')).trim() === 'started'
+        } catch {
+          return false
+        }
+      },
+      () => readDispatchDiagnostic(root)
+    )
     assert.equal(await readTextFile(countPath), 'started')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('notify handler keeps the original notify alive when dispatch lock is a directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-dispatch-directory-'))
+  const handlerPath = join(root, 'notify.cjs')
+  const originalScript = join(root, 'original.mjs')
+  const originalResult = join(root, 'original-result.txt')
+
+  try {
+    await writeFile(
+      originalScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(originalResult)}, "forwarded")`].join(
+        '\n'
+      )
+    )
+    await writeFile(
+      join(root, 'codex_notify_original.json'),
+      JSON.stringify({
+        notify: [process.execPath, originalScript]
+      })
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: join(root, 'missing-background.mjs'),
+        nodePath: process.execPath
+      })
+    )
+    await import('node:fs/promises').then(({ mkdir }) => mkdir(join(root, 'notify.dispatch.lock')))
+
+    const result = spawnSync(process.execPath, [handlerPath, '--source=codex'])
+
+    assert.equal(result.status, 0)
+    await waitFor(
+      () => existsSync(originalResult),
+      () => readDispatchDiagnostic(root)
+    )
+    assert.equal(await readTextFile(originalResult), 'forwarded')
+    assert.match(await readFile(join(root, 'notify-handler-errors.log'), 'utf8'), /dispatch-lock/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -100,15 +316,21 @@ test('notify handler records a background spawn error and releases its dispatch 
   const handlerPath = join(root, 'notify.cjs')
 
   try {
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: '\u0000',
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: '\u0000',
+        nodePath: process.execPath
+      })
+    )
 
-    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex'], {
-      timeout: backgroundResultTimeoutMs
-    }).status, 0)
+    assert.equal(
+      spawnSync(process.execPath, [handlerPath, '--source=codex'], {
+        timeout: backgroundResultTimeoutMs
+      }).status,
+      0
+    )
     await waitFor(async () => {
       try {
         return (await readFile(join(root, 'notify-handler-errors.log'), 'utf8')).includes('"stage":"background"')
@@ -135,36 +357,164 @@ test('notify handler leaves cooldown work to a live trailing process', async () 
   let trailingPid
 
   try {
-    await writeFile(backgroundScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(countPath)}, "started")`
-    ].join('\n'))
-    await writeFile(trailingScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))`,
-      'await new Promise((resolve) => setTimeout(resolve, 5000))'
-    ].join('\n'))
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: backgroundScript,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      backgroundScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+    )
+    await writeFile(
+      trailingScript,
+      [
+        'import { writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))`,
+        'await new Promise((resolve) => setTimeout(resolve, 5000))'
+      ].join('\n')
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
     const trailing = spawn(process.execPath, [trailingScript], { detached: true, stdio: 'ignore' })
     trailingPid = trailing.pid
     trailing.unref()
 
     await waitFor(() => existsSync(trailingLockPath))
+    let processStartIdentity
+    await waitFor(() => {
+      processStartIdentity = currentProcessStartIdentity({ pid: trailingPid })
+      return Boolean(processStartIdentity)
+    })
+    assert.ok(processStartIdentity)
+    await writeFile(
+      trailingLockPath,
+      JSON.stringify({
+        pid: trailingPid,
+        startedAt: new Date().toISOString(),
+        processStartIdentity
+      })
+    )
     assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
     await new Promise((resolve) => setTimeout(resolve, 300))
     assert.equal(existsSync(countPath), false)
     assert.match(await readFile(join(root, 'notify.signal.d', 'codex.json'), 'utf8'), /"source":"codex"/)
   } finally {
     if (trailingPid) {
-      try { process.kill(trailingPid, 'SIGTERM') } catch {}
+      try {
+        process.kill(trailingPid, 'SIGTERM')
+      } catch {}
     }
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('notify handler does not trust a legacy pid-only trailing lock', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-trailing-legacy-'))
+  const handlerPath = join(root, 'notify.cjs')
+  const backgroundScript = join(root, 'background.mjs')
+  const countPath = join(root, 'background-count.txt')
+  const trailingScript = join(root, 'trailing.mjs')
+  const trailingLockPath = join(root, 'trailing.lock')
+  let trailingPid
+
+  try {
+    await writeFile(
+      backgroundScript,
+      ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+    )
+    await writeFile(
+      trailingScript,
+      [
+        'import { writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))`,
+        'await new Promise((resolve) => setTimeout(resolve, 5000))'
+      ].join('\n')
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
+    const trailing = spawn(process.execPath, [trailingScript], { detached: true, stdio: 'ignore' })
+    trailingPid = trailing.pid
+    trailing.unref()
+
+    await waitFor(() => existsSync(trailingLockPath))
+    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
+    await waitFor(
+      () => existsSync(countPath),
+      () => readDispatchDiagnostic(root)
+    )
+    assert.equal(await readTextFile(countPath), 'started')
+  } finally {
+    if (trailingPid) {
+      try {
+        process.kill(trailingPid, 'SIGTERM')
+      } catch {}
+    }
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test(
+  'notify handler dispatches when a live trailing pid has been reused',
+  { skip: !processIdentityAvailable },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-trailing-reused-'))
+    const handlerPath = join(root, 'notify.cjs')
+    const backgroundScript = join(root, 'background.mjs')
+    const countPath = join(root, 'background-count.txt')
+    const trailingScript = join(root, 'trailing.mjs')
+    const trailingLockPath = join(root, 'trailing.lock')
+    let trailingPid
+
+    try {
+      await writeFile(
+        backgroundScript,
+        ['import { writeFileSync } from "node:fs"', `writeFileSync(${JSON.stringify(countPath)}, "started")`].join('\n')
+      )
+      await writeFile(
+        trailingScript,
+        [
+          'import { writeFileSync } from "node:fs"',
+          `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), processStartIdentity: "reused-process-identity" }))`,
+          'await new Promise((resolve) => setTimeout(resolve, 5000))'
+        ].join('\n')
+      )
+      await writeFile(
+        handlerPath,
+        buildNotifyHandler({
+          stateDir: root,
+          notifyScriptPath: backgroundScript,
+          nodePath: process.execPath
+        })
+      )
+      const trailing = spawn(process.execPath, [trailingScript], { detached: true, stdio: 'ignore' })
+      trailingPid = trailing.pid
+      trailing.unref()
+
+      await waitFor(() => existsSync(trailingLockPath))
+      assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
+      await waitFor(
+        () => existsSync(countPath),
+        () => readDispatchDiagnostic(root)
+      )
+      assert.equal(await readTextFile(countPath), 'started')
+    } finally {
+      if (trailingPid) {
+        try {
+          process.kill(trailingPid, 'SIGTERM')
+        } catch {}
+      }
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+)
 
 test('detached notify worker releases dispatch ownership after scheduling trailing work', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-dispatch-'))
@@ -175,22 +525,33 @@ test('detached notify worker releases dispatch ownership after scheduling traili
   try {
     await writeFile(join(root, 'config.json'), JSON.stringify({ updatedAt: new Date().toISOString() }))
     await writeFile(join(root, 'last-success.json'), new Date().toISOString())
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: notifyPath,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: notifyPath,
+        nodePath: process.execPath
+      })
+    )
 
     assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex']).status, 0)
     await assertTrailingLockAlwaysParses(join(root, 'trailing.lock'))
     trailingPid = JSON.parse(await readFile(join(root, 'trailing.lock'), 'utf8')).pid
     await waitFor(() => !existsSync(join(root, 'notify.dispatch.lock')))
-    await waitFor(async () => !((await readdir(root)).some((name) => name.startsWith('notify.dispatch.worker.'))), () => readDispatchDiagnostic(root))
+    await waitFor(
+      async () => !(await readdir(root)).some((name) => name.startsWith('notify.dispatch.worker.')),
+      () => readDispatchDiagnostic(root)
+    )
     assert.equal(existsSync(join(root, 'notify.dispatch.worker')), false)
-    assert.equal((await readdir(root)).some((name) => name.startsWith('notify.dispatch.worker.')), false)
+    assert.equal(
+      (await readdir(root)).some((name) => name.startsWith('notify.dispatch.worker.')),
+      false
+    )
   } finally {
     if (trailingPid) {
-      try { process.kill(trailingPid, 'SIGTERM') } catch {}
+      try {
+        process.kill(trailingPid, 'SIGTERM')
+      } catch {}
     }
     await rm(root, { recursive: true, force: true })
   }
@@ -205,22 +566,34 @@ test('notify handler preserves payload source args for the original Codex notify
   const originalArgsPath = join(root, 'original-args.json')
 
   try {
-    await writeFile(backgroundScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(backgroundArgsPath)}, JSON.stringify(process.argv.slice(2)))`
-    ].join('\n'))
-    await writeFile(originalScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(originalArgsPath)}, JSON.stringify(process.argv.slice(2)))`
-    ].join('\n'))
-    await writeFile(join(root, 'codex_notify_original.json'), `${JSON.stringify({
-      notify: [process.execPath, originalScript]
-    })}\n`)
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: backgroundScript,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      backgroundScript,
+      [
+        'import { writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(backgroundArgsPath)}, JSON.stringify(process.argv.slice(2)))`
+      ].join('\n')
+    )
+    await writeFile(
+      originalScript,
+      [
+        'import { writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(originalArgsPath)}, JSON.stringify(process.argv.slice(2)))`
+      ].join('\n')
+    )
+    await writeFile(
+      join(root, 'codex_notify_original.json'),
+      `${JSON.stringify({
+        notify: [process.execPath, originalScript]
+      })}\n`
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
 
     const result = spawnSync(process.execPath, [
       handlerPath,
@@ -245,18 +618,27 @@ test('notify handler records an original notify spawn error without blocking the
   const handlerPath = join(root, 'notify.cjs')
 
   try {
-    await writeFile(join(root, 'codex_notify_original.json'), JSON.stringify({
-      notify: [join(root, 'missing-original-command')]
-    }))
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: join(root, 'missing-background.mjs'),
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      join(root, 'codex_notify_original.json'),
+      JSON.stringify({
+        notify: [join(root, 'missing-original-command')]
+      })
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: join(root, 'missing-background.mjs'),
+        nodePath: process.execPath
+      })
+    )
 
-    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=codex'], {
-      timeout: backgroundResultTimeoutMs
-    }).status, 0)
+    assert.equal(
+      spawnSync(process.execPath, [handlerPath, '--source=codex'], {
+        timeout: backgroundResultTimeoutMs
+      }).status,
+      0
+    )
     await waitFor(async () => {
       try {
         return (await readFile(join(root, 'notify-handler-errors.log'), 'utf8')).includes('"stage":"original"')
@@ -323,15 +705,21 @@ test('notify handler records invalid source without enqueueing background work',
   const backgroundArgsPath = join(root, 'background-args.json')
 
   try {
-    await writeFile(backgroundScript, [
-      'import { writeFileSync } from "node:fs"',
-      `writeFileSync(${JSON.stringify(backgroundArgsPath)}, JSON.stringify(process.argv.slice(2)))`
-    ].join('\n'))
-    await writeFile(handlerPath, buildNotifyHandler({
-      stateDir: root,
-      notifyScriptPath: backgroundScript,
-      nodePath: process.execPath
-    }))
+    await writeFile(
+      backgroundScript,
+      [
+        'import { writeFileSync } from "node:fs"',
+        `writeFileSync(${JSON.stringify(backgroundArgsPath)}, JSON.stringify(process.argv.slice(2)))`
+      ].join('\n')
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: backgroundScript,
+        nodePath: process.execPath
+      })
+    )
 
     const result = spawnSync(process.execPath, [handlerPath, '--source=bad-source'])
 
@@ -341,6 +729,35 @@ test('notify handler records invalid source without enqueueing background work',
     const log = await readFile(join(root, 'notify-handler-errors.log'), 'utf8')
     assert.match(log, /Unsupported TokenBoard hook source/)
     assert.doesNotMatch(log, /bad-source/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('notify handler bounds its error log while retaining recent diagnostics', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-handler-log-bound-'))
+  const handlerPath = join(root, 'notify.cjs')
+  const logPath = join(root, 'notify-handler-errors.log')
+
+  try {
+    const oldLine = '{"stage":"old"}\n'
+    await writeFile(
+      logPath,
+      oldLine.repeat(Math.ceil((notifyHandlerErrorLogMaxBytes + oldLine.length) / oldLine.length))
+    )
+    await writeFile(
+      handlerPath,
+      buildNotifyHandler({
+        stateDir: root,
+        notifyScriptPath: join(root, 'missing-background.mjs'),
+        nodePath: process.execPath
+      })
+    )
+
+    assert.equal(spawnSync(process.execPath, [handlerPath, '--source=bad-source']).status, 0)
+    const log = await readFile(logPath, 'utf8')
+    assert.ok(Buffer.byteLength(log) <= notifyHandlerErrorLogMaxBytes)
+    assert.match(log.trimEnd().split('\n').at(-1) ?? '', /"stage":"source"/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -396,7 +813,11 @@ async function assertTrailingLockAlwaysParses(lockPath) {
 
 async function readDispatchDiagnostic(root) {
   const readJson = async (name) => {
-    try { return JSON.parse(await readFile(join(root, name), 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await readFile(join(root, name), 'utf8'))
+    } catch {
+      return null
+    }
   }
   const [lock, worker, run, entries] = await Promise.all([
     readJson('notify.dispatch.lock'),

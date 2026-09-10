@@ -3,11 +3,7 @@ import { D1DevicePairingRepository } from '../../../../features/device/repositor
 import { devicePairRequestSchema } from '../../../../features/device/schema'
 import { createPairDeviceDeps, pairDevice } from '../../../../features/device/service'
 import { jsonError } from '../../../../lib/http'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit,
-  writeRateLimitPolicies
-} from '../../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit, writeRateLimitPolicies } from '../../../../lib/rate-limit'
 
 export const POST = createRoute(async (c) => {
   try {

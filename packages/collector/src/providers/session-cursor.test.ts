@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -15,6 +15,31 @@ import type { SessionJsonlLine } from './session-jsonl-line-reader'
 const canDenyFileReadWithModeBits = process.platform !== 'win32' && process.getuid?.() !== 0
 
 describe('collectChangedSessionFiles', () => {
+  test.skipIf(process.platform === 'win32')('preserves literal backslashes in POSIX cursor identities', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+    const sessionsDir = join(root, 'sessions')
+    const cursorPath = join(root, 'codex-cursor.json')
+    const literalName = join(sessionsDir, 'literal\\name.jsonl')
+    const nestedName = join(sessionsDir, 'literal', 'name.jsonl')
+
+    try {
+      await writeSession(literalName, 'literal', '2026-05-22T01:00:00.000Z')
+      await writeSession(nestedName, 'nested', '2026-05-22T02:00:00.000Z')
+      const result = await collectChangedSessionFiles({
+        source: 'codex',
+        sessionsDir,
+        cursorPath
+      })
+
+      expect(result.files.map((file) => file.relativePath).sort()).toEqual(
+        ['literal/name.jsonl', 'literal\\name.jsonl'].sort()
+      )
+      expect(Object.keys(result.cursor.files)).toHaveLength(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('returns only new or changed session files after the cursor is written', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
     const sessionsDir = join(root, 'sessions')
@@ -94,11 +119,13 @@ describe('collectChangedSessionFiles', () => {
     try {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
       await writeFile(cursorPath, JSON.stringify({ version: 1, source: 'codex', files: [] }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -112,16 +139,21 @@ describe('collectChangedSessionFiles', () => {
 
     try {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
-      await writeFile(cursorPath, JSON.stringify({
-        version: 1,
-        source: 'codex',
-        files: { 'missing.jsonl': null }
-      }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          version: 1,
+          source: 'codex',
+          files: { 'missing.jsonl': null }
+        })
+      )
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -135,25 +167,30 @@ describe('collectChangedSessionFiles', () => {
 
     try {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
-      await writeFile(cursorPath, JSON.stringify({
-        version: 1,
-        source: 'codex',
-        files: {
-          'old.jsonl': {
-            size: 1,
-            mtimeMs: 1,
-            sha256: 'abc',
-            snapshots: [null],
-            missingCost: false,
-            updatedAt: '2026-05-22T01:00:00.000Z'
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          version: 1,
+          source: 'codex',
+          files: {
+            'old.jsonl': {
+              size: 1,
+              mtimeMs: 1,
+              sha256: 'abc',
+              snapshots: [null],
+              missingCost: false,
+              updatedAt: '2026-05-22T01:00:00.000Z'
+            }
           }
-        }
-      }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+        })
+      )
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -167,17 +204,22 @@ describe('collectChangedSessionFiles', () => {
 
     try {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
-      await writeFile(cursorPath, JSON.stringify({
-        version: 1,
-        source: 'codex',
-        lastScanHighWaterMs: -1,
-        files: {}
-      }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          version: 1,
+          source: 'codex',
+          lastScanHighWaterMs: -1,
+          files: {}
+        })
+      )
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -190,17 +232,22 @@ describe('collectChangedSessionFiles', () => {
 
     try {
       await mkdir(sessionsDir, { recursive: true })
-      await writeFile(cursorPath, JSON.stringify({
-        version: 1,
-        source: 'codex',
-        lastScanOffsetBytes: 0.5,
-        files: {}
-      }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          version: 1,
+          source: 'codex',
+          lastScanOffsetBytes: 0.5,
+          files: {}
+        })
+      )
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -211,27 +258,32 @@ describe('collectChangedSessionFiles', () => {
     const sessionsDir = join(root, 'sessions')
     const cursorPath = join(root, 'codex-cursor.json')
     try {
-      await writeFile(cursorPath, JSON.stringify({
-        version: 1,
-        source: 'codex',
-        antigravityDbFileScan: {
-          nextSequence: 1,
-          files: {
-            'raw-conversation-id': {
-              mtimeMs: 1,
-              size: 1,
-              hasDatabaseFile: false,
-              checkedSequence: 0
+      await writeFile(
+        cursorPath,
+        JSON.stringify({
+          version: 1,
+          source: 'codex',
+          antigravityDbFileScan: {
+            nextSequence: 1,
+            files: {
+              'raw-conversation-id': {
+                mtimeMs: 1,
+                size: 1,
+                hasDatabaseFile: false,
+                checkedSequence: 0
+              }
             }
-          }
-        },
-        files: {}
-      }))
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor file')
+          },
+          files: {}
+        })
+      )
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor file')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -247,40 +299,47 @@ describe('collectChangedSessionFiles', () => {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
       await symlink(sessionsDir, cursorPath, process.platform === 'win32' ? 'junction' : 'dir')
 
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow()
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow()
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  test.skipIf(process.platform === 'win32')('rejects symbolic link session files instead of following their targets', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
-    const sessionsDir = join(root, 'sessions')
-    const cursorPath = join(root, 'codex-cursor.json')
-    const outside = join(root, 'outside.jsonl')
-    const linkedSession = join(sessionsDir, '2026', '05', '22', 'linked.jsonl')
+  test.skipIf(process.platform === 'win32')(
+    'rejects symbolic link session files instead of following their targets',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+      const sessionsDir = join(root, 'sessions')
+      const cursorPath = join(root, 'codex-cursor.json')
+      const outside = join(root, 'outside.jsonl')
+      const linkedSession = join(sessionsDir, '2026', '05', '22', 'linked.jsonl')
 
-    try {
-      await writeSession(outside, 'outside', '2026-05-22T01:00:00.000Z')
-      await mkdir(dirname(linkedSession), { recursive: true })
-      await symlink(outside, linkedSession)
+      try {
+        await writeSession(outside, 'outside', '2026-05-22T01:00:00.000Z')
+        await mkdir(dirname(linkedSession), { recursive: true })
+        await symlink(outside, linkedSession)
 
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow(/symbolic links are not supported/i)
-      await expect(readFile(cursorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        await expect(
+          collectChangedSessionFiles({
+            source: 'codex',
+            sessionsDir,
+            cursorPath
+          })
+        ).rejects.toThrow(/symbolic links are not supported/i)
+        await expect(readFile(cursorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
-  test.skipIf(process.platform === 'win32')('keeps a caller-supplied symbolic link session root stable after it changes', async () => {
+  test('rejects a caller-supplied symbolic link or junction session root', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
     const firstSessionsDir = join(root, 'first-sessions')
     const secondSessionsDir = join(root, 'second-sessions')
@@ -293,20 +352,15 @@ describe('collectChangedSessionFiles', () => {
     try {
       await writeSession(firstSession, 'first', '2026-05-22T01:00:00.000Z')
       await writeSession(secondSession, 'second', '2026-05-22T02:00:00.000Z')
-      await symlink(firstSessionsDir, linkedSessionsDir)
+      await symlink(firstSessionsDir, linkedSessionsDir, process.platform === 'win32' ? 'junction' : 'dir')
 
-      const changed = await collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir: linkedSessionsDir,
-        cursorPath
-      })
-
-      await rm(linkedSessionsDir)
-      await symlink(secondSessionsDir, linkedSessionsDir)
-
-      expect(changed.files).toHaveLength(1)
-      expect(changed.files[0]?.absolutePath).toBe(await realpath(firstSession))
-      await expect(readLines(changed.files[0]!)).resolves.toEqual(['first'])
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir: linkedSessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow(/symbolic links are not supported/i)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -322,11 +376,13 @@ describe('collectChangedSessionFiles', () => {
       await writeSession(file, 'one', '2026-05-22T01:00:00.000Z')
       await writeFile(cursorPath, '{')
 
-      await expect(collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })).rejects.toThrow('Invalid codex cursor JSON')
+      await expect(
+        collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
+      ).rejects.toThrow('Invalid codex cursor JSON')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -417,6 +473,59 @@ describe('collectChangedSessionFiles', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  test('retains real pending snapshots when a rewritten file contains only safe synthetic rows', () => {
+    const pendingSnapshot = {
+      source: 'claude-code' as const,
+      usageDate: '2026-05-22',
+      timezone: 'UTC',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 15,
+      costUsd: 0.03,
+      sessionCount: 1
+    }
+    const cursor = {
+      version: 1 as const,
+      source: 'claude-code' as const,
+      files: {
+        'session.jsonl': {
+          size: 100,
+          mtimeMs: 1,
+          sha256: 'old',
+          endsWithNewline: true,
+          snapshots: [pendingSnapshot],
+          missingCost: false,
+          pendingUpload: true,
+          updatedAt: '2026-05-22T10:00:00.000Z'
+        }
+      }
+    }
+
+    updateCursorFile(
+      cursor,
+      {
+        relativePath: 'session.jsonl',
+        size: 20,
+        mtimeMs: 2,
+        sha256: 'new',
+        endsWithNewline: true,
+        appendOnly: false
+      },
+      {
+        snapshots: [],
+        missingCost: false,
+        ignoredUploadSafeRows: 1
+      },
+      '2026-05-23T10:00:00.000Z'
+    )
+
+    expect(cursor.files['session.jsonl'].snapshots).toEqual([pendingSnapshot])
+    expect(cursor.files['session.jsonl'].pendingUpload).toBe(true)
   })
 
   test('bounds an append-only read to the file size captured during scanning', async () => {
@@ -585,8 +694,9 @@ describe('collectChangedSessionFiles', () => {
       await consumeFiles(result.files)
       await result.commit()
 
-      expect(JSON.parse(await readFile(cursorPath, 'utf8')).files['2026/05/22/session.jsonl']
-        .endsWithNewline).toBe(true)
+      expect(JSON.parse(await readFile(cursorPath, 'utf8')).files['2026/05/22/session.jsonl'].endsWithNewline).toBe(
+        true
+      )
 
       await writeFile(file, `${second}\r`, { flag: 'a' })
       result = await collectChangedSessionFiles({
@@ -660,10 +770,7 @@ describe('collectChangedSessionFiles', () => {
       }
 
       expect(lines).toEqual([first, second])
-      expect(lines.map((line) => JSON.parse(line).text)).toEqual([
-        'before\u2028middle\u2029after',
-        'next'
-      ])
+      expect(lines.map((line) => JSON.parse(line).text)).toEqual(['before\u2028middle\u2029after', 'next'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -706,6 +813,70 @@ describe('collectChangedSessionFiles', () => {
     }
   })
 
+  test('acknowledges Codex pending files by path and hash instead of a shared snapshot group', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-file-ack-'))
+    const cursorPath = join(root, 'codex-cursor.json')
+    const snapshot = {
+      source: 'codex',
+      usageDate: '2026-06-24',
+      timezone: 'UTC',
+      model: 'gpt-5.6-luna',
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 12,
+      costUsd: 0.01,
+      sessionCount: 1
+    }
+
+    try {
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'codex',
+            files: {
+              'missing.jsonl': {
+                size: 10,
+                mtimeMs: Date.parse('2026-06-24T10:00:00.000Z'),
+                sha256: 'a'.repeat(64),
+                snapshots: [snapshot],
+                missingCost: false,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              },
+              'current.jsonl': {
+                size: 20,
+                mtimeMs: Date.parse('2026-06-24T11:00:00.000Z'),
+                sha256: 'b'.repeat(64),
+                snapshots: [snapshot],
+                missingCost: false,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
+
+      await clearPendingUploadCursors({
+        stateDir: root,
+        source: 'codex',
+        acknowledgedSnapshotFiles: [{ relativePath: 'current.jsonl', sha256: 'b'.repeat(64) }]
+      })
+
+      const cursor = JSON.parse(await readFile(cursorPath, 'utf8'))
+      expect(cursor.files['missing.jsonl'].pendingUpload).toBe(true)
+      expect(cursor.files['current.jsonl'].pendingUpload).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('keeps pending Antigravity snapshots outside a bounded acknowledgement range', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-bounded-ack-'))
     const cursorPath = join(root, 'antigravity-cursor.json')
@@ -734,23 +905,30 @@ describe('collectChangedSessionFiles', () => {
     const oldSessionKey = ['session', 'antigravity', '2026-06-23', 'gemini', 'old-session'].join('\0')
 
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'antigravity',
-        files: {
-          'event\0old': entry('2026-06-23'),
-          'event\0current': entry('2026-06-24'),
-          [oldSessionKey]: {
-            size: 0,
-            mtimeMs: Date.parse('2026-06-23T10:00:00.000Z'),
-            sha256: 'b'.repeat(64),
-            snapshots: [],
-            missingCost: true,
-            pendingUpload: true,
-            updatedAt: new Date().toISOString()
-          }
-        }
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity',
+            files: {
+              'event\0old': entry('2026-06-23'),
+              'event\0current': entry('2026-06-24'),
+              [oldSessionKey]: {
+                size: 0,
+                mtimeMs: Date.parse('2026-06-23T10:00:00.000Z'),
+                sha256: 'b'.repeat(64),
+                snapshots: [],
+                missingCost: true,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
 
       await clearPendingUploadCursors({
         stateDir: root,
@@ -783,10 +961,12 @@ describe('collectChangedSessionFiles', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-ack-timezone-'))
 
     try {
-      await expect(clearPendingUploadCursors({
-        stateDir: root,
-        source: 'antigravity'
-      })).rejects.toThrow('Antigravity cursor acknowledgement requires an explicit timezone')
+      await expect(
+        clearPendingUploadCursors({
+          stateDir: root,
+          source: 'antigravity'
+        })
+      ).rejects.toThrow('Antigravity cursor acknowledgement requires an explicit timezone')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -812,21 +992,28 @@ describe('collectChangedSessionFiles', () => {
     const currentSnapshot = snapshot('2026-06-24', 'gemini-current')
 
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'antigravity',
-        files: {
-          'event\0mixed': {
-            size: 0,
-            mtimeMs: Date.parse('2026-06-24T10:00:00.000Z'),
-            sha256: 'a'.repeat(64),
-            snapshots: [oldSnapshot, currentSnapshot],
-            missingCost: true,
-            pendingUpload: true,
-            updatedAt: new Date().toISOString()
-          }
-        }
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity',
+            files: {
+              'event\0mixed': {
+                size: 0,
+                mtimeMs: Date.parse('2026-06-24T10:00:00.000Z'),
+                sha256: 'a'.repeat(64),
+                snapshots: [oldSnapshot, currentSnapshot],
+                missingCost: true,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
 
       await clearPendingUploadCursors({
         stateDir: root,
@@ -844,10 +1031,7 @@ describe('collectChangedSessionFiles', () => {
         source: 'antigravity',
         since: '20260624',
         timezone: 'UTC',
-        acknowledgedSnapshotGroups: [
-          cursorSnapshotGroupKey(oldSnapshot),
-          cursorSnapshotGroupKey(currentSnapshot)
-        ]
+        acknowledgedSnapshotGroups: [cursorSnapshotGroupKey(oldSnapshot), cursorSnapshotGroupKey(currentSnapshot)]
       })
 
       const fullyAcknowledged = JSON.parse(await readFile(cursorPath, 'utf8'))
@@ -866,21 +1050,28 @@ describe('collectChangedSessionFiles', () => {
     const snapshotGroup = ['antigravity', usageDate, 'UTC', model].join('\0')
 
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'antigravity',
-        files: {
-          [sessionKey]: {
-            size: 0,
-            mtimeMs: Date.parse(`${usageDate}T10:00:00.000Z`),
-            sha256: 'a'.repeat(64),
-            snapshots: [],
-            missingCost: true,
-            pendingUpload: true,
-            updatedAt: new Date().toISOString()
-          }
-        }
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity',
+            files: {
+              [sessionKey]: {
+                size: 0,
+                mtimeMs: Date.parse(`${usageDate}T10:00:00.000Z`),
+                sha256: 'a'.repeat(64),
+                snapshots: [],
+                missingCost: true,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
 
       await clearPendingUploadCursors({
         stateDir: root,
@@ -952,25 +1143,75 @@ describe('collectChangedSessionFiles', () => {
     expect([...selected]).toEqual([cursorSnapshotGroupKey(oldFirst)])
   })
 
+  test('rotates bounded pending snapshot retries so a failed group cannot starve later groups', () => {
+    const snapshot = (index: number) => ({
+      source: 'antigravity-cli' as const,
+      usageDate: `2026-06-${String(index + 1).padStart(2, '0')}`,
+      timezone: 'UTC',
+      model: `gemini-${index}`,
+      inputTokens: 1,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 1,
+      costUsd: 0,
+      sessionCount: 1
+    })
+    const cursor = {
+      version: 1 as const,
+      source: 'antigravity-cli' as const,
+      files: Object.fromEntries(
+        Array.from({ length: 4 }, (_, index) => {
+          const value = snapshot(index)
+          return [
+            `file-${index}`,
+            {
+              size: 0,
+              mtimeMs: index,
+              sha256: 'a'.repeat(64),
+              snapshots: [value],
+              missingCost: true,
+              pendingUpload: true,
+              updatedAt: '2026-07-17T00:00:00.000Z'
+            }
+          ]
+        })
+      )
+    }
+
+    const first = selectPendingCursorSnapshotGroups({ cursor, sinceDate: '2026-07-01', limit: 2 })
+    const second = selectPendingCursorSnapshotGroups({ cursor, sinceDate: '2026-07-01', limit: 2 })
+
+    expect([...first]).not.toEqual([...second])
+    expect(new Set([...first, ...second]).size).toBe(4)
+  })
+
   test('acks snapshotless Antigravity entries with unknown mtime in a bounded range', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-zero-mtime-'))
     const cursorPath = join(root, 'antigravity-cursor.json')
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'antigravity',
-        files: {
-          'event\0unknown-time': {
-            size: 0,
-            mtimeMs: 0,
-            sha256: 'a'.repeat(64),
-            snapshots: [],
-            missingCost: true,
-            pendingUpload: true,
-            updatedAt: new Date().toISOString()
-          }
-        }
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'antigravity',
+            files: {
+              'event\0unknown-time': {
+                size: 0,
+                mtimeMs: 0,
+                sha256: 'a'.repeat(64),
+                snapshots: [],
+                missingCost: true,
+                pendingUpload: true,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
 
       await clearPendingUploadCursors({
         stateDir: root,
@@ -1065,36 +1306,43 @@ describe('collectChangedSessionFiles', () => {
 
     try {
       await mkdir(dirname(cursorPath), { recursive: true })
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'codex',
-        files: {
-          '2026/05/22/missing.jsonl': {
-            size: 123,
-            mtimeMs: Date.parse('2026-05-22T01:00:00.000Z'),
-            sha256: 'missing',
-            snapshots: [
-              {
-                source: 'codex',
-                usageDate: '2026-05-22',
-                timezone: 'Asia/Shanghai',
-                model: 'gpt-5',
-                inputTokens: 10,
-                outputTokens: 5,
-                cacheCreationTokens: 0,
-                cacheReadTokens: 0,
-                totalTokens: 15,
-                costUsd: 0.03,
-                sessionCount: 1
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'codex',
+            files: {
+              '2026/05/22/missing.jsonl': {
+                size: 123,
+                mtimeMs: Date.parse('2026-05-22T01:00:00.000Z'),
+                sha256: 'missing',
+                snapshots: [
+                  {
+                    source: 'codex',
+                    usageDate: '2026-05-22',
+                    timezone: 'Asia/Shanghai',
+                    model: 'gpt-5',
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: 0,
+                    totalTokens: 15,
+                    costUsd: 0.03,
+                    sessionCount: 1
+                  }
+                ],
+                missingCost: false,
+                pendingUpload: true,
+                updatedAt: '2026-05-22T01:00:00.000Z'
               }
-            ],
-            missingCost: false,
-            pendingUpload: true,
-            updatedAt: '2026-05-22T01:00:00.000Z'
-          }
-        },
-        lastScanHighWaterMs: Date.parse('2026-05-22T01:00:00.000Z')
-      }, null, 2)}\n`)
+            },
+            lastScanHighWaterMs: Date.parse('2026-05-22T01:00:00.000Z')
+          },
+          null,
+          2
+        )}\n`
+      )
       await writeSession(changedFile, 'changed', '2026-05-23T02:00:00.000Z')
 
       const retry = await collectChangedSessionFiles({
@@ -1123,30 +1371,33 @@ describe('collectChangedSessionFiles', () => {
     }
   })
 
-  test.skipIf(!canDenyFileReadWithModeBits)('reports unreadable new changed files instead of silently advancing the scan', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
-    const sessionsDir = join(root, 'sessions')
-    const cursorPath = join(root, 'codex-cursor.json')
-    const unreadableFile = join(sessionsDir, '2026', '05', '22', 'unreadable.jsonl')
+  test.skipIf(!canDenyFileReadWithModeBits)(
+    'reports unreadable new changed files instead of silently advancing the scan',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+      const sessionsDir = join(root, 'sessions')
+      const cursorPath = join(root, 'codex-cursor.json')
+      const unreadableFile = join(sessionsDir, '2026', '05', '22', 'unreadable.jsonl')
 
-    try {
-      await writeSession(unreadableFile, 'unreadable', '2026-05-22T01:00:00.000Z')
-      await chmod(unreadableFile, 0o000)
+      try {
+        await writeSession(unreadableFile, 'unreadable', '2026-05-22T01:00:00.000Z')
+        await chmod(unreadableFile, 0o000)
 
-      const result = await collectChangedSessionFiles({
-        source: 'codex',
-        sessionsDir,
-        cursorPath
-      })
+        const result = await collectChangedSessionFiles({
+          source: 'codex',
+          sessionsDir,
+          cursorPath
+        })
 
-      expect(result.files).toEqual([])
-      expect(result.hasUnreadableChangedFile).toBe(true)
-      await expect(readFile(cursorPath, 'utf8')).rejects.toThrow()
-    } finally {
-      await chmod(unreadableFile, 0o600).catch(() => undefined)
-      await rm(root, { recursive: true, force: true })
+        expect(result.files).toEqual([])
+        expect(result.hasUnreadableChangedFile).toBe(true)
+        await expect(readFile(cursorPath, 'utf8')).rejects.toThrow()
+      } finally {
+        await chmod(unreadableFile, 0o600).catch(() => undefined)
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('skips old unchanged files after high-water scan advances', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))

@@ -12,11 +12,13 @@ import { createHash } from 'node:crypto'
 const scriptPath = fileURLToPath(new URL('./antigravity-statusline.mjs', import.meta.url))
 
 test('extracts only sanitized Antigravity statusline usage fields', () => {
-  const raw = JSON.stringify(statuslinePayload({
-    conversation_id: 'raw-conversation-id',
-    cwd: '/Users/example/private',
-    email: 'user@example.com'
-  }))
+  const raw = JSON.stringify(
+    statuslinePayload({
+      conversation_id: 'raw-conversation-id',
+      cwd: '/Users/example/private',
+      email: 'user@example.com'
+    })
+  )
 
   const event = extractStatuslineEvent(raw, '2026-06-23T10:00:00.000Z')
 
@@ -29,7 +31,14 @@ test('extracts only sanitized Antigravity statusline usage fields', () => {
   assert.equal(event.usage.cacheReadTokens, 40)
   assert.equal(event.conversationHash, legacyHash('raw-conversation-id'))
   assert.deepEqual(event.conversationHashAliases, [plainHash('raw-conversation-id')])
-  assert.deepEqual(Object.keys(event).sort(), ['capturedAt', 'conversationHash', 'conversationHashAliases', 'model', 'schemaVersion', 'usage'])
+  assert.deepEqual(Object.keys(event).sort(), [
+    'capturedAt',
+    'conversationHash',
+    'conversationHashAliases',
+    'model',
+    'schemaVersion',
+    'usage'
+  ])
 })
 
 test('preserves a local capture id for distinct statusline calls', () => {
@@ -65,26 +74,25 @@ test('statusline CLI writes sanitized JSONL and preserves original command outpu
     const originalPath = join(root, 'original.mjs')
     const backupPath = join(root, 'original.json')
     const logPath = join(root, 'events.jsonl')
-    await writeFile(originalPath, [
-      'let raw = ""',
-      'process.stdin.setEncoding("utf8")',
-      'process.stdin.on("data", (chunk) => { raw += chunk })',
-      'process.stdin.on("end", () => { process.stdout.write("original-statusline") })'
-    ].join('\n'))
+    await writeFile(
+      originalPath,
+      [
+        'let raw = ""',
+        'process.stdin.setEncoding("utf8")',
+        'process.stdin.on("data", (chunk) => { raw += chunk })',
+        'process.stdin.on("end", () => { process.stdout.write("original-statusline") })'
+      ].join('\n')
+    )
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath,
-      '--original-command-file',
-      backupPath
-    ], {
-      input: JSON.stringify(statuslinePayload({ conversation_id: 'raw-session-id' })),
-      encoding: 'utf8'
-    })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--original-command-file', backupPath],
+      {
+        input: JSON.stringify(statuslinePayload({ conversation_id: 'raw-session-id' })),
+        encoding: 'utf8'
+      }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, 'original-statusline')
@@ -109,23 +117,35 @@ test('statusline CLI forwards oversized input to the original command', async ()
     const backupPath = join(root, 'original.json')
     const logPath = join(root, 'events.jsonl')
     const errorPath = join(root, 'errors.log')
-    await writeFile(originalPath, [
-      'import { createHash } from "node:crypto"',
-      'const hash = createHash("sha256")',
-      'process.stdin.on("data", (chunk) => { hash.update(chunk) })',
-      'process.stdin.on("end", () => { process.stdout.write(hash.digest("hex")) })'
-    ].join('\n'))
+    await writeFile(
+      originalPath,
+      [
+        'import { createHash } from "node:crypto"',
+        'const hash = createHash("sha256")',
+        'process.stdin.on("data", (chunk) => { hash.update(chunk) })',
+        'process.stdin.on("end", () => { process.stdout.write(hash.digest("hex")) })'
+      ].join('\n')
+    )
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
     const raw = Buffer.alloc(2 * 1024 * 1024, 0xff)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--log-path', logPath,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath,
-      '--max-input-bytes', '1024'
-    ], { input: raw, encoding: 'utf8' })
+    const result = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        '--state-dir',
+        root,
+        '--log-path',
+        logPath,
+        '--error-path',
+        errorPath,
+        '--original-command-file',
+        backupPath,
+        '--max-input-bytes',
+        '1024'
+      ],
+      { input: raw, encoding: 'utf8' }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, createHash('sha256').update(raw).digest('hex'))
@@ -142,26 +162,33 @@ test('statusline CLI preserves successful original output when the original comm
     const originalPath = join(root, 'original.mjs')
     const backupPath = join(root, 'original.json')
     const errorPath = join(root, 'errors.log')
-    await writeFile(originalPath, [
-      'process.stdout.write("static-output")',
-      'process.stdin.destroy()'
-    ].join('\n'))
+    await writeFile(originalPath, ['process.stdout.write("static-output")', 'process.stdin.destroy()'].join('\n'))
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath,
-      '--max-input-bytes', '1024'
-    ], { input: Buffer.alloc(2 * 1024 * 1024), encoding: 'utf8', timeout: 8000 })
+    const result = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        '--state-dir',
+        root,
+        '--error-path',
+        errorPath,
+        '--original-command-file',
+        backupPath,
+        '--max-input-bytes',
+        '1024'
+      ],
+      { input: Buffer.alloc(2 * 1024 * 1024), encoding: 'utf8', timeout: 8000 }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, 'static-output')
     const errors = await readErrorRecords(errorPath)
-    assert.ok(errors.some((record) => (
-      record.stage === 'original' && typeof record.message === 'string' && record.message.length > 0
-    )))
+    assert.ok(
+      errors.some(
+        (record) => record.stage === 'original' && typeof record.message === 'string' && record.message.length > 0
+      )
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -173,20 +200,18 @@ test('statusline CLI force-terminates an original command that ignores its timeo
     const originalPath = join(root, 'original.mjs')
     const backupPath = join(root, 'original.json')
     const errorPath = join(root, 'errors.log')
-    await writeFile(originalPath, [
-      'process.on("SIGTERM", () => {})',
-      'process.stdin.resume()',
-      'setTimeout(() => {}, 6000)'
-    ].join('\n'))
+    await writeFile(
+      originalPath,
+      ['process.on("SIGTERM", () => {})', 'process.stdin.resume()', 'setTimeout(() => {}, 6000)'].join('\n')
+    )
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
     const startedAt = Date.now()
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath
-    ], { input: '{}', encoding: 'utf8', timeout: 8000 })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--error-path', errorPath, '--original-command-file', backupPath],
+      { input: '{}', encoding: 'utf8', timeout: 8000 }
+    )
 
     assert.equal(result.status, 0)
     assert.ok(Date.now() - startedAt < 5000)
@@ -235,12 +260,10 @@ test('statusline command termination uses taskkill for the full Windows process 
 })
 
 test('resolves taskkill from SystemRoot without relying on PATH', () => {
+  assert.equal(windowsTaskkillCommand({ SystemRoot: 'D:\\Windows' }), 'D:\\Windows\\System32\\taskkill.exe')
+  assert.equal(windowsTaskkillCommand({ SystemRoot: 'relative\\Windows' }), 'C:\\Windows\\System32\\taskkill.exe')
   assert.equal(
-    windowsTaskkillCommand({ SystemRoot: 'D:\\Windows' }),
-    'D:\\Windows\\System32\\taskkill.exe'
-  )
-  assert.equal(
-    windowsTaskkillCommand({ SystemRoot: 'relative\\Windows' }),
+    windowsTaskkillCommand({ SystemRoot: '\\\\server\\share\\Windows' }),
     'C:\\Windows\\System32\\taskkill.exe'
   )
 })
@@ -268,47 +291,50 @@ test('statusline command termination falls back when Windows taskkill exits nonz
   assert.deepEqual(killSignals, ['SIGKILL'])
 })
 
-test('statusline CLI force-terminates descendants after the original command exits on timeout', {
-  skip: process.platform === 'win32'
-}, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-descendant-timeout-'))
-  const descendantPath = join(root, 'descendant.mjs')
-  const originalPath = join(root, 'original.mjs')
-  const descendantPidPath = join(root, 'descendant.pid')
-  const backupPath = join(root, 'original.json')
-  const errorPath = join(root, 'errors.log')
-  let descendantPid
-  try {
-    await writeFile(descendantPath, [
-      'process.on("SIGTERM", () => {})',
-      'setInterval(() => {}, 1000)'
-    ].join('\n'))
-    await writeFile(originalPath, [
-      'import { spawn } from "node:child_process"',
-      'import { writeFileSync } from "node:fs"',
-      `const child = spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(descendantPath)}], { stdio: "ignore" })`,
-      `writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))`,
-      'process.stdin.resume()',
-      'setInterval(() => {}, 1000)'
-    ].join('\n'))
-    await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
+test(
+  'statusline CLI force-terminates descendants after the original command exits on timeout',
+  {
+    skip: process.platform === 'win32'
+  },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-descendant-timeout-'))
+    const descendantPath = join(root, 'descendant.mjs')
+    const originalPath = join(root, 'original.mjs')
+    const descendantPidPath = join(root, 'descendant.pid')
+    const backupPath = join(root, 'original.json')
+    const errorPath = join(root, 'errors.log')
+    let descendantPid
+    try {
+      await writeFile(descendantPath, ['process.on("SIGTERM", () => {})', 'setInterval(() => {}, 1000)'].join('\n'))
+      await writeFile(
+        originalPath,
+        [
+          'import { spawn } from "node:child_process"',
+          'import { writeFileSync } from "node:fs"',
+          `const child = spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(descendantPath)}], { stdio: "ignore" })`,
+          `writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))`,
+          'process.stdin.resume()',
+          'setInterval(() => {}, 1000)'
+        ].join('\n')
+      )
+      await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath
-    ], { input: '{}', encoding: 'utf8', timeout: 8000 })
-    descendantPid = Number(await readFile(descendantPidPath, 'utf8'))
+      const result = spawnSync(
+        process.execPath,
+        [scriptPath, '--state-dir', root, '--error-path', errorPath, '--original-command-file', backupPath],
+        { input: '{}', encoding: 'utf8', timeout: 8000 }
+      )
+      descendantPid = Number(await readFile(descendantPidPath, 'utf8'))
 
-    assert.equal(result.status, 0)
-    assert.equal(isProcessAlive(descendantPid), false)
-    assert.match(await readFile(errorPath, 'utf8'), /timed out/)
-  } finally {
-    if (descendantPid && isProcessAlive(descendantPid)) process.kill(descendantPid, 'SIGKILL')
-    await rm(root, { recursive: true, force: true })
+      assert.equal(result.status, 0)
+      assert.equal(isProcessAlive(descendantPid), false)
+      assert.match(await readFile(errorPath, 'utf8'), /timed out/)
+    } finally {
+      if (descendantPid && isProcessAlive(descendantPid)) process.kill(descendantPid, 'SIGKILL')
+      await rm(root, { recursive: true, force: true })
+    }
   }
-})
+)
 
 test('statusline CLI preserves the original output-limit error when stdin forwarding also fails', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-error-priority-'))
@@ -316,19 +342,24 @@ test('statusline CLI preserves the original output-limit error when stdin forwar
     const originalPath = join(root, 'original.mjs')
     const backupPath = join(root, 'original.json')
     const errorPath = join(root, 'errors.log')
-    await writeFile(originalPath, [
-      'process.stdout.write("x".repeat(9000))',
-      'process.stdin.destroy()'
-    ].join('\n'))
+    await writeFile(originalPath, ['process.stdout.write("x".repeat(9000))', 'process.stdin.destroy()'].join('\n'))
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath,
-      '--max-input-bytes', '1024'
-    ], { input: Buffer.alloc(4 * 1024 * 1024), encoding: 'utf8', timeout: 8000 })
+    const result = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        '--state-dir',
+        root,
+        '--error-path',
+        errorPath,
+        '--original-command-file',
+        backupPath,
+        '--max-input-bytes',
+        '1024'
+      ],
+      { input: Buffer.alloc(4 * 1024 * 1024), encoding: 'utf8', timeout: 8000 }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, '')
@@ -344,27 +375,31 @@ test('statusline CLI suppresses partial output from a failed original command', 
     const originalPath = join(root, 'original.mjs')
     const backupPath = join(root, 'original.json')
     const errorPath = join(root, 'errors.log')
-    await writeFile(originalPath, [
-      'process.stdin.resume()',
-      'process.stdin.on("end", () => {',
-      '  process.stdout.write("partial-output")',
-      '  process.exitCode = 2',
-      '})'
-    ].join('\n'))
+    await writeFile(
+      originalPath,
+      [
+        'process.stdin.resume()',
+        'process.stdin.on("end", () => {',
+        '  process.stdout.write("partial-output")',
+        '  process.exitCode = 2',
+        '})'
+      ].join('\n')
+    )
     await writeFile(backupPath, `${JSON.stringify({ command: shellCommand(process.execPath, originalPath) })}\n`)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--error-path', errorPath,
-      '--original-command-file', backupPath
-    ], { input: JSON.stringify(statuslinePayload()), encoding: 'utf8', timeout: 8000 })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--error-path', errorPath, '--original-command-file', backupPath],
+      { input: JSON.stringify(statuslinePayload()), encoding: 'utf8', timeout: 8000 }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, '')
-    assert.ok((await readErrorRecords(errorPath)).some((record) => (
-      record.stage === 'original' && /exited with 2/.test(record.message)
-    )))
+    assert.ok(
+      (await readErrorRecords(errorPath)).some(
+        (record) => record.stage === 'original' && /exited with 2/.test(record.message)
+      )
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -375,13 +410,11 @@ test('statusline CLI rejects an explicitly empty input limit', async () => {
   try {
     const logPath = join(root, 'events.jsonl')
     const errorPath = join(root, 'errors.log')
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir', root,
-      '--log-path', logPath,
-      '--error-path', errorPath,
-      '--max-input-bytes='
-    ], { input: JSON.stringify(statuslinePayload()), encoding: 'utf8' })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--error-path', errorPath, '--max-input-bytes='],
+      { input: JSON.stringify(statuslinePayload()), encoding: 'utf8' }
+    )
 
     assert.equal(result.status, 0)
     await assert.rejects(readFile(logPath, 'utf8'))
@@ -398,31 +431,33 @@ test('statusline CLI does not run an original command that was disabled', async 
     const backupPath = join(root, 'original.json')
     const logPath = join(root, 'events.jsonl')
     const markerPath = join(root, 'original-ran')
-    await writeFile(originalPath, [
-      `import { writeFileSync } from 'node:fs'`,
-      `writeFileSync(${JSON.stringify(markerPath)}, 'ran')`,
-      `process.stdout.write('disabled-original')`
-    ].join('\n'))
-    await writeFile(backupPath, `${JSON.stringify({
-      statusLine: {
-        enabled: false,
+    await writeFile(
+      originalPath,
+      [
+        `import { writeFileSync } from 'node:fs'`,
+        `writeFileSync(${JSON.stringify(markerPath)}, 'ran')`,
+        `process.stdout.write('disabled-original')`
+      ].join('\n')
+    )
+    await writeFile(
+      backupPath,
+      `${JSON.stringify({
+        statusLine: {
+          enabled: false,
+          command: shellCommand(process.execPath, originalPath)
+        },
         command: shellCommand(process.execPath, originalPath)
-      },
-      command: shellCommand(process.execPath, originalPath)
-    })}\n`)
+      })}\n`
+    )
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath,
-      '--original-command-file',
-      backupPath
-    ], {
-      input: JSON.stringify(statuslinePayload({ conversation_id: 'raw-session-id' })),
-      encoding: 'utf8'
-    })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--original-command-file', backupPath],
+      {
+        input: JSON.stringify(statuslinePayload({ conversation_id: 'raw-session-id' })),
+        encoding: 'utf8'
+      }
+    )
 
     assert.equal(result.status, 0)
     assert.equal(result.stdout, '')
@@ -446,13 +481,7 @@ test('statusline CLI tightens existing log file permissions after appending', as
     await writeFile(logPath, '')
     await chmod(logPath, 0o644)
 
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath
-    ], {
+    const result = spawnSync(process.execPath, [scriptPath, '--state-dir', root, '--log-path', logPath], {
       input: JSON.stringify(statuslinePayload({ conversation_id: 'raw-session-id' })),
       encoding: 'utf8'
     })
@@ -469,18 +498,14 @@ test('statusline CLI records malformed payload errors outside the usage JSONL', 
   try {
     const logPath = join(root, 'events.jsonl')
     const errorPath = join(root, 'errors.log')
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath,
-      '--error-path',
-      errorPath
-    ], {
-      input: '{bad json}',
-      encoding: 'utf8'
-    })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--error-path', errorPath],
+      {
+        input: '{bad json}',
+        encoding: 'utf8'
+      }
+    )
 
     assert.equal(result.status, 0)
     await assert.rejects(readFile(logPath, 'utf8'))
@@ -495,15 +520,14 @@ test('statusline CLI bounds repeated error records', async () => {
   try {
     const errorPath = join(root, 'errors.log')
     for (let index = 0; index < 40; index += 1) {
-      const result = spawnSync(process.execPath, [
-        scriptPath,
-        '--state-dir', root,
-        '--error-path', errorPath,
-        '--max-log-bytes', '1024'
-      ], {
-        input: '{bad json',
-        encoding: 'utf8'
-      })
+      const result = spawnSync(
+        process.execPath,
+        [scriptPath, '--state-dir', root, '--error-path', errorPath, '--max-log-bytes', '1024'],
+        {
+          input: '{bad json',
+          encoding: 'utf8'
+        }
+      )
       assert.equal(result.status, 0)
     }
 
@@ -526,13 +550,7 @@ test('statusline CLI defaults missing cache token fields to zero', async () => {
         }
       }
     })
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath
-    ], {
+    const result = spawnSync(process.execPath, [scriptPath, '--state-dir', root, '--log-path', logPath], {
       input: JSON.stringify(payload),
       encoding: 'utf8'
     })
@@ -551,27 +569,25 @@ test('statusline CLI records invalid token values outside the usage JSONL', asyn
   try {
     const logPath = join(root, 'events.jsonl')
     const errorPath = join(root, 'errors.log')
-    const result = spawnSync(process.execPath, [
-      scriptPath,
-      '--state-dir',
-      root,
-      '--log-path',
-      logPath,
-      '--error-path',
-      errorPath
-    ], {
-      input: JSON.stringify(statuslinePayload({
-        context_window: {
-          current_usage: {
-            input_tokens: -1,
-            output_tokens: 12,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0
-          }
-        }
-      })),
-      encoding: 'utf8'
-    })
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, '--state-dir', root, '--log-path', logPath, '--error-path', errorPath],
+      {
+        input: JSON.stringify(
+          statuslinePayload({
+            context_window: {
+              current_usage: {
+                input_tokens: -1,
+                output_tokens: 12,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0
+              }
+            }
+          })
+        ),
+        encoding: 'utf8'
+      }
+    )
 
     assert.equal(result.status, 0)
     await assert.rejects(readFile(logPath, 'utf8'))
@@ -644,8 +660,5 @@ function isProcessAlive(pid) {
 }
 
 function legacyHash(value) {
-  return createHash('sha256')
-    .update('tokenboard-antigravity-cli\0')
-    .update(value)
-    .digest('hex')
+  return createHash('sha256').update('tokenboard-antigravity-cli\0').update(value).digest('hex')
 }

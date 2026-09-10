@@ -1,33 +1,43 @@
 import { describe, expect, test } from 'vitest'
-import {
-  canSendDailyReportLink,
-  cleanupNewDailyReportHistoryShare
-} from './report-history-delivery'
+import { canSendDailyReportLink, cleanupNewDailyReportHistoryShare } from './report-history-delivery'
 
 describe('daily report history delivery helpers', () => {
   test('sends report links to webhooks only when the URL is absolute HTTPS', () => {
     const subscription = { dailyReportShareEnabled: true }
 
-    expect(canSendDailyReportLink(subscription, {
-      reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      shareRevokedAt: null
-    })).toBe(true)
-    expect(canSendDailyReportLink(subscription, {
-      reportUrl: '/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      shareRevokedAt: null
-    })).toBe(false)
-    expect(canSendDailyReportLink(subscription, {
-      reportUrl: 'http://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      shareRevokedAt: null
-    })).toBe(false)
-    expect(canSendDailyReportLink({ dailyReportShareEnabled: false }, {
-      reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      shareRevokedAt: null
-    })).toBe(false)
-    expect(canSendDailyReportLink(subscription, {
-      reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      shareRevokedAt: '2026-04-30T00:00:00.000Z'
-    })).toBe(false)
+    expect(
+      canSendDailyReportLink(subscription, {
+        reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        shareRevokedAt: null
+      })
+    ).toBe(true)
+    expect(
+      canSendDailyReportLink(subscription, {
+        reportUrl: '/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        shareRevokedAt: null
+      })
+    ).toBe(false)
+    expect(
+      canSendDailyReportLink(subscription, {
+        reportUrl: 'http://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        shareRevokedAt: null
+      })
+    ).toBe(false)
+    expect(
+      canSendDailyReportLink(
+        { dailyReportShareEnabled: false },
+        {
+          reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          shareRevokedAt: null
+        }
+      )
+    ).toBe(false)
+    expect(
+      canSendDailyReportLink(subscription, {
+        reportUrl: 'https://tokenboard.example.com/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        shareRevokedAt: '2026-04-30T00:00:00.000Z'
+      })
+    ).toBe(false)
   })
 
   test('deletes only unused prewritten report history rows during cleanup', async () => {

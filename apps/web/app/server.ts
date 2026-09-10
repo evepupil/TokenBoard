@@ -2,6 +2,8 @@ import { showRoutes } from 'hono/dev'
 import { createApp } from 'honox/server'
 import { backfillUsageSummaryCache, usageSummaryBackfillLimit } from './features/ingest/repository'
 import { runDueWebhookNotifications } from './features/notifications/service'
+import { modelPricingSyncEnabled, runModelPricingSync } from './features/model-pricing/service'
+import { createModelPricingResponse } from './features/model-pricing/http'
 import {
   createPublicUsageResponse,
   parsePublicUsagePath,
@@ -9,7 +11,7 @@ import {
   PUBLIC_API_CLIENT_CACHE_CONTROL,
   PUBLIC_API_WORKER_CACHE_CONTROL
 } from './features/public-card/http'
-import { assertPublicUsageVisible } from './features/public-card/service'
+import { assertPublicUsageVisible, publicUsageSlugExists } from './features/public-card/service'
 import { usageSummaryStrictMode } from './features/usage/deduped-daily-usage'
 import type { Bindings } from './lib/db'
 import { pruneExpiredRateLimits } from './lib/rate-limit'
@@ -40,15 +42,20 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
 
   try {
     const url = new URL(request.url)
+    if (url.pathname === '/api/public/model-pricing' && !(await publicUsageSlugExists(env.DB, 'model-pricing'))) {
+      return createModelPricingResponse({
+        db: env.DB,
+        searchParams: url.searchParams,
+        requestHeaders: request.headers
+      })
+    }
     const route = parsePublicUsagePath(url.pathname)
     if (!route) return null
 
     const summaryStrict = usageSummaryStrictMode(env)
     const cache = publicApiCache()
     const subject = await assertPublicUsageVisible(env.DB, route.slug)
-    const cacheKey = cache && subject
-      ? await publicApiCacheKey(url, route, subject, summaryStrict)
-      : null
+    const cacheKey = cache && subject ? await publicApiCacheKey(url, route, subject, summaryStrict) : null
     if (cache && cacheKey) {
       const cached = await cache.match(cacheKey)
       if (cached) return publicApiClientCacheResponse(cached)
@@ -95,15 +102,11 @@ async function publicApiCacheKey(
 
 async function sha256Hex(value: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function publicApiCache() {
-  const workerCaches = typeof caches === 'undefined'
-    ? null
-    : caches as unknown as { default?: Cache }
+  const workerCaches = typeof caches === 'undefined' ? null : (caches as unknown as { default?: Cache })
   return workerCaches?.default ?? null
 }
 
@@ -128,16 +131,35 @@ function publicApiCacheControlResponse(response: Response, cacheControl: string)
 function shouldFetchStaticAsset(request: Request) {
   const { pathname } = new URL(request.url)
   if (pathname.startsWith('/api/')) return false
-  return pathname.startsWith('/static/')
-    || /\.[a-z0-9][a-z0-9-]*$/i.test(pathname)
+  return pathname.startsWith('/static/') || /\.[a-z0-9][a-z0-9-]*$/i.test(pathname)
 }
 
 async function runScheduledTasks(env: Bindings, now: Date) {
-  await Promise.all([
+  const results = await Promise.allSettled([
     runUsageSummaryBackfill(env),
     runScheduledNotifications(env, now),
-    runRateLimitPrune(env, now)
+    runRateLimitPrune(env, now),
+    runScheduledModelPricing(env)
   ])
+  const reasons = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map((result) => result.reason)
+  if (reasons.length === 0) return
+  for (const reason of reasons) {
+    console.error(`TokenBoard scheduled task failed: ${errorMessage(reason)}`)
+  }
+  if (reasons.length === 1) throw reasons[0]
+  throw new AggregateError(reasons, 'TokenBoard scheduled tasks failed')
+}
+
+async function runScheduledModelPricing(env: Bindings) {
+  try {
+    if (!modelPricingSyncEnabled(env)) return
+    await runModelPricingSync({ env, now: new Date() })
+  } catch (error) {
+    console.error(`TokenBoard model pricing sync failed: ${errorMessage(error)}`)
+    throw error
+  }
 }
 
 async function runScheduledNotifications(env: Bindings, now: Date) {

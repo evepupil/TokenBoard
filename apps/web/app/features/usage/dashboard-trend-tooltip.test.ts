@@ -235,14 +235,16 @@ describe('dashboard trend tooltip', () => {
   })
 
   test('calculates tooltip positions inside the viewport bounds', () => {
-    expect(getDashboardTrendTooltipPosition({
-      clientX: 8,
-      clientY: 6,
-      tooltipWidth: 90,
-      tooltipHeight: 36,
-      viewportWidth: 200,
-      viewportHeight: 180
-    })).toEqual({
+    expect(
+      getDashboardTrendTooltipPosition({
+        clientX: 8,
+        clientY: 6,
+        tooltipWidth: 90,
+        tooltipHeight: 36,
+        viewportWidth: 200,
+        viewportHeight: 180
+      })
+    ).toEqual({
       left: 22,
       top: 20
     })

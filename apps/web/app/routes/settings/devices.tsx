@@ -146,10 +146,7 @@ export function DevicesPage(props: {
       <section class="mx-auto flex max-w-6xl flex-col gap-5">
         <DevicesHeader />
         <DevicePageFlash saved={props.saved} revoked={props.revoked} />
-        <RotatedTokenFlash
-          credentials={rotatedCredentials}
-          serverOrigin={props.serverOrigin ?? null}
-        />
+        <RotatedTokenFlash credentials={rotatedCredentials} serverOrigin={props.serverOrigin ?? null} />
         <DevicesOverview summary={summary} visible={filteredDevices.length} total={props.devices.length} />
         <DevicesToolbar view={view} query={query} total={props.devices.length} visible={filteredDevices.length} />
         {filteredDevices.length === 0 ? (
@@ -234,7 +231,9 @@ function DevicesHeader() {
             查看设备、同步、安装和上传凭证。列表看全局，卡片逐台处理。
           </p>
         </div>
-        <LinkButton class="w-full md:w-auto" href="/settings/install">连接新设备</LinkButton>
+        <LinkButton class="w-full md:w-auto" href="/settings/install">
+          连接新设备
+        </LinkButton>
       </div>
     </header>
   )
@@ -253,7 +252,9 @@ function DevicesOverview(props: { summary: DevicesSummary; visible: number; tota
           <p class="app-accent-text text-xs font-black uppercase tracking-[0.24em]">Overview</p>
           <h2 class="mt-2 text-xl font-black tracking-tight">设备概览</h2>
         </div>
-        <p class="text-xs font-bold text-[var(--app-muted)]">显示 {props.visible} / {props.total}</p>
+        <p class="text-xs font-bold text-[var(--app-muted)]">
+          显示 {props.visible} / {props.total}
+        </p>
       </div>
       <dl class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryStat label="设备" value={String(props.summary.deviceCount)} hint="已连接" />
@@ -278,9 +279,7 @@ function SummaryStat(props: { label: string; value: string; hint: string }) {
 function DevicePageFlash(props: { saved: boolean; revoked: string | null }) {
   return (
     <>
-      {props.saved ? (
-        <p class="app-flash-success p-3 text-sm">设备名称已更新。</p>
-      ) : null}
+      {props.saved ? <p class="app-flash-success p-3 text-sm">设备名称已更新。</p> : null}
       {props.revoked ? <p class="app-flash-success p-3 text-sm">{formatRevokeFlash(props.revoked)}</p> : null}
     </>
   )
@@ -327,7 +326,13 @@ function DevicesToolbar(props: { view: 'list' | 'cards'; query: string; total: n
   )
 }
 
-function ViewToggleButton(props: { active: boolean; view: 'list' | 'cards'; label: string; icon: IconNode; query: string }) {
+function ViewToggleButton(props: {
+  active: boolean
+  view: 'list' | 'cards'
+  label: string
+  icon: IconNode
+  query: string
+}) {
   return (
     <a
       data-device-view-toggle={props.view}
@@ -354,12 +359,7 @@ function buildViewHref(view: 'list' | 'cards', query: string) {
   return `/settings/devices?${params.toString()}`
 }
 
-function buildDevicesUrl(options: {
-  saved?: string
-  revoked?: string
-  view: DevicesView
-  query: string
-}) {
+function buildDevicesUrl(options: { saved?: string; revoked?: string; view: DevicesView; query: string }) {
   const params = new URLSearchParams()
   if (options.saved) {
     params.set('saved', options.saved)
@@ -378,10 +378,7 @@ function normalizeDevicesView(value: FormDataEntryValue | null | undefined): Dev
   return value === 'cards' ? 'cards' : 'list'
 }
 
-function RotatedTokenFlash(props: {
-  credentials: RotatedCredentials | null
-  serverOrigin: string | null
-}) {
+function RotatedTokenFlash(props: { credentials: RotatedCredentials | null; serverOrigin: string | null }) {
   if (!props.credentials) return null
   const deviceLinkCommands = buildRotatedTokenUpdateCommands(props.credentials, props.serverOrigin)
   return (
@@ -482,14 +479,17 @@ function shellQuote(value: string) {
 }
 
 function powerShellQuote(value: string) {
-  return `"${value
-    .replaceAll('`', '``')
-    .replaceAll('"', '`"')
-    .replaceAll('$', '`$')}"`
+  return `"${value.replaceAll('`', '``').replaceAll('"', '`"').replaceAll('$', '`$')}"`
 }
 
 function DevicesCardGrid(props: { devices: DeviceViewModel[]; state: DevicesPageState }) {
-  return <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" data-devices-card-grid="true">{props.devices.map((device) => <DeviceCard device={device} mode="card" state={props.state} />)}</div>
+  return (
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" data-devices-card-grid="true">
+      {props.devices.map((device) => (
+        <DeviceCard device={device} mode="card" state={props.state} />
+      ))}
+    </div>
+  )
 }
 
 function DevicesList(props: { devices: DeviceViewModel[]; state: DevicesPageState }) {
@@ -620,7 +620,8 @@ function DeviceListIdentity(props: { device: UserDevice }) {
         <DeviceStatus device={props.device} />
       </div>
       <p class="mt-1 hidden truncate text-xs font-bold text-[var(--app-muted)] md:block">
-        {formatPlatformLabel(props.device.platform)} / 安装记录 {props.device.installations.length} / 可用凭证 {props.device.activeTokenCount}
+        {formatPlatformLabel(props.device.platform)} / 安装记录 {props.device.installations.length} / 可用凭证{' '}
+        {props.device.activeTokenCount}
       </p>
     </div>
   )
@@ -684,12 +685,7 @@ function DeviceListDetailsButton(props: { dialogId: string; deviceId: string; st
 
 function DeviceDetailsDialogShell() {
   return (
-    <dialog
-      id="device-details-dialog"
-      class="app-device-dialog"
-      data-device-details-dialog="true"
-      aria-live="polite"
-    />
+    <dialog id="device-details-dialog" class="app-device-dialog" data-device-details-dialog="true" aria-live="polite" />
   )
 }
 
@@ -705,10 +701,13 @@ export function DeviceDetailsDialogContent(props: {
     <>
       <header class="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-panel)] p-4">
         <div class="min-w-0">
-          <p id={titleId} class="text-base font-black text-[var(--app-text)]">设备详情</p>
+          <p id={titleId} class="text-base font-black text-[var(--app-text)]">
+            设备详情
+          </p>
           <p class="mt-1 truncate text-sm font-bold text-[var(--app-muted)]">{props.device.name}</p>
           <p class="mt-1 text-xs font-bold text-[var(--app-subtle)]">
-            {formatPlatformLabel(props.device.platform)} / 安装记录 {props.device.installations.length} / 凭证记录 {props.device.uploadTokens.length}
+            {formatPlatformLabel(props.device.platform)} / 安装记录 {props.device.installations.length} / 凭证记录{' '}
+            {props.device.uploadTokens.length}
           </p>
         </div>
         {showCloseButton ? (
@@ -721,7 +720,12 @@ export function DeviceDetailsDialogContent(props: {
             <LucideIcon icon={X} size={17} />
           </button>
         ) : (
-          <LinkButton class="shrink-0" variant="secondary" size="sm" href={buildViewHref(props.state.view, props.state.query)}>
+          <LinkButton
+            class="shrink-0"
+            variant="secondary"
+            size="sm"
+            href={buildViewHref(props.state.view, props.state.query)}
+          >
             返回列表
           </LinkButton>
         )}
@@ -757,7 +761,11 @@ export function DeviceDetailsPage(props: {
 }
 
 function DeviceDetailsSurface(props: { children: Child }) {
-  return <article class="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)]">{props.children}</article>
+  return (
+    <article class="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)]">
+      {props.children}
+    </article>
+  )
 }
 
 function DeviceListDetails(props: {
@@ -895,10 +903,7 @@ function DeviceInstallationsDense(props: { device: UserDevice; state: DevicesPag
   )
 }
 
-function InstallationDenseRow(props: {
-  installation: UserDevice['installations'][number]
-  state: DevicesPageState
-}) {
+function InstallationDenseRow(props: { installation: UserDevice['installations'][number]; state: DevicesPageState }) {
   const lastSeenAt = formatDeviceTimestamp(props.installation.lastSeenAt, '从未同步')
   return (
     <div class="grid gap-2 border-t border-[var(--app-border)] px-2 py-2.5 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -936,10 +941,7 @@ function DeviceUploadTokensDense(props: { device: UserDevice; state: DevicesPage
   )
 }
 
-function UploadTokenDenseRow(props: {
-  token: UserDevice['uploadTokens'][number]
-  state: DevicesPageState
-}) {
+function UploadTokenDenseRow(props: { token: UserDevice['uploadTokens'][number]; state: DevicesPageState }) {
   const lastUsedAt = formatDeviceTimestamp(props.token.lastUsedAt, '从未使用')
   const installationLabel = props.token.installationId ? `安装：${props.token.installationId}` : '未绑定安装'
   return (
@@ -1029,7 +1031,9 @@ function DeviceUploadTokens(props: { device: UserDevice; state: DevicesPageState
                     {token.installationId ? `安装：${token.installationId}` : '未绑定安装'}
                   </p>
                   <p class="mt-1 text-xs text-[var(--app-muted)]">上次使用：{lastUsedAt.primary}</p>
-                  {lastUsedAt.secondary ? <p class="mt-1 text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p> : null}
+                  {lastUsedAt.secondary ? (
+                    <p class="mt-1 text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p>
+                  ) : null}
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-2">
@@ -1123,19 +1127,17 @@ function UploadTokenRevokeForm(props: { token: UserDevice['uploadTokens'][number
 
 function DeviceRenameForm(props: { device: UserDevice; state: DevicesPageState }) {
   return (
-    <form method="post" action="/settings/devices" class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end" data-submit-feedback="true">
+    <form
+      method="post"
+      action="/settings/devices"
+      class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+      data-submit-feedback="true"
+    >
       <input type="hidden" name="action" value="rename" />
       <input type="hidden" name="deviceId" value={props.device.id} />
       <input type="hidden" name="view" value={props.state.view} />
       <input type="hidden" name="query" value={props.state.query} />
-      <Input
-        class="mt-0 h-11 py-2"
-        name="name"
-        value={props.device.name}
-        autocomplete="off"
-        required
-        minLength={1}
-      />
+      <Input class="mt-0 h-11 py-2" name="name" value={props.device.name} autocomplete="off" required minLength={1} />
       <Button class="w-full sm:w-auto" type="submit" variant="secondary" size="sm" data-submitting-label="正在保存...">
         保存
       </Button>
@@ -1143,7 +1145,12 @@ function DeviceRenameForm(props: { device: UserDevice; state: DevicesPageState }
   )
 }
 
-function DeviceActionForms(props: { device: UserDevice; state: DevicesPageState; compact?: boolean; inline?: boolean }) {
+function DeviceActionForms(props: {
+  device: UserDevice
+  state: DevicesPageState
+  compact?: boolean
+  inline?: boolean
+}) {
   if (props.compact) {
     return (
       <div class={cn('grid gap-2', props.inline ? 'sm:grid-cols-2 xl:grid-cols-2' : '')}>
@@ -1165,7 +1172,13 @@ function DeviceReconnectForm(props: { device: UserDevice; compact?: boolean }) {
   return (
     <form method="post" action="/settings/install" data-submit-feedback="true">
       <input type="hidden" name="targetDeviceId" value={props.device.id} />
-      <Button class={cn('w-full', props.compact ? 'h-10' : '')} type="submit" variant="secondary" size="sm" data-submitting-label="正在生成...">
+      <Button
+        class={cn('w-full', props.compact ? 'h-10' : '')}
+        type="submit"
+        variant="secondary"
+        size="sm"
+        data-submitting-label="正在生成..."
+      >
         重连
       </Button>
     </form>
@@ -1439,7 +1452,7 @@ function filterDevices(devices: DeviceViewModel[], query: string) {
         installation.clientVersion ?? ''
       ]),
       ...device.uploadTokens.flatMap((token) => [token.name, token.installationId ?? '', token.lastUsedAt ?? '']),
-      ...((device.auditLogs ?? []).map((log) => `${log.action} ${log.createdAt}`))
+      ...(device.auditLogs ?? []).map((log) => `${log.action} ${log.createdAt}`)
     ]
       .join(' ')
       .toLowerCase()

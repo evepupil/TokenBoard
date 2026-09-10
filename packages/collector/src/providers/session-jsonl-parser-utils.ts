@@ -35,7 +35,7 @@ export function readString(record: UnknownRecord | null | undefined, keys: strin
 }
 
 export function readRecord(value: unknown): UnknownRecord | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : null
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord) : null
 }
 
 export function formatDate(date: Date, timezone: string) {

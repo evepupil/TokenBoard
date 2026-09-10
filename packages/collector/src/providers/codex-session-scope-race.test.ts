@@ -79,8 +79,7 @@ describe('createCodexSessionScope copy races', () => {
     try {
       await writeJsonl(activeFile, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
 
-      await expect(createCodexSessionScope({ codexHome, since: 'all' }))
-        .rejects.toThrow('clone permission denied')
+      await expect(createCodexSessionScope({ codexHome, since: 'all' })).rejects.toThrow('clone permission denied')
       expect(close).toHaveBeenCalledTimes(1)
     } finally {
       restore()
@@ -116,8 +115,9 @@ describe('createCodexSessionScope copy races', () => {
 
       expect(scope).not.toBeNull()
       expect(skippedFiles).toEqual(['2026/05/disappearing.jsonl'])
-      await expect(readFile(join(scope!.codexHome, 'sessions', '2026', '05', 'active.jsonl'), 'utf8'))
-        .resolves.toContain('token_count')
+      await expect(
+        readFile(join(scope!.codexHome, 'sessions', '2026', '05', 'active.jsonl'), 'utf8')
+      ).resolves.toContain('token_count')
       await scope?.cleanup()
     } finally {
       restore()
@@ -139,11 +139,13 @@ describe('createCodexSessionScope copy races', () => {
     try {
       await writeJsonl(activeFile, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
 
-      await expect(createCodexSessionScope({
-        codexHome,
-        since: 'all',
-        onMissingSessionFile: (file) => skippedFiles.push(file)
-      })).rejects.toThrow('target vanished')
+      await expect(
+        createCodexSessionScope({
+          codexHome,
+          since: 'all',
+          onMissingSessionFile: (file) => skippedFiles.push(file)
+        })
+      ).rejects.toThrow('target vanished')
       expect(skippedFiles).toEqual([])
     } finally {
       restore()

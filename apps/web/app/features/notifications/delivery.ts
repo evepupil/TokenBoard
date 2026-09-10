@@ -81,7 +81,11 @@ export async function runDueWebhookNotifications(input: {
   fetcher?: Fetcher
 }) {
   const now = input.now ?? new Date()
-  const due = await listDueWebhookSubscriptions(input.env.DB, now.toISOString(), input.limit ?? webhookCronBatchSize(input.env))
+  const due = await listDueWebhookSubscriptions(
+    input.env.DB,
+    now.toISOString(),
+    input.limit ?? webhookCronBatchSize(input.env)
+  )
   const counts = { checked: due.length, sent: 0, failed: 0, skipped: 0 }
   const fetcher = input.fetcher ?? defaultWebhookFetcher
 
@@ -142,7 +146,9 @@ function logCronSubscriptionFailure(subscription: DueWebhookSubscription, error:
 }
 
 function logSuccessfulDeliveryPersistenceFailure(subscription: DueWebhookSubscription, error: unknown) {
-  console.error(`TokenBoard webhook success persistence failed for subscription ${subscription.id}: ${errorMessage(error)}`)
+  console.error(
+    `TokenBoard webhook success persistence failed for subscription ${subscription.id}: ${errorMessage(error)}`
+  )
 }
 
 async function deliverSubscription(input: DeliverSubscriptionInput) {
@@ -209,9 +215,7 @@ async function prepareReportHistoryForDelivery(
   report: DailyTokenReport
 ): Promise<ReportHistoryDeliveryState> {
   const scheduleSlot = reportHistoryScheduleSlot(input)
-  const retentionDays = scheduleSlot
-    ? dailyReportHistoryRetentionDays(input.env)
-    : 0
+  const retentionDays = scheduleSlot ? dailyReportHistoryRetentionDays(input.env) : 0
   const share = scheduleSlot
     ? await prepareDailyReportHistoryForDelivery({
         env: input.env,

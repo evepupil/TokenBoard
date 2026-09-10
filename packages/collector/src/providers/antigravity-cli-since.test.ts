@@ -15,10 +15,14 @@ describe('collectAntigravityCliUsage since ranges', () => {
         stateDir: root,
         timezone: 'Asia/Shanghai',
         since: '20260624',
-        readDbUsageEvents: async () => dbUsage([
-          historyEvent('b', '2026-06-23T15:59:59.000Z', 'gemini-old', 30),
-          historyEvent('c', '2026-06-23T16:00:00.000Z', 'gemini-new', 40)
-        ], 2)
+        readDbUsageEvents: async () =>
+          dbUsage(
+            [
+              historyEvent('b', '2026-06-23T15:59:59.000Z', 'gemini-old', 30),
+              historyEvent('c', '2026-06-23T16:00:00.000Z', 'gemini-new', 40)
+            ],
+            2
+          )
       })
 
       expect(snapshots).toEqual([expect.objectContaining({ model: 'gemini-new', inputTokens: 40 })])
@@ -30,15 +34,17 @@ describe('collectAntigravityCliUsage since ranges', () => {
   test('rejects an incomplete first bounded scan without persisting partial usage', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-since-incomplete-'))
     try {
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: '20260630',
-        readDbUsageEvents: async () => ({
-          ...dbUsage([historyEvent('b', '2026-06-30T12:00:00.000Z', 'gemini', 10)], 1),
-          completeDirectoryScan: false
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: '20260630',
+          readDbUsageEvents: async () => ({
+            ...dbUsage([historyEvent('b', '2026-06-30T12:00:00.000Z', 'gemini', 10)], 1),
+            completeDirectoryScan: false
+          })
         })
-      })).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
+      ).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
 
       expect(await readdir(root)).toEqual([])
     } finally {
@@ -49,15 +55,17 @@ describe('collectAntigravityCliUsage since ranges', () => {
   test('rejects an incomplete full-history scan without marking its cursor complete', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-since-incomplete-full-'))
     try {
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: 'all',
-        readDbUsageEvents: async () => ({
-          ...dbUsage([historyEvent('b', '2026-06-30T12:00:00.000Z', 'gemini', 10)], 1),
-          completeDirectoryScan: false
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: 'all',
+          readDbUsageEvents: async () => ({
+            ...dbUsage([historyEvent('b', '2026-06-30T12:00:00.000Z', 'gemini', 10)], 1),
+            completeDirectoryScan: false
+          })
         })
-      })).rejects.toThrow('requires a complete SQLite directory scan')
+      ).rejects.toThrow('requires a complete SQLite directory scan')
 
       expect(await readdir(root)).toEqual([])
     } finally {
@@ -68,15 +76,17 @@ describe('collectAntigravityCliUsage since ranges', () => {
   test('rejects an empty incomplete first bounded scan without persisting scan state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-since-empty-incomplete-'))
     try {
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: '20260630',
-        readDbUsageEvents: async () => ({
-          ...dbUsage([], 0),
-          completeDirectoryScan: false
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: '20260630',
+          readDbUsageEvents: async () => ({
+            ...dbUsage([], 0),
+            completeDirectoryScan: false
+          })
         })
-      })).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
+      ).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
 
       expect(await readdir(root)).toEqual([])
     } finally {
@@ -100,15 +110,17 @@ describe('collectAntigravityCliUsage since ranges', () => {
       const cursorPath = join(root, 'antigravity-cli-cursor.json')
       const before = await readFile(cursorPath, 'utf8')
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: '20260630',
-        readDbUsageEvents: async () => ({
-          ...dbUsage([], 1),
-          completeDirectoryScan: false
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: '20260630',
+          readDbUsageEvents: async () => ({
+            ...dbUsage([], 1),
+            completeDirectoryScan: false
+          })
         })
-      })).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
+      ).rejects.toThrow('requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
 
       expect(await readFile(cursorPath, 'utf8')).toBe(before)
     } finally {
@@ -140,11 +152,13 @@ describe('collectAntigravityCliUsage since ranges', () => {
         })
       })
 
-      expect(snapshots).toEqual([expect.objectContaining({
-        usageDate: '2026-07-01',
-        model: 'gemini-new',
-        inputTokens: 20
-      })])
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          usageDate: '2026-07-01',
+          model: 'gemini-new',
+          inputTokens: 20
+        })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -214,10 +228,12 @@ describe('collectAntigravityCliUsage since ranges', () => {
 
       expect(cursorSizes).toEqual([0, 0])
       expect(bounded).toEqual([expect.objectContaining({ inputTokens: 20 })])
-      expect(full).toEqual(expect.arrayContaining([
-        expect.objectContaining({ usageDate: '2026-06-23', inputTokens: 10, sessionCount: 1 }),
-        expect.objectContaining({ usageDate: '2026-06-24', inputTokens: 20, sessionCount: 1 })
-      ]))
+      expect(full).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ usageDate: '2026-06-23', inputTokens: 10, sessionCount: 1 }),
+          expect.objectContaining({ usageDate: '2026-06-24', inputTokens: 20, sessionCount: 1 })
+        ])
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }

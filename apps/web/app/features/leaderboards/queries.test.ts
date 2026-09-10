@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'vitest'
 import { listLeaderboard } from './queries'
 
-function createDb() {
+function createDb(
+  results = [
+    {
+      slug: 'eve-tokenboard',
+      displayName: 'Eve',
+      totalTokens: 1000,
+      totalTokensWithoutCacheRead: 750,
+      costUsd: 2.5,
+      costAvailable: 1
+    }
+  ]
+) {
   const sqlStatements: string[] = []
   const bindings: unknown[][] = []
   const db = {
@@ -13,15 +24,7 @@ function createDb() {
           return {
             async all() {
               return {
-                results: [
-                  {
-                    slug: 'eve-tokenboard',
-                    displayName: 'Eve',
-                    totalTokens: 1000,
-                    totalTokensWithoutCacheRead: 750,
-                    costUsd: 2.5
-                  }
-                ]
+                results
               }
             }
           }
@@ -53,7 +56,8 @@ describe('listLeaderboard', () => {
         totalTokens: 1000,
         totalTokensWithoutCacheRead: 750,
         cacheReadRate: 0.25,
-        costUsd: 2.5
+        costUsd: 2.5,
+        costAvailable: true
       }
     ])
     expect(sqlStatements[0]).toContain('effective_daily_usage_summary')
@@ -77,6 +81,37 @@ describe('listLeaderboard', () => {
     })
 
     expect(sqlStatements[0]).toContain('ORDER BY costUsd DESC, totalTokens DESC')
+    expect(sqlStatements[0]).toContain(
+      "source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness')"
+    )
+    expect(sqlStatements[0]).toContain('MIN(CASE')
+    expect(sqlStatements[0]).toContain(
+      "SUM(CASE WHEN effective_daily_usage_summary.source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness') THEN 0 ELSE effective_daily_usage_summary.cost_usd END)"
+    )
+  })
+
+  test('marks mixed billable and Antigravity usage cost unavailable', async () => {
+    const { db } = createDb([
+      {
+        slug: 'mixed-user',
+        displayName: 'Mixed User',
+        totalTokens: 1300,
+        totalTokensWithoutCacheRead: 1100,
+        costUsd: 2.5,
+        costAvailable: 0
+      }
+    ])
+
+    const entries = await listLeaderboard(db, {
+      period: 'monthly',
+      metric: 'cost',
+      startDate: '2026-04-01',
+      endDateExclusive: '2026-05-01',
+      limit: 20
+    })
+
+    expect(entries[0]?.costUsd).toBe(2.5)
+    expect(entries[0]?.costAvailable).toBe(false)
   })
 
   test('lists leaderboard ordered by tokens without cache reads', async () => {

@@ -43,7 +43,10 @@ test('installed schedules preserve a custom TokenBoard config directory', () => 
     const plistPath = join(harness.homeDir, 'Library', 'LaunchAgents', 'com.tokenboard.daily-sync.plist')
     const plist = readFileSync(plistPath, 'utf8')
 
-    assert.match(plist, new RegExp(`<key>TOKENBOARD_CONFIG_DIR<\\/key>\\s+<string>${escapeRegExp(harness.options.configDir)}<\\/string>`))
+    assert.match(
+      plist,
+      new RegExp(`<key>TOKENBOARD_CONFIG_DIR<\\/key>\\s+<string>${escapeRegExp(harness.options.configDir)}<\\/string>`)
+    )
   } finally {
     harness.cleanup()
   }
@@ -109,11 +112,17 @@ test('creates Windows scheduled tasks through an isolated schtasks harness', () 
 
     const calls = harness.calls.map(commandLine)
     assert.equal(calls[0], 'schtasks.exe --version')
-    assert.match(calls[1], /schtasks\.exe \/Create \/F \/SC DAILY \/TN TokenBoardDailySync0815 \/TR ".+tokenboard-daily-sync\.cmd" \/ST 08:15/)
+    assert.match(
+      calls[1],
+      /schtasks\.exe \/Create \/F \/SC DAILY \/TN TokenBoardDailySync0815 \/TR ".+tokenboard-daily-sync\.cmd" \/ST 08:15/
+    )
     assert.ok(calls[1].length < 261)
     assert.match(calls[2], /TokenBoardDailySync2145/)
     assert.match(calls[2], /tokenboard-daily-sync\.cmd" \/ST 21:45/)
-    assert.equal(calls[3], "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $current = @('TokenBoardDailySync0815','TokenBoardDailySync2145'); Get-ScheduledTask -TaskPath '\\' | Where-Object { (($_.TaskName -like 'TokenBoardDailySync*') -or ($_.Actions | Where-Object { $_.Execute -like '*node*' -and $_.Arguments -like '*TokenBoard*skills*tokenboard*scripts*sync.mjs*' })) -and $current -notcontains $_.TaskName } | Unregister-ScheduledTask -Confirm:$false")
+    assert.equal(
+      calls[3],
+      "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $current = @('TokenBoardDailySync0815','TokenBoardDailySync2145'); Get-ScheduledTask -TaskPath '\\' | Where-Object { (($_.TaskName -like 'TokenBoardDailySync*') -or ($_.Actions | Where-Object { $_.Execute -like '*node*' -and $_.Arguments -like '*TokenBoard*skills*tokenboard*scripts*sync.mjs*' })) -and $current -notcontains $_.TaskName } | Unregister-ScheduledTask -Confirm:$false"
+    )
     const wrapperPath = join(harness.options.configDir, 'tokenboard-daily-sync.cmd')
     const wrapper = readFileSync(wrapperPath, 'utf8')
     assert.match(wrapper, /TOKENBOARD_PACKAGE_MANAGER=pnpm/)

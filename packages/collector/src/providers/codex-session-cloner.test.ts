@@ -289,11 +289,7 @@ describe('Codex session cloner', () => {
       await cloner.copy(secondSource, secondTarget)
       await cloner.close()
 
-      expect(modes).toEqual([
-        forcedCloneMode,
-        constants.COPYFILE_EXCL,
-        constants.COPYFILE_EXCL
-      ])
+      expect(modes).toEqual([forcedCloneMode, constants.COPYFILE_EXCL, constants.COPYFILE_EXCL])
       expect(fallback).toHaveBeenCalledTimes(1)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -332,9 +328,12 @@ function createFakeMacOsHelper(respond: (request: CloneRequest) => Promise<Clone
       input = input.slice(newline + 1)
       const request = JSON.parse(line) as CloneRequest
       requests.push(request)
-      void respond(request).then((response) => {
-        stdout.write(typeof response === 'string' ? `${response}\n` : `${JSON.stringify(response)}\n`)
-      }, (error) => emitter.emit('error', error))
+      void respond(request).then(
+        (response) => {
+          stdout.write(typeof response === 'string' ? `${response}\n` : `${JSON.stringify(response)}\n`)
+        },
+        (error) => emitter.emit('error', error)
+      )
     }
   })
   stdin.once('finish', () => {

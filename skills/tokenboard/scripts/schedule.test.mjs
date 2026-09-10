@@ -16,15 +16,7 @@ test('builds the Windows scheduled task shape with time-suffixed names', () => {
     scriptPath: 'C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync.mjs'
   })
 
-  assert.deepEqual(args.slice(0, 7), [
-    '/Create',
-    '/F',
-    '/SC',
-    'DAILY',
-    '/TN',
-    'TokenBoardDailySync0900',
-    '/TR'
-  ])
+  assert.deepEqual(args.slice(0, 7), ['/Create', '/F', '/SC', 'DAILY', '/TN', 'TokenBoardDailySync0900', '/TR'])
   assert.match(args[7], /cmd\.exe \/d \/s \/c/)
   assert.match(args[7], /TOKENBOARD_PACKAGE_MANAGER=pnpm/)
   assert.match(args[7], /TOKENBOARD_SCHEDULED_SYNC=1/)
@@ -66,8 +58,14 @@ test('builds macOS LaunchAgent plist for every daily sync time', () => {
   assert.match(plist, /<string>\/Users\/tokenboard\/.tokenboard\/logs\/daily-sync\.out\.log<\/string>/)
   assert.match(plist, /<string>\/Users\/tokenboard\/.tokenboard\/logs\/daily-sync\.err\.log<\/string>/)
   assert.match(plist, /<string>--scheduled<\/string>/)
-  assert.equal([...plist.matchAll(/<key>Hour<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','), '9,12,18,23')
-  assert.equal([...plist.matchAll(/<key>Minute<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','), '0,0,0,0')
+  assert.equal(
+    [...plist.matchAll(/<key>Hour<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','),
+    '9,12,18,23'
+  )
+  assert.equal(
+    [...plist.matchAll(/<key>Minute<\/key>\s+<integer>(\d+)<\/integer>/g)].map((match) => match[1]).join(','),
+    '0,0,0,0'
+  )
 })
 
 test('parses validated schedule times and removes duplicates', () => {
@@ -89,8 +87,14 @@ test('builds Linux user systemd units with pnpm available in PATH', () => {
   assert.match(units.service, /Environment="TOKENBOARD_PACKAGE_MANAGER=pnpm"/)
   assert.match(units.service, /Environment="TOKENBOARD_SCHEDULED_SYNC=1"/)
   assert.match(units.service, /Environment="TOKENBOARD_LOG_DIR=\/home\/tokenboard\/.tokenboard\/logs"/)
-  assert.match(units.service, /Environment="PATH=\/home\/tokenboard\/.bun\/bin:\/home\/tokenboard\/.local\/bin:\/usr\/bin:\/bin"/)
-  assert.match(units.service, /ExecStart="\/usr\/bin\/node" "\/home\/tokenboard\/.tokenboard\/TokenBoard\/skills\/tokenboard\/scripts\/sync.mjs" --mode sync --source all --scheduled/)
+  assert.match(
+    units.service,
+    /Environment="PATH=\/home\/tokenboard\/.bun\/bin:\/home\/tokenboard\/.local\/bin:\/usr\/bin:\/bin"/
+  )
+  assert.match(
+    units.service,
+    /ExecStart="\/usr\/bin\/node" "\/home\/tokenboard\/.tokenboard\/TokenBoard\/skills\/tokenboard\/scripts\/sync.mjs" --mode sync --source all --scheduled/
+  )
   assert.match(units.timer, /OnCalendar=09:00/)
   assert.match(units.timer, /OnCalendar=12:00/)
   assert.match(units.timer, /OnCalendar=18:00/)
@@ -138,7 +142,10 @@ test('builds schedules with custom daily sync times', () => {
     scheduleTimes
   })
 
-  assert.deepEqual(windowsTasks.map((task) => task.args.at(-1)), ['08:15', '21:45'])
+  assert.deepEqual(
+    windowsTasks.map((task) => task.args.at(-1)),
+    ['08:15', '21:45']
+  )
   assert.match(macPlist, /<integer>8<\/integer>/)
   assert.match(macPlist, /<integer>15<\/integer>/)
   assert.match(macPlist, /<integer>21<\/integer>/)
@@ -283,7 +290,10 @@ test('builds Windows scheduled task command with explicit runtime environment', 
   assert.match(taskCommand, /TOKENBOARD_PACKAGE_MANAGER=bun/)
   assert.match(taskCommand, /TOKENBOARD_SCHEDULED_SYNC=1/)
   assert.match(taskCommand, /TOKENBOARD_LOG_DIR=C:\\Users\\tokenboard\\.tokenboard\\logs/)
-  assert.match(taskCommand, /PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32/)
+  assert.match(
+    taskCommand,
+    /PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32/
+  )
   assert.match(taskCommand, /C:\\Program Files\\nodejs\\node\.exe/)
   assert.match(taskCommand, /C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs/)
   assert.match(taskCommand, /--mode sync --source all --scheduled/)
@@ -314,6 +324,12 @@ test('builds Windows scheduled sync wrapper script with explicit runtime environ
   assert.match(script, /set "TOKENBOARD_PACKAGE_MANAGER=bun"/)
   assert.match(script, /set "TOKENBOARD_SCHEDULED_SYNC=1"/)
   assert.match(script, /set "TOKENBOARD_LOG_DIR=C:\\Users\\tokenboard\\.tokenboard\\logs"/)
-  assert.match(script, /set "PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32"/)
-  assert.match(script, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs" --mode sync --source all --scheduled/)
+  assert.match(
+    script,
+    /set "PATH=C:\\Users\\tokenboard\\.bun\\bin;C:\\Users\\tokenboard\\.local\\bin;C:\\Program Files\\nodejs;C:\\Windows\\System32"/
+  )
+  assert.match(
+    script,
+    /"C:\\Program Files\\nodejs\\node\.exe" "C:\\Users\\tokenboard\\.tokenboard\\TokenBoard\\skills\\tokenboard\\scripts\\sync\.mjs" --mode sync --source all --scheduled/
+  )
 })

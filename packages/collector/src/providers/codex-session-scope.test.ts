@@ -38,10 +38,10 @@ describe('createCodexSessionScope', () => {
       const scope = await createScopedWithMockedHome({ since: 'all' })
       expect(scope).not.toBeNull()
       try {
-        await expect(readFile(join(scope!.codexHome, 'sessions', '2026', '05', 'home.jsonl'), 'utf8'))
-          .resolves.toContain('token_count')
-        await expect(stat(join(scope!.codexHome, 'sessions', '2026', '05', 'cwd.jsonl')))
-          .rejects.toThrow()
+        await expect(
+          readFile(join(scope!.codexHome, 'sessions', '2026', '05', 'home.jsonl'), 'utf8')
+        ).resolves.toContain('token_count')
+        await expect(stat(join(scope!.codexHome, 'sessions', '2026', '05', 'cwd.jsonl'))).rejects.toThrow()
       } finally {
         await scope?.cleanup()
       }
@@ -66,8 +66,9 @@ describe('createCodexSessionScope', () => {
 
       try {
         expect(scope?.codexHomes).toHaveLength(1)
-        await expect(readFile(join(scope!.codexHome, 'sessions', '2026', '05', '09', 'session.jsonl'), 'utf8'))
-          .resolves.toContain('token_count')
+        await expect(
+          readFile(join(scope!.codexHome, 'sessions', '2026', '05', '09', 'session.jsonl'), 'utf8')
+        ).resolves.toContain('token_count')
       } finally {
         await scope?.cleanup()
       }
@@ -132,8 +133,9 @@ describe('createCodexSessionScope', () => {
       const scope = await createCodexSessionScope({ since: 'all' })
       try {
         expect(scope?.codexHomes).toHaveLength(1)
-        await expect(readFile(join(scope!.codexHome, 'sessions', '2026', '05', '09', 'session.jsonl'), 'utf8'))
-          .resolves.toContain('token_count')
+        await expect(
+          readFile(join(scope!.codexHome, 'sessions', '2026', '05', '09', 'session.jsonl'), 'utf8')
+        ).resolves.toContain('token_count')
       } finally {
         await scope?.cleanup()
       }
@@ -147,14 +149,12 @@ describe('createCodexSessionScope', () => {
   test('selects sessions by token_count timestamp before directory date', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
     try {
-      await writeJsonl(
-        join(codexHome, 'sessions', '2026', '03', '25', 'still-active.jsonl'),
-        [tokenCountEvent('2026-05-09T04:24:07.234Z')]
-      )
-      await writeJsonl(
-        join(codexHome, 'sessions', '2026', '03', '20', 'inactive.jsonl'),
-        [tokenCountEvent('2026-03-20T04:24:07.234Z')]
-      )
+      await writeJsonl(join(codexHome, 'sessions', '2026', '03', '25', 'still-active.jsonl'), [
+        tokenCountEvent('2026-05-09T04:24:07.234Z')
+      ])
+      await writeJsonl(join(codexHome, 'sessions', '2026', '03', '20', 'inactive.jsonl'), [
+        tokenCountEvent('2026-03-20T04:24:07.234Z')
+      ])
       await utimes(
         join(codexHome, 'sessions', '2026', '03', '20', 'inactive.jsonl'),
         new Date('2026-03-20T04:24:07.234Z'),
@@ -167,9 +167,7 @@ describe('createCodexSessionScope', () => {
         await expect(
           readFile(join(scope!.codexHome, 'sessions', '2026', '03', '25', 'still-active.jsonl'), 'utf8')
         ).resolves.toContain('token_count')
-        await expect(
-          stat(join(scope!.codexHome, 'sessions', '2026', '03', '20', 'inactive.jsonl'))
-        ).rejects.toThrow()
+        await expect(stat(join(scope!.codexHome, 'sessions', '2026', '03', '20', 'inactive.jsonl'))).rejects.toThrow()
       } finally {
         await scope?.cleanup()
       }
@@ -229,18 +227,15 @@ describe('createCodexSessionScope', () => {
   test('keeps the next UTC-day candidate for downstream negative-timezone filtering', async () => {
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
     try {
-      await writeJsonl(
-        join(codexHome, 'sessions', '2026', '05', '09', 'included.jsonl'),
-        [tokenCountEvent('2026-05-09T23:59:59.999Z')]
-      )
-      await writeJsonl(
-        join(codexHome, 'sessions', '2026', '05', '10', 'negative-offset-edge.jsonl'),
-        [tokenCountEvent('2026-05-10T07:30:00.000Z')]
-      )
-      await writeJsonl(
-        join(codexHome, 'sessions', '2026', '05', '11', 'excluded.jsonl'),
-        [tokenCountEvent('2026-05-11T00:00:00.000Z')]
-      )
+      await writeJsonl(join(codexHome, 'sessions', '2026', '05', '09', 'included.jsonl'), [
+        tokenCountEvent('2026-05-09T23:59:59.999Z')
+      ])
+      await writeJsonl(join(codexHome, 'sessions', '2026', '05', '10', 'negative-offset-edge.jsonl'), [
+        tokenCountEvent('2026-05-10T07:30:00.000Z')
+      ])
+      await writeJsonl(join(codexHome, 'sessions', '2026', '05', '11', 'excluded.jsonl'), [
+        tokenCountEvent('2026-05-11T00:00:00.000Z')
+      ])
 
       const scope = await createCodexSessionScope({ codexHome, until: '20260509' })
       expect(scope).not.toBeNull()
@@ -251,9 +246,7 @@ describe('createCodexSessionScope', () => {
         await expect(
           readFile(join(scope!.codexHome, 'sessions', '2026', '05', '10', 'negative-offset-edge.jsonl'), 'utf8')
         ).resolves.toContain('token_count')
-        await expect(
-          stat(join(scope!.codexHome, 'sessions', '2026', '05', '11', 'excluded.jsonl'))
-        ).rejects.toThrow()
+        await expect(stat(join(scope!.codexHome, 'sessions', '2026', '05', '11', 'excluded.jsonl'))).rejects.toThrow()
       } finally {
         await scope?.cleanup()
       }
@@ -333,10 +326,7 @@ describe('createCodexSessionScope', () => {
         }
       }
 
-      expect(batches).toEqual([
-        [firstSibling, secondSibling].sort(),
-        [firstNested]
-      ])
+      expect(batches).toEqual([[firstSibling, secondSibling].sort(), [firstNested]])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -438,8 +428,9 @@ describe('createCodexSessionScope', () => {
       ])
       await writeJsonl(outside, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
 
-      await expect(createCodexSessionScope({ codexHome, files: [outside] }))
-        .rejects.toThrow('Invalid Codex session file path for canonical session attribution')
+      await expect(createCodexSessionScope({ codexHome, files: [outside] })).rejects.toThrow(
+        'Invalid Codex session file path for canonical session attribution'
+      )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }
@@ -473,21 +464,25 @@ describe('createCodexSessionScope', () => {
     }
   })
 
-  test.skipIf(process.platform === 'win32')('fails visibly when an active session candidate cannot be read', async () => {
-    const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
-    const unreadable = join(codexHome, 'sessions', '2026', '05', 'unreadable.jsonl')
-    try {
-      await writeJsonl(unreadable, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
-      await utimes(unreadable, new Date('2026-03-20T04:24:07.234Z'), new Date('2026-03-20T04:24:07.234Z'))
-      await chmod(unreadable, 0o000)
+  test.skipIf(process.platform === 'win32')(
+    'fails visibly when an active session candidate cannot be read',
+    async () => {
+      const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-scope-test-'))
+      const unreadable = join(codexHome, 'sessions', '2026', '05', 'unreadable.jsonl')
+      try {
+        await writeJsonl(unreadable, [tokenCountEvent('2026-05-09T04:24:07.234Z')])
+        await utimes(unreadable, new Date('2026-03-20T04:24:07.234Z'), new Date('2026-03-20T04:24:07.234Z'))
+        await chmod(unreadable, 0o000)
 
-      await expect(createCodexSessionScope({ codexHome, since: '20260508' }))
-        .rejects.toThrow(/Unable to read Codex session file/)
-    } finally {
-      await chmod(unreadable, 0o600).catch(() => {})
-      await rm(codexHome, { recursive: true, force: true })
+        await expect(createCodexSessionScope({ codexHome, since: '20260508' })).rejects.toThrow(
+          /Unable to read Codex session file/
+        )
+      } finally {
+        await chmod(unreadable, 0o600).catch(() => {})
+        await rm(codexHome, { recursive: true, force: true })
+      }
     }
-  })
+  )
 })
 
 async function writeJsonl(file: string, rows: unknown[]) {

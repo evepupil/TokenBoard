@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { acknowledgeSignalSource, appendSignal, drainSignalSources, readSignalSources } from './coordinator-signal.mjs'
-import { fakeProcess, memoryRuntime } from './coordinator-test-helpers.mjs'
+import { fakeProcess, memoryPathIncludes, memoryRuntime } from './coordinator-test-helpers.mjs'
 
 function signal(source) {
   return `${JSON.stringify({ source })}\n`
 }
 
 function recoveryPaths(files) {
-  return [...files.keys()].filter((path) => path.includes('/notify.signal.recovery.'))
+  return [...files.keys()].filter((path) => memoryPathIncludes(path, '/notify.signal.recovery.'))
 }
 
 function runtime(files, overrides = {}) {
@@ -28,7 +28,7 @@ test('signal drain leaves every source in place when the recovery journal cannot
   })
   const writeFile = fs.writeFile
   fs.writeFile = (path, value, options) => {
-    if (path.includes('/notify.signal.recovery.')) {
+    if (memoryPathIncludes(path, '/notify.signal.recovery.')) {
       const error = new Error('EACCES')
       error.code = 'EACCES'
       throw error
@@ -37,10 +37,7 @@ test('signal drain leaves every source in place when the recovery journal cannot
   }
 
   assert.throws(() => drainSignalSources(fs), /EACCES/)
-  assert.equal(
-    [...fs.files.keys()].filter((path) => path.endsWith('.drain')).length,
-    2
-  )
+  assert.equal([...fs.files.keys()].filter((path) => path.endsWith('.drain')).length, 2)
   assert.equal(recoveryPaths(fs.files).length, 0)
   assert.deepEqual(readSignalSources(fs), ['codex', 'claude-code'])
 })
@@ -55,7 +52,10 @@ test('signal drain validates a malformed recovery journal before rotating new si
   assert.throws(() => drainSignalSources(fs), /Invalid TokenBoard signal recovery journal/)
   assert.equal(fs.files.has('/state/notify.signal.d/codex.json'), true)
   assert.equal(fs.files.has('/state/notify.signal'), true)
-  assert.equal([...fs.files.keys()].some((path) => path.endsWith('.drain')), false)
+  assert.equal(
+    [...fs.files.keys()].some((path) => path.endsWith('.drain')),
+    false
+  )
   assert.equal(recoveryPaths(fs.files).length, 1)
 })
 
@@ -80,16 +80,10 @@ test('signal drain keeps a cross-format recovery journal when cleanup fails afte
   }
 
   assert.throws(() => drainSignalSources(fs), /recovery journal retained: EPERM/)
-  assert.equal(
-    [...fs.files.keys()].filter((path) => path.endsWith('.drain')).length,
-    1
-  )
+  assert.equal([...fs.files.keys()].filter((path) => path.endsWith('.drain')).length, 1)
   const journals = recoveryPaths(fs.files)
   assert.equal(journals.length, 2)
-  assert.deepEqual(
-    journals.map((path) => JSON.parse(fs.files.get(path)).source).sort(),
-    ['claude-code', 'codex']
-  )
+  assert.deepEqual(journals.map((path) => JSON.parse(fs.files.get(path)).source).sort(), ['claude-code', 'codex'])
   assert.deepEqual(readSignalSources(fs), ['claude-code', 'codex'])
 })
 
@@ -115,10 +109,7 @@ test('signal drain reuses its recovery journal while cleanup keeps failing', () 
   assert.throws(() => drainSignalSources(fs), /recovery journal retained: EPERM/)
   const secondJournals = recoveryPaths(fs.files)
   assert.deepEqual(secondJournals, firstJournals)
-  assert.deepEqual(
-    secondJournals.map((path) => JSON.parse(fs.files.get(path)).source).sort(),
-    ['claude-code', 'codex']
-  )
+  assert.deepEqual(secondJournals.map((path) => JSON.parse(fs.files.get(path)).source).sort(), ['claude-code', 'codex'])
 })
 
 test('signal drain preserves a legacy source journal while adding a newly drained source', () => {
@@ -134,10 +125,12 @@ test('signal drain preserves a legacy source journal while adding a newly draine
   const journals = recoveryPaths(fs.files)
   assert.equal(journals.length, 2)
   assert.deepEqual(
-    journals.map((path) => {
-      const parsed = JSON.parse(fs.files.get(path))
-      return parsed.version === 1 ? parsed.sources[0] : parsed.source
-    }).sort(),
+    journals
+      .map((path) => {
+        const parsed = JSON.parse(fs.files.get(path))
+        return parsed.version === 1 ? parsed.sources[0] : parsed.source
+      })
+      .sort(),
     ['claude-code', 'codex']
   )
 })
@@ -161,7 +154,10 @@ test('a later drain migrates a multi-source journal and preserves it until each 
   })
 
   assert.deepEqual(drainSignalSources(fs), ['claude-code', 'codex'])
-  assert.equal([...fs.files.keys()].some((path) => path.endsWith('.drain')), false)
+  assert.equal(
+    [...fs.files.keys()].some((path) => path.endsWith('.drain')),
+    false
+  )
   assert.equal(recoveryPaths(fs.files).length, 2)
   assert.deepEqual(readSignalSources(fs), ['claude-code', 'codex'])
 
@@ -181,7 +177,10 @@ test('signal drain without rename consumes retained legacy drains through the re
   delete fs.rename
 
   assert.deepEqual(drainSignalSources(fs), ['codex'])
-  assert.equal([...fs.files.keys()].some((path) => path.endsWith('.drain')), false)
+  assert.equal(
+    [...fs.files.keys()].some((path) => path.endsWith('.drain')),
+    false
+  )
   assert.equal(recoveryPaths(fs.files).length, 1)
 
   acknowledgeSignalSource(fs, 'codex')
@@ -210,13 +209,33 @@ test('drains legacy per-event queue files and retained drains through the recove
 
   assert.deepEqual(drainSignalSources(fs), ['codex', 'claude-code'])
   assert.equal(fs.files.has('/state/notify.signal.d/1785302092394-95086-5lxdll72uc.json'), false)
-  assert.equal(
-    fs.files.has('/state/notify.signal.d/1785302092395-95087-r5z2h9.json.900.1.deadbeef.drain'),
-    false
-  )
+  assert.equal(fs.files.has('/state/notify.signal.d/1785302092395-95087-r5z2h9.json.900.1.deadbeef.drain'), false)
   assert.deepEqual(readSignalSources(fs), ['claude-code', 'codex'])
 
   acknowledgeSignalSource(fs, 'codex')
   acknowledgeSignalSource(fs, 'claude-code')
   assert.deepEqual(readSignalSources(fs), [])
+})
+
+test('signal drain tolerates a drained file removed by another worker', () => {
+  let reads = 0
+  const fs = runtime(
+    {
+      '/state/notify.signal.900.1.deadbeef.drain': signal('codex')
+    },
+    {
+      readFile(path) {
+        reads += 1
+        if (path.endsWith('.drain')) {
+          const error = new Error('drained signal already consumed')
+          error.code = 'ENOENT'
+          throw error
+        }
+        return fs.files.get(path)
+      }
+    }
+  )
+
+  assert.deepEqual(drainSignalSources(fs), [])
+  assert.equal(reads, 1)
 })

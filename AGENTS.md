@@ -14,6 +14,8 @@ pnpm typecheck
 pnpm build
 pnpm preview
 pnpm deploy
+pnpm format
+pnpm format:check
 ```
 
 - `pnpm dev`：启动 Web 开发服务，等价于 `pnpm --filter @tokenboard/web dev`。
@@ -22,6 +24,8 @@ pnpm deploy
 - `pnpm build`：构建 Web Worker 客户端与服务端产物。
 - `pnpm preview`：通过 Wrangler 本地预览 Worker。
 - `pnpm deploy`：执行生产部署脚本，包含配置校验、构建、D1 migration 和 Worker 发布。
+- `pnpm format`：按根目录 Prettier 配置格式化 JavaScript、TypeScript 和 JSON 源文件。
+- `pnpm format:check`：检查上述文件是否符合统一格式，不修改工作树。
 
 ### 目录速览
 

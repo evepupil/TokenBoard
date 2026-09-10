@@ -24,7 +24,8 @@ export const writeRateLimitPolicies = {
   ingestCheck: { id: 'ingest-check', maxRequests: 240, windowSeconds: 60 },
   ingestCheckIp: { id: 'ingest-check-ip', maxRequests: 300, windowSeconds: 60 },
   devicePair: { id: 'device-pair', maxRequests: 20, windowSeconds: 15 * 60 },
-  pairingCode: { id: 'pairing-code', maxRequests: 30, windowSeconds: 15 * 60 }
+  pairingCode: { id: 'pairing-code', maxRequests: 30, windowSeconds: 15 * 60 },
+  modelPricingSyncIp: { id: 'model-pricing-sync-ip', maxRequests: 5, windowSeconds: 15 * 60 }
 } satisfies Record<string, RateLimitPolicy>
 
 export async function enforceRateLimit(
@@ -76,10 +77,7 @@ export async function enforceRateLimit(
 }
 
 export async function pruneExpiredRateLimits(db: D1Database, now = new Date()) {
-  await db
-    .prepare('DELETE FROM api_rate_limits WHERE reset_at <= ?')
-    .bind(now.toISOString())
-    .run()
+  await db.prepare('DELETE FROM api_rate_limits WHERE reset_at <= ?').bind(now.toISOString()).run()
 }
 
 export function clientIpRateLimitSubject(headers: Headers): RateLimitSubject {

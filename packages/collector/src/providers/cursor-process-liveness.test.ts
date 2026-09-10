@@ -26,44 +26,60 @@ describe('cursor process liveness', () => {
 
     expect(cursorTasklistCommand({ SystemRoot: 'D:\\Windows' })).toBe('D:\\Windows\\System32\\tasklist.exe')
     expect(cursorTasklistCommand({ SystemRoot: 'C:relative' })).toBe('C:\\Windows\\System32\\tasklist.exe')
-    expect(probeCursorProcessLiveness(123, {
-      platform: 'win32',
-      nodeVersion: '22.12.0',
-      env: { SystemRoot: 'D:\\Windows' },
-      runTasklist: (candidate) => {
-        command = candidate
-        return { status: 0, stdout: 'INFO: no match' }
-      }
-    })).toBe('dead')
+    expect(
+      probeCursorProcessLiveness(123, {
+        platform: 'win32',
+        nodeVersion: '22.12.0',
+        env: { SystemRoot: 'D:\\Windows' },
+        runTasklist: (candidate) => {
+          command = candidate
+          return { status: 0, stdout: 'INFO: no match' }
+        }
+      })
+    ).toBe('dead')
     expect(command).toBe('D:\\Windows\\System32\\tasklist.exe')
   })
 
   test('keeps unknown old-Windows owners and distinguishes alive from dead', () => {
     const base = { platform: 'win32', nodeVersion: '22.12.0' }
-    expect(probeCursorProcessLiveness(123, {
-      ...base,
-      runTasklist: () => ({ status: 0, stdout: '"node.exe","123","Console","1","1 K"' })
-    })).toBe('alive')
-    expect(probeCursorProcessLiveness(123, {
-      ...base,
-      runTasklist: () => ({ status: 0, stdout: 'INFO: no match' })
-    })).toBe('dead')
-    expect(probeCursorProcessLiveness(123, {
-      ...base,
-      runTasklist: () => ({ status: null, stdout: '', error: new Error('timed out') })
-    })).toBe('unknown')
+    expect(
+      probeCursorProcessLiveness(123, {
+        ...base,
+        runTasklist: () => ({ status: 0, stdout: '"node.exe","123","Console","1","1 K"' })
+      })
+    ).toBe('alive')
+    expect(
+      probeCursorProcessLiveness(123, {
+        ...base,
+        runTasklist: () => ({ status: 0, stdout: 'INFO: no match' })
+      })
+    ).toBe('dead')
+    expect(
+      probeCursorProcessLiveness(123, {
+        ...base,
+        runTasklist: () => ({ status: null, stdout: '', error: new Error('timed out') })
+      })
+    ).toBe('unknown')
   })
 
   test('treats EPERM as alive and ESRCH as dead', () => {
-    expect(probeCursorProcessLiveness(123, {
-      platform: 'darwin',
-      nodeVersion: '24.0.0',
-      kill: () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }) }
-    })).toBe('alive')
-    expect(probeCursorProcessLiveness(123, {
-      platform: 'darwin',
-      nodeVersion: '24.0.0',
-      kill: () => { throw Object.assign(new Error('missing'), { code: 'ESRCH' }) }
-    })).toBe('dead')
+    expect(
+      probeCursorProcessLiveness(123, {
+        platform: 'darwin',
+        nodeVersion: '24.0.0',
+        kill: () => {
+          throw Object.assign(new Error('denied'), { code: 'EPERM' })
+        }
+      })
+    ).toBe('alive')
+    expect(
+      probeCursorProcessLiveness(123, {
+        platform: 'darwin',
+        nodeVersion: '24.0.0',
+        kill: () => {
+          throw Object.assign(new Error('missing'), { code: 'ESRCH' })
+        }
+      })
+    ).toBe('dead')
   })
 })

@@ -21,7 +21,7 @@ export function resolveCodexHomes(input: ResolveCodexHomesInput = {}) {
   if (configured.includes(',') && existsSync(resolve(configured))) {
     throw new Error(
       'CODEX_HOME is ambiguous because the configured path contains a comma; ' +
-      'use TOKENBOARD_CODEX_HOMES_JSON or the codexHomes array instead'
+        'use TOKENBOARD_CODEX_HOMES_JSON or the codexHomes array instead'
     )
   }
   return normalizeCodexHomes(configured.split(','))
@@ -36,8 +36,11 @@ function parseCodexHomesJson(value: string) {
       cause: error
     })
   }
-  if (!Array.isArray(parsed) || parsed.length === 0 ||
-      !parsed.every((item) => typeof item === 'string' && item.trim().length > 0)) {
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every((item) => typeof item === 'string' && item.trim().length > 0)
+  ) {
     throw new Error('Invalid TOKENBOARD_CODEX_HOMES_JSON: expected a non-empty JSON array of paths')
   }
   return parsed

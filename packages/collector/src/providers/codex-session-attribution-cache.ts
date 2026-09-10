@@ -35,9 +35,10 @@ type ComparableCodexSessionFileFingerprint = CodexSessionFileMetadata & {
   tailSha256: string
 }
 
-type CacheEntry = ComparableCodexSessionFileFingerprint & CodexSessionAttribution & {
-  updatedAt: string
-}
+type CacheEntry = ComparableCodexSessionFileFingerprint &
+  CodexSessionAttribution & {
+    updatedAt: string
+  }
 
 type CacheState = {
   version: typeof cacheVersion
@@ -132,7 +133,7 @@ export async function withCodexSessionAttributionCache<T>(input: {
     }
     const result = await input.callback(api)
     await assertObservedFilesUnchanged(observedFiles)
-    cache.entries = retainCacheEntries(cache.entries, usedKeys, Date.parse(updatedAt))
+    cache.entries = retainCacheEntries(cache.entries, usedKeys, Date.parse(updatedAt), cache.timezone)
     await writeCache(cachePath, cache)
     return result
   })
@@ -209,39 +210,34 @@ export async function fingerprintCodexSessionFile(filePath: string): Promise<Cod
       await handle.close()
     }
   } catch (error) {
-    if (error instanceof Error && (
-      error.message.startsWith('Unable to inspect Codex session file:') ||
-      error.message.startsWith('Codex session changed while fingerprinting;')
-    )) {
+    if (
+      error instanceof Error &&
+      (error.message.startsWith('Unable to inspect Codex session file:') ||
+        error.message.startsWith('Codex session changed while fingerprinting;'))
+    ) {
       throw error
     }
     throw new Error('Unable to inspect Codex session file', { cause: error })
   }
 }
 
-export function sameCodexSessionFileMetadata(
-  left: CodexSessionFileMetadata,
-  right: CodexSessionFileMetadata
-) {
-  return left.size === right.size &&
-    left.mtimeMs === right.mtimeMs &&
-    left.ctimeMs === right.ctimeMs
+export function sameCodexSessionFileMetadata(left: CodexSessionFileMetadata, right: CodexSessionFileMetadata) {
+  return left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }
 
 export function sameCodexSessionFileFingerprint(
   left: ComparableCodexSessionFileFingerprint,
   right: CodexSessionFileFingerprint
 ) {
-  return left.dev === right.dev &&
+  return (
+    left.dev === right.dev &&
     left.ino === right.ino &&
     sameCodexSessionFileMetadata(left, right) &&
     left.tailSha256 === right.tailSha256
+  )
 }
 
-function assertCodexSessionFileAtPath(details: {
-  isFile: () => boolean
-  isSymbolicLink: () => boolean
-}) {
+function assertCodexSessionFileAtPath(details: { isFile: () => boolean; isSymbolicLink: () => boolean }) {
   if (details.isSymbolicLink()) {
     throw new Error('Unable to inspect Codex session file: symbolic links are not supported')
   }
@@ -254,18 +250,28 @@ function sameCodexSessionFileIdentity(
   left: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number },
   right: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }
 ) {
-  return left.dev === right.dev &&
+  return (
+    left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
     left.mtimeMs === right.mtimeMs &&
     left.ctimeMs === right.ctimeMs
+  )
 }
 
 async function hashOpenFileTail(handle: Awaited<ReturnType<typeof open>>, size: number) {
   const length = Math.min(size, tailBytes)
   const buffer = Buffer.alloc(length)
-  const result = await handle.read(buffer, 0, length, Math.max(0, size - length))
-  return createHash('sha256').update(buffer.subarray(0, result.bytesRead)).digest('hex')
+  const start = Math.max(0, size - length)
+  let offset = 0
+  while (offset < length) {
+    const result = await handle.read(buffer, offset, length - offset, start + offset)
+    if (result.bytesRead === 0) {
+      throw new Error('Codex session changed while fingerprinting; retry the sync')
+    }
+    offset += result.bytesRead
+  }
+  return createHash('sha256').update(buffer).digest('hex')
 }
 
 async function readCache(cachePath: string, timezone: string): Promise<CacheState> {
@@ -329,10 +335,11 @@ function emptyCache(timezone: string): CacheState {
   return { version: cacheVersion, timezone, entries: {} }
 }
 
-function retainCacheEntries(
+export function retainCacheEntries(
   entries: Record<string, CacheEntry>,
   usedKeys: ReadonlySet<string>,
-  nowMs: number
+  nowMs: number,
+  timezone: string
 ) {
   const cutoffMs = nowMs - cacheRetentionMs
   const used: Array<[string, CacheEntry]> = []
@@ -352,10 +359,30 @@ function retainCacheEntries(
     Date.parse(right[1].updatedAt) - Date.parse(left[1].updatedAt) || left[0].localeCompare(right[0])
   used.sort(newestFirst)
   recent.sort(newestFirst)
-  return Object.fromEntries([
+  const selected = [
     ...used.slice(0, maxCacheEntries),
-    ...recent.slice(0, Math.max(0, maxCacheEntries - used.length))
-  ])
+    ...recent.slice(0, Math.max(0, maxCacheEntries - Math.min(used.length, maxCacheEntries)))
+  ]
+  return Object.fromEntries(trimCacheEntriesToSerializedSize(selected, timezone))
+}
+
+function trimCacheEntriesToSerializedSize(entries: Array<[string, CacheEntry]>, timezone: string) {
+  const serializedEntries = entries.map(([key, entry]) => ({
+    entry: [key, entry] as [string, CacheEntry],
+    bytes: Buffer.byteLength(`${JSON.stringify(key)}:${JSON.stringify(entry)}`)
+  }))
+  let serializedBytes = Buffer.byteLength(
+    `{"version":${cacheVersion},"timezone":${JSON.stringify(timezone)},"entries":{` + '}}\n'
+  )
+  serializedBytes += serializedEntries.reduce((total, item) => total + item.bytes, 0)
+  serializedBytes += Math.max(0, serializedEntries.length - 1)
+
+  while (serializedBytes > maxCacheBytes && serializedEntries.length > 0) {
+    const removed = serializedEntries.pop()!
+    serializedBytes -= removed.bytes
+    if (serializedEntries.length > 0) serializedBytes -= 1
+  }
+  return serializedEntries.map((item) => item.entry)
 }
 
 function cacheKey(filePath: string) {
@@ -375,12 +402,14 @@ function assertAttribution(attribution: CodexSessionAttribution) {
 function isCacheState(value: unknown): value is CacheState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<CacheState>
-  return candidate.version === cacheVersion &&
+  return (
+    candidate.version === cacheVersion &&
     typeof candidate.timezone === 'string' &&
     Boolean(candidate.entries) &&
     typeof candidate.entries === 'object' &&
     !Array.isArray(candidate.entries) &&
     Object.entries(candidate.entries).every(([key, entry]) => isCacheKey(key) && isCacheEntry(entry))
+  )
 }
 
 function isCacheKey(value: string) {
@@ -390,15 +419,17 @@ function isCacheKey(value: string) {
 function isCacheEntry(value: unknown): value is CacheEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<CacheEntry>
-  if (!isFiniteNumber(candidate.size) ||
-      (candidate.dev !== undefined && !isFiniteNumber(candidate.dev)) ||
-      (candidate.ino !== undefined && !isFiniteNumber(candidate.ino)) ||
-      !isFiniteNumber(candidate.mtimeMs) ||
-      !isFiniteNumber(candidate.ctimeMs) ||
-      !isSha256(candidate.tailSha256) ||
-      typeof candidate.updatedAt !== 'string' ||
-      typeof candidate.usageDate !== 'string' ||
-      typeof candidate.model !== 'string') {
+  if (
+    !isFiniteNumber(candidate.size) ||
+    (candidate.dev !== undefined && !isFiniteNumber(candidate.dev)) ||
+    (candidate.ino !== undefined && !isFiniteNumber(candidate.ino)) ||
+    !isFiniteNumber(candidate.mtimeMs) ||
+    !isFiniteNumber(candidate.ctimeMs) ||
+    !isSha256(candidate.tailSha256) ||
+    typeof candidate.updatedAt !== 'string' ||
+    typeof candidate.usageDate !== 'string' ||
+    typeof candidate.model !== 'string'
+  ) {
     return false
   }
   try {
@@ -422,8 +453,7 @@ function isMissingFileError(error: unknown) {
 }
 
 function isMissingCodexSessionFileError(error: unknown) {
-  return isMissingFileError(error) ||
-    (error instanceof Error && isMissingFileError(error.cause))
+  return isMissingFileError(error) || (error instanceof Error && isMissingFileError(error.cause))
 }
 
 function isCodexSessionFingerprintRaceError(error: unknown) {

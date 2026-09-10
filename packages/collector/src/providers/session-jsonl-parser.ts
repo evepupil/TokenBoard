@@ -8,11 +8,9 @@ import {
   readTimestamp,
   type UnknownRecord
 } from './session-jsonl-parser-utils'
-import {
-  isSkippedOversizedSessionJsonlLine,
-  type SessionJsonlLine
-} from './session-jsonl-line-reader'
+import { isSkippedOversizedSessionJsonlLine, type SessionJsonlLine } from './session-jsonl-line-reader'
 import { hasUnparsedTokenMetricField } from './session-jsonl-token-fields'
+import { normalizeCodexTotalTokens } from '../codex-token-usage'
 
 type ParseInput = {
   source: UsageSource
@@ -73,10 +71,7 @@ export async function parseSessionJsonlLines(input: ParseLinesInput) {
   for await (const line of input.lines) {
     if (isSkippedOversizedSessionJsonlLine(line)) {
       state.skippedOversizedRows += 1
-      state.largestSkippedOversizedRowBytes = Math.max(
-        state.largestSkippedOversizedRowBytes,
-        line.byteLength
-      )
+      state.largestSkippedOversizedRowBytes = Math.max(state.largestSkippedOversizedRowBytes, line.byteLength)
       continue
     }
     consumeLine(state, input, line)
@@ -100,9 +95,8 @@ function consumeLine(state: ParseState, input: ParseContext, line: string) {
   const record = readLineRecord(state, line)
   if (!record) return
 
-  const metric = input.source === 'codex'
-    ? readCodexMetric(record, input.timezone)
-    : readClaudeMetric(record, input.timezone)
+  const metric =
+    input.source === 'codex' ? readCodexMetric(record, input.timezone) : readClaudeMetric(record, input.timezone)
   if (!metric) {
     if (isKnownCodexTokenMetadata(input.source, record)) return
     if (isKnownClaudeSyntheticZeroUsage(input.source, record)) {
@@ -120,10 +114,12 @@ function consumeLine(state: ParseState, input: ParseContext, line: string) {
 function finishParseState(state: ParseState, input: ParseContext) {
   return {
     ignoredUploadSafeRows: state.ignoredUploadSafeRows,
-    ...(state.skippedOversizedRows === 0 ? {} : {
-      skippedOversizedRows: state.skippedOversizedRows,
-      largestSkippedOversizedRowBytes: state.largestSkippedOversizedRowBytes
-    }),
+    ...(state.skippedOversizedRows === 0
+      ? {}
+      : {
+          skippedOversizedRows: state.skippedOversizedRows,
+          largestSkippedOversizedRowBytes: state.largestSkippedOversizedRowBytes
+        }),
     malformedRows: state.malformedRows,
     missingCost: state.missingCost,
     unparsedTokenLikeRows: state.unparsedTokenLikeRows,
@@ -142,7 +138,7 @@ function readCodexMetric(record: UnknownRecord, timezone: string): MetricRow | n
   if (!usage || !timestamp) return null
 
   const model = readString(info, ['model']) || readString(usage, ['model']) || 'all'
-  return buildMetric({ record, usage, model, timestamp, timezone })
+  return buildMetric({ source: 'codex', record, usage, model, timestamp, timezone })
 }
 
 function isKnownCodexTokenMetadata(source: UsageSource, record: UnknownRecord) {
@@ -164,7 +160,7 @@ function readClaudeMetric(record: UnknownRecord, timezone: string): MetricRow | 
 
   const model = readString(message, ['model', 'modelName']) || readString(record, ['model']) || 'all'
   if (isSyntheticZeroUsage(model, usage)) return null
-  return buildMetric({ record, usage, model, timestamp, timezone })
+  return buildMetric({ source: 'claude-code', record, usage, model, timestamp, timezone })
 }
 
 function isKnownClaudeSyntheticZeroUsage(source: UsageSource, record: UnknownRecord) {
@@ -185,6 +181,7 @@ function isSyntheticZeroUsage(model: string, usage: UnknownRecord) {
     'output_tokens',
     'outputTokens',
     'cache_creation_input_tokens',
+    'cache_write_input_tokens',
     'cacheCreationInputTokens',
     'cacheCreationTokens',
     'cache_read_input_tokens',
@@ -198,6 +195,7 @@ function isSyntheticZeroUsage(model: string, usage: UnknownRecord) {
 }
 
 function buildMetric(input: {
+  source: UsageSource
   record: UnknownRecord
   usage: UnknownRecord
   model: string
@@ -208,6 +206,7 @@ function buildMetric(input: {
   const outputTokens = readNumber(input.usage, ['output_tokens', 'outputTokens'])
   const cacheCreationTokens = readNumber(input.usage, [
     'cache_creation_input_tokens',
+    'cache_write_input_tokens',
     'cacheCreationInputTokens',
     'cacheCreationTokens'
   ])
@@ -227,7 +226,16 @@ function buildMetric(input: {
     outputTokens,
     cacheCreationTokens,
     cacheReadTokens,
-    totalTokens: readTotalTokens(input.usage, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens),
+    totalTokens:
+      input.source === 'codex'
+        ? normalizeCodexTotalTokens({
+            inputTokens,
+            outputTokens,
+            cacheCreationTokens,
+            cacheReadTokens,
+            explicitTotalTokens: usableExplicitTotal(input.usage)
+          })
+        : readTotalTokens(input.usage, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens),
     costUsd: costUsd.value,
     hasCost: costUsd.found
   }
@@ -287,6 +295,11 @@ function readTotalTokens(
 ) {
   const total = readNumber(usage, ['total_tokens', 'totalTokens'])
   return total > 0 ? total : inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+}
+
+function usableExplicitTotal(usage: UnknownRecord) {
+  const total = readOptionalNumber(usage, ['total_tokens', 'totalTokens'])
+  return total !== null && total > 0 ? total : undefined
 }
 
 function readCostUsd(usage: UnknownRecord, record: UnknownRecord) {

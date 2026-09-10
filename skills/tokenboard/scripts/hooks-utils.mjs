@@ -2,9 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSy
 import { dirname } from 'node:path'
 
 export const notifyHandlerMarker = 'TOKENBOARD_NOTIFY_HANDLER'
-export {
-  antigravitySource, claudeSource, codexSource, readSources, readUninstallSources
-} from './hook-sources.mjs'
+export { antigravitySource, claudeSource, codexSource, readSources, readUninstallSources } from './hook-sources.mjs'
 
 export function removeNotifyHandler({ paths, fs }) {
   const text = readOptional(paths.notifyPath, fs)
@@ -31,9 +29,7 @@ export function inspectTomlStringArray(text, key) {
     const literal = readTomlArrayLiteral(lines, index, match[1].trim())
     if (!literal) return { status: 'invalid', value: null }
     const value = parseTomlStringArray(literal)
-    return value === null
-      ? { status: 'invalid', value: null }
-      : { status: 'ok', value }
+    return value === null ? { status: 'invalid', value: null } : { status: 'ok', value }
   }
   return { status: 'missing', value: null }
 }

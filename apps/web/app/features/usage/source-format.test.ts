@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { costUnavailableSources } from '@tokenboard/usage-core'
 import {
   costUnavailableSourceNames,
   formatCostUnavailableNotice,
@@ -17,19 +18,15 @@ describe('source-format', () => {
   })
 
   test('marks all Antigravity sources as cost unavailable', () => {
-    const sourceSplit = [
-      { source: 'codex' },
-      { source: 'antigravity-ide' }
-    ]
+    const sourceSplit = [{ source: 'codex' }, { source: 'antigravity-ide' }]
 
     expect(hasUnavailableCostSource(sourceSplit)).toBe(true)
     expect(formatCostWithAvailability(0.42, sourceSplit)).toBe('$0.42 (Antigravity IDE 费用不可用)')
     expect(formatSourceCostNote('antigravity')).toBe('Antigravity 费用不可用')
     expect(formatSourceCostNote('antigravity-cli')).toBe('Antigravity CLI 费用不可用')
-    expect(formatCostWithAvailability(0.42, [
-      { source: 'antigravity-cli' },
-      { source: 'antigravity-ide' }
-    ])).toBe('$0.42 (Antigravity 费用不可用)')
+    expect(formatCostWithAvailability(0.42, [{ source: 'antigravity-cli' }, { source: 'antigravity-ide' }])).toBe(
+      '$0.42 (Antigravity 费用不可用)'
+    )
   })
 
   test('formats the new sources', () => {
@@ -45,8 +42,7 @@ describe('source-format', () => {
     expect(hasUnavailableCostSource([{ source: 'deepseek-harness' }])).toBe(true)
     expect(hasUnavailableCostSource([{ source: 'opencode' }, { source: 'pi' }])).toBe(false)
 
-    expect(formatCostWithAvailability(0.42, [{ source: 'grok-build' }]))
-      .toBe('$0.42 (Grok Build 费用不可用)')
+    expect(formatCostWithAvailability(0.42, [{ source: 'grok-build' }])).toBe('$0.42 (Grok Build 费用不可用)')
     expect(formatSourceCostNote('deepseek-harness')).toBe('DeepSeek Harness 费用不可用')
   })
 
@@ -74,5 +70,15 @@ describe('source-format', () => {
 
   test('lists every cost-unavailable source family once', () => {
     expect(costUnavailableSourceNames()).toEqual(['Antigravity', 'Grok Build', 'DeepSeek Harness'])
+  })
+
+  test('derives unavailable-cost detection from the shared source contract', () => {
+    expect(costUnavailableSources.every((source) => hasUnavailableCostSource([{ source }]))).toBe(true)
+  })
+
+  test('does not treat inherited object keys as unavailable-cost sources', () => {
+    expect(hasUnavailableCostSource([{ source: 'toString' }])).toBe(false)
+    expect(formatCostWithAvailability(0.42, [{ source: 'toString' }])).toBe('$0.42')
+    expect(formatSourceCostNote('toString')).toBe('')
   })
 })

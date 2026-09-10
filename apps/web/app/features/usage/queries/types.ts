@@ -41,6 +41,7 @@ export type DailyUsageTrendItem = {
   totalTokensWithoutCacheRead: number
   cacheReadRate: number
   costUsd: number
+  costAvailable: boolean
 }
 
 export type UsageDetailsInput = {

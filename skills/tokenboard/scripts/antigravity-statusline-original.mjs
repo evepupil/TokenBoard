@@ -48,11 +48,7 @@ function monitorCommandStreams(child, state) {
   child.stdout.on('data', (chunk) => {
     state.stdoutBytes += chunk.length
     if (state.stdoutBytes > commandMaxBuffer) {
-      abortCommand(
-        child,
-        state,
-        new Error('Antigravity original statusline command output exceeded the limit')
-      )
+      abortCommand(child, state, new Error('Antigravity original statusline command output exceeded the limit'))
       return
     }
     state.stdout.push(Buffer.from(chunk))
@@ -60,11 +56,7 @@ function monitorCommandStreams(child, state) {
   child.stderr.on('data', (chunk) => {
     state.stderrBytes += chunk.length
     if (state.stderrBytes > commandMaxBuffer) {
-      abortCommand(
-        child,
-        state,
-        new Error('Antigravity original statusline command error output exceeded the limit')
-      )
+      abortCommand(child, state, new Error('Antigravity original statusline command error output exceeded the limit'))
     }
   })
 }
@@ -83,9 +75,7 @@ function waitForCommand(child, state) {
     child.once('close', (status) => {
       const error = commandCompletionError(status, state)
       settle({
-        output: canForwardCommandOutput(status, state)
-          ? Buffer.concat(state.stdout).toString('utf8')
-          : '',
+        output: canForwardCommandOutput(status, state) ? Buffer.concat(state.stdout).toString('utf8') : '',
         error
       })
     })
@@ -100,9 +90,7 @@ function commandCompletionError(status, state) {
   if (state.processError) return state.processError
   if (state.inputError) return state.inputError
   if (state.timedOut) return new Error('Antigravity original statusline command timed out')
-  return status === 0
-    ? undefined
-    : new Error(`Antigravity original statusline command exited with ${status}`)
+  return status === 0 ? undefined : new Error(`Antigravity original statusline command exited with ${status}`)
 }
 
 function writeCommandInput(child, state, chunk) {
@@ -209,8 +197,12 @@ function terminateWindowsCommandTree(child, signal, spawnTreeKiller, taskkillCom
 
 export function windowsTaskkillCommand(env = process.env) {
   const systemRoot = typeof env?.SystemRoot === 'string' ? env.SystemRoot.trim() : ''
-  const root = windowsPath.isAbsolute(systemRoot) ? systemRoot : 'C:\\Windows'
+  const root = isDriveRootedWindowsPath(systemRoot) ? systemRoot : 'C:\\Windows'
   return windowsPath.join(root, 'System32', 'taskkill.exe')
+}
+
+function isDriveRootedWindowsPath(value) {
+  return /^[A-Za-z]:[\\/]/.test(value)
 }
 
 function readOriginalCommand(filePath, selfPath) {

@@ -10,12 +10,14 @@ const canDenyFileReadWithModeBits = process.platform !== 'win32' && process.getu
 
 describe('hook sync collection', () => {
   test('reconciles explicitly provided keys even when expected dates are empty', () => {
-    expect(() => assertHookReconciliationSnapshots({
-      sourceLabel: 'Codex',
-      expectedDates: [],
-      expectedKeys: [{ usageDate: '2026-05-22', model: 'gpt-5' }],
-      snapshots: []
-    })).toThrow(/Codex hook reconciliation returned no snapshots/)
+    expect(() =>
+      assertHookReconciliationSnapshots({
+        sourceLabel: 'Codex',
+        expectedDates: [],
+        expectedKeys: [{ usageDate: '2026-05-22', model: 'gpt-5' }],
+        snapshots: []
+      })
+    ).toThrow(/Codex hook reconciliation returned no snapshots/)
   })
 
   test('uses configured config dir as hook state dir when state dir is unset', async () => {
@@ -117,6 +119,36 @@ describe('hook sync collection', () => {
     }
   })
 
+  test('strips internal Codex context-pricing state from restored snapshots', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-pending-pricing-'))
+    const sessionsDir = join(root, 'codex', 'sessions')
+    const stateDir = join(root, 'state')
+    const sessionFile = join(sessionsDir, '2026', '05', '22', 'session.jsonl')
+    const input = {
+      source: 'codex' as const,
+      sessionsDir,
+      cursorName: 'codex-cursor.json',
+      stateDir,
+      timezone: 'Asia/Shanghai',
+      collectedAt: '2026-05-22T10:00:00.000Z'
+    }
+
+    try {
+      await writeJsonl(sessionFile, [tokenCountEvent('2026-05-22T01:00:00.000Z', 10, 'gpt-5.6-sol')])
+      await collectHookIncremental(input)
+      await rm(sessionFile, { force: true })
+
+      const restored = await collectHookIncremental(input)
+      expect(restored.cachedSnapshots).toHaveLength(1)
+      expect(restored.cachedSnapshots[0]).not.toHaveProperty('codexContextPricingPending')
+      expect(restored.unresolvedContextPricingSnapshots).toEqual([
+        expect.not.objectContaining({ codexContextPricingPending: true })
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('uses changed Codex session files to run narrow ccusage reconciliation despite external since', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
     const codexHome = join(root, 'codex')
@@ -187,8 +219,34 @@ describe('hook sync collection', () => {
       })
 
       expect(calls).toEqual([
-        ['ccusage@20.0.19', 'codex', 'daily', '--json', '--offline', '--single-thread', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'codex', 'session', '--json', '--offline', '--single-thread', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'daily',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'session',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -248,7 +306,9 @@ describe('hook sync collection', () => {
       })
       await clearPendingUploadCursors({ stateDir, source: 'codex' })
 
-      await writeFile(sessionFile, `${JSON.stringify(tokenCountEvent('2026-05-23T01:00:00.000Z', 25))}\n`, { flag: 'a' })
+      await writeFile(sessionFile, `${JSON.stringify(tokenCountEvent('2026-05-23T01:00:00.000Z', 25))}\n`, {
+        flag: 'a'
+      })
       const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
@@ -262,17 +322,40 @@ describe('hook sync collection', () => {
       })
 
       expect(calls.slice(2)).toEqual([
-        ['ccusage@20.0.19', 'codex', 'daily', '--json', '--offline', '--single-thread', '--since', '20260523', '--until', '20260523', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'codex', 'session', '--json', '--offline', '--single-thread', '--since', '20260523', '--until', '20260523', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'daily',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260523',
+          '--until',
+          '20260523',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'session',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260523',
+          '--until',
+          '20260523',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
-      expect(snapshots).toEqual([
-        expect.objectContaining({ usageDate: '2026-05-23', totalTokens: 25 })
-      ])
+      expect(snapshots).toEqual([expect.objectContaining({ usageDate: '2026-05-23', totalTokens: 25 })])
       const cursor = JSON.parse(await readFile(join(stateDir, 'codex-cursor.json'), 'utf8'))
-      expect(cursor.files['2026/05/22/session.jsonl'].snapshots.map((snapshot: { usageDate: string }) => snapshot.usageDate)).toEqual([
-        '2026-05-22',
-        '2026-05-23'
-      ])
+      expect(
+        cursor.files['2026/05/22/session.jsonl'].snapshots.map((snapshot: { usageDate: string }) => snapshot.usageDate)
+      ).toEqual(['2026-05-22', '2026-05-23'])
     } finally {
       vi.unstubAllEnvs()
       await rm(root, { recursive: true, force: true })
@@ -299,7 +382,9 @@ describe('hook sync collection', () => {
       })
       await clearPendingUploadCursors({ stateDir, source: 'codex' })
 
-      await writeFile(sessionFile, `${JSON.stringify(tokenCountEvent('2026-05-22T01:05:00.000Z', 25))}\n`, { flag: 'a' })
+      await writeFile(sessionFile, `${JSON.stringify(tokenCountEvent('2026-05-22T01:05:00.000Z', 25))}\n`, {
+        flag: 'a'
+      })
       await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
@@ -386,8 +471,34 @@ describe('hook sync collection', () => {
       })
 
       expect(calls).toEqual([
-        ['ccusage@20.0.19', 'codex', 'daily', '--json', '--offline', '--single-thread', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'codex', 'session', '--json', '--offline', '--single-thread', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'daily',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'codex',
+          'session',
+          '--json',
+          '--offline',
+          '--single-thread',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -594,22 +705,29 @@ describe('hook sync collection', () => {
 
     try {
       await mkdir(dirname(cursorPath), { recursive: true })
-      await writeFile(cursorPath, `${JSON.stringify({
-        version: 1,
-        source: 'codex',
-        files: {
-          '2026/05/22/missing.jsonl': {
-            size: 123,
-            mtimeMs: Date.parse('2026-05-22T01:00:00.000Z'),
-            sha256: 'missing',
-            snapshots: [],
-            missingCost: false,
-            pendingUpload: true,
-            updatedAt: '2026-05-22T01:00:00.000Z'
-          }
-        },
-        lastScanHighWaterMs: Date.parse('2026-05-22T01:00:00.000Z')
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'codex',
+            files: {
+              '2026/05/22/missing.jsonl': {
+                size: 123,
+                mtimeMs: Date.parse('2026-05-22T01:00:00.000Z'),
+                sha256: 'missing',
+                snapshots: [],
+                missingCost: false,
+                pendingUpload: true,
+                updatedAt: '2026-05-22T01:00:00.000Z'
+              }
+            },
+            lastScanHighWaterMs: Date.parse('2026-05-22T01:00:00.000Z')
+          },
+          null,
+          2
+        )}\n`
+      )
       await writeJsonl(changedFile, [
         {
           type: 'event_msg',
@@ -710,14 +828,16 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
 
       const cursor = JSON.parse(await readFile(join(stateDir, 'codex-cursor.json'), 'utf8'))
       expect(cursor.files['2026/05/22/session.jsonl'].pendingUpload).toBe(true)
@@ -727,53 +847,58 @@ describe('hook sync collection', () => {
     }
   })
 
-  test.skipIf(!canDenyFileReadWithModeBits)('fails Codex hook sync when a new changed session file is unreadable', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
-    const codexHome = join(root, 'codex')
-    const stateDir = join(root, 'state')
-    const sessionFile = join(codexHome, 'sessions', '2026', '05', '22', 'session.jsonl')
+  test.skipIf(!canDenyFileReadWithModeBits)(
+    'fails Codex hook sync when a new changed session file is unreadable',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
+      const codexHome = join(root, 'codex')
+      const stateDir = join(root, 'state')
+      const sessionFile = join(codexHome, 'sessions', '2026', '05', '22', 'session.jsonl')
 
-    vi.stubEnv('TOKENBOARD_HOOK_MODE', '1')
-    vi.stubEnv('TOKENBOARD_STATE_DIR', stateDir)
-    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+      vi.stubEnv('TOKENBOARD_HOOK_MODE', '1')
+      vi.stubEnv('TOKENBOARD_STATE_DIR', stateDir)
+      vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
 
-    try {
-      await writeJsonl(sessionFile, [
-        {
-          type: 'event_msg',
-          timestamp: '2026-05-22T01:00:00.000Z',
-          payload: {
-            type: 'token_count',
-            info: {
-              model: 'gpt-5',
-              last_token_usage: {
-                input_tokens: 10,
-                output_tokens: 5,
-                total_tokens: 15,
-                cost_usd: 0.03
+      try {
+        await writeJsonl(sessionFile, [
+          {
+            type: 'event_msg',
+            timestamp: '2026-05-22T01:00:00.000Z',
+            payload: {
+              type: 'token_count',
+              info: {
+                model: 'gpt-5',
+                last_token_usage: {
+                  input_tokens: 10,
+                  output_tokens: 5,
+                  total_tokens: 15,
+                  cost_usd: 0.03
+                }
               }
             }
           }
-        }
-      ])
-      await chmod(sessionFile, 0o000)
+        ])
+        await chmod(sessionFile, 0o000)
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/not readable/)
+        await expect(
+          collectCodexUsage({
+            codexHome,
+            timezone: 'Asia/Shanghai',
+            collectedAt: '2026-05-22T10:00:00.000Z',
+            async runner() {
+              return { data: [] }
+            }
+          })
+        ).rejects.toThrow(/not readable/)
 
-      await expect(readFile(join(stateDir, 'codex-cursor.json'), 'utf8')).rejects.toThrow()
-    } finally {
-      await chmod(sessionFile, 0o600).catch(() => undefined)
-      vi.unstubAllEnvs()
-      await rm(root, { recursive: true, force: true })
+        await expect(readFile(join(stateDir, 'codex-cursor.json'), 'utf8')).rejects.toThrow()
+      } finally {
+        await chmod(sessionFile, 0o600).catch(() => undefined)
+        vi.unstubAllEnvs()
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('fails Codex hook sync when changed files contain unparsed token-like rows', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-hook-sync-'))
@@ -799,14 +924,16 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/unparsed token-like rows/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/unparsed token-like rows/)
 
       await expect(readFile(join(stateDir, 'codex-cursor.json'), 'utf8')).rejects.toThrow()
     } finally {
@@ -829,14 +956,16 @@ describe('hook sync collection', () => {
       await mkdir(dirname(sessionFile), { recursive: true })
       await writeFile(sessionFile, '{"type":"event_msg"\n')
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/malformed JSONL rows/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/malformed JSONL rows/)
 
       await expect(readFile(join(stateDir, 'codex-cursor.json'), 'utf8')).rejects.toThrow()
     } finally {
@@ -875,41 +1004,43 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner(_command, args) {
-          if (args.includes('session')) {
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner(_command, args) {
+            if (args.includes('session')) {
+              return {
+                data: [
+                  {
+                    sessionId: 's1',
+                    lastActivity: '2026-05-22T01:00:00.000Z',
+                    models: {
+                      'gpt-5-old': {
+                        inputTokens: 20,
+                        outputTokens: 10
+                      }
+                    }
+                  }
+                ]
+              }
+            }
             return {
               data: [
                 {
-                  sessionId: 's1',
-                  lastActivity: '2026-05-22T01:00:00.000Z',
-                  models: {
-                    'gpt-5-old': {
-                      inputTokens: 20,
-                      outputTokens: 10
-                    }
-                  }
+                  date: '2026-05-22',
+                  model: 'gpt-5-old',
+                  inputTokens: 20,
+                  outputTokens: 10,
+                  totalTokens: 30,
+                  costUSD: 0.06
                 }
               ]
             }
           }
-          return {
-            data: [
-              {
-                date: '2026-05-22',
-                model: 'gpt-5-old',
-                inputTokens: 20,
-                outputTokens: 10,
-                totalTokens: 30,
-                costUSD: 0.06
-              }
-            ]
-          }
-        }
-      })).rejects.toThrow(/gpt-5-new/)
+        })
+      ).rejects.toThrow(/gpt-5-new/)
 
       const cursor = JSON.parse(await readFile(join(stateDir, 'codex-cursor.json'), 'utf8'))
       expect(cursor.files['2026/05/22/session.jsonl'].pendingUpload).toBe(true)
@@ -1025,14 +1156,16 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
 
       await rm(sessionFile)
 
@@ -1090,25 +1223,29 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
 
       await writeJsonl(sessionFile, [{ type: 'metadata', value: 'still no usage' }])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:01:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/pending upload files with no parsed usage snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:01:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/pending upload files with no parsed usage snapshots/)
 
       const cursor = JSON.parse(await readFile(join(stateDir, 'codex-cursor.json'), 'utf8'))
       expect(cursor.files['2026/05/22/session.jsonl'].pendingUpload).toBe(true)
@@ -1150,14 +1287,16 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
 
       await writeJsonl(pendingFile, [{ type: 'metadata', value: 'still no usage' }])
       await writeJsonl(changedFile, [
@@ -1179,15 +1318,17 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-23T10:00:00.000Z',
-        async runner(_command, args) {
-          calls.push(args)
-          return { data: [] }
-        }
-      })).rejects.toThrow(/pending upload files with no parsed usage snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-23T10:00:00.000Z',
+          async runner(_command, args) {
+            calls.push(args)
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/pending upload files with no parsed usage snapshots/)
 
       const cursor = JSON.parse(await readFile(join(stateDir, 'codex-cursor.json'), 'utf8'))
       expect(cursor.files['2026/05/22/pending.jsonl'].pendingUpload).toBe(true)
@@ -1230,14 +1371,16 @@ describe('hook sync collection', () => {
         }
       ])
 
-      await expect(collectCodexUsage({
-        codexHome,
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Codex hook reconciliation returned no snapshots/)
 
       await rm(pendingFile)
       await writeJsonl(changedFile, [
@@ -1321,14 +1464,14 @@ async function writeJsonl(file: string, rows: unknown[]) {
   await writeFile(file, `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`)
 }
 
-function tokenCountEvent(timestamp: string, totalTokens: number) {
+function tokenCountEvent(timestamp: string, totalTokens: number, model = 'gpt-5') {
   return {
     type: 'event_msg',
     timestamp,
     payload: {
       type: 'token_count',
       info: {
-        model: 'gpt-5',
+        model,
         last_token_usage: {
           input_tokens: totalTokens,
           output_tokens: 0,
@@ -1340,36 +1483,41 @@ function tokenCountEvent(timestamp: string, totalTokens: number) {
 }
 
 function sameDayIncrementRunner(totalTokens: number) {
-  return async (_command: string, args: string[]) => args.includes('session')
-    ? sessionResult('2026-05-22T01:05:00.000Z', totalTokens)
-    : dailyResult('2026-05-22', totalTokens)
+  return async (_command: string, args: string[]) =>
+    args.includes('session')
+      ? sessionResult('2026-05-22T01:05:00.000Z', totalTokens)
+      : dailyResult('2026-05-22', totalTokens)
 }
 
 function dailyResult(date: string, totalTokens: number) {
   return {
-    data: [{
-      date,
-      model: 'gpt-5',
-      inputTokens: totalTokens,
-      outputTokens: 0,
-      totalTokens,
-      costUSD: 0.01
-    }]
+    data: [
+      {
+        date,
+        model: 'gpt-5',
+        inputTokens: totalTokens,
+        outputTokens: 0,
+        totalTokens,
+        costUSD: 0.01
+      }
+    ]
   }
 }
 
 function sessionResult(lastActivity: string, totalTokens: number) {
   return {
-    data: [{
-      sessionId: 'session',
-      lastActivity,
-      models: {
-        'gpt-5': {
-          inputTokens: totalTokens,
-          outputTokens: 0,
-          totalTokens
+    data: [
+      {
+        sessionId: 'session',
+        lastActivity,
+        models: {
+          'gpt-5': {
+            inputTokens: totalTokens,
+            outputTokens: 0,
+            totalTokens
+          }
         }
       }
-    }]
+    ]
   }
 }

@@ -18,7 +18,8 @@ describe('ProfilePage layout', () => {
           shouldUseBrowserTimezoneDefault: true,
           publicJsonUrl: 'https://tokenboard.example/api/public/example-long-public-slug.json',
           publicSvgUrl: 'https://tokenboard.example/api/public/example-long-public-slug.svg',
-          publicMarkdown: '[![TokenBoard](https://tokenboard.example/api/public/example-long-public-slug.svg)](https://tokenboard.example)',
+          publicMarkdown:
+            '[![TokenBoard](https://tokenboard.example/api/public/example-long-public-slug.svg)](https://tokenboard.example)',
           publicCardConfig: defaultPublicCardConfig,
           profileNeedsRepair: true
         }}
@@ -48,7 +49,9 @@ describe('ProfilePage layout', () => {
     expect(html).toContain('README SVG 预览')
     expect(html).toContain('app-surface-subtle overflow-hidden rounded-lg')
     expect(html).toContain('data-public-card-preview="true"')
-    expect(html).toContain('data-public-card-public-url="https://tokenboard.example/api/public/example-long-public-slug.svg"')
+    expect(html).toContain(
+      'data-public-card-public-url="https://tokenboard.example/api/public/example-long-public-slug.svg"'
+    )
     expect(html).toContain('w-full sm:w-auto')
     expect(html).toContain('>公开</span>')
     expect(html).toContain('README 卡片外观')
@@ -75,7 +78,8 @@ describe('ProfilePage layout', () => {
           shouldUseBrowserTimezoneDefault: false,
           publicJsonUrl: 'https://tokenboard.example/api/public/private-user.json',
           publicSvgUrl: 'https://tokenboard.example/api/public/private-user.svg',
-          publicMarkdown: '[![TokenBoard](https://tokenboard.example/api/public/private-user.svg)](https://tokenboard.example)',
+          publicMarkdown:
+            '[![TokenBoard](https://tokenboard.example/api/public/private-user.svg)](https://tokenboard.example)',
           publicCardConfig: defaultPublicCardConfig
         }}
       />

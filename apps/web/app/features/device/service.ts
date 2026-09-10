@@ -294,10 +294,7 @@ export async function listUserDevices(db: D1Database, userId: string): Promise<U
       revokedAt: row.revokedAt ?? null,
       activeTokenCount: Number(row.activeTokenCount ?? 0)
     }
-    installationsByDevice.set(row.deviceId, [
-      ...(installationsByDevice.get(row.deviceId) ?? []),
-      installation
-    ])
+    installationsByDevice.set(row.deviceId, [...(installationsByDevice.get(row.deviceId) ?? []), installation])
   }
 
   const uploadTokensByDevice = new Map<string, UserDeviceUploadToken[]>()
@@ -312,10 +309,7 @@ export async function listUserDevices(db: D1Database, userId: string): Promise<U
       createdAt: row.createdAt,
       revokedAt: row.revokedAt ?? null
     }
-    uploadTokensByDevice.set(row.deviceId, [
-      ...(uploadTokensByDevice.get(row.deviceId) ?? []),
-      token
-    ])
+    uploadTokensByDevice.set(row.deviceId, [...(uploadTokensByDevice.get(row.deviceId) ?? []), token])
   }
 
   return (deviceRows.results ?? []).map((row) => ({
@@ -388,14 +382,16 @@ export async function listLatestDeviceAuditLogs(
     const chunk = deviceIds.slice(index, index + maxLatestAuditLogDeviceIdsPerQuery)
     const rows = await queryLatestDeviceAuditLogs(db, input.userId, chunk)
     for (const row of rows) {
-      logsByDevice.set(row.deviceId, [{
-        id: row.id,
-        action: row.action,
-        targetType: row.targetType,
-        targetId: row.targetId,
-        metadata: row.metadata,
-        createdAt: row.createdAt
-      }])
+      logsByDevice.set(row.deviceId, [
+        {
+          id: row.id,
+          action: row.action,
+          targetType: row.targetType,
+          targetId: row.targetId,
+          metadata: row.metadata,
+          createdAt: row.createdAt
+        }
+      ])
     }
   }
   return logsByDevice
@@ -472,7 +468,8 @@ export async function renameDevice(
   const now = input.now ?? new Date().toISOString()
   const name = parseDeviceNameForm({ name: input.name })
   const results = await db.batch([
-    db.prepare('UPDATE devices SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    db
+      .prepare('UPDATE devices SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?')
       .bind(name, now, input.deviceId, input.userId),
     createDeviceRenameAuditStatement(db, {
       userId: input.userId,
@@ -490,17 +487,27 @@ function createDeviceRenameAuditStatement(
   db: D1Database,
   input: { userId: string; deviceId: string; name: string; now: string }
 ) {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     INSERT INTO audit_logs (
       id, user_id, actor_type, action, target_type, target_id, metadata, created_at
     )
     SELECT ?, ?, 'user', 'device.rename', 'device', id, ?, ?
     FROM devices
     WHERE id = ? AND user_id = ? AND name = ? AND updated_at = ?
-  `).bind(
-    randomId('audit'), input.userId, JSON.stringify({ name: input.name }), input.now,
-    input.deviceId, input.userId, input.name, input.now
-  )
+  `
+    )
+    .bind(
+      randomId('audit'),
+      input.userId,
+      JSON.stringify({ name: input.name }),
+      input.now,
+      input.deviceId,
+      input.userId,
+      input.name,
+      input.now
+    )
 }
 
 export async function revokeDevice(
@@ -542,40 +549,41 @@ export async function revokeInstallation(
   assertChangedResult(results[0], 'Installation revocation was not recorded')
 }
 
-function createDeviceTokenRevokeStatement(
-  db: D1Database,
-  input: { userId: string; deviceId: string; now: string }
-) {
-  return db.prepare(`
+function createDeviceTokenRevokeStatement(db: D1Database, input: { userId: string; deviceId: string; now: string }) {
+  return db
+    .prepare(
+      `
     UPDATE upload_tokens SET revoked_at = ?
     WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL
-  `).bind(input.now, input.userId, input.deviceId)
+  `
+    )
+    .bind(input.now, input.userId, input.deviceId)
 }
 
 function createDeviceInstallationRevokeStatement(
   db: D1Database,
   input: { userId: string; deviceId: string; now: string }
 ) {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     UPDATE device_installations SET revoked_at = ?, updated_at = ?
     WHERE user_id = ? AND device_id = ? AND revoked_at IS NULL
-  `).bind(input.now, input.now, input.userId, input.deviceId)
+  `
+    )
+    .bind(input.now, input.now, input.userId, input.deviceId)
 }
 
-function createDeviceTouchStatement(
-  db: D1Database,
-  input: { userId: string; deviceId: string; now: string }
-) {
-  return db.prepare(
-    'UPDATE devices SET updated_at = ? WHERE id = ? AND user_id = ?'
-  ).bind(input.now, input.deviceId, input.userId)
+function createDeviceTouchStatement(db: D1Database, input: { userId: string; deviceId: string; now: string }) {
+  return db
+    .prepare('UPDATE devices SET updated_at = ? WHERE id = ? AND user_id = ?')
+    .bind(input.now, input.deviceId, input.userId)
 }
 
-function createDeviceRevokeAuditStatement(
-  db: D1Database,
-  input: { userId: string; deviceId: string; now: string }
-) {
-  return db.prepare(`
+function createDeviceRevokeAuditStatement(db: D1Database, input: { userId: string; deviceId: string; now: string }) {
+  return db
+    .prepare(
+      `
     INSERT INTO audit_logs (
       id, user_id, actor_type, action, target_type, target_id, metadata, created_at
     )
@@ -583,38 +591,55 @@ function createDeviceRevokeAuditStatement(
     WHERE EXISTS (
       SELECT 1 FROM devices WHERE id = ? AND user_id = ? AND updated_at = ?
     )
-  `).bind(
-    randomId('audit'), input.userId, input.deviceId,
-    JSON.stringify({ deviceId: input.deviceId }), input.now,
-    input.deviceId, input.userId, input.now
-  )
+  `
+    )
+    .bind(
+      randomId('audit'),
+      input.userId,
+      input.deviceId,
+      JSON.stringify({ deviceId: input.deviceId }),
+      input.now,
+      input.deviceId,
+      input.userId,
+      input.now
+    )
 }
 
 function createInstallationTokenRevokeStatement(
   db: D1Database,
   input: { userId: string; installationId: string; now: string }
 ) {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     UPDATE upload_tokens SET revoked_at = ?
     WHERE user_id = ? AND installation_id = ? AND revoked_at IS NULL
-  `).bind(input.now, input.userId, input.installationId)
+  `
+    )
+    .bind(input.now, input.userId, input.installationId)
 }
 
 function createInstallationRevokeStatement(
   db: D1Database,
   input: { userId: string; installationId: string; now: string }
 ) {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     UPDATE device_installations SET revoked_at = ?, updated_at = ?
     WHERE id = ? AND user_id = ? AND revoked_at IS NULL
-  `).bind(input.now, input.now, input.installationId, input.userId)
+  `
+    )
+    .bind(input.now, input.now, input.installationId, input.userId)
 }
 
 function createInstallationRevokeAuditStatement(
   db: D1Database,
   input: { userId: string; installationId: string; now: string }
 ) {
-  return db.prepare(`
+  return db
+    .prepare(
+      `
     INSERT INTO audit_logs (
       id, user_id, actor_type, action, target_type, target_id, metadata, created_at
     )
@@ -622,7 +647,9 @@ function createInstallationRevokeAuditStatement(
       json_object('deviceId', device_id), ?
     FROM device_installations
     WHERE id = ? AND user_id = ? AND revoked_at IS NULL
-  `).bind(randomId('audit'), input.userId, input.now, input.installationId, input.userId)
+  `
+    )
+    .bind(randomId('audit'), input.userId, input.now, input.installationId, input.userId)
 }
 
 export async function revokeUploadToken(
@@ -639,26 +666,31 @@ export async function revokeUploadToken(
     throw new ApiError('NOT_FOUND', 'Upload token not found', 404)
   }
 
-  const statements = [createUploadTokenRevokeAuditStatement(db, {
-    userId: input.userId,
-    uploadTokenId: input.uploadTokenId,
-    metadata: {
-      deviceId: token.deviceId,
-      installationId: token.installationId
-    },
-    now
-  }), createUploadTokenRevokeOnlyStatement(db, {
-    userId: input.userId,
-    uploadTokenId: input.uploadTokenId,
-    now
-  })]
-  if (token.installationId) {
-    statements.push(createInstallationClaimClearForRevokedTokenStatement(db, {
+  const statements = [
+    createUploadTokenRevokeAuditStatement(db, {
       userId: input.userId,
-      installationId: token.installationId,
+      uploadTokenId: input.uploadTokenId,
+      metadata: {
+        deviceId: token.deviceId,
+        installationId: token.installationId
+      },
+      now
+    }),
+    createUploadTokenRevokeOnlyStatement(db, {
+      userId: input.userId,
       uploadTokenId: input.uploadTokenId,
       now
-    }))
+    })
+  ]
+  if (token.installationId) {
+    statements.push(
+      createInstallationClaimClearForRevokedTokenStatement(db, {
+        userId: input.userId,
+        installationId: token.installationId,
+        uploadTokenId: input.uploadTokenId,
+        now
+      })
+    )
   }
   const results = await db.batch(statements)
   assertDeviceBatchSucceeded(results)
@@ -799,15 +831,17 @@ export async function rotateUploadToken(
     createUploadTokenRevokeStatement(db, input.userId, input.uploadTokenId, uploadTokenId, now)
   ]
   if (installationId && installClaimHash) {
-    statements.push(createInstallClaimRotateStatement(db, {
-      userId: input.userId,
-      installationId,
-      previousInstallClaimHash: existing.installClaimHash,
-      previousTokenId: input.uploadTokenId,
-      uploadTokenId,
-      installClaimHash,
-      now
-    }))
+    statements.push(
+      createInstallClaimRotateStatement(db, {
+        userId: input.userId,
+        installationId,
+        previousInstallClaimHash: existing.installClaimHash,
+        previousTokenId: input.uploadTokenId,
+        uploadTokenId,
+        installClaimHash,
+        now
+      })
+    )
   }
   statements.push(
     createTokenRotateAuditStatement(db, {
@@ -827,16 +861,20 @@ export async function rotateUploadToken(
     assertRotatedTokenUpdates(results, Boolean(installationId))
   } catch (error) {
     if (!results || mayHaveChanged(results[0])) {
-      await cleanupFailedRotationAfterError(db, {
-        userId: input.userId,
-        uploadTokenId,
-        previousTokenId: input.uploadTokenId,
-        installationId,
-        previousInstallClaimHash: existing.installClaimHash,
-        nextInstallClaimHash: installClaimHash,
-        auditId,
-        now
-      }, error)
+      await cleanupFailedRotationAfterError(
+        db,
+        {
+          userId: input.userId,
+          uploadTokenId,
+          previousTokenId: input.uploadTokenId,
+          installationId,
+          previousInstallClaimHash: existing.installClaimHash,
+          nextInstallClaimHash: installClaimHash,
+          auditId,
+          now
+        },
+        error
+      )
     }
     throw error
   }
@@ -858,10 +896,7 @@ async function cleanupFailedRotationAfterError(
   try {
     await cleanupFailedRotation(db, input)
   } catch (cleanupError) {
-    throw new AggregateError(
-      [rotationError, cleanupError],
-      'Token rotation failed and cleanup also failed'
-    )
+    throw new AggregateError([rotationError, cleanupError], 'Token rotation failed and cleanup also failed')
   }
 }
 
@@ -928,13 +963,7 @@ function createRotatedUploadTokenInsert(
           )
       `
     )
-    .bind(
-      input.uploadTokenId,
-      input.uploadTokenHash,
-      input.now,
-      input.userId,
-      input.previousTokenId
-    )
+    .bind(input.uploadTokenId, input.uploadTokenHash, input.now, input.userId, input.previousTokenId)
 }
 
 function createUploadTokenRevokeStatement(
@@ -1093,9 +1122,7 @@ function assertDeviceBatchSucceeded(results: D1Result<unknown>[]) {
   if (failedIndex < 0) return
 
   const error = batchResults[failedIndex]?.error
-  throw new Error(
-    `D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`
-  )
+  throw new Error(`D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`)
 }
 
 function assertRotatedTokenUpdates(results: D1Result<unknown>[], rotatedInstallClaim: boolean) {
@@ -1159,9 +1186,7 @@ async function cleanupFailedRotation(
     now: string
   }
 ) {
-  const statements = [
-    createRevokeFailedRotatedUploadTokenStatement(db, input)
-  ]
+  const statements = [createRevokeFailedRotatedUploadTokenStatement(db, input)]
   if (input.installationId && input.nextInstallClaimHash) {
     statements.push(createRestoreFailedInstallClaimStatement(db, input))
   }
@@ -1289,14 +1314,7 @@ function createDeleteFailedRotationAuditStatement(
           AND created_at = ?
       `
     )
-    .bind(
-      input.auditId,
-      input.userId,
-      'token.rotate',
-      'upload_token',
-      input.uploadTokenId,
-      input.now
-    )
+    .bind(input.auditId, input.userId, 'token.rotate', 'upload_token', input.uploadTokenId, input.now)
 }
 
 export async function createPairingCode(
@@ -1413,11 +1431,7 @@ export async function createReconnectPairingCodeFromClaim(
   }
 }
 
-function normalizeInstallClaimInput(input: {
-  deviceId: string
-  installationId: string
-  installClaim: string
-}) {
+function normalizeInstallClaimInput(input: { deviceId: string; installationId: string; installClaim: string }) {
   const deviceId = requiredTrimmedString(input.deviceId, 'deviceId')
   const installationId = requiredTrimmedString(input.installationId, 'installationId')
   const installClaim = requiredTrimmedString(input.installClaim, 'installClaim')
@@ -1457,9 +1471,7 @@ function parseReconnectPairingMetadata(metadata: string | null): ReconnectPairin
   const sourceInstallationId = optionalTrimmedString(parsed.installationId)
   const sourceInstallClaimHash = optionalTrimmedString(parsed.installClaimHash)
   const method = optionalTrimmedString(parsed.method)
-  const isDeviceLinkMetadata = method === 'device-link' || Boolean(
-    sourceInstallationId || sourceInstallClaimHash
-  )
+  const isDeviceLinkMetadata = method === 'device-link' || Boolean(sourceInstallationId || sourceInstallClaimHash)
   if (!isDeviceLinkMetadata) {
     return { sourceInstallationId: null, sourceInstallClaimHash: null }
   }
@@ -1496,9 +1508,10 @@ function optionalTrimmedString(value: unknown) {
 }
 
 function isInactiveReconnectTargetError(error: unknown) {
-  return error instanceof Error && (
-    error.message === 'Reconnect target is no longer active' ||
-    error.message === 'Reconnect source installation is no longer current'
+  return (
+    error instanceof Error &&
+    (error.message === 'Reconnect target is no longer active' ||
+      error.message === 'Reconnect source installation is no longer current')
   )
 }
 
@@ -1528,9 +1541,7 @@ export async function pairDevice(
   }
 
   const reconnectMetadata =
-    pairingCode.pairingType === 'reconnect_device'
-      ? parseReconnectPairingMetadata(pairingCode.metadata)
-      : null
+    pairingCode.pairingType === 'reconnect_device' ? parseReconnectPairingMetadata(pairingCode.metadata) : null
   const id = deps.randomId()
   const deviceId = pairingCode.pairingType === 'reconnect_device' ? pairingCode.targetDeviceId : `dev_${id}`
   if (!deviceId) {
@@ -1546,9 +1557,7 @@ export async function pairDevice(
   const shouldConsumeSourceClaim = Boolean(
     reconnectMetadata?.sourceInstallationId && reconnectMetadata.sourceInstallClaimHash
   )
-  const consumedInstallClaimHash = shouldConsumeSourceClaim
-    ? await deps.hash(deps.randomInstallClaim())
-    : null
+  const consumedInstallClaimHash = shouldConsumeSourceClaim ? await deps.hash(deps.randomInstallClaim()) : null
   const deviceName = request.deviceName ?? 'TokenBoard device'
   const platform = request.platform ?? 'unknown'
   const input = {

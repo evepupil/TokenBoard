@@ -1,16 +1,7 @@
 import { join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import {
-  cursorFileName,
-  readCursor,
-  withCursorLock,
-  writeCursor
-} from './session-cursor-store'
-import {
-  mergeSnapshots,
-  selectPendingCursorSnapshotGroups,
-  shouldIncludeCursorSnapshot
-} from './session-cursor'
+import { cursorFileName, readCursor, withCursorLock, writeCursor } from './session-cursor-store'
+import { mergeSnapshots, selectPendingCursorSnapshotGroups, shouldIncludeCursorSnapshot } from './session-cursor'
 import {
   createAntigravityLanguageServerClient,
   listAntigravityCascades,
@@ -18,14 +9,8 @@ import {
   type AntigravityGeneratorMetadataRequest
 } from './antigravity-gui-client'
 import { hash, parseGeneratorMetadata } from './antigravity-gui-parser'
-import {
-  isAntigravityDbRowCursorResetError,
-  type AntigravityDbUsageResult
-} from './antigravity-history-db'
-import {
-  resolveAntigravityCollectionRange,
-  type AntigravityCollectionRange
-} from './antigravity-since'
+import { isAntigravityDbRowCursorResetError, type AntigravityDbUsageResult } from './antigravity-history-db'
+import { resolveAntigravityCollectionRange, type AntigravityCollectionRange } from './antigravity-since'
 import {
   hasDbCascadeRowsProcessed,
   markDbCascadeRowsProcessed,
@@ -41,8 +26,10 @@ import {
   shouldRequestCascade
 } from './antigravity-gui-cursor'
 import {
-  errorMessage, isUnavailableDbError,
-  isUnavailableLanguageServerError, readStateDir
+  errorMessage,
+  isUnavailableDbError,
+  isUnavailableLanguageServerError,
+  readStateDir
 } from './antigravity-gui-environment'
 import { readAntigravityGuiLocalDbUsage } from './antigravity-gui-local-db'
 
@@ -67,6 +54,8 @@ export type CollectAntigravityGuiUsageOptions = {
     sinceDate?: string
     timezone?: string
     detectRowCursorReset?: boolean
+    requireCompleteDirectoryScan?: boolean
+    forceFullScanCascadeHashes?: ReadonlySet<string>
   }) => Promise<AntigravityDbUsageResult>
   stderr?: (line: string) => void
   maxLanguageServerCascades?: number
@@ -104,16 +93,19 @@ export function collectAntigravityIdeUsage(options: Omit<CollectAntigravityGuiUs
   return collectAntigravityGuiUsage({ ...options, source: 'antigravity-ide' })
 }
 
-export async function collectAntigravityGuiUsage(
-  options: CollectAntigravityGuiUsageOptions
-): Promise<UsageSnapshot[]> {
+export async function collectAntigravityGuiUsage(options: CollectAntigravityGuiUsageOptions): Promise<UsageSnapshot[]> {
   const timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const stateDir = options.stateDir ?? readStateDir()
   const cursorPath = join(stateDir, cursorFileName(options.source, options.cursorScope))
-  return withCursorLock(cursorPath, () => collectAntigravityGuiUsageLocked({
-    options, timezone, collectedAt, cursorPath
-  }))
+  return withCursorLock(cursorPath, () =>
+    collectAntigravityGuiUsageLocked({
+      options,
+      timezone,
+      collectedAt,
+      cursorPath
+    })
+  )
 }
 
 async function collectAntigravityGuiUsageLocked(input: {
@@ -142,6 +134,7 @@ async function collectAntigravityGuiUsageLocked(input: {
     timezone,
     collectedAt
   })
+  assertFullHistoryDirectoryScanComplete(range, localDbUsage)
   for (const event of localDbUsage.events.filter((item) => range.includesTimestamp(item.createdAt))) {
     pushGuiUsageEvent({
       event,
@@ -160,7 +153,15 @@ async function collectAntigravityGuiUsageLocked(input: {
   }
 
   await collectLanguageServerUsage({
-    options, cursor, cursorPath, snapshots, emittedKeys, timezone, collectedAt, localDbUsage, range
+    options,
+    cursor,
+    cursorPath,
+    snapshots,
+    emittedKeys,
+    timezone,
+    collectedAt,
+    localDbUsage,
+    range
   })
 
   markDbCascadeRowsProcessed({
@@ -169,15 +170,20 @@ async function collectAntigravityGuiUsageLocked(input: {
     lastReadRowIndexByCascade: localDbUsage.lastReadRowIndexByCascade,
     historyScope: range.historyScope
   })
-  pushCompleteGuiCursorSnapshots(
-    snapshots,
-    cursor,
-    collectedAt,
-    emittedKeys,
-    (snapshot) => shouldIncludeCursorSnapshot(snapshot, range.sinceDate, pendingSnapshotGroups)
+  pushCompleteGuiCursorSnapshots(snapshots, cursor, collectedAt, emittedKeys, (snapshot) =>
+    shouldIncludeCursorSnapshot(snapshot, range.sinceDate, pendingSnapshotGroups)
   )
   await writeCursor(cursorPath, cursor)
   return mergeSnapshots(snapshots)
+}
+
+function assertFullHistoryDirectoryScanComplete(
+  range: AntigravityCollectionRange,
+  localDbUsage: AntigravityDbUsageResult
+) {
+  if (range.fullHistory && localDbUsage.completeDirectoryScan === false) {
+    throw new Error('Antigravity GUI --since all requires a complete SQLite directory scan')
+  }
 }
 
 async function readGuiLocalDbUsageWithCursorRecovery(input: {
@@ -187,12 +193,7 @@ async function readGuiLocalDbUsageWithCursorRecovery(input: {
   timezone: string
   collectedAt: string
 }) {
-  const firstAttempt = await readAntigravityGuiLocalDbUsage(
-    input.options,
-    input.cursor,
-    input.range,
-    input.timezone
-  )
+  const firstAttempt = await readAntigravityGuiLocalDbUsage(input.options, input.cursor, input.range, input.timezone)
   if (!input.range.fullHistory || !isAntigravityDbRowCursorResetError(firstAttempt.error)) {
     return firstAttempt
   }
@@ -205,10 +206,9 @@ async function readGuiLocalDbUsageWithCursorRecovery(input: {
   stderr('Antigravity SQLite metadata cursor reset detected; rebuilding full local database history once')
   const rebuilt = await readAntigravityGuiLocalDbUsage(input.options, input.cursor, input.range, input.timezone)
   if (rebuilt.error) {
-    throw new Error(
-      `Antigravity SQLite metadata cursor reset recovery failed: ${errorMessage(rebuilt.error)}`,
-      { cause: rebuilt.error }
-    )
+    throw new Error(`Antigravity SQLite metadata cursor reset recovery failed: ${errorMessage(rebuilt.error)}`, {
+      cause: rebuilt.error
+    })
   }
   queueGuiDbResetCorrections({ cursor: input.cursor, corrections, collectedAt: input.collectedAt })
   return rebuilt
@@ -322,12 +322,8 @@ async function preservePartialGuiUsage(
       lastReadRowIndexByCascade: input.localDbUsage.lastReadRowIndexByCascade,
       historyScope: input.range.historyScope
     })
-    pushCompleteGuiCursorSnapshots(
-      input.snapshots,
-      input.cursor,
-      input.collectedAt,
-      input.emittedKeys,
-      (snapshot) => shouldIncludeCursorSnapshot(
+    pushCompleteGuiCursorSnapshots(input.snapshots, input.cursor, input.collectedAt, input.emittedKeys, (snapshot) =>
+      shouldIncludeCursorSnapshot(
         snapshot,
         input.range.sinceDate,
         selectPendingCursorSnapshotGroups({ cursor: input.cursor, sinceDate: input.range.sinceDate })
@@ -339,18 +335,14 @@ async function preservePartialGuiUsage(
   }
 }
 
-function guiCollectionError(
-  error: unknown,
-  snapshots: UsageSnapshot[],
-  cleanupErrors: unknown[]
-) {
+function guiCollectionError(error: unknown, snapshots: UsageSnapshot[], cleanupErrors: unknown[]) {
   const cause = cleanupErrorCause(cleanupErrors)
   if (snapshots.length > 0) {
     const unavailable = isUnavailableLanguageServerError(error)
     return new AntigravityPartialUsageError(
-      `${unavailable
-        ? 'Antigravity language server unavailable'
-        : 'Antigravity language server collection failed'} after DB history was collected: ${errorMessage(error)}`,
+      `${
+        unavailable ? 'Antigravity language server unavailable' : 'Antigravity language server collection failed'
+      } after DB history was collected: ${errorMessage(error)}`,
       mergeSnapshots(snapshots),
       cause,
       cleanupErrors.length > 0 || !unavailable
@@ -363,9 +355,10 @@ function guiCollectionError(
 
 function attachCleanupCause(error: Error, cause: unknown) {
   const existingCause = (error as Error & { cause?: unknown }).cause
-  const combinedCause = existingCause === undefined
-    ? cause
-    : new AggregateError([existingCause, cause], 'Antigravity collection cleanup failed')
+  const combinedCause =
+    existingCause === undefined
+      ? cause
+      : new AggregateError([existingCause, cause], 'Antigravity collection cleanup failed')
   try {
     Object.defineProperty(error, 'cause', { value: combinedCause, configurable: true })
   } catch {
@@ -412,18 +405,16 @@ async function listUncapturedLanguageServerCascades(input: {
   })
   return cascades
     .filter((cascade) => input.range.includesFileMtime(cascade.mtimeMs))
-    .filter((cascade) => shouldRequestLanguageServerCascade({
-      cascade,
-      cursor: input.cursor,
-      localDbUsage: input.localDbUsage,
-      source: input.options.source,
-      historyScope: input.range.historyScope
-    }))
-    .sort((left, right) => compareLanguageServerCascadePriority(
-      left,
-      right,
-      emptyCascadeFrontier
-    ))
+    .filter((cascade) =>
+      shouldRequestLanguageServerCascade({
+        cascade,
+        cursor: input.cursor,
+        localDbUsage: input.localDbUsage,
+        source: input.options.source,
+        historyScope: input.range.historyScope
+      })
+    )
+    .sort((left, right) => compareLanguageServerCascadePriority(left, right, emptyCascadeFrontier))
     .slice(0, maxCascades)
 }
 
@@ -479,11 +470,7 @@ async function readLanguageServerCascadeRefs(input: {
       localDbUsage: input.localDbUsage,
       source: options.source
     }),
-    compareCascades: (left, right) => compareLanguageServerCascadePriority(
-      left,
-      right,
-      input.emptyCascadeFrontier
-    ),
+    compareCascades: (left, right) => compareLanguageServerCascadePriority(left, right, input.emptyCascadeFrontier),
     includeCascade: (cascade) => {
       if (!input.range.includesFileMtime(cascade.mtimeMs)) return false
       if (input.localDbUsage.cascadeIds.has(cascade.id)) {
@@ -511,10 +498,7 @@ function requiredLanguageServerCascadeIds(input: {
   localDbUsage: AntigravityDbUsageResult
   source: AntigravityGuiSource
 }) {
-  return new Set([
-    ...input.localDbUsage.cascadeIds,
-    ...(input.localDbUsage.lastReadRowIndexByCascade?.keys() ?? [])
-  ])
+  return new Set([...input.localDbUsage.cascadeIds, ...(input.localDbUsage.lastReadRowIndexByCascade?.keys() ?? [])])
 }
 
 function shouldRequestLanguageServerCascade(input: {
@@ -524,9 +508,10 @@ function shouldRequestLanguageServerCascade(input: {
   source: AntigravityGuiSource
   historyScope: string
 }) {
-  const databaseScanPending = input.cascade.hasDatabaseFile &&
-    !input.localDbUsage.lastReadRowIndexByCascade?.has(input.cascade.id)
-  return !databaseScanPending &&
+  const databaseScanPending =
+    input.cascade.hasDatabaseFile && !input.localDbUsage.lastReadRowIndexByCascade?.has(input.cascade.id)
+  return (
+    !databaseScanPending &&
     !input.localDbUsage.cascadeIds.has(input.cascade.id) &&
     !hasDbCascadeRowsProcessed({
       cascade: input.cascade,
@@ -540,4 +525,5 @@ function shouldRequestLanguageServerCascade(input: {
       source: input.source,
       historyScope: input.historyScope
     })
+  )
 }

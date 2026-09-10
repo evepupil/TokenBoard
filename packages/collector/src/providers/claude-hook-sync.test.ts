@@ -75,8 +75,31 @@ describe('Claude hook sync collection', () => {
       })
 
       expect(calls).toEqual([
-        ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'claude', 'session', '--json', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'daily',
+          '--json',
+          '--breakdown',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'session',
+          '--json',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -169,8 +192,31 @@ describe('Claude hook sync collection', () => {
       })
 
       expect(calls).toEqual([
-        ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'claude', 'session', '--json', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'daily',
+          '--json',
+          '--breakdown',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'session',
+          '--json',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -256,8 +302,31 @@ describe('Claude hook sync collection', () => {
       })
 
       expect(calls).toEqual([
-        ['ccusage@20.0.19', 'claude', 'daily', '--json', '--breakdown', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai'],
-        ['ccusage@20.0.19', 'claude', 'session', '--json', '--since', '20260522', '--until', '20260522', '--timezone', 'Asia/Shanghai']
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'daily',
+          '--json',
+          '--breakdown',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ],
+        [
+          'ccusage@20.0.20',
+          'claude',
+          'session',
+          '--json',
+          '--since',
+          '20260522',
+          '--until',
+          '20260522',
+          '--timezone',
+          'Asia/Shanghai'
+        ]
       ])
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -407,35 +476,42 @@ describe('Claude hook sync collection', () => {
       ])
       const syntheticStat = await stat(syntheticFile)
       await mkdir(stateDir, { recursive: true })
-      await writeFile(join(stateDir, 'claude-code-cursor.json'), `${JSON.stringify({
-        version: 1,
-        source: 'claude-code',
-        files: {
-          'project-a/failed.jsonl': {
-            size: syntheticStat.size,
-            mtimeMs: syntheticStat.mtimeMs,
-            sha256: 'previous-parser-hash',
-            snapshots: [
-              {
-                source: 'claude-code',
-                usageDate: '2026-05-22',
-                timezone: 'Asia/Shanghai',
-                model: '<synthetic>',
-                inputTokens: 0,
-                outputTokens: 0,
-                cacheCreationTokens: 0,
-                cacheReadTokens: 0,
-                totalTokens: 0,
-                costUsd: 0,
-                sessionCount: 1
+      await writeFile(
+        join(stateDir, 'claude-code-cursor.json'),
+        `${JSON.stringify(
+          {
+            version: 1,
+            source: 'claude-code',
+            files: {
+              'project-a/failed.jsonl': {
+                size: syntheticStat.size,
+                mtimeMs: syntheticStat.mtimeMs,
+                sha256: 'previous-parser-hash',
+                snapshots: [
+                  {
+                    source: 'claude-code',
+                    usageDate: '2026-05-22',
+                    timezone: 'Asia/Shanghai',
+                    model: '<synthetic>',
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: 0,
+                    totalTokens: 0,
+                    costUsd: 0,
+                    sessionCount: 1
+                  }
+                ],
+                missingCost: false,
+                pendingUpload: true,
+                updatedAt: '2026-05-22T10:00:00.000Z'
               }
-            ],
-            missingCost: false,
-            pendingUpload: true,
-            updatedAt: '2026-05-22T10:00:00.000Z'
-          }
-        }
-      }, null, 2)}\n`)
+            }
+          },
+          null,
+          2
+        )}\n`
+      )
       await writeJsonl(usageFile, [
         {
           type: 'assistant',
@@ -536,13 +612,15 @@ describe('Claude hook sync collection', () => {
         }
       ])
 
-      await expect(collectClaudeCodeUsage({
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-05-22T10:00:00.000Z',
-        async runner() {
-          return { data: [] }
-        }
-      })).rejects.toThrow(/Claude hook reconciliation returned no snapshots/)
+      await expect(
+        collectClaudeCodeUsage({
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          async runner() {
+            return { data: [] }
+          }
+        })
+      ).rejects.toThrow(/Claude hook reconciliation returned no snapshots/)
 
       const cursor = JSON.parse(await readFile(join(stateDir, 'claude-code-cursor.json'), 'utf8'))
       expect(cursor.files['project-a/session.jsonl'].pendingUpload).toBe(true)

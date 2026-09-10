@@ -33,10 +33,14 @@ test('rejects config replacement after credentials lock ownership is lost', () =
   const directory = mkdtempSync(join(tmpdir(), 'tokenboard-config-lock-fence-'))
   process.env.TOKENBOARD_CONFIG_DIR = directory
   try {
-    assert.throws(() => withCredentialsLock(directory, () => {
-      writeFileSync(credentialsLockPath(directory), JSON.stringify({ pid: process.pid, token: 'replacement' }))
-      writeConfig({ activeServer: 'https://tokenboard.example', servers: {} })
-    }), /credentials lock ownership changed before write/)
+    assert.throws(
+      () =>
+        withCredentialsLock(directory, () => {
+          writeFileSync(credentialsLockPath(directory), JSON.stringify({ pid: process.pid, token: 'replacement' }))
+          writeConfig({ activeServer: 'https://tokenboard.example', servers: {} })
+        }),
+      /credentials lock ownership changed before write/
+    )
     assert.equal(statSync(join(directory, 'config.json'), { throwIfNoEntry: false }), undefined)
   } finally {
     if (previousConfigDir === undefined) delete process.env.TOKENBOARD_CONFIG_DIR
@@ -601,26 +605,24 @@ test('mergeConfig preserves concurrent server profile updates across processes',
       "import { mergeConfig } from './config.mjs'",
       'mergeConfig(JSON.parse(process.env.TOKENBOARD_CONFIG_PATCH))'
     ].join('\n')
-    const writers = Array.from({ length: 12 }, (_, index) => spawn(process.execPath, [
-      '--input-type=module',
-      '-e',
-      script
-    ], {
-      cwd: new URL('.', import.meta.url),
-      env: {
-        ...process.env,
-        TOKENBOARD_CONFIG_DIR: directory,
-        TOKENBOARD_CONFIG_PATCH: JSON.stringify({
-          servers: {
-            [`https://server-${index}.example.com`]: {
-              endpoint: `https://server-${index}.example.com/api/v1/ingest`,
-              uploadToken: `token-${index}`
+    const writers = Array.from({ length: 12 }, (_, index) =>
+      spawn(process.execPath, ['--input-type=module', '-e', script], {
+        cwd: new URL('.', import.meta.url),
+        env: {
+          ...process.env,
+          TOKENBOARD_CONFIG_DIR: directory,
+          TOKENBOARD_CONFIG_PATCH: JSON.stringify({
+            servers: {
+              [`https://server-${index}.example.com`]: {
+                endpoint: `https://server-${index}.example.com/api/v1/ingest`,
+                uploadToken: `token-${index}`
+              }
             }
-          }
-        })
-      },
-      stdio: ['ignore', 'ignore', 'pipe']
-    }))
+          })
+        },
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
+    )
     const errors = await Promise.all(writers.map(collectChildExit))
     assert.deepEqual(errors, Array(12).fill(''))
 
@@ -651,7 +653,9 @@ test('mergeConfig creates a missing config directory before locking', () => {
 function collectChildExit(child) {
   return new Promise((resolve, reject) => {
     let stderr = ''
-    child.stderr.on('data', (chunk) => { stderr += chunk })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk
+    })
     child.on('error', reject)
     child.on('close', (status) => resolve(status === 0 ? '' : stderr || `exit ${status}`))
   })

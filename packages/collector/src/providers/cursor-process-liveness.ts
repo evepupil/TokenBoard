@@ -17,13 +17,16 @@ type RunTasklist = (
   options: { encoding: 'utf8'; windowsHide: true; timeout: number }
 ) => TasklistResult
 
-export function probeCursorProcessLiveness(pid: number, options: {
-  platform?: string
-  nodeVersion?: string
-  kill?: (pid: number, signal: 0) => unknown
-  runTasklist?: RunTasklist
-  env?: Partial<NodeJS.ProcessEnv>
-} = {}): CursorProcessLiveness {
+export function probeCursorProcessLiveness(
+  pid: number,
+  options: {
+    platform?: string
+    nodeVersion?: string
+    kill?: (pid: number, signal: 0) => unknown
+    runTasklist?: RunTasklist
+    env?: Partial<NodeJS.ProcessEnv>
+  } = {}
+): CursorProcessLiveness {
   const platform = options.platform ?? process.platform
   const nodeVersion = options.nodeVersion ?? process.versions.node
   if (platform === 'win32' && !supportsReliableCursorSignalZero(platform, nodeVersion)) {
@@ -58,9 +61,7 @@ export function tasklistContainsCursorPid(output: string, pid: number) {
 
 export function cursorTasklistCommand(env: Partial<NodeJS.ProcessEnv> = process.env) {
   const systemRoot = typeof env.SystemRoot === 'string' ? env.SystemRoot.trim() : ''
-  const root = windowsPath.isAbsolute(systemRoot)
-    ? systemRoot
-    : 'C:\\Windows'
+  const root = windowsPath.isAbsolute(systemRoot) ? systemRoot : 'C:\\Windows'
   return windowsPath.join(root, 'System32', 'tasklist.exe')
 }
 
@@ -75,6 +76,6 @@ function probeWindowsProcess(
     timeout: tasklistTimeoutMs
   })
   if (result.error || result.status !== 0) return 'unknown'
-  const stdout = typeof result.stdout === 'string' ? result.stdout : result.stdout?.toString('utf8') ?? ''
+  const stdout = typeof result.stdout === 'string' ? result.stdout : (result.stdout?.toString('utf8') ?? '')
   return tasklistContainsCursorPid(stdout, pid) ? 'alive' : 'dead'
 }

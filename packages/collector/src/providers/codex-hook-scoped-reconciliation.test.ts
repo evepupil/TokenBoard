@@ -44,17 +44,13 @@ describe('Codex hook scoped reconciliation', () => {
         scopedHomes.push(scopedHome)
         commandArgs.push(args)
         if (!verifyFrozenScope) {
-          return args.includes('session')
-            ? initialSessionResult(activeTokens)
-            : initialDailyResult(activeTokens)
+          return args.includes('session') ? initialSessionResult(activeTokens) : initialDailyResult(activeTokens)
         }
         expect(scopedHome).not.toBe(codexHome)
         expect(await fileExists(join(scopedHome, 'sessions', '2026', '05', '22', 'stable.jsonl'))).toBe(true)
         expect(await fileExists(join(scopedHome, 'sessions', '2026', '04', '02', 'active-old.jsonl'))).toBe(true)
         expect(await fileExists(join(scopedHome, 'sessions', '2025', '01', '01', 'history.jsonl'))).toBe(false)
-        return args.includes('session')
-          ? changedDateSessionResult(activeTokens)
-          : changedDateDailyResult(activeTokens)
+        return args.includes('session') ? changedDateSessionResult(activeTokens) : changedDateDailyResult(activeTokens)
       }
 
       await collectCodexUsage({
@@ -68,9 +64,13 @@ describe('Codex hook scoped reconciliation', () => {
 
       verifyFrozenScope = true
       activeTokens = 20
-      await writeFile(activeOldSession, `${JSON.stringify(tokenCountEvent('2026-05-22T02:00:00.000Z', activeTokens))}\n`, {
-        flag: 'a'
-      })
+      await writeFile(
+        activeOldSession,
+        `${JSON.stringify(tokenCountEvent('2026-05-22T02:00:00.000Z', activeTokens))}\n`,
+        {
+          flag: 'a'
+        }
+      )
       await setFileMtime(activeOldSession, '2026-05-22T02:00:00.000Z')
       scopedHomes.length = 0
       commandArgs.length = 0
@@ -107,14 +107,16 @@ describe('Codex hook scoped reconciliation', () => {
 
 function changedDateDailyResult(activeTokens: number) {
   return {
-    data: [{
-      date: '2026-05-22',
-      model: 'gpt-5',
-      inputTokens: 10 + activeTokens,
-      outputTokens: 0,
-      totalTokens: 10 + activeTokens,
-      costUSD: 0.01
-    }]
+    data: [
+      {
+        date: '2026-05-22',
+        model: 'gpt-5',
+        inputTokens: 10 + activeTokens,
+        outputTokens: 0,
+        totalTokens: 10 + activeTokens,
+        costUSD: 0.01
+      }
+    ]
   }
 }
 
@@ -174,5 +176,7 @@ async function setFileMtime(file: string, value: string) {
 }
 
 async function fileExists(file: string) {
-  return stat(file).then(() => true).catch(() => false)
+  return stat(file)
+    .then(() => true)
+    .catch(() => false)
 }

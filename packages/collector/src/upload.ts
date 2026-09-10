@@ -39,9 +39,7 @@ export async function uploadSnapshots(
   let uploaded = false
 
   for (const batch of chunkSnapshots(snapshots, snapshotBatchSize)) {
-    const checked = await filterChangedSnapshots(batch, (keys) =>
-      fetchExistingSnapshotHashes(config, keys, fetcher)
-    )
+    const checked = await filterChangedSnapshots(batch, (keys) => fetchExistingSnapshotHashes(config, keys, fetcher))
     skipped += checked.skipped
 
     if (checked.snapshots.length === 0) {
@@ -75,7 +73,7 @@ export async function filterChangedSnapshots(
   let skipped = 0
 
   for (const snapshot of snapshots) {
-    if (hashes.get(snapshotKey(snapshot)) === await snapshotHash(snapshot)) {
+    if (hashes.get(snapshotKey(snapshot)) === (await snapshotHash(snapshot))) {
       skipped += 1
       continue
     }
@@ -89,20 +87,11 @@ export async function filterChangedSnapshots(
 }
 
 export async function snapshotHash(snapshot: UsageSnapshot) {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(snapshotHashPayload(snapshot))
-  )
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshotHashPayload(snapshot)))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function fetchExistingSnapshotHashes(
-  config: CollectorConfig,
-  keys: UsageSnapshotKey[],
-  fetcher: Fetcher
-) {
+async function fetchExistingSnapshotHashes(config: CollectorConfig, keys: UsageSnapshotKey[], fetcher: Fetcher) {
   if (keys.length === 0) {
     return { existing: [] }
   }
@@ -139,11 +128,7 @@ function isUnsupportedSnapshotCheckResponse(response: Response) {
   return response.status === 404 || response.status === 405 || response.status === 501
 }
 
-async function uploadSnapshotBatch(
-  config: CollectorConfig,
-  snapshots: UsageSnapshot[],
-  fetcher: Fetcher
-) {
+async function uploadSnapshotBatch(config: CollectorConfig, snapshots: UsageSnapshot[], fetcher: Fetcher) {
   const { response, value } = await fetchWithRetries(
     fetcher,
     config.endpoint,
@@ -293,10 +278,12 @@ function parseExistingSnapshotHashResponse(value: unknown) {
 
 function isExistingSnapshotHash(value: unknown): value is ExistingSnapshotHash {
   if (!isRecord(value)) return false
-  return isUsageSource(value.source) &&
+  return (
+    isUsageSource(value.source) &&
     isUsageDate(value.usageDate) &&
     isModelName(value.model) &&
     isSnapshotHash(value.snapshotHash)
+  )
 }
 
 function parseUploadResponse(value: unknown) {
@@ -331,12 +318,14 @@ function isNonNegativeInteger(value: unknown): value is number {
 }
 
 function isRetryableResponse(response: Response) {
-  return response.status === 408 ||
+  return (
+    response.status === 408 ||
     response.status === 429 ||
     response.status === 500 ||
     response.status === 502 ||
     response.status === 503 ||
     response.status === 504
+  )
 }
 
 function readRetryDelayMs(response: Response | undefined, attempt: number) {

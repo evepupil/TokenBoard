@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ccusagePackageSpecifier, resolvePackageRunner } from './package-runner'
 
-const expectedCcusagePackageSpecifier = 'ccusage@20.0.19'
+const expectedCcusagePackageSpecifier = 'ccusage@20.0.20'
 const packageJsonPath = join(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json')
 
 describe('resolvePackageRunner', () => {
@@ -36,6 +36,16 @@ describe('resolvePackageRunner', () => {
       'daily',
       '--json'
     ])
+  })
+
+  test('passes the checkout pricing configuration when explicitly provided', () => {
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    vi.stubEnv('TOKENBOARD_CCUSAGE_CONFIG', packageConfigPath())
+
+    expect(
+      resolvePackageRunner().runPackageArgs(expectedCcusagePackageSpecifier, 'ccusage', ['daily', '--json'])
+    ).toEqual([expectedCcusagePackageSpecifier, 'daily', '--json', '--config', packageConfigPath()])
   })
 
   test('uses Windows command shims on win32', () => {
@@ -129,4 +139,8 @@ describe('resolvePackageRunner', () => {
 
 function platformCommand(command: string) {
   return process.platform === 'win32' ? `${command}.cmd` : command
+}
+
+function packageConfigPath() {
+  return join(dirname(dirname(fileURLToPath(import.meta.url))), 'ccusage.json')
 }

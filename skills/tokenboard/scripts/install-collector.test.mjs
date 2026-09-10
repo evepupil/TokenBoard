@@ -14,7 +14,13 @@ test('clones the configured collector repo before installing dependencies', () =
     [
       {
         command: 'git',
-        args: ['clone', '--depth', '1', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        args: [
+          'clone',
+          '--depth',
+          '1',
+          'https://github.com/example/TokenBoard.git',
+          '/home/user/.tokenboard/TokenBoard'
+        ],
         options: {}
       },
       {
@@ -105,7 +111,14 @@ test('clones the configured collector ref when provided', () => {
     [
       {
         command: 'git',
-        args: ['clone', '--depth', '1', '--no-checkout', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        args: [
+          'clone',
+          '--depth',
+          '1',
+          '--no-checkout',
+          'https://github.com/example/TokenBoard.git',
+          '/home/user/.tokenboard/TokenBoard'
+        ],
         options: {}
       },
       {
@@ -135,7 +148,14 @@ test('treats all-hex collector refs as branch candidates when installing', () =>
     [
       {
         command: 'git',
-        args: ['clone', '--depth', '1', '--no-checkout', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        args: [
+          'clone',
+          '--depth',
+          '1',
+          '--no-checkout',
+          'https://github.com/example/TokenBoard.git',
+          '/home/user/.tokenboard/TokenBoard'
+        ],
         options: {}
       },
       {
@@ -165,7 +185,14 @@ test('clones a configured full ref detached when provided', () => {
     [
       {
         command: 'git',
-        args: ['clone', '--depth', '1', '--no-checkout', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        args: [
+          'clone',
+          '--depth',
+          '1',
+          '--no-checkout',
+          'https://github.com/example/TokenBoard.git',
+          '/home/user/.tokenboard/TokenBoard'
+        ],
         options: {}
       },
       {
@@ -205,7 +232,13 @@ test('removes an existing non-git collector directory before cloning', () => {
       },
       {
         command: 'git',
-        args: ['clone', '--depth', '1', 'https://github.com/example/TokenBoard.git', '/home/user/.tokenboard/TokenBoard'],
+        args: [
+          'clone',
+          '--depth',
+          '1',
+          'https://github.com/example/TokenBoard.git',
+          '/home/user/.tokenboard/TokenBoard'
+        ],
         options: {}
       },
       {
@@ -236,29 +269,31 @@ test('uses corepack pnpm for workspace dependency install on Windows', () => {
 
 test('refuses to replace the config directory as a non-git collector', () => {
   assert.throws(
-    () => buildInstallCollectorPlan({
-      dir: '/home/user/.tokenboard',
-      configDir: '/home/user/.tokenboard',
-      repoUrl: 'https://github.com/example/TokenBoard.git',
-      packageManager: 'pnpm',
-      exists: true,
-      isGitRepo: false
-    }),
+    () =>
+      buildInstallCollectorPlan({
+        dir: '/home/user/.tokenboard',
+        configDir: '/home/user/.tokenboard',
+        repoUrl: 'https://github.com/example/TokenBoard.git',
+        packageManager: 'pnpm',
+        exists: true,
+        isGitRepo: false
+      }),
     /Refusing to replace TokenBoard config directory/
   )
 })
 
 test('refuses a case-variant Windows config directory as a non-git collector', () => {
   assert.throws(
-    () => buildInstallCollectorPlan({
-      dir: 'C:\\Users\\QDM\\.tokenboard',
-      configDir: 'c:\\users\\qdm\\.TOKENBOARD',
-      repoUrl: 'https://github.com/example/TokenBoard.git',
-      packageManager: 'pnpm',
-      exists: true,
-      isGitRepo: false,
-      platform: 'win32'
-    }),
+    () =>
+      buildInstallCollectorPlan({
+        dir: 'C:\\Users\\QDM\\.tokenboard',
+        configDir: 'c:\\users\\qdm\\.TOKENBOARD',
+        repoUrl: 'https://github.com/example/TokenBoard.git',
+        packageManager: 'pnpm',
+        exists: true,
+        isGitRepo: false,
+        platform: 'win32'
+      }),
     /Refusing to replace TokenBoard config directory/
   )
 })

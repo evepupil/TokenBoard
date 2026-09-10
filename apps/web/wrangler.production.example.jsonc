@@ -3,18 +3,14 @@
   "name": "tokenboard",
   "main": "./dist/index.js",
   "compatibility_date": "2026-04-28",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "run_worker_first": true
   },
   "triggers": {
-    "crons": [
-      "*/15 * * * *"
-    ]
+    "crons": ["*/15 * * * *"]
   },
   "workers_dev": false,
   "routes": [
@@ -31,7 +27,10 @@
     "TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "<tokenboard-usage-summary-backfill-limit>",
     "TOKENBOARD_USAGE_SUMMARY_STRICT": "<tokenboard-usage-summary-strict>",
     "TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "<tokenboard-webhook-log-retention-days>",
-    "TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "<tokenboard-webhook-cron-batch-size>"
+    "TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "<tokenboard-webhook-cron-batch-size>",
+    "TOKENBOARD_MODEL_PRICING_SYNC_ENABLED": "true",
+    "TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "24",
+    "TOKENBOARD_MODEL_PRICING_SOURCE_URL": "https://models.dev/api.json"
   },
   "d1_databases": [
     {

@@ -35,9 +35,7 @@ export type CollectGrokBuildUsageOptions = {
  * surface labels the cost as unavailable rather than showing a derived figure
  * as real.
  */
-export async function collectGrokBuildUsage(
-  options: CollectGrokBuildUsageOptions = {}
-): Promise<UsageSnapshot[]> {
+export async function collectGrokBuildUsage(options: CollectGrokBuildUsageOptions = {}): Promise<UsageSnapshot[]> {
   const timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const sinceDate = readSinceDate(options.since, label)
@@ -138,7 +136,6 @@ function toUsageEvent(
 }
 
 function sessionRoots(grokHome?: string) {
-  const home = grokHome ?? process.env.TOKENBOARD_GROK_HOME ?? process.env.GROK_HOME ??
-    join(homedir(), '.grok')
+  const home = grokHome ?? process.env.TOKENBOARD_GROK_HOME ?? process.env.GROK_HOME ?? join(homedir(), '.grok')
   return [join(home, 'sessions'), join(home, 'archived_sessions')]
 }

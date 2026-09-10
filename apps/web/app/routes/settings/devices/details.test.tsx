@@ -29,10 +29,12 @@ describe('device details route', () => {
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedListUserDevices.mockResolvedValue([device()] as never)
     mockedListDeviceAuditLogs.mockResolvedValue([] as never)
-    const response = await GET[0](
-      routeContext('https://tokenboard.example/settings/devices/details?deviceId=device_1&view=cards&query=linux') as never,
+    const response = (await GET[0](
+      routeContext(
+        'https://tokenboard.example/settings/devices/details?deviceId=device_1&view=cards&query=linux'
+      ) as never,
       async () => undefined
-    ) as Response
+    )) as Response
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -47,20 +49,22 @@ describe('device details route', () => {
   test('keeps normal unauthenticated navigation on the shared auth redirect path', async () => {
     mockedRequireUser.mockRejectedValue(new ApiError('UNAUTHORIZED', 'Authentication required', 401) as never)
 
-    await expect(GET[0](
-      routeContext('https://tokenboard.example/settings/devices/details?deviceId=device_1') as never,
-      async () => undefined
-    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    await expect(
+      GET[0](
+        routeContext('https://tokenboard.example/settings/devices/details?deviceId=device_1') as never,
+        async () => undefined
+      )
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
   })
 
   test('renders a full error page through the app renderer when the device is missing', async () => {
     mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
     mockedListUserDevices.mockResolvedValue([] as never)
 
-    const response = await GET[0](
+    const response = (await GET[0](
       routeContext('https://tokenboard.example/settings/devices/details?deviceId=missing') as never,
       async () => undefined
-    ) as Response
+    )) as Response
     const html = await response.text()
 
     expect(response.status).toBe(404)
@@ -74,12 +78,12 @@ describe('device details route', () => {
     mockedListUserDevices.mockResolvedValue([device()] as never)
     mockedListDeviceAuditLogs.mockResolvedValue([] as never)
 
-    const response = await GET[0](
+    const response = (await GET[0](
       routeContext('https://tokenboard.example/settings/devices/details?deviceId=device_1&view=list', {
         'x-tokenboard-fragment': 'device-details'
       }) as never,
       async () => undefined
-    ) as Response
+    )) as Response
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -99,21 +103,18 @@ function routeContext(url: string, headers: Record<string, string> = {}) {
       header: vi.fn((name: string) => headers[name.toLowerCase()] ?? null),
       raw: new Request(url, { headers })
     },
-    html: vi.fn(async (body: unknown, status = 200) => (
-      new Response(await renderToString(body as never), { status })
-    )),
-    render: vi.fn(async (body: unknown) => (
-      new Response(await renderToString(body as never), {
-        status: responseStatus,
-        headers: { 'x-rendered-by': 'app-renderer' }
-      })
-    )),
+    html: vi.fn(async (body: unknown, status = 200) => new Response(await renderToString(body as never), { status })),
+    render: vi.fn(
+      async (body: unknown) =>
+        new Response(await renderToString(body as never), {
+          status: responseStatus,
+          headers: { 'x-rendered-by': 'app-renderer' }
+        })
+    ),
     status: vi.fn((status: number) => {
       responseStatus = status
     }),
-    redirect: vi.fn((location: string, status = 302) => (
-      new Response(null, { status, headers: { location } })
-    ))
+    redirect: vi.fn((location: string, status = 302) => new Response(null, { status, headers: { location } }))
   }
 }
 

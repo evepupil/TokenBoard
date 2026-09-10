@@ -13,7 +13,17 @@ type CardProps = DataAttributes & {
 export function Card(props: CardProps) {
   const { class: className, children, ...attributes } = props
 
-  return <section {...attributes} class={cn('app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)] backdrop-blur', className)}>{children}</section>
+  return (
+    <section
+      {...attributes}
+      class={cn(
+        'app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)] backdrop-blur',
+        className
+      )}
+    >
+      {children}
+    </section>
+  )
 }
 
 export function CardHeader(props: { class?: string; children?: Child }) {

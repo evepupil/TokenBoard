@@ -2,10 +2,7 @@ import { createHash } from 'node:crypto'
 import { isReusableAntigravityHistoryScope } from './antigravity-since'
 import type { CursorState } from './session-cursor-store'
 
-export function lastSeenCliDbRowIndexByCascadeHash(input: {
-  cursor: CursorState
-  historyScope?: string
-}) {
+export function lastSeenCliDbRowIndexByCascadeHash(input: { cursor: CursorState; historyScope?: string }) {
   const historyScope = input.historyScope ?? 'all'
   const indexes = new Map<string, number>()
   for (const [key, entry] of Object.entries(input.cursor.files)) {
@@ -16,6 +13,35 @@ export function lastSeenCliDbRowIndexByCascadeHash(input: {
     indexes.set(cascadeHash, entry.mtimeMs)
   }
   return indexes
+}
+
+export function hasUnanchoredCliDbRowCursor(input: { cursor: CursorState; historyScope?: string }) {
+  return unanchoredCliDbRowCursorHashes(input).size > 0
+}
+
+export function unanchoredCliDbRowCursorHashes(input: { cursor: CursorState; historyScope?: string }) {
+  const rowIndexes = lastSeenCliDbRowIndexByCascadeHash(input)
+  if (rowIndexes.size === 0) return new Set<string>()
+  const scanFiles = input.cursor.antigravityDbFileScan?.files
+  const unanchored = new Set<string>()
+  for (const [cascadeHash, rowIndex] of rowIndexes.entries()) {
+    const entry = scanFiles?.[cascadeHash] as
+      | {
+          metadataCursorRowIndex?: unknown
+          metadataCursorRowSha256?: unknown
+        }
+      | undefined
+    if (
+      !entry ||
+      !Number.isSafeInteger(entry.metadataCursorRowIndex) ||
+      entry.metadataCursorRowIndex !== rowIndex ||
+      typeof entry.metadataCursorRowSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(entry.metadataCursorRowSha256)
+    ) {
+      unanchored.add(cascadeHash)
+    }
+  }
+  return unanchored
 }
 
 export function markCliDbRowsProcessed(input: {
@@ -62,9 +88,7 @@ export function markCliDbRowsProcessed(input: {
 }
 
 function cliDbCascadeCursorPrefixForScope(historyScope: string) {
-  return historyScope === 'all'
-    ? cliDbCascadeCursorPrefix
-    : `${cliDbBoundedCursorPrefix}${historyScope}\0`
+  return historyScope === 'all' ? cliDbCascadeCursorPrefix : `${cliDbBoundedCursorPrefix}${historyScope}\0`
 }
 
 function reusableCliDbScopes(cursor: CursorState, historyScope: string) {

@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createAuth } from './auth'
-import {
-  ensureProfile,
-  getOptionalUser,
-  requireUser,
-  verifyUploadToken
-} from './middleware'
+import { ensureProfile, getOptionalUser, requireUser, verifyUploadToken } from './middleware'
 
 vi.mock('./auth', () => ({
   createAuth: vi.fn()
@@ -40,44 +35,44 @@ describe('getOptionalUser', () => {
     expect(mockedCreateAuth).not.toHaveBeenCalled()
   })
 
-  test.each([
-    'better-auth-session_token=abc',
-    '__Secure-better-auth-session_token=abc'
-  ])('preserves Better Auth hyphenated session cookie lookup for %s', async (cookieHeader) => {
-    const getSession = vi.fn(async () => ({
-      user: {
+  test.each(['better-auth-session_token=abc', '__Secure-better-auth-session_token=abc'])(
+    'preserves Better Auth hyphenated session cookie lookup for %s',
+    async (cookieHeader) => {
+      const getSession = vi.fn(async () => ({
+        user: {
+          id: 'user_123',
+          email: 'user@example.com',
+          name: 'Token User',
+          image: null
+        }
+      }))
+      mockedCreateAuth.mockReturnValue({
+        api: { getSession }
+      } as never)
+
+      const raw = new Request('http://127.0.0.1/dashboard', {
+        headers: { cookie: cookieHeader }
+      })
+      const user = await getOptionalUser({
+        env: {},
+        req: {
+          header(name: string) {
+            expect(name).toBe('cookie')
+            return raw.headers.get('cookie')
+          },
+          raw
+        }
+      } as never)
+
+      expect(user).toEqual({
         id: 'user_123',
         email: 'user@example.com',
         name: 'Token User',
         image: null
-      }
-    }))
-    mockedCreateAuth.mockReturnValue({
-      api: { getSession }
-    } as never)
-
-    const raw = new Request('http://127.0.0.1/dashboard', {
-      headers: { cookie: cookieHeader }
-    })
-    const user = await getOptionalUser({
-      env: {},
-      req: {
-        header(name: string) {
-          expect(name).toBe('cookie')
-          return raw.headers.get('cookie')
-        },
-        raw
-      }
-    } as never)
-
-    expect(user).toEqual({
-      id: 'user_123',
-      email: 'user@example.com',
-      name: 'Token User',
-      image: null
-    })
-    expect(getSession).toHaveBeenCalledWith({ headers: raw.headers })
-  })
+      })
+      expect(getSession).toHaveBeenCalledWith({ headers: raw.headers })
+    }
+  )
 })
 
 describe('requireUser', () => {

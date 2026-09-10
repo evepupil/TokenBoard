@@ -3,11 +3,7 @@ import { verifyUploadToken } from '../../../features/auth/middleware'
 import { ingestRequestSchema } from '../../../features/ingest/schema'
 import { ingestSnapshots } from '../../../features/ingest/service'
 import { jsonError } from '../../../lib/http'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit,
-  writeRateLimitPolicies
-} from '../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit, writeRateLimitPolicies } from '../../../lib/rate-limit'
 
 export const POST = createRoute(async (c) => {
   try {

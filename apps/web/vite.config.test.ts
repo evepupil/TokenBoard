@@ -100,11 +100,11 @@ async function flattenPlugins(plugins: PluginOption[]): Promise<Plugin[]> {
   const flattened: Plugin[] = []
   for (const plugin of plugins) {
     if (plugin && typeof plugin === 'object' && 'then' in plugin) {
-      flattened.push(...await flattenPlugins([await plugin]))
+      flattened.push(...(await flattenPlugins([await plugin])))
       continue
     }
     if (Array.isArray(plugin)) {
-      flattened.push(...await flattenPlugins(plugin))
+      flattened.push(...(await flattenPlugins(plugin)))
       continue
     }
     if (plugin && typeof plugin === 'object' && 'name' in plugin) {
@@ -131,7 +131,7 @@ function flattenPluginsSync(plugins: PluginOption[]): Plugin[] {
 
 async function runConfigHook(plugin: Plugin | undefined) {
   if (!plugin || typeof plugin.config !== 'function') return {}
-  return await plugin.config.call(createConfigContext(), {}, { command: 'build', mode: 'client' }) ?? {}
+  return (await plugin.config.call(createConfigContext(), {}, { command: 'build', mode: 'client' })) ?? {}
 }
 
 function createConfigContext(): ConfigPluginContext {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest'
 import { collectAntigravityGuiUsage } from './antigravity-gui'
 import { AntigravityDbRowCursorResetError } from './antigravity-history-db'
 import {
+  hasUnanchoredDbRowCursor,
   lastSeenDbRowIndexByCascadeHash,
   prepareGuiHistoryScope
 } from './antigravity-gui-cursor'
@@ -39,11 +40,55 @@ describe('collectAntigravityGuiUsage since ranges', () => {
 
     prepareGuiHistoryScope({ cursor, source: 'antigravity', historyScope: currentScope })
 
-    expect(lastSeenDbRowIndexByCascadeHash({
-      cursor,
-      source: 'antigravity',
-      historyScope: currentScope
-    }).get(cascadeHash)).toBe(7)
+    expect(
+      lastSeenDbRowIndexByCascadeHash({
+        cursor,
+        source: 'antigravity',
+        historyScope: currentScope
+      }).get(cascadeHash)
+    ).toBe(7)
+  })
+
+  test('detects a legacy bounded DB cursor without a SQLite continuity anchor', () => {
+    const cascadeHash = createHash('sha256').update('conversation-a').digest('hex')
+    const cursor = {
+      version: 1 as const,
+      source: 'antigravity' as const,
+      files: {
+        [`db\0antigravity\0${cascadeHash}`]: {
+          size: 0,
+          mtimeMs: 41,
+          sha256: 'a'.repeat(64),
+          snapshots: [],
+          missingCost: true,
+          pendingUpload: false,
+          updatedAt: '2026-06-24T00:00:00.000Z'
+        }
+      },
+      antigravityDbFileScan: { nextSequence: 0, files: {} }
+    }
+
+    expect(hasUnanchoredDbRowCursor({ cursor, source: 'antigravity' })).toBe(true)
+    const scanFiles = cursor.antigravityDbFileScan.files as Record<
+      string,
+      {
+        mtimeMs: number
+        size: number
+        hasDatabaseFile: true
+        checkedSequence: number
+        metadataCursorRowIndex?: number
+        metadataCursorRowSha256?: string
+      }
+    >
+    scanFiles[cascadeHash] = {
+      mtimeMs: 1,
+      size: 0,
+      hasDatabaseFile: true,
+      checkedSequence: 0,
+      metadataCursorRowIndex: 41,
+      metadataCursorRowSha256: 'b'.repeat(64)
+    }
+    expect(hasUnanchoredDbRowCursor({ cursor, source: 'antigravity' })).toBe(false)
   })
 
   test('excludes SQLite and language-server events before the configured date', async () => {
@@ -62,10 +107,12 @@ describe('collectAntigravityGuiUsage since ranges', () => {
         requestGeneratorMetadata: async () => metadataResponse()
       })
 
-      expect(snapshots).toEqual(expect.arrayContaining([
-        expect.objectContaining({ model: 'gemini-db-new', inputTokens: 20 }),
-        expect.objectContaining({ model: 'gemini-ls-new', inputTokens: 40 })
-      ]))
+      expect(snapshots).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ model: 'gemini-db-new', inputTokens: 20 }),
+          expect.objectContaining({ model: 'gemini-ls-new', inputTokens: 40 })
+        ])
+      )
       expect(snapshots).toHaveLength(2)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -186,8 +233,10 @@ describe('collectAntigravityGuiUsage since ranges', () => {
       const readDbUsageEvents = async (input?: {
         lastSeenRowIndexByCascadeHash?: Map<string, number>
         detectRowCursorReset?: boolean
+        requireCompleteDirectoryScan?: boolean
       }) => {
         reads += 1
+        expect(input?.requireCompleteDirectoryScan).toBe(true)
         if (reads === 1) {
           return {
             cascadeIds: new Set(['conversation-db']),
@@ -231,11 +280,45 @@ describe('collectAntigravityGuiUsage since ranges', () => {
       expect(diagnostics).toEqual([
         'Antigravity SQLite metadata cursor reset detected; rebuilding full local database history once'
       ])
-      expect(rebuilt).toEqual(expect.arrayContaining([
-        expect.objectContaining({ model: 'gemini-retained', inputTokens: 10 }),
-        expect.objectContaining({ model: 'gemini-rebuilt', inputTokens: 20 })
-      ]))
+      expect(rebuilt).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ model: 'gemini-retained', inputTokens: 10 }),
+          expect.objectContaining({ model: 'gemini-rebuilt', inputTokens: 20 })
+        ])
+      )
       expect(rebuilt).toHaveLength(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects an incomplete GUI SQLite full history scan before committing the cursor', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-since-incomplete-db-scan-'))
+    try {
+      let requireCompleteDirectoryScan: boolean | undefined
+      const readDbUsageEvents = async (input?: { requireCompleteDirectoryScan?: boolean }) => {
+        requireCompleteDirectoryScan = input?.requireCompleteDirectoryScan
+        return {
+          cascadeIds: new Set(['conversation-db']),
+          events: [dbEvent('a', '2026-06-24T00:00:00.000Z', 'gemini-incomplete', 10, 'conversation-db')],
+          completeDirectoryScan: false,
+          lastReadRowIndexByCascade: new Map([['conversation-db', 41]])
+        }
+      }
+
+      await expect(
+        collectAntigravityGuiUsage({
+          ...baseOptions(root),
+          since: 'all',
+          listCascades: async () => [],
+          readDbUsageEvents
+        })
+      ).rejects.toThrow('Antigravity GUI --since all requires a complete SQLite directory scan')
+
+      expect(requireCompleteDirectoryScan).toBe(true)
+      await expect(readFile(join(root, 'antigravity-cursor.json'), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT'
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -245,9 +328,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-since-bounded-db-reset-'))
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -267,12 +348,14 @@ describe('collectAntigravityGuiUsage since ranges', () => {
         readDbUsageEvents
       })
 
-      await expect(collectAntigravityGuiUsage({
-        ...baseOptions(root),
-        since: '20260624',
-        listCascades: async () => [],
-        readDbUsageEvents
-      })).rejects.toThrow('Antigravity SQLite metadata cursor reset detected for recreated.db')
+      await expect(
+        collectAntigravityGuiUsage({
+          ...baseOptions(root),
+          since: '20260624',
+          listCascades: async () => [],
+          readDbUsageEvents
+        })
+      ).rejects.toThrow('Antigravity SQLite metadata cursor reset detected for recreated.db')
 
       expect(reads).toBe(2)
     } finally {
@@ -286,9 +369,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     try {
       let reads = 0
       const requests: string[] = []
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -327,16 +408,18 @@ describe('collectAntigravityGuiUsage since ranges', () => {
 
       expect(reads).toBe(3)
       expect(requests).toEqual([cascade.id])
-      expect(recovered).toEqual(expect.arrayContaining([
-        expect.objectContaining({ model: 'gemini-recovered', inputTokens: 20 }),
-        expect.objectContaining({
-          model: 'gemini-retained',
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          sessionCount: 0
-        })
-      ]))
+      expect(recovered).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ model: 'gemini-recovered', inputTokens: 20 }),
+          expect.objectContaining({
+            model: 'gemini-retained',
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            sessionCount: 0
+          })
+        ])
+      )
       expect(recovered).toHaveLength(2)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -347,9 +430,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-since-db-reset-acknowledged-'))
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -382,11 +463,13 @@ describe('collectAntigravityGuiUsage since ranges', () => {
       const rebuilt = await collectAntigravityGuiUsage(options)
 
       expect(reads).toBe(3)
-      expect(rebuilt).toEqual([expect.objectContaining({
-        model: 'gemini-rebuilt',
-        inputTokens: 30,
-        sessionCount: 1
-      })])
+      expect(rebuilt).toEqual([
+        expect.objectContaining({
+          model: 'gemini-rebuilt',
+          inputTokens: 30,
+          sessionCount: 1
+        })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -396,9 +479,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-since-db-reset-replace-'))
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -428,11 +509,13 @@ describe('collectAntigravityGuiUsage since ranges', () => {
       const rebuilt = await collectAntigravityGuiUsage(options)
 
       expect(reads).toBe(3)
-      expect(rebuilt).toEqual([expect.objectContaining({
-        model: 'gemini-rebuilt',
-        inputTokens: 20,
-        sessionCount: 1
-      })])
+      expect(rebuilt).toEqual([
+        expect.objectContaining({
+          model: 'gemini-rebuilt',
+          inputTokens: 20,
+          sessionCount: 1
+        })
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -442,9 +525,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-since-db-reset-pending-'))
     try {
       let reads = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -483,9 +564,7 @@ describe('collectAntigravityGuiUsage since ranges', () => {
     try {
       let reads = 0
       let requests = 0
-      const readDbUsageEvents = async (input?: {
-        lastSeenRowIndexByCascadeHash?: Map<string, number>
-      }) => {
+      const readDbUsageEvents = async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
         reads += 1
         if (reads === 1) {
           return {
@@ -506,18 +585,18 @@ describe('collectAntigravityGuiUsage since ranges', () => {
       const options = {
         ...baseOptions(root),
         since: 'all',
-        listCascades: async () => [{
-          id: languageServerCascade,
-          mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
-          size: 20
-        }],
+        listCascades: async () => [
+          {
+            id: languageServerCascade,
+            mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'),
+            size: 20
+          }
+        ],
         readDbUsageEvents,
         requestGeneratorMetadata: async () => {
           requests += 1
           return {
-            generatorMetadata: [
-              metadataItem('2026-06-24T00:00:00.000Z', 'gemini-ls', '30', 'response-ls')
-            ]
+            generatorMetadata: [metadataItem('2026-06-24T00:00:00.000Z', 'gemini-ls', '30', 'response-ls')]
           }
         }
       }
@@ -573,23 +652,21 @@ describe('collectAntigravityGuiUsage since ranges', () => {
         stateDir: root,
         timezone: 'Asia/Shanghai',
         since: '20260624',
-        listCascades: async () => [
-          { id: cascadeId, mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'), size: 20 }
-        ],
+        listCascades: async () => [{ id: cascadeId, mtimeMs: Date.parse('2026-06-24T01:00:00.000Z'), size: 20 }],
         readDbUsageEvents: async () => ({
           cascadeIds: new Set([cascadeId]),
-          events: [{
-            ...dbEvent('b', '2026-06-23T15:59:59.000Z', 'gemini-old', 10),
-            cascadeHash: createHash('sha256').update(cascadeId).digest('hex')
-          }],
+          events: [
+            {
+              ...dbEvent('b', '2026-06-23T15:59:59.000Z', 'gemini-old', 10),
+              cascadeHash: createHash('sha256').update(cascadeId).digest('hex')
+            }
+          ],
           lastReadRowIndexByCascade: new Map([[cascadeId, 1]])
         }),
         requestGeneratorMetadata: async () => {
           requests += 1
           return {
-            generatorMetadata: [
-              metadataItem('2026-06-23T16:00:00.000Z', 'gemini-current', '40', 'response-current')
-            ]
+            generatorMetadata: [metadataItem('2026-06-23T16:00:00.000Z', 'gemini-current', '40', 'response-current')]
           }
         }
       })
@@ -613,13 +690,7 @@ function baseOptions(stateDir: string) {
   }
 }
 
-function dbEvent(
-  hash: string,
-  createdAt: string,
-  model: string,
-  inputTokens: number,
-  cascadeId?: string
-) {
+function dbEvent(hash: string, createdAt: string, model: string, inputTokens: number, cascadeId?: string) {
   return {
     cascadeHash: cascadeId ? createHash('sha256').update(cascadeId).digest('hex') : 'a'.repeat(64),
     eventHash: hash.repeat(64),

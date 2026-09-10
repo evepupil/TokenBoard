@@ -9,6 +9,12 @@ describe('errorMessage', () => {
 
   test('does not throw while formatting hostile thrown values', () => {
     expect(errorMessage(Object.create(null))).toBe('Unknown error')
-    expect(errorMessage({ toString: () => { throw new Error('failed') } })).toBe('Unknown error')
+    expect(
+      errorMessage({
+        toString: () => {
+          throw new Error('failed')
+        }
+      })
+    ).toBe('Unknown error')
   })
 })

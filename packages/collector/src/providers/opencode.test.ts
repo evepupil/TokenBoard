@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { collectOpenCodeUsage } from './opencode'
 
@@ -36,31 +39,35 @@ describe('collectOpenCodeUsage', () => {
   test('normalizes a message row into a daily snapshot', async () => {
     const snapshots = await collect([usageRow()])
 
-    expect(snapshots).toEqual([{
-      source: 'opencode',
-      usageDate: '2026-05-26',
-      timezone: 'Asia/Shanghai',
-      model: 'deepseek-v4-pro',
-      inputTokens: 3272,
-      // 383 output + 419 reasoning: reasoning is billed as output, not a bucket.
-      outputTokens: 802,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 52_480,
-      totalTokens: 56_554,
-      costUsd: 0.0023113,
-      sessionCount: 1,
-      collectedAt: '2026-05-09T10:00:00.000Z'
-    }])
+    expect(snapshots).toEqual([
+      {
+        source: 'opencode',
+        usageDate: '2026-05-26',
+        timezone: 'Asia/Shanghai',
+        model: 'deepseek-v4-pro',
+        inputTokens: 3272,
+        // 383 output + 419 reasoning: reasoning is billed as output, not a bucket.
+        outputTokens: 802,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 52_480,
+        totalTokens: 56_554,
+        costUsd: 0.0023113,
+        sessionCount: 1,
+        collectedAt: '2026-05-09T10:00:00.000Z'
+      }
+    ])
   })
 
   test('keeps input fresh so totals stay disjoint', async () => {
-    const [snapshot] = await collect([usageRow({
-      inputTokens: 1000,
-      outputTokens: 200,
-      reasoningTokens: 0,
-      cacheReadTokens: 5000,
-      cacheWriteTokens: 300
-    })])
+    const [snapshot] = await collect([
+      usageRow({
+        inputTokens: 1000,
+        outputTokens: 200,
+        reasoningTokens: 0,
+        cacheReadTokens: 5000,
+        cacheWriteTokens: 300
+      })
+    ])
 
     expect(snapshot.inputTokens).toBe(1000)
     expect(snapshot.totalTokens).toBe(6500)
@@ -94,11 +101,14 @@ describe('collectOpenCodeUsage', () => {
 
   test('skips rows without usable token metadata', async () => {
     const skipped: string[] = []
-    const snapshots = await collect([
-      usageRow({ inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
-      usageRow({ createdMs: null }),
-      usageRow({ createdMs: 0 })
-    ], { stderr: (line: string) => skipped.push(line) })
+    const snapshots = await collect(
+      [
+        usageRow({ inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+        usageRow({ createdMs: null }),
+        usageRow({ createdMs: 0 })
+      ],
+      { stderr: (line: string) => skipped.push(line) }
+    )
 
     expect(snapshots).toEqual([])
     expect(skipped).toHaveLength(1)
@@ -117,11 +127,13 @@ describe('collectOpenCodeUsage', () => {
   })
 
   test('treats negative counts and costs as zero', async () => {
-    const [snapshot] = await collect([usageRow({
-      inputTokens: -5,
-      cacheWriteTokens: -1,
-      costUsd: -2
-    })])
+    const [snapshot] = await collect([
+      usageRow({
+        inputTokens: -5,
+        cacheWriteTokens: -1,
+        costUsd: -2
+      })
+    ])
 
     expect(snapshot.inputTokens).toBe(0)
     expect(snapshot.cacheCreationTokens).toBe(0)
@@ -141,23 +153,57 @@ describe('collectOpenCodeUsage', () => {
   })
 
   test('reports a missing database instead of returning empty usage', async () => {
-    await expect(collectOpenCodeUsage({
-      dbPath,
-      statFile: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }) },
-      runQuery: async () => '[]'
-    })).rejects.toThrow(`OpenCode database not found: ${dbPath}`)
+    await expect(
+      collectOpenCodeUsage({
+        dbPath,
+        statFile: async () => {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+        },
+        runQuery: async () => '[]'
+      })
+    ).rejects.toThrow(`OpenCode database not found: ${dbPath}`)
+  })
+
+  test('reports a database removed between the existence check and SQLite open', async () => {
+    try {
+      await import('node:sqlite')
+    } catch {
+      return
+    }
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-opencode-race-'))
+    const missingDb = join(root, 'opencode.db')
+    try {
+      await expect(
+        collectOpenCodeUsage({
+          dbPath: missingDb,
+          statFile: async () => ({ mtimeMs: 1 })
+        })
+      ).rejects.toThrow(`OpenCode database not found: ${missingDb}`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test('treats an empty result as no usage', async () => {
     expect(await collect([])).toEqual([])
-    expect(await collectOpenCodeUsage({
-      dbPath, statFile, since: 'all', runQuery: async () => '  '
-    })).toEqual([])
+    expect(
+      await collectOpenCodeUsage({
+        dbPath,
+        statFile,
+        since: 'all',
+        runQuery: async () => '  '
+      })
+    ).toEqual([])
   })
 
   test('never selects the message blob that holds prompts and local paths', async () => {
     let executedSql = ''
-    await collect([], { runQuery: async (_db: string, sql: string) => { executedSql = sql; return '[]' } })
+    await collect([], {
+      runQuery: async (_db: string, sql: string) => {
+        executedSql = sql
+        return '[]'
+      }
+    })
 
     expect(executedSql).toContain('json_extract(m.data')
     expect(executedSql).not.toMatch(/SELECT[\s\S]*\bm\.data\b(?!,?\s*'\$)/)
@@ -219,12 +265,14 @@ describe('collectOpenCodeUsage', () => {
   })
 
   test('reports the executable as unavailable when it is missing', async () => {
-    await expect(collectOpenCodeUsage({
-      dbPath,
-      statFile,
-      since: 'all',
-      forceExternalSqlite: true,
-      sqliteBin: 'tokenboard-sqlite3-does-not-exist'
-    })).rejects.toThrow('OpenCode SQLite reader unavailable')
+    await expect(
+      collectOpenCodeUsage({
+        dbPath,
+        statFile,
+        since: 'all',
+        forceExternalSqlite: true,
+        sqliteBin: 'tokenboard-sqlite3-does-not-exist'
+      })
+    ).rejects.toThrow('OpenCode SQLite reader unavailable')
   })
 })

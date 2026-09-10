@@ -36,11 +36,19 @@ export function runNotify(options = {}) {
     unlink: options.unlink,
     sleep: options.sleep,
     process: options.process,
+    processStartIdentity: options.processStartIdentity,
+    readProcessStartIdentity: options.readProcessStartIdentity,
+    runProcessIdentity: options.runProcessIdentity,
+    platform: options.platform,
+    nodeVersion: options.nodeVersion,
+    runTasklist: options.runTasklist,
     trailingProcess: options.trailingProcess ?? hasTrailingDelay(env),
-    scheduleTrailing: options.scheduleTrailing || ((trigger, delayMs) =>
-      scheduleTrailingNotify(trigger, delayMs, { ...options, env, configDir: configDirectory })
-    ),
-    executeSync: options.executeSync || ((trigger, lockToken) => executeTokenBoardSync(trigger.source, { ...options, env, lockToken }))
+    scheduleTrailing:
+      options.scheduleTrailing ||
+      ((trigger, delayMs) => scheduleTrailingNotify(trigger, delayMs, { ...options, env, configDir: configDirectory })),
+    executeSync:
+      options.executeSync ||
+      ((trigger, lockToken) => executeTokenBoardSync(trigger.source, { ...options, env, lockToken }))
   })
 }
 
@@ -84,35 +92,38 @@ function scheduleTrailingNotify(trigger, delayMs, options = {}) {
   const nodePath = options.nodePath || process.execPath
   const scriptPath = options.notifyScriptPath || fileURLToPath(import.meta.url)
   try {
-    const child = spawnProcess(
-      nodePath,
-      [scriptPath, '--source', trigger.source],
-      {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-        env: {
-          ...runtime.env,
-          TOKENBOARD_CONFIG_DIR: runtime.configDir,
-          TOKENBOARD_STATE_DIR: runtime.stateDir,
-          TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: String(delayMs),
-          TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: lockPath,
-          TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: lock.ownerToken,
-          TOKENBOARD_NOTIFY_DISPATCH_LOCK_PATH: '',
-          TOKENBOARD_NOTIFY_DISPATCH_LOCK_TOKEN: '',
-          TOKENBOARD_NOTIFY_DISPATCH_WORKER_PATH: ''
-        }
+    const child = spawnProcess(nodePath, [scriptPath, '--source', trigger.source], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: {
+        ...runtime.env,
+        TOKENBOARD_CONFIG_DIR: runtime.configDir,
+        TOKENBOARD_STATE_DIR: runtime.stateDir,
+        TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: String(delayMs),
+        TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: lockPath,
+        TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: lock.ownerToken,
+        TOKENBOARD_NOTIFY_DISPATCH_LOCK_PATH: '',
+        TOKENBOARD_NOTIFY_DISPATCH_LOCK_TOKEN: '',
+        TOKENBOARD_NOTIFY_DISPATCH_WORKER_PATH: ''
       }
-    )
+    })
+    attachTrailingSpawnErrorHandler(child, lockPath, lock.ownerToken, runtime, options)
     if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
       throw new Error('TokenBoard trailing notifier did not provide a valid process id')
     }
-    publishTrailingLock(lockPath, {
-      pid: child.pid,
-      startedAt: new Date(runtime.now()).toISOString(),
-      token: lock.ownerToken,
-      processStartIdentity: processStartIdentityForPid(child.pid, runtime)
-    }, runtime)
+    const childStartedAt = new Date(runtime.now()).toISOString()
+    publishTrailingLock(
+      lockPath,
+      {
+        pid: child.pid,
+        startedAt: childStartedAt,
+        token: lock.ownerToken,
+        identityProbeStartedAt: childStartedAt,
+        processStartIdentity: processStartIdentityForPid(child.pid, runtime)
+      },
+      runtime
+    )
     child.unref?.()
     return true
   } catch (error) {
@@ -123,6 +134,54 @@ function scheduleTrailingNotify(trigger, delayMs, options = {}) {
     }
     throw error
   }
+}
+
+function attachTrailingSpawnErrorHandler(child, lockPath, ownerToken, runtime, options) {
+  if (typeof child?.once !== 'function' && typeof child?.on !== 'function') return
+
+  let spawned = false
+  let handled = false
+  const handleError = (error) => {
+    if (spawned || handled) return
+    handled = true
+    let cleanupError
+    try {
+      const childPid = Number.isSafeInteger(child.pid) && child.pid > 0 ? child.pid : runtime.process.pid
+      releaseTrailingLock(lockPath, {
+        ...runtime,
+        process: { ...runtime.process, pid: childPid },
+        ownerToken
+      })
+    } catch (error) {
+      cleanupError = error
+    }
+
+    const reportError = typeof options.error === 'function' ? options.error : console.error
+    try {
+      reportError(
+        `TokenBoard trailing notifier spawn failed: ${errorMessage(error)}` +
+          (cleanupError ? `; trailing lock cleanup failed: ${errorMessage(cleanupError)}` : '')
+      )
+    } catch {}
+  }
+
+  if (typeof child.on === 'function') {
+    child.on('spawn', () => {
+      spawned = true
+    })
+    child.on('error', handleError)
+    return
+  }
+  child.once('spawn', () => {
+    spawned = true
+  })
+  const listenForError = () => {
+    child.once('error', (error) => {
+      handleError(error)
+      listenForError()
+    })
+  }
+  listenForError()
 }
 
 function readSource(value) {
@@ -210,7 +269,9 @@ export function readNotifyCooldownMs(explicitValue, env = process.env) {
 
   const cooldownMs = Number(configuredValue)
   if (!Number.isSafeInteger(cooldownMs) || cooldownMs < minNotifyCooldownMs || cooldownMs > maxNotifyCooldownMs) {
-    throw new Error(`TOKENBOARD_NOTIFY_COOLDOWN_MS must be between ${minNotifyCooldownMs} and ${maxNotifyCooldownMs} milliseconds`)
+    throw new Error(
+      `TOKENBOARD_NOTIFY_COOLDOWN_MS must be between ${minNotifyCooldownMs} and ${maxNotifyCooldownMs} milliseconds`
+    )
   }
   return cooldownMs
 }
@@ -254,7 +315,9 @@ function normalizeChildOutput(value) {
 function trailingRuntime(options = {}) {
   const env = options.env || process.env
   const stateDir = options.stateDir || env.TOKENBOARD_STATE_DIR || configDir()
-  const hasCustomFileOps = Boolean(options.readFile || options.writeFile || options.unlink || options.rename || options.link)
+  const hasCustomFileOps = Boolean(
+    options.readFile || options.writeFile || options.unlink || options.rename || options.link
+  )
   const processValue = options.process || process
   return {
     env,
@@ -287,11 +350,15 @@ function acquireTrailingLock(lockPath, runtime) {
     runtime.ownerToken = ownerToken
     const startedAt = new Date(runtime.now()).toISOString()
     try {
-      runtime.writeFile(lockPath, JSON.stringify({
-        pid: runtime.process.pid,
-        startedAt,
-        token: ownerToken
-      }), { flag: 'wx' })
+      runtime.writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: runtime.process.pid,
+          startedAt,
+          token: ownerToken
+        }),
+        { flag: 'wx' }
+      )
     } catch (error) {
       if (error.code !== 'EEXIST') throw error
       const record = readTrailingLockRecord(lockPath, runtime)
@@ -308,16 +375,19 @@ function acquireTrailingLock(lockPath, runtime) {
       continue
     }
 
-    const processStartIdentity = typeof runtime.rename === 'function'
-      ? currentProcessStartIdentityForRuntime(runtime)
-      : undefined
+    const processStartIdentity =
+      typeof runtime.rename === 'function' ? currentProcessStartIdentityForRuntime(runtime) : undefined
     if (processStartIdentity) {
-      publishTrailingLock(lockPath, {
-        pid: runtime.process.pid,
-        startedAt,
-        token: ownerToken,
-        processStartIdentity: { status: 'known', value: processStartIdentity }
-      }, runtime)
+      publishTrailingLock(
+        lockPath,
+        {
+          pid: runtime.process.pid,
+          startedAt,
+          token: ownerToken,
+          processStartIdentity: { status: 'known', value: processStartIdentity }
+        },
+        runtime
+      )
     }
     return { acquired: true, ownerToken }
   }
@@ -332,14 +402,19 @@ function publishTrailingLock(lockPath, record, runtime) {
 
   const tempPath = trailingPublishPath(lockPath, runtime)
   try {
-    runtime.writeFile(tempPath, JSON.stringify({
-      pid: record.pid,
-      startedAt: record.startedAt,
-      ...(record.token ? { token: record.token } : {}),
-      ...(record.processStartIdentity?.status === 'known'
-        ? { processStartIdentity: record.processStartIdentity.value }
-        : {})
-    }), { flag: 'wx', mode: 0o600 })
+    runtime.writeFile(
+      tempPath,
+      JSON.stringify({
+        pid: record.pid,
+        startedAt: record.startedAt,
+        ...(record.token ? { token: record.token } : {}),
+        ...(record.identityProbeStartedAt ? { identityProbeStartedAt: record.identityProbeStartedAt } : {}),
+        ...(record.processStartIdentity?.status === 'known'
+          ? { processStartIdentity: record.processStartIdentity.value }
+          : {})
+      }),
+      { flag: 'wx', mode: 0o600 }
+    )
     runtime.rename(tempPath, lockPath)
   } catch (error) {
     try {
@@ -354,9 +429,8 @@ function publishTrailingLock(lockPath, record, runtime) {
 }
 
 function isTrailingLockOwnedByCurrentProcess(lockPathOrRecord, runtime) {
-  const record = typeof lockPathOrRecord === 'string'
-    ? readTrailingLockRecord(lockPathOrRecord, runtime)
-    : lockPathOrRecord
+  const record =
+    typeof lockPathOrRecord === 'string' ? readTrailingLockRecord(lockPathOrRecord, runtime) : lockPathOrRecord
   if (!record || record.pid !== runtime.process.pid) return false
   if (record.token) {
     return typeof runtime.ownerToken === 'string' && runtime.ownerToken === record.token
@@ -391,12 +465,14 @@ function isTrailingLockStale(record, runtime) {
     return false
   }
   if (pid === runtime.process.pid) return false
-  return probeProcessLiveness(pid, {
-    platform: runtime.platform,
-    nodeVersion: runtime.nodeVersion,
-    kill: runtime.process.kill?.bind(runtime.process),
-    runTasklist: runtime.runTasklist
-  }) === 'dead'
+  return (
+    probeProcessLiveness(pid, {
+      platform: runtime.platform,
+      nodeVersion: runtime.nodeVersion,
+      kill: runtime.process.kill?.bind(runtime.process),
+      runTasklist: runtime.runTasklist
+    }) === 'dead'
+  )
 }
 
 function currentProcessStartIdentityForRuntime(runtime) {
@@ -421,8 +497,12 @@ function processStartIdentityForPid(pid, runtime) {
   if (pid === runtime.process.pid && typeof runtime.processStartIdentity === 'string' && runtime.processStartIdentity) {
     return { status: 'known', value: runtime.processStartIdentity }
   }
-  if (!runtime.isRealProcess && pid !== runtime.process.pid &&
-    !runtime.readProcessStartIdentity && !runtime.runProcessIdentity) {
+  if (
+    !runtime.isRealProcess &&
+    pid !== runtime.process.pid &&
+    !runtime.readProcessStartIdentity &&
+    !runtime.runProcessIdentity
+  ) {
     return { status: 'unknown' }
   }
   return probeProcessStartIdentity(pid, {
@@ -495,16 +575,23 @@ function readTrailingLockRecord(lockPath, runtime) {
 function parseTrailingLockRecord(raw) {
   try {
     const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return { pid: null, token: null, processStartIdentity: null }
+    if (!parsed || typeof parsed !== 'object')
+      return { pid: null, token: null, identityProbeStartedAt: null, processStartIdentity: null }
     return {
       pid: Number.isSafeInteger(parsed.pid) && parsed.pid > 0 ? parsed.pid : null,
       token: typeof parsed.token === 'string' && parsed.token ? parsed.token : null,
-      processStartIdentity: typeof parsed.processStartIdentity === 'string' && parsed.processStartIdentity
-        ? parsed.processStartIdentity
-        : null
+      identityProbeStartedAt:
+        typeof parsed.identityProbeStartedAt === 'string' && parsed.identityProbeStartedAt
+          ? parsed.identityProbeStartedAt
+          : null,
+      processStartIdentity:
+        typeof parsed.processStartIdentity === 'string' && parsed.processStartIdentity
+          ? parsed.processStartIdentity
+          : null
     }
   } catch (error) {
-    if (error instanceof SyntaxError) return { pid: null, token: null, processStartIdentity: null }
+    if (error instanceof SyntaxError)
+      return { pid: null, token: null, identityProbeStartedAt: null, processStartIdentity: null }
     throw error
   }
 }
@@ -527,20 +614,77 @@ export function claimDispatchLock(lockPath, token, options = {}) {
   const pid = options.pid || process.pid
   const now = options.now || Date.now
   const workerPath = dispatchWorkerPath(lockPath, options.workerPath)
+  let lockOwned = false
   try {
     if (!hasDispatchLockToken(lockPath, token, readFile)) return false
-    writeFile(workerPath, JSON.stringify({
+    lockOwned = true
+    const workerStartedAt = new Date(now()).toISOString()
+    const worker = {
       token,
       pid,
-      startedAt: new Date(now()).toISOString()
-    }), { encoding: 'utf8', mode: 0o600 })
+      startedAt: workerStartedAt,
+      identityProbeStartedAt: workerStartedAt,
+      ...(typeof options.processStartIdentity === 'string' && options.processStartIdentity
+        ? { processStartIdentity: options.processStartIdentity }
+        : {})
+    }
+    writeFile(workerPath, JSON.stringify(worker), { encoding: 'utf8', mode: 0o600 })
+    const processStartIdentity =
+      typeof options.processStartIdentity === 'string' && options.processStartIdentity
+        ? options.processStartIdentity
+        : pid === process.pid
+          ? currentProcessStartIdentity({
+              pid,
+              platform: options.platform,
+              nodeVersion: options.nodeVersion,
+              readProcessStartIdentity: options.readProcessStartIdentity,
+              runProcessIdentity: options.runProcessIdentity,
+              readFile,
+              kill: (options.kill || process.kill).bind(process)
+            })
+          : undefined
+    if (processStartIdentity) {
+      const currentWorker = JSON.parse(readFile(workerPath))
+      if (currentWorker && currentWorker.token === token && currentWorker.pid === pid) {
+        writeFile(workerPath, JSON.stringify({ ...currentWorker, processStartIdentity }), {
+          encoding: 'utf8',
+          mode: 0o600
+        })
+      }
+    }
     if (hasDispatchLockToken(lockPath, token, readFile)) return true
     removeDispatchWorker(workerPath, token, options)
     return false
   } catch (error) {
+    if (!lockOwned) {
+      if (error.code === 'ENOENT') return false
+      throw error
+    }
+    let cleanupError
+    try {
+      releaseDispatchLock(lockPath, token, options)
+    } catch (error) {
+      cleanupError = error
+    }
+    if (cleanupError) {
+      throw aggregateDispatchClaimErrors(error, cleanupError)
+    }
     if (error.code === 'ENOENT') return false
     throw error
   }
+}
+
+function aggregateDispatchClaimErrors(primaryError, cleanupError) {
+  const aggregate = new AggregateError(
+    [primaryError, cleanupError],
+    `${errorMessage(primaryError)}; dispatch lock cleanup failed: ${errorMessage(cleanupError)}`
+  )
+  if (primaryError?.code && primaryError.code !== 'ENOENT') {
+    aggregate.code = primaryError.code
+  } else if (cleanupError?.code && cleanupError.code !== 'ENOENT') {
+    aggregate.code = cleanupError.code
+  }
+  return aggregate
 }
 
 export function releaseDispatchLock(lockPath, token, options = {}) {

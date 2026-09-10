@@ -24,7 +24,7 @@ type HistoryAuthorityMigrationPlan = {
 
 export function planAntigravityCliHistoryAuthorityMigration(
   input: PrepareHistoryAuthorityMigrationInput
-) : HistoryAuthorityMigrationPlan {
+): HistoryAuthorityMigrationPlan {
   if (input.cursor.source !== 'antigravity-cli') {
     return { required: false, requiresFullHistory: false, corrections: [], reset: false }
   }
@@ -55,15 +55,7 @@ export function applyAntigravityCliHistoryAuthorityMigration(input: {
   if (input.reset) resetLegacyCliMeteringState(input.cursor)
   for (const snapshot of input.corrections) {
     const key = correctionKey(snapshot)
-    input.cursor.files[key] = {
-      size: 0,
-      mtimeMs: Date.parse(input.collectedAt),
-      sha256: hash(key),
-      snapshots: [snapshot],
-      missingCost: true,
-      pendingUpload: true,
-      updatedAt: input.collectedAt
-    }
+    input.cursor.files[key] = newCorrectionEntry(snapshot, input.collectedAt)
   }
   input.cursor.antigravityCliMeteringVersion = antigravityCliHistoryMeteringVersion
 }
@@ -72,10 +64,7 @@ export function isAntigravityCliHistoryCorrectionKey(key: string) {
   return key.startsWith(antigravityCliHistoryCorrectionPrefix)
 }
 
-export function shouldRebuildCliHistoryFromFullScan(input: {
-  cursor: CursorState
-  fullHistory: boolean
-}) {
+export function shouldRebuildCliHistoryFromFullScan(input: { cursor: CursorState; fullHistory: boolean }) {
   return input.fullHistory
 }
 
@@ -107,7 +96,44 @@ export function restoreCliHistoryEntriesOutsideFullRebuild(input: {
   cursor: CursorState
   retainedEntries: Array<[string, CursorEntry]>
   rebuiltSnapshotGroups: ReadonlySet<string>
+  collectedAt?: string
 }) {
+  const collectedAt = input.collectedAt ?? new Date().toISOString()
+  const retainedCorrectionGroups = new Set<string>()
+  const missingGroups = new Map<
+    string,
+    {
+      hasPending: boolean
+      acknowledgedSnapshot?: CursorSnapshot
+    }
+  >()
+  for (const [key, entry] of input.retainedEntries) {
+    if (isAntigravityCliHistoryCorrectionKey(key)) {
+      for (const snapshot of entry.snapshots) {
+        retainedCorrectionGroups.add(cliHistorySnapshotGroupKey(snapshot))
+      }
+      continue
+    }
+    if (isCliHistorySessionKey(key)) continue
+    for (const snapshot of entry.snapshots) {
+      const groupKey = cliHistorySnapshotGroupKey(snapshot)
+      if (input.rebuiltSnapshotGroups.has(groupKey)) continue
+      const group = missingGroups.get(groupKey) ?? { hasPending: false }
+      if (entry.pendingUpload) {
+        group.hasPending = true
+      } else {
+        group.acknowledgedSnapshot ??= snapshot
+      }
+      missingGroups.set(groupKey, group)
+    }
+  }
+  const missingAcknowledgedSnapshots = new Map<string, CursorSnapshot>()
+  for (const [groupKey, group] of missingGroups) {
+    if (!group.hasPending && group.acknowledgedSnapshot) {
+      missingAcknowledgedSnapshots.set(groupKey, group.acknowledgedSnapshot)
+    }
+  }
+
   const retainedSessionKeys = new Set<string>()
   for (const [key, entry] of input.retainedEntries) {
     if (isAntigravityCliHistoryCorrectionKey(key)) {
@@ -115,9 +141,11 @@ export function restoreCliHistoryEntriesOutsideFullRebuild(input: {
       continue
     }
     if (isCliHistorySessionKey(key)) continue
-    const snapshots = entry.snapshots.filter((snapshot) => !input.rebuiltSnapshotGroups.has(
-      cliHistorySnapshotGroupKey(snapshot)
-    ))
+    const snapshots = entry.snapshots.filter(
+      (snapshot) =>
+        !input.rebuiltSnapshotGroups.has(cliHistorySnapshotGroupKey(snapshot)) &&
+        !missingAcknowledgedSnapshots.has(cliHistorySnapshotGroupKey(snapshot))
+    )
     if (snapshots.length === 0) continue
     const restoredEntry = { ...entry, snapshots }
     input.cursor.files[key] = restoredEntry
@@ -129,6 +157,13 @@ export function restoreCliHistoryEntriesOutsideFullRebuild(input: {
     if (!isCliHistorySessionKey(key) || !retainedSessionKeys.has(key)) continue
     input.cursor.files[key] = entry
   }
+
+  for (const [groupKey, snapshot] of missingAcknowledgedSnapshots) {
+    if (retainedCorrectionGroups.has(groupKey)) continue
+    const key = correctionKey(snapshot)
+    if (input.cursor.files[key]) continue
+    input.cursor.files[key] = newCorrectionEntry(zeroCorrectionSnapshot(snapshot), collectedAt)
+  }
 }
 
 export function markCliHistoryFullScanComplete(cursor: CursorState) {
@@ -136,7 +171,8 @@ export function markCliHistoryFullScanComplete(cursor: CursorState) {
 }
 
 function hasLegacyCliMeteringState(cursor: CursorState) {
-  return cursor.antigravityHistoryAliasMtimes !== undefined ||
+  return (
+    cursor.antigravityHistoryAliasMtimes !== undefined ||
     cursor.antigravityHistoryReplayReady !== undefined ||
     cursor.antigravityStatuslineReplayReady !== undefined ||
     cursor.antigravityHistoryReplayCompacted !== undefined ||
@@ -145,6 +181,7 @@ function hasLegacyCliMeteringState(cursor: CursorState) {
     cursor.lastScanGeneration !== undefined ||
     cursor.lastScanPrefixSha256 !== undefined ||
     Object.keys(cursor.files).some((key) => !key.startsWith('db-row\0antigravity-cli\0'))
+  )
 }
 
 function correctionSnapshots(cursor: CursorState) {
@@ -189,6 +226,35 @@ function resetLegacyCliMeteringState(cursor: CursorState) {
 
 function correctionKey(snapshot: CursorSnapshot) {
   return `${antigravityCliHistoryCorrectionPrefix}${hash(snapshotGroupKey(snapshot))}`
+}
+
+function newCorrectionEntry(snapshot: CursorSnapshot, collectedAt: string): CursorEntry {
+  const key = correctionKey(snapshot)
+  return {
+    size: 0,
+    mtimeMs: Date.parse(collectedAt),
+    sha256: hash(key),
+    snapshots: [snapshot],
+    missingCost: true,
+    pendingUpload: true,
+    updatedAt: collectedAt
+  }
+}
+
+function zeroCorrectionSnapshot(snapshot: CursorSnapshot): CursorSnapshot {
+  return {
+    source: snapshot.source,
+    usageDate: snapshot.usageDate,
+    timezone: snapshot.timezone,
+    model: snapshot.model,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    sessionCount: 0
+  }
 }
 
 function snapshotGroupKey(snapshot: CursorSnapshot) {

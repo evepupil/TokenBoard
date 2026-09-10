@@ -1,6 +1,6 @@
 # TokenBoard 发布前复核记录
 
-日期：2026-08-04（复核更新）
+日期：2026-08-05（复核更新）
 
 ## 范围
 
@@ -138,7 +138,7 @@
 - 来源专属 retry 状态文件存在但损坏或不可读时，`status.mjs` 保持该 `invalid` 状态为权威结果，不再被有效的 legacy 状态覆盖；仅在来源专属文件不存在或来源不匹配时回退。
 - Linux legacy retry marker 的进程身份现在绑定 `/proc/sys/kernel/random/boot_id` 与 `/proc/<pid>/stat` 启动 tick。boot ID 无法读取时返回 `unknown` 并保持 fail-closed，避免系统重启后的 PID 和 tick 复用误认活动进程。
 - 新增状态优先级、Linux boot ID 和 boot ID 读取失败回归测试；skill 脚本全量测试 `442/442` 通过。
-- 将 `brace-expansion` override 从 `5.0.8` 更新到 `5.0.9`，将 `miniflare` 使用的 `undici` 从 `7.28.0` 更新到 `7.29.0`，并将 Web 的 Hono 依赖提升到已修复 ReDoS 的 `4.13.0`；冻结锁文件安装成功，`pnpm audit --audit-level=high` 和完整 `pnpm audit --audit-level=moderate` 均通过，报告无已知漏洞。
+- 将 `brace-expansion` override 从 `5.0.8` 更新到 `5.0.9`，将 `miniflare` 使用的 `undici` 从 `7.28.0` 更新到 `7.29.0`，并将 Web 的 Hono 依赖提升到已修复 ReDoS 的 `4.13.0`；冻结锁文件安装成功，`pnpm audit --audit-level=high` 和完整 `pnpm audit --audit-level=moderate` 均通过，分别未报告已知高危及以上、或中危及以上漏洞。
 - 本轮最终验证：依赖更新后的 workspace 测试 usage-core `9`、Web `582`、collector `654` 全部通过；`pnpm typecheck`、`pnpm build`、`git diff --check` 均通过。当前仍未提交、未推送、未部署。
 
 ## 2026-08-04 legacy marker 保守互斥修复
@@ -146,7 +146,7 @@
 - 进程启动身份探测失败时不再生成 `fallback:` 可比较值；marker 省略未知身份字段，后续扫描回退到保守的 PID liveness 判断，避免与原生身份不一致时误删活动 marker。
 - 截断、非法 JSON 或字段无效的 `source-*.json` marker 现在保留在目录中并报告 `TOKENBOARD_LEGACY_RETRY_FENCE_CORRUPTED`，不会被当作陈旧 marker 删除后继续 retry。
 - 新增未知身份 marker 落盘、活动未知身份 marker 阻塞 all-source retry、all/source 两条路径损坏 marker 保留回归测试。
-- 最终验证：skill 脚本 `447/447`，workspace usage-core `9`、Web `582`、collector `654`，`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=moderate`（无已知漏洞）和 `git diff --check` 全部通过；仍未提交、未推送、未部署。
+- 最终验证：skill 脚本 `447/447`，workspace usage-core `9`、Web `582`、collector `654`，`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=moderate`（未报告已知中危及以上漏洞）和 `git diff --check` 全部通过；仍未提交、未推送、未部署。
 
 ## 2026-08-04 最终收口复核（历史快照）
 
@@ -181,7 +181,7 @@
 
 - 修复 bounded Codex canonical attribution 的 live/frozen 文件竞态：缓存未命中的 canonical 子批次现在从同一批已冻结的临时 `CODEX_HOME` 派生，并通过显式映射回原始 source file；不再在 canonical 扫描阶段重新读取 live 文件。移除已不再使用的 `codexHomes` 参数，避免误导调用方。
 - 新增回归覆盖：第二次有界采集期间 live 文件继续增长时，canonical 子批次仍读取冻结内容，并校验各批次实际 token 尾值；未发现跨 profile 映射丢失或重复归因路径。
-- 本轮本地验证：`pnpm test` 的 usage-core `9`、Web `582`、collector `655` 共 `1246/1246` 通过；skill 脚本 `452/452` 通过；`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=high`（无已知漏洞）、`pnpm install --frozen-lockfile --offline`、`git diff --check` 均通过。
+- 本轮本地验证：`pnpm test` 的 usage-core `9`、Web `582`、collector `655` 共 `1246/1246` 通过；skill 脚本 `452/452` 通过；`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=high`（未报告已知高危及以上漏洞）、`pnpm install --frozen-lockfile --offline`、`git diff --check` 均通过。
 - CodeRabbit CLI `0.7.1` 执行 `coderabbit review --agent --base-commit c160d455a12f7c49fed1ba2ddd84dfa103d6018b -c AGENTS.md` 完成，返回 `review_completed`、`findings: 0`，覆盖当前基线差异及未提交修改涉及的文件。
 - OMP `17.1.8` 使用指定的 `grok-4.5` 模型完成只读复核，结论为未发现可操作缺陷；Claude Code `2.1.220` 的标准与 `--bare` 只读调用均在超过 10 分钟内无输出，已停止且不计为通过证据。
 - 追加上述外部复核记录后再次执行同一 CodeRabbit 命令时返回 `rate_limit`，没有产生新的 `review_completed` 或 `findings: 0`；该限流结果不作为通过证据。此前成功复核覆盖的业务/测试差异未被修改，本节新增内容仅为审查记录。

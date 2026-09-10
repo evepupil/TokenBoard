@@ -1,0 +1,295 @@
+{
+  "$schema": "https://ccusage.com/config-schema.json",
+  "codex": {
+    "defaults": {
+      "speed": "auto"
+    }
+  },
+  "defaults": {
+    "pricingOverrides": {
+      "claude-fable-5": {
+        "cacheCreationInputTokenCost": 0.0000125,
+        "cacheReadInputTokenCost": 0.000001,
+        "inputCostPerToken": 0.00001,
+        "outputCostPerToken": 0.00005,
+        "maxInputTokens": 1000000
+      },
+      "claude-fable-5-preview": {
+        "cacheCreationInputTokenCost": 0.0000125,
+        "cacheReadInputTokenCost": 0.000001,
+        "inputCostPerToken": 0.00001,
+        "outputCostPerToken": 0.00005,
+        "maxInputTokens": 1000000
+      },
+      "claude-mythos-5": {
+        "cacheCreationInputTokenCost": 0.0000125,
+        "cacheReadInputTokenCost": 0.000001,
+        "inputCostPerToken": 0.00001,
+        "outputCostPerToken": 0.00005,
+        "maxInputTokens": 1000000
+      },
+      "claude-mythos-5-preview": {
+        "cacheCreationInputTokenCost": 0.0000125,
+        "cacheReadInputTokenCost": 0.000001,
+        "inputCostPerToken": 0.00001,
+        "outputCostPerToken": 0.00005,
+        "maxInputTokens": 1000000
+      },
+      "claude-mythos-preview": {
+        "cacheCreationInputTokenCost": 0.0000125,
+        "cacheReadInputTokenCost": 0.000001,
+        "inputCostPerToken": 0.00001,
+        "outputCostPerToken": 0.00005,
+        "maxInputTokens": 1000000
+      },
+      "claude-opus-5": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.000025,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1000000
+      },
+      "claude-opus-4-8": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.000025,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1000000
+      },
+      "claude-opus-4-7": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.000025,
+        "maxInputTokens": 1000000
+      },
+      "claude-opus-4-6": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.000025,
+        "maxInputTokens": 1000000
+      },
+      "claude-opus-4-5": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.000025,
+        "maxInputTokens": 200000
+      },
+      "claude-opus-4-1": {
+        "cacheCreationInputTokenCost": 0.00001875,
+        "cacheReadInputTokenCost": 0.0000015,
+        "inputCostPerToken": 0.000015,
+        "outputCostPerToken": 0.000075,
+        "maxInputTokens": 200000
+      },
+      "claude-opus-4": {
+        "cacheCreationInputTokenCost": 0.00001875,
+        "cacheReadInputTokenCost": 0.0000015,
+        "inputCostPerToken": 0.000015,
+        "outputCostPerToken": 0.000075,
+        "maxInputTokens": 200000
+      },
+      "claude-sonnet-5": {
+        "cacheCreationInputTokenCost": 0.0000025,
+        "cacheReadInputTokenCost": 0.0000002,
+        "inputCostPerToken": 0.000002,
+        "outputCostPerToken": 0.00001,
+        "maxInputTokens": 1000000
+      },
+      "claude-sonnet-4-6": {
+        "cacheCreationInputTokenCost": 0.00000375,
+        "cacheReadInputTokenCost": 0.0000003,
+        "inputCostPerToken": 0.000003,
+        "outputCostPerToken": 0.000015,
+        "maxInputTokens": 1000000
+      },
+      "claude-sonnet-4-5": {
+        "cacheCreationInputTokenCost": 0.00000375,
+        "cacheReadInputTokenCost": 0.0000003,
+        "inputCostPerToken": 0.000003,
+        "outputCostPerToken": 0.000015,
+        "maxInputTokens": 200000
+      },
+      "claude-sonnet-4": {
+        "cacheCreationInputTokenCost": 0.00000375,
+        "cacheReadInputTokenCost": 0.0000003,
+        "inputCostPerToken": 0.000003,
+        "outputCostPerToken": 0.000015,
+        "maxInputTokens": 1000000
+      },
+      "claude-haiku-4-5": {
+        "cacheCreationInputTokenCost": 0.00000125,
+        "cacheReadInputTokenCost": 0.0000001,
+        "inputCostPerToken": 0.000001,
+        "outputCostPerToken": 0.000005,
+        "maxInputTokens": 200000
+      },
+      "claude-haiku-3-5": {
+        "cacheCreationInputTokenCost": 0.000001,
+        "cacheReadInputTokenCost": 0.00000008,
+        "inputCostPerToken": 0.0000008,
+        "outputCostPerToken": 0.000004,
+        "maxInputTokens": 200000
+      },
+      "claude-3-7-sonnet": {
+        "cacheCreationInputTokenCost": 0.00000375,
+        "cacheReadInputTokenCost": 0.0000003,
+        "inputCostPerToken": 0.000003,
+        "outputCostPerToken": 0.000015,
+        "maxInputTokens": 200000
+      },
+      "claude-3-opus": {
+        "cacheCreationInputTokenCost": 0.00001875,
+        "cacheReadInputTokenCost": 0.0000015,
+        "inputCostPerToken": 0.000015,
+        "outputCostPerToken": 0.000075,
+        "maxInputTokens": 200000
+      },
+      "claude-3-sonnet": {
+        "cacheCreationInputTokenCost": 0.00000375,
+        "cacheReadInputTokenCost": 0.0000003,
+        "inputCostPerToken": 0.000003,
+        "outputCostPerToken": 0.000015,
+        "maxInputTokens": 200000
+      },
+      "claude-3-haiku": {
+        "cacheCreationInputTokenCost": 0.0000003125,
+        "cacheReadInputTokenCost": 0.000000025,
+        "inputCostPerToken": 0.00000025,
+        "outputCostPerToken": 0.00000125,
+        "maxInputTokens": 200000
+      },
+      "grok-4.5": {
+        "cacheReadInputTokenCost": 0.0000003,
+        "cacheReadInputTokenCostAbove200kTokens": 0.0000006,
+        "inputCostPerToken": 0.000002,
+        "inputCostPerTokenAbove200kTokens": 0.000004,
+        "outputCostPerToken": 0.000006,
+        "outputCostPerTokenAbove200kTokens": 0.000012,
+        "maxInputTokens": 500000
+      },
+      "gpt-5.6-sol": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.00003,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.6-terra": {
+        "cacheCreationInputTokenCost": 0.0000025,
+        "cacheReadInputTokenCost": 0.0000002,
+        "inputCostPerToken": 0.000002,
+        "outputCostPerToken": 0.000012,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.6-luna": {
+        "cacheCreationInputTokenCost": 0.00000025,
+        "cacheReadInputTokenCost": 0.00000002,
+        "inputCostPerToken": 0.0000002,
+        "outputCostPerToken": 0.0000012,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.6": {
+        "cacheCreationInputTokenCost": 0.00000625,
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.00003,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.5": {
+        "cacheReadInputTokenCost": 0.0000005,
+        "inputCostPerToken": 0.000005,
+        "outputCostPerToken": 0.00003,
+        "fastMultiplier": 2.5,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.5-pro": {
+        "inputCostPerToken": 0.00003,
+        "outputCostPerToken": 0.00018,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.4": {
+        "cacheReadInputTokenCost": 0.00000025,
+        "inputCostPerToken": 0.0000025,
+        "outputCostPerToken": 0.000015,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.4-mini": {
+        "cacheReadInputTokenCost": 0.000000075,
+        "inputCostPerToken": 0.00000075,
+        "outputCostPerToken": 0.0000045,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.4-nano": {
+        "cacheReadInputTokenCost": 0.00000002,
+        "inputCostPerToken": 0.0000002,
+        "outputCostPerToken": 0.00000125,
+        "fastMultiplier": 2,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.4-pro": {
+        "inputCostPerToken": 0.00003,
+        "outputCostPerToken": 0.00018,
+        "maxInputTokens": 1050000
+      },
+      "gpt-5.3-codex": {
+        "cacheReadInputTokenCost": 0.000000175,
+        "inputCostPerToken": 0.00000175,
+        "outputCostPerToken": 0.000014,
+        "fastMultiplier": 2,
+        "maxInputTokens": 272000
+      },
+      "gpt-5.2-codex": {
+        "cacheReadInputTokenCost": 0.000000175,
+        "inputCostPerToken": 0.00000175,
+        "outputCostPerToken": 0.000014,
+        "maxInputTokens": 272000
+      },
+      "gpt-5.2": {
+        "cacheReadInputTokenCost": 0.000000175,
+        "inputCostPerToken": 0.00000175,
+        "outputCostPerToken": 0.000014,
+        "maxInputTokens": 272000
+      },
+      "gpt-5.2-pro": {
+        "inputCostPerToken": 0.000021,
+        "outputCostPerToken": 0.000168,
+        "maxInputTokens": 272000
+      },
+      "gpt-5.1-codex": {
+        "cacheReadInputTokenCost": 0.000000125,
+        "inputCostPerToken": 0.00000125,
+        "outputCostPerToken": 0.00001,
+        "maxInputTokens": 272000
+      },
+      "gpt-5.1": {
+        "cacheReadInputTokenCost": 0.000000125,
+        "inputCostPerToken": 0.00000125,
+        "outputCostPerToken": 0.00001,
+        "maxInputTokens": 272000
+      },
+      "gpt-5-codex": {
+        "cacheReadInputTokenCost": 0.000000125,
+        "inputCostPerToken": 0.00000125,
+        "outputCostPerToken": 0.00001,
+        "maxInputTokens": 272000
+      },
+      "gpt-5": {
+        "cacheReadInputTokenCost": 0.000000125,
+        "inputCostPerToken": 0.00000125,
+        "outputCostPerToken": 0.00001,
+        "maxInputTokens": 272000
+      }
+    }
+  }
+}

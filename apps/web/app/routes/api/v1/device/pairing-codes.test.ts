@@ -60,7 +60,7 @@ describe('pairing codes route', () => {
       expiresAt: '2026-06-30T10:30:00.000Z'
     } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -74,10 +74,6 @@ describe('pairing codes route', () => {
       policy: { id: 'pairing-code', maxRequests: 20, windowSeconds: 60 },
       subject: { kind: 'user', value: 'user_1' }
     })
-    expect(mockedCreatePairingCode).toHaveBeenCalledWith(
-      { kind: 'repository' },
-      'user_1',
-      { kind: 'deps' }
-    )
+    expect(mockedCreatePairingCode).toHaveBeenCalledWith({ kind: 'repository' }, 'user_1', { kind: 'deps' })
   })
 })

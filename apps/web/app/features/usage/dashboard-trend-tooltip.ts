@@ -5,13 +5,11 @@ let dashboardTrendTooltipFrame = 0
 let dashboardTrendTooltipAnchor: HTMLElement | null = null
 let dashboardTrendTooltipActiveBar: HTMLElement | null = null
 let dashboardTrendPointerFocusTarget: HTMLElement | null = null
-let pendingDashboardTrendPointerState:
-  | {
-      bar: HTMLElement | null
-      clientX: number
-      clientY: number
-    }
-  | null = null
+let pendingDashboardTrendPointerState: {
+  bar: HTMLElement | null
+  clientX: number
+  clientY: number
+} | null = null
 
 export function initDashboardTrendTooltip() {
   document.addEventListener('pointerdown', handleDashboardTrendPointerDown)
@@ -82,14 +80,8 @@ export function getDashboardTrendTooltipPosition(props: {
   viewportHeight: number
 }) {
   const offset = 14
-  const left = Math.min(
-    props.clientX + offset,
-    props.viewportWidth - props.tooltipWidth - offset
-  )
-  const top = Math.min(
-    props.clientY + offset,
-    props.viewportHeight - props.tooltipHeight - offset
-  )
+  const left = Math.min(props.clientX + offset, props.viewportWidth - props.tooltipWidth - offset)
+  const top = Math.min(props.clientY + offset, props.viewportHeight - props.tooltipHeight - offset)
 
   return {
     left: Math.max(offset, left),
@@ -180,11 +172,7 @@ function showFocusedDashboardTrendTooltip() {
   }
 
   const rect = dashboardTrendTooltipAnchor.getBoundingClientRect()
-  showDashboardTrendTooltip(
-    dashboardTrendTooltipAnchor,
-    rect.left + rect.width / 2,
-    rect.top
-  )
+  showDashboardTrendTooltip(dashboardTrendTooltipAnchor, rect.left + rect.width / 2, rect.top)
   return true
 }
 

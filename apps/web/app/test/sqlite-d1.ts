@@ -56,13 +56,10 @@ export function runSql(dbPath: string, input: string) {
 
 function runPreparedSql(dbPath: string, sql: string, bindings: unknown[]) {
   const parameterCommands = bindings.map((value, index) => parameterInsertSql(index, value))
-  const output = runSql(dbPath, [
-    '.mode json',
-    '.parameter init',
-    'DELETE FROM temp.sqlite_parameters;',
-    ...parameterCommands,
-    sql
-  ].join('\n'))
+  const output = runSql(
+    dbPath,
+    ['.mode json', '.parameter init', 'DELETE FROM temp.sqlite_parameters;', ...parameterCommands, sql].join('\n')
+  )
 
   if (!output.trim()) return []
   return parseRows(parseSqliteJsonRows(output))
@@ -75,22 +72,16 @@ function runPreparedSqlBatch(dbPath: string, statements: SqlitePreparedStatement
     `${statement.sql};`,
     'SELECT changes() AS changes;'
   ])
-  const output = runSql(dbPath, [
-    '.bail on',
-    '.mode json',
-    '.parameter init',
-    'BEGIN IMMEDIATE;',
-    ...commands,
-    'COMMIT;'
-  ].join('\n'))
+  const output = runSql(
+    dbPath,
+    ['.bail on', '.mode json', '.parameter init', 'BEGIN IMMEDIATE;', ...commands, 'COMMIT;'].join('\n')
+  )
   const resultSets = sqliteJsonResultSets(output)
     .map((json) => JSON.parse(json) as SqliteRow[])
     .filter((rows) => rows.length === 1 && 'changes' in rows[0])
 
   if (resultSets.length !== statements.length) {
-    throw new Error(
-      `sqlite batch returned ${resultSets.length} results for ${statements.length} statements`
-    )
+    throw new Error(`sqlite batch returned ${resultSets.length} results for ${statements.length} statements`)
   }
 
   return resultSets.map((rows) => ({

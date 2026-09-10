@@ -41,16 +41,27 @@ export function subtractMetric(left: Metric, right: Metric): Metric {
 export function sumMetrics(metrics: Metric[]): Metric {
   if (metrics.length === 0) throw new Error('Codex subagent session row has no model metrics')
   const first = metrics[0]
-  return metrics.reduce((total, metric) => ({
-    usageDate: first.usageDate,
-    model: first.model,
-    inputTokens: total.inputTokens + metric.inputTokens,
-    outputTokens: total.outputTokens + metric.outputTokens,
-    cacheCreationTokens: total.cacheCreationTokens + metric.cacheCreationTokens,
-    cacheReadTokens: total.cacheReadTokens + metric.cacheReadTokens,
-    totalTokens: total.totalTokens + metric.totalTokens,
-    costUsd: total.costUsd + metric.costUsd
-  }), { ...first, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, costUsd: 0 })
+  return metrics.reduce(
+    (total, metric) => ({
+      usageDate: first.usageDate,
+      model: first.model,
+      inputTokens: total.inputTokens + metric.inputTokens,
+      outputTokens: total.outputTokens + metric.outputTokens,
+      cacheCreationTokens: total.cacheCreationTokens + metric.cacheCreationTokens,
+      cacheReadTokens: total.cacheReadTokens + metric.cacheReadTokens,
+      totalTokens: total.totalTokens + metric.totalTokens,
+      costUsd: total.costUsd + metric.costUsd
+    }),
+    {
+      ...first,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+      costUsd: 0
+    }
+  )
 }
 
 export function distributeMetric(total: Metric, originals: Metric[]) {

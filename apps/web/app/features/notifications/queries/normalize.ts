@@ -5,11 +5,7 @@ import {
   normalizeScheduleTimes,
   normalizeScheduleWeekdays
 } from '../time'
-import type {
-  WebhookSubscriptionRow,
-  WebhookSubscriptionSecretDbRow,
-  WebhookSubscriptionSecretRow
-} from './types'
+import type { WebhookSubscriptionRow, WebhookSubscriptionSecretDbRow, WebhookSubscriptionSecretRow } from './types'
 
 export function normalizeSecretRow(row: WebhookSubscriptionSecretDbRow): WebhookSubscriptionSecretRow {
   return {
@@ -42,9 +38,7 @@ export function normalizeSubscriptionSummary(row: WebhookSubscriptionRow): Webho
   }
 }
 
-export function normalizeSettingsSubscriptionSummary(
-  row: WebhookSubscriptionRow
-): WebhookSubscriptionSummary {
+export function normalizeSettingsSubscriptionSummary(row: WebhookSubscriptionRow): WebhookSubscriptionSummary {
   const scheduleTimes = normalizeSettingsScheduleTimes(row)
   const scheduleWeekdays = normalizeSettingsScheduleWeekdays(row)
   return {
@@ -66,15 +60,11 @@ export function normalizeSettingsSubscriptionSummary(
 }
 
 function normalizeSettingsScheduleTimes(row: WebhookSubscriptionRow) {
-  const storedValue = isEmptyScheduleValue(row.scheduleTimesLocal)
-    ? row.scheduleTimeLocal
-    : row.scheduleTimesLocal
+  const storedValue = isEmptyScheduleValue(row.scheduleTimesLocal) ? row.scheduleTimeLocal : row.scheduleTimesLocal
   try {
     return {
       values: normalizeScheduleTimes(storedValue),
-      needsRepair:
-        isEmptyScheduleValue(row.scheduleTimesLocal) ||
-        isEmptyScheduleValue(storedValue)
+      needsRepair: isEmptyScheduleValue(row.scheduleTimesLocal) || isEmptyScheduleValue(storedValue)
     }
   } catch {
     return normalizeLegacyScheduleTime(row.scheduleTimeLocal)

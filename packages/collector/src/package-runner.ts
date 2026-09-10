@@ -7,7 +7,7 @@ export type PackageRunner = {
   runPackageArgs(packageName: string, binaryName: string, packageArgs: string[]): string[]
 }
 
-export const ccusagePackageSpecifier = 'ccusage@20.0.19'
+export const ccusagePackageSpecifier = 'ccusage@20.0.20'
 
 export function resolvePackageRunner(
   packageManager = process.env.TOKENBOARD_PACKAGE_MANAGER,
@@ -20,18 +20,21 @@ export function resolvePackageRunner(
     if (!fileExists(forcedCcusage)) {
       throw new Error(`TOKENBOARD_CCUSAGE_BIN does not exist: ${forcedCcusage}`)
     }
-    return createLocalCcusageRunner(forcedCcusage)
+    return createLocalCcusageRunner(forcedCcusage, fileExists)
   }
 
   const localCcusage = resolveLocalCcusageBin(platform)
   if (!forcePackageRunner && fileExists(localCcusage)) {
-    return createLocalCcusageRunner(localCcusage)
+    return createLocalCcusageRunner(localCcusage, fileExists)
   }
 
   if (packageManager === 'bun') {
     return {
       command: process.env.TOKENBOARD_BUNX_BIN || 'bunx',
-      runPackageArgs: (packageName, _binaryName, packageArgs) => [packageName, ...packageArgs]
+      runPackageArgs: (packageName, _binaryName, packageArgs) => [
+        packageName,
+        ...appendCcusageConfig(packageName, packageArgs, fileExists)
+      ]
     }
   }
 
@@ -45,7 +48,7 @@ export function resolvePackageRunner(
         packageName,
         '--',
         binaryName,
-        ...packageArgs
+        ...appendCcusageConfig(packageName, packageArgs, fileExists)
       ]
     }
   }
@@ -53,21 +56,38 @@ export function resolvePackageRunner(
   if (packageManager === 'pnpm') {
     return {
       command: process.env.TOKENBOARD_PNPM_BIN || packageCommand('pnpm', platform),
-      runPackageArgs: (packageName, _binaryName, packageArgs) => ['dlx', packageName, ...packageArgs]
+      runPackageArgs: (packageName, _binaryName, packageArgs) => [
+        'dlx',
+        packageName,
+        ...appendCcusageConfig(packageName, packageArgs, fileExists)
+      ]
     }
   }
 
   return {
     command: process.env.TOKENBOARD_NPX_BIN || packageCommand('npx', platform),
-    runPackageArgs: (packageName, _binaryName, packageArgs) => [packageName, ...packageArgs]
+    runPackageArgs: (packageName, _binaryName, packageArgs) => [
+      packageName,
+      ...appendCcusageConfig(packageName, packageArgs, fileExists)
+    ]
   }
 }
 
-function createLocalCcusageRunner(command: string): PackageRunner {
+function createLocalCcusageRunner(command: string, fileExists: (path: string) => boolean): PackageRunner {
   return {
     command,
-    runPackageArgs: (_packageName, _binaryName, packageArgs) => packageArgs
+    runPackageArgs: (packageName, _binaryName, packageArgs) => appendCcusageConfig(packageName, packageArgs, fileExists)
   }
+}
+
+function appendCcusageConfig(packageName: string, packageArgs: string[], fileExists: (path: string) => boolean) {
+  if (packageName !== ccusagePackageSpecifier) return packageArgs
+  const configPath = process.env.TOKENBOARD_CCUSAGE_CONFIG?.trim()
+  if (!configPath) return packageArgs
+  if (!fileExists(configPath)) {
+    throw new Error(`TOKENBOARD_CCUSAGE_CONFIG does not exist: ${configPath}`)
+  }
+  return [...packageArgs, '--config', configPath]
 }
 
 function packageCommand(command: string, platform: string) {

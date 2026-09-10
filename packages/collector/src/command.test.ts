@@ -2,12 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, test } from 'vitest'
-import {
-  assertWindowsShellSafeInvocation,
-  buildShellInvocation,
-  commandShellOption,
-  runJsonCommand
-} from './command'
+import { assertWindowsShellSafeInvocation, buildShellInvocation, commandShellOption, runJsonCommand } from './command'
 
 describe('runJsonCommand', () => {
   test('passes arguments directly without shell parsing', async () => {
@@ -22,11 +17,9 @@ describe('runJsonCommand', () => {
 
   test('fails visibly when a command exceeds the configured timeout', async () => {
     await expect(
-      runJsonCommand(
-        process.execPath,
-        ['-e', 'setTimeout(() => console.log(JSON.stringify({ ok: true })), 50)'],
-        { timeoutMs: 1 }
-      )
+      runJsonCommand(process.execPath, ['-e', 'setTimeout(() => console.log(JSON.stringify({ ok: true })), 50)'], {
+        timeoutMs: 1
+      })
     ).rejects.toThrow()
   })
 
@@ -69,15 +62,11 @@ describe('runJsonCommand', () => {
     const retryLogs: string[] = []
 
     await expect(
-      runJsonCommand(
-        process.execPath,
-        ['-e', 'console.error("invalid input"); process.exit(1)'],
-        {
-          retries: 2,
-          retryDelayMs: 0,
-          onRetry: (line) => retryLogs.push(line)
-        }
-      )
+      runJsonCommand(process.execPath, ['-e', 'console.error("invalid input"); process.exit(1)'], {
+        retries: 2,
+        retryDelayMs: 0,
+        onRetry: (line) => retryLogs.push(line)
+      })
     ).rejects.toThrow()
     expect(retryLogs).toEqual([])
   })
@@ -90,42 +79,57 @@ describe('runJsonCommand', () => {
   })
 
   test('rejects shell metacharacters before invoking a Windows command shim', () => {
-    expect(() => assertWindowsShellSafeInvocation('npm.cmd', ['exec', 'ccusage', '--timezone', 'UTC&whoami'], true))
-      .toThrow('Windows command argument 3')
-    expect(() => assertWindowsShellSafeInvocation('npm.cmd', ['exec', 'ccusage', '--timezone', 'Asia/Shanghai'], true))
-      .not.toThrow()
+    expect(() =>
+      assertWindowsShellSafeInvocation('npm.cmd', ['exec', 'ccusage', '--timezone', 'UTC&whoami'], true)
+    ).toThrow('Windows command argument 3')
+    expect(() =>
+      assertWindowsShellSafeInvocation('npm.cmd', ['exec', 'ccusage', '--timezone', 'Asia/Shanghai'], true)
+    ).not.toThrow()
   })
 
   test('allows legal parentheses in Windows command arguments', () => {
-    expect(() => assertWindowsShellSafeInvocation(
-      'npm.cmd',
-      ['exec', 'ccusage', '--input-dir', 'C:\\Program Files (x86)\\TokenBoard'],
-      true
-    )).not.toThrow()
+    expect(() =>
+      assertWindowsShellSafeInvocation(
+        'npm.cmd',
+        ['exec', 'ccusage', '--input-dir', 'C:\\Program Files (x86)\\TokenBoard'],
+        true
+      )
+    ).not.toThrow()
   })
 
   test('rejects shell metacharacters in a Windows command shim path', () => {
-    expect(() => assertWindowsShellSafeInvocation('C:/tools/npm.cmd&whoami', [], true))
-      .toThrow('Windows command shim path')
+    expect(() => assertWindowsShellSafeInvocation('C:/tools/npm.cmd&whoami', [], true)).toThrow(
+      'Windows command shim path'
+    )
   })
 
   test('allows legal parentheses in a Windows command shim path', () => {
-    expect(() => assertWindowsShellSafeInvocation(
-      'C:/Program Files (x86)/nodejs/npm.cmd',
-      ['exec', 'ccusage', '--timezone', 'Asia/Shanghai'],
-      true
-    )).not.toThrow()
+    expect(() =>
+      assertWindowsShellSafeInvocation(
+        'C:/Program Files (x86)/nodejs/npm.cmd',
+        ['exec', 'ccusage', '--timezone', 'Asia/Shanghai'],
+        true
+      )
+    ).not.toThrow()
   })
 
   test('quotes Windows shell arguments including parenthesized paths', () => {
-    expect(buildShellInvocation(
-      'C:/Program Files (x86)/nodejs/npm.cmd',
-      ['exec', 'ccusage', '--input-dir', 'C:/checkouts/(repo) with spaces', 'C:\\work\\'],
-      true
-    )).toEqual({
-      command: '"C:/Program Files (x86)/nodejs/npm.cmd" "exec" "ccusage" "--input-dir" "C:/checkouts/(repo) with spaces" "C:\\work\\\\"',
-      args: [],
-      shell: true
+    expect(
+      buildShellInvocation(
+        'C:/Program Files (x86)/nodejs/npm.cmd',
+        ['exec', 'ccusage', '--input-dir', 'C:/checkouts/(repo) with spaces', 'C:\\work\\'],
+        true
+      )
+    ).toEqual({
+      command: process.env.ComSpec || 'cmd.exe',
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        '""C:/Program Files (x86)/nodejs/npm.cmd" exec ccusage --input-dir "C:/checkouts/(repo) with spaces" "C:\\work\\\\""'
+      ],
+      shell: false,
+      windowsVerbatimArguments: true
     })
   })
 

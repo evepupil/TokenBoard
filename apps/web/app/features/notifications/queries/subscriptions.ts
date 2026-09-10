@@ -1,10 +1,6 @@
 import type { WebhookSubscriptionSummary } from '../schema'
 import { normalizeSecretRow, normalizeSettingsSubscriptionSummary } from './normalize'
-import type {
-  DueWebhookSubscription,
-  WebhookSubscriptionRow,
-  WebhookSubscriptionSecretDbRow
-} from './types'
+import type { DueWebhookSubscription, WebhookSubscriptionRow, WebhookSubscriptionSecretDbRow } from './types'
 
 const subscriptionSummarySelect = `
   SELECT
@@ -63,10 +59,7 @@ const subscriptionSecretSelect = `
   JOIN profiles ON profiles.user_id = webhook_subscriptions.user_id
 `
 
-export async function listWebhookSubscriptions(
-  db: D1Database,
-  userId: string
-): Promise<WebhookSubscriptionSummary[]> {
+export async function listWebhookSubscriptions(db: D1Database, userId: string): Promise<WebhookSubscriptionSummary[]> {
   const rows = await db
     .prepare(
       `
@@ -81,11 +74,7 @@ export async function listWebhookSubscriptions(
   return (rows.results ?? []).map(normalizeSettingsSubscriptionSummary)
 }
 
-export async function getWebhookSubscriptionForUser(
-  db: D1Database,
-  userId: string,
-  subscriptionId: string
-) {
+export async function getWebhookSubscriptionForUser(db: D1Database, userId: string, subscriptionId: string) {
   const row = await db
     .prepare(
       `
@@ -149,14 +138,7 @@ export async function claimWebhookSubscription(input: {
           )
       `
     )
-    .bind(
-      input.lockedUntilIso,
-      input.nowIso,
-      input.nowIso,
-      input.subscriptionId,
-      input.nowIso,
-      input.nowIso
-    )
+    .bind(input.lockedUntilIso, input.nowIso, input.nowIso, input.subscriptionId, input.nowIso, input.nowIso)
     .run()
 
   return Number(result.meta?.changes ?? 0) > 0

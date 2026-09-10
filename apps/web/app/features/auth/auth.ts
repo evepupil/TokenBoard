@@ -8,7 +8,8 @@ export function createAuth(
   request?: Request
 ) {
   const origin = request ? new URL(request.url).origin : undefined
-  const secret = env.BETTER_AUTH_SECRET || (origin?.startsWith('http://localhost') ? 'dev-tokenboard-local-secret' : undefined)
+  const secret =
+    env.BETTER_AUTH_SECRET || (origin?.startsWith('http://localhost') ? 'dev-tokenboard-local-secret' : undefined)
 
   return betterAuth({
     appName: 'TokenBoard',

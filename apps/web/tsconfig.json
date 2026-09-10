@@ -1,24 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": [
-      "ESNext",
-      "DOM"
-    ],
-    "types": [
-      "vite/client",
-      "@cloudflare/workers-types"
-    ],
+    "lib": ["ESNext", "DOM"],
+    "types": ["vite/client", "@cloudflare/workers-types"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "paths": {
-      "@/*": [
-        "./app/*"
-      ]
+      "@/*": ["./app/*"]
     }
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx"
-  ]
+  "include": ["**/*.ts", "**/*.tsx"]
 }

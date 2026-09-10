@@ -39,59 +39,64 @@ describe('Codex daily cost projection', () => {
     ])
   })
 
-  test('keeps shared historical snapshot costs and hashes stable across since-driven batch boundaries', async () => {
-    const codexHome = await createEmptyCodexHome()
-    const stateDir = await mkdtemp(join(tmpdir(), 'tokenboard-cost-projection-state-'))
-    const commandArgs: string[][] = []
-    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
-    vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '2')
+  test(
+    'keeps shared historical snapshot costs and hashes stable across since-driven batch boundaries',
+    async () => {
+      const codexHome = await createEmptyCodexHome()
+      const stateDir = await mkdtemp(join(tmpdir(), 'tokenboard-cost-projection-state-'))
+      const commandArgs: string[][] = []
+      vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+      vi.stubEnv('TOKENBOARD_CODEX_BATCH_SIZE', '2')
 
-    try {
-      await Promise.all([
-        writeJsonl(join(codexHome, 'sessions', '2026', '07', '01', 'legacy.jsonl'), [
-          tokenCountEvent('2026-07-01T01:00:00.000Z', 10)
-        ]),
-        writeJsonl(join(codexHome, 'sessions', '2026', '07', '08', 'first.jsonl'), [
-          tokenCountEvent('2026-07-08T01:00:00.000Z', 100)
-        ]),
-        writeJsonl(join(codexHome, 'sessions', '2026', '07', '08', 'second.jsonl'), [
-          tokenCountEvent('2026-07-08T02:00:00.000Z', 100)
+      try {
+        await Promise.all([
+          writeJsonl(join(codexHome, 'sessions', '2026', '07', '01', 'legacy.jsonl'), [
+            tokenCountEvent('2026-07-01T01:00:00.000Z', 10)
+          ]),
+          writeJsonl(join(codexHome, 'sessions', '2026', '07', '08', 'first.jsonl'), [
+            tokenCountEvent('2026-07-08T01:00:00.000Z', 100)
+          ]),
+          writeJsonl(join(codexHome, 'sessions', '2026', '07', '08', 'second.jsonl'), [
+            tokenCountEvent('2026-07-08T02:00:00.000Z', 100)
+          ])
         ])
-      ])
 
-      const runner = createBatchSensitiveRunner(commandArgs)
-      const broad = await collectCodexUsage({
-        codexHome,
-        since: '20260701',
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-07-28T00:00:00.000Z',
-        stateDir,
-        runner
-      })
-      const narrow = await collectCodexUsage({
-        codexHome,
-        since: '20260708',
-        timezone: 'Asia/Shanghai',
-        collectedAt: '2026-07-28T00:00:00.000Z',
-        stateDir,
-        runner
-      })
-      const targetDay = (snapshots: UsageSnapshot[]) => snapshots.filter((snapshot) => snapshot.usageDate === '2026-07-08')
+        const runner = createBatchSensitiveRunner(commandArgs)
+        const broad = await collectCodexUsage({
+          codexHome,
+          since: '20260701',
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-07-28T00:00:00.000Z',
+          stateDir,
+          runner
+        })
+        const narrow = await collectCodexUsage({
+          codexHome,
+          since: '20260708',
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-07-28T00:00:00.000Z',
+          stateDir,
+          runner
+        })
+        const targetDay = (snapshots: UsageSnapshot[]) =>
+          snapshots.filter((snapshot) => snapshot.usageDate === '2026-07-08')
 
-      expect(targetDay(broad)).toEqual([
-        expect.objectContaining({ model: 'gpt-a', totalTokens: 100, sessionCount: 1, costUsd: 6 }),
-        expect.objectContaining({ model: 'gpt-b', totalTokens: 100, sessionCount: 1, costUsd: 6 })
-      ])
-      expect(targetDay(narrow)).toEqual(targetDay(broad))
-      expect(targetDay(narrow).map(snapshotHashPayload)).toEqual(targetDay(broad).map(snapshotHashPayload))
-      expect(commandArgs).not.toHaveLength(0)
-      expect(commandArgs.every((args) => args.includes('--offline'))).toBe(true)
-      expect(await fileExists(join(stateDir, 'codex-session-attribution-cache.json'))).toBe(true)
-    } finally {
-      await rm(codexHome, { recursive: true, force: true })
-      await rm(stateDir, { recursive: true, force: true })
-    }
-  }, scopedCollectionTestTimeoutMs)
+        expect(targetDay(broad)).toEqual([
+          expect.objectContaining({ model: 'gpt-a', totalTokens: 100, sessionCount: 1, costUsd: 6 }),
+          expect.objectContaining({ model: 'gpt-b', totalTokens: 100, sessionCount: 1, costUsd: 6 })
+        ])
+        expect(targetDay(narrow)).toEqual(targetDay(broad))
+        expect(targetDay(narrow).map(snapshotHashPayload)).toEqual(targetDay(broad).map(snapshotHashPayload))
+        expect(commandArgs).not.toHaveLength(0)
+        expect(commandArgs.every((args) => args.includes('--offline'))).toBe(true)
+        expect(await fileExists(join(stateDir, 'codex-session-attribution-cache.json'))).toBe(true)
+      } finally {
+        await rm(codexHome, { recursive: true, force: true })
+        await rm(stateDir, { recursive: true, force: true })
+      }
+    },
+    scopedCollectionTestTimeoutMs
+  )
 })
 
 function snapshot(input: Pick<UsageSnapshot, 'model' | 'totalTokens' | 'costUsd'>): UsageSnapshot {
@@ -147,16 +152,16 @@ function dailyRow(date: string, models: Record<string, number>, costUSD: number)
     date,
     costUSD,
     totalTokens: Object.values(models).reduce((total, value) => total + value, 0),
-    models: Object.fromEntries(Object.entries(models).map(([model, totalTokens]) => [
-      model,
-      { inputTokens: totalTokens, totalTokens }
-    ]))
+    models: Object.fromEntries(
+      Object.entries(models).map(([model, totalTokens]) => [model, { inputTokens: totalTokens, totalTokens }])
+    )
   }
 }
 
 function sessionResult(batch: { legacy: boolean; first: boolean; second: boolean }) {
   const sessions: unknown[] = []
-  if (batch.legacy) sessions.push(sessionRow('2026/07/01', 'legacy.jsonl', '2026-07-01T01:00:00.000Z', 'gpt-legacy', 10))
+  if (batch.legacy)
+    sessions.push(sessionRow('2026/07/01', 'legacy.jsonl', '2026-07-01T01:00:00.000Z', 'gpt-legacy', 10))
   if (batch.first) sessions.push(sessionRow('2026/07/08', 'first.jsonl', '2026-07-08T01:00:00.000Z', 'gpt-a', 100))
   if (batch.second) sessions.push(sessionRow('2026/07/08', 'second.jsonl', '2026-07-08T02:00:00.000Z', 'gpt-b', 100))
   return { sessions }

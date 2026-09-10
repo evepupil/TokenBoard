@@ -77,21 +77,23 @@ describe('collectDeepSeekHarnessUsage', () => {
 
     const snapshots = await collect(home)
 
-    expect(snapshots).toEqual([{
-      source: 'deepseek-harness',
-      usageDate: '2026-08-14',
-      timezone: 'Asia/Shanghai',
-      model: 'deepseek-v4-pro',
-      inputTokens: 3272,
-      // reasoningTokens is already inside outputTokens and is not added again.
-      outputTokens: 802,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 52_480,
-      totalTokens: 56_554,
-      costUsd: 0,
-      sessionCount: 1,
-      collectedAt: '2026-08-14T12:00:00.000Z'
-    }])
+    expect(snapshots).toEqual([
+      {
+        source: 'deepseek-harness',
+        usageDate: '2026-08-14',
+        timezone: 'Asia/Shanghai',
+        model: 'deepseek-v4-pro',
+        inputTokens: 3272,
+        // reasoningTokens is already inside outputTokens and is not added again.
+        outputTokens: 802,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 52_480,
+        totalTokens: 56_554,
+        costUsd: 0,
+        sessionCount: 1,
+        collectedAt: '2026-08-14T12:00:00.000Z'
+      }
+    ])
   })
 
   test('reads every frame of a compressed log', async () => {
@@ -128,9 +130,11 @@ describe('collectDeepSeekHarnessUsage', () => {
   test('keeps cache reads and writes in their own buckets', async () => {
     const home = await dshHome({
       'project/session-a/session.jsonl': {
-        lines: [assistantMessage({
-          usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000, cacheWriteTokens: 300 }
-        })]
+        lines: [
+          assistantMessage({
+            usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 5000, cacheWriteTokens: 300 }
+          })
+        ]
       }
     })
 
@@ -180,12 +184,14 @@ describe('collectDeepSeekHarnessUsage', () => {
   test('falls back to a placeholder model when provenance is absent', async () => {
     const home = await dshHome({
       'project/session-a/session.jsonl': {
-        lines: [JSON.stringify({
-          type: 'assistant/message',
-          seq: 1,
-          time: eventMs,
-          data: { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 2 } }
-        })]
+        lines: [
+          JSON.stringify({
+            type: 'assistant/message',
+            seq: 1,
+            time: eventMs,
+            data: { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 2 } }
+          })
+        ]
       }
     })
 
@@ -260,11 +266,31 @@ describe('collectDeepSeekHarnessUsage', () => {
         compress: true,
         lines: [
           JSON.stringify({ type: 'turn/start', seq: 1, time: eventMs, data: { turn: 1 } }),
-          JSON.stringify({ type: 'user/message', seq: 2, time: eventMs, data: { content: [{ type: 'text', text: 'a real prompt' }] } }),
+          JSON.stringify({
+            type: 'user/message',
+            seq: 2,
+            time: eventMs,
+            data: { content: [{ type: 'text', text: 'a real prompt' }] }
+          }),
           // Packed chunk rows hold the model's raw output and must be ignored.
-          JSON.stringify({ type: 'reasoning-chunks', seq: 3, time: eventMs, data: { turn: 1, step: 0, texts: ['private reasoning'] } }),
-          JSON.stringify({ type: 'text-chunks', seq: 4, time: eventMs, data: { turn: 1, step: 0, texts: ['streamed reply'] } }),
-          JSON.stringify({ type: 'assistant/chunk', seq: 5, time: eventMs, data: { turn: 1, step: 0, chunk: { text: 'delta' } } }),
+          JSON.stringify({
+            type: 'reasoning-chunks',
+            seq: 3,
+            time: eventMs,
+            data: { turn: 1, step: 0, texts: ['private reasoning'] }
+          }),
+          JSON.stringify({
+            type: 'text-chunks',
+            seq: 4,
+            time: eventMs,
+            data: { turn: 1, step: 0, texts: ['streamed reply'] }
+          }),
+          JSON.stringify({
+            type: 'assistant/chunk',
+            seq: 5,
+            time: eventMs,
+            data: { turn: 1, step: 0, chunk: { text: 'delta' } }
+          }),
           JSON.stringify({
             type: 'assistant/message',
             seq: 6,
@@ -305,20 +331,22 @@ describe('collectDeepSeekHarnessUsage', () => {
 
     const snapshots = await collect(home)
 
-    expect(snapshots).toEqual([{
-      source: 'deepseek-harness',
-      usageDate: '2026-08-14',
-      timezone: 'Asia/Shanghai',
-      model: 'deepseek-v4-flash-vision-exp',
-      inputTokens: 9195,
-      outputTokens: 910,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 9856,
-      totalTokens: 19_961,
-      costUsd: 0,
-      sessionCount: 1,
-      collectedAt: '2026-08-14T12:00:00.000Z'
-    }])
+    expect(snapshots).toEqual([
+      {
+        source: 'deepseek-harness',
+        usageDate: '2026-08-14',
+        timezone: 'Asia/Shanghai',
+        model: 'deepseek-v4-flash-vision-exp',
+        inputTokens: 9195,
+        outputTokens: 910,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 9856,
+        totalTokens: 19_961,
+        costUsd: 0,
+        sessionCount: 1,
+        collectedAt: '2026-08-14T12:00:00.000Z'
+      }
+    ])
   })
 
   test('keeps session content out of the snapshot', async () => {
@@ -327,7 +355,12 @@ describe('collectDeepSeekHarnessUsage', () => {
       'proj/session-a/session.jsonl.zstd': {
         compress: true,
         lines: [
-          JSON.stringify({ type: 'user/message', seq: 1, time: eventMs, data: { content: [{ type: 'text', text: secrets[0] }] } }),
+          JSON.stringify({
+            type: 'user/message',
+            seq: 1,
+            time: eventMs,
+            data: { content: [{ type: 'text', text: secrets[0] }] }
+          }),
           JSON.stringify({ type: 'reasoning-chunks', seq: 2, time: eventMs, data: { texts: [secrets[1]] } }),
           JSON.stringify({ type: 'text-chunks', seq: 3, time: eventMs, data: { texts: [secrets[2]] } }),
           JSON.stringify({

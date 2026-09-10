@@ -1,27 +1,16 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { usageSnapshotSchema, type UsageSnapshot } from '@tokenboard/usage-core'
-import {
-  cursorFileName,
-  readCursor,
-  withCursorLock,
-  writeCursor
-} from './session-cursor-store'
-import {
-  mergeSnapshots,
-  selectPendingCursorSnapshotGroups,
-  shouldIncludeCursorSnapshot
-} from './session-cursor'
+import { cursorFileName, readCursor, withCursorLock, writeCursor } from './session-cursor-store'
+import { mergeSnapshots, selectPendingCursorSnapshotGroups, shouldIncludeCursorSnapshot } from './session-cursor'
 import { readAntigravityDbUsageEvents, type AntigravityDbUsageResult } from './antigravity-history-db'
 import type { AntigravityUsageEvent } from './antigravity-gui-parser'
 import {
   lastSeenCliDbRowIndexByCascadeHash,
-  markCliDbRowsProcessed
+  markCliDbRowsProcessed,
+  unanchoredCliDbRowCursorHashes
 } from './antigravity-cli-db-cursor'
-import {
-  resolveAntigravityCollectionRange,
-  type AntigravityCollectionRange
-} from './antigravity-since'
+import { resolveAntigravityCollectionRange, type AntigravityCollectionRange } from './antigravity-since'
 import {
   assertCliHistoryEventsCanApplyIncrementally,
   cliHistorySnapshotGroupFromEvent,
@@ -54,6 +43,7 @@ export type CollectAntigravityCliUsageOptions = {
     timezone?: string
     detectRowCursorReset?: boolean
     requireCompleteDirectoryScan?: boolean
+    forceFullScanCascadeHashes?: ReadonlySet<string>
   }) => Promise<AntigravityDbUsageResult>
 }
 
@@ -64,9 +54,14 @@ export async function collectAntigravityCliUsage(
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const stateDir = options.stateDir ?? readStateDir()
   const cursorPath = join(stateDir, cursorFileName(source, options.cursorScope))
-  return withCursorLock(cursorPath, () => collectAntigravityCliUsageLocked({
-    options, timezone, collectedAt, cursorPath
-  }))
+  return withCursorLock(cursorPath, () =>
+    collectAntigravityCliUsageLocked({
+      options,
+      timezone,
+      collectedAt,
+      cursorPath
+    })
+  )
 }
 
 async function collectAntigravityCliUsageLocked(input: {
@@ -98,9 +93,7 @@ async function collectAntigravityCliUsageLocked(input: {
       reset: migration.reset
     })
   }
-  const retainedEntries = rebuildFullHistory
-    ? prepareCliHistoryFullRebuild(nextCursor)
-    : []
+  const retainedEntries = rebuildFullHistory ? prepareCliHistoryFullRebuild(nextCursor) : []
   const pendingSnapshotGroups = selectPendingCursorSnapshotGroups({
     cursor: nextCursor,
     sinceDate: range.sinceDate
@@ -143,18 +136,13 @@ async function collectAntigravityCliUsageLocked(input: {
     restoreCliHistoryEntriesOutsideFullRebuild({
       cursor: nextCursor,
       retainedEntries,
-      rebuiltSnapshotGroups: new Set(historyEvents.map((event) => (
-        cliHistorySnapshotGroupFromEvent(event, timezone)
-      )))
+      rebuiltSnapshotGroups: new Set(historyEvents.map((event) => cliHistorySnapshotGroupFromEvent(event, timezone))),
+      collectedAt
     })
     markCliHistoryFullScanComplete(nextCursor)
   }
-  pushCompleteCliCursorSnapshots(
-    snapshots,
-    nextCursor,
-    collectedAt,
-    emittedKeys,
-    (snapshot) => shouldIncludeCursorSnapshot(snapshot, range.sinceDate, pendingSnapshotGroups)
+  pushCompleteCliCursorSnapshots(snapshots, nextCursor, collectedAt, emittedKeys, (snapshot) =>
+    shouldIncludeCursorSnapshot(snapshot, range.sinceDate, pendingSnapshotGroups)
   )
   const merged = mergeSnapshots(snapshots).map((snapshot) => usageSnapshotSchema.parse(snapshot))
   await writeCursor(cursorPath, nextCursor)
@@ -173,16 +161,26 @@ async function readLocalDbUsage(
   })
   if (options.readDbUsageEvents) {
     const maxDbFiles = resolveMaxDbFiles(options.maxDbFiles, range)
-    return options.readDbUsageEvents({
+    const unanchoredCascadeHashes = unanchoredCliDbRowCursorHashes({
+      cursor,
+      historyScope: range.historyScope
+    })
+    const readOptions = {
       lastSeenRowIndexByCascadeHash,
       maxDbFiles,
       sinceDate: range.sinceDate,
       timezone,
       detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0,
-      requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null
-    })
+      requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null,
+      ...(unanchoredCascadeHashes.size > 0 ? { forceFullScanCascadeHashes: unanchoredCascadeHashes } : {})
+    }
+    return options.readDbUsageEvents(readOptions)
   }
   const maxDbFiles = resolveMaxDbFiles(options.maxDbFiles, range)
+  const unanchoredCascadeHashes = unanchoredCliDbRowCursorHashes({
+    cursor,
+    historyScope: range.historyScope
+  })
   return readAntigravityDbUsageEvents({
     conversationDir: options.conversationDir ?? defaultConversationDir(),
     lastSeenRowIndexByCascadeHash,
@@ -191,7 +189,8 @@ async function readLocalDbUsage(
     sinceDate: range.sinceDate,
     timezone,
     detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0,
-    requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null
+    requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null,
+    forceFullScanCascadeHashes: unanchoredCascadeHashes.size > 0 ? unanchoredCascadeHashes : undefined
   })
 }
 
@@ -207,7 +206,9 @@ function assertBoundedCliHistoryScanComplete(input: {
   ) {
     return
   }
-  throw new Error('Antigravity CLI requires --since all before a bounded scan can complete an incomplete SQLite directory scan')
+  throw new Error(
+    'Antigravity CLI requires --since all before a bounded scan can complete an incomplete SQLite directory scan'
+  )
 }
 
 function assertFullHistoryDirectoryScanComplete(

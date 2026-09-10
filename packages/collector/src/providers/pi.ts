@@ -32,9 +32,7 @@ export type CollectPiUsageOptions = {
  * Pi records normalized token counts and a cost breakdown per model call, so
  * both are read straight from the log.
  */
-export async function collectPiUsage(
-  options: CollectPiUsageOptions = {}
-): Promise<UsageSnapshot[]> {
+export async function collectPiUsage(options: CollectPiUsageOptions = {}): Promise<UsageSnapshot[]> {
   const timezone = options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const sinceDate = readSinceDate(options.since, label)
@@ -46,13 +44,17 @@ export async function collectPiUsage(
   })
 
   const root = sessionsRoot(options.agentDir)
+  // Forked Pi sessions copy shared history into separate files. Keep one
+  // identity set for the whole scan so an entry is counted once even when it
+  // appears in more than one fork.
+  const seenEntryIds = new Set<string>()
   let scannedFiles = 0
   for await (const file of scanSessionFiles(root, {
     matches: (name) => name.endsWith('.jsonl'),
     onSkipped: (path, reason) => options.stderr?.(`Skipping ${label} session path (${reason}): ${path}`)
   })) {
     scannedFiles += 1
-    for await (const event of readUsageEvents(file.path)) {
+    for await (const event of readUsageEvents(file.path, seenEntryIds)) {
       if (sinceDate && formatDate(event.occurredAt, timezone) < sinceDate) continue
       aggregate.add(event)
     }
@@ -76,9 +78,8 @@ export async function collectPiUsage(
  * A session file is a tree keyed by `id`/`parentId`, and a fork copies shared
  * history into the new file, so an entry id is only counted once per scan.
  */
-async function* readUsageEvents(filePath: string): AsyncGenerator<UsageEvent> {
+async function* readUsageEvents(filePath: string, seenEntryIds: Set<string>): AsyncGenerator<UsageEvent> {
   const sessionId = basename(filePath).replace(/\.jsonl$/, '')
-  const seenEntryIds = new Set<string>()
   let sessionTimestamp: Date | null = null
 
   for await (const line of readSessionLines(filePath)) {
@@ -100,9 +101,8 @@ async function* readUsageEvents(filePath: string): AsyncGenerator<UsageEvent> {
       seenEntryIds.add(entryId)
     }
 
-    const occurredAt = readEventTimestamp(entry.timestamp) ??
-      readEventTimestamp(carrier.message?.timestamp) ??
-      sessionTimestamp
+    const occurredAt =
+      readEventTimestamp(entry.timestamp) ?? readEventTimestamp(carrier.message?.timestamp) ?? sessionTimestamp
     if (!occurredAt) continue
 
     const usage = carrier.usage
@@ -112,8 +112,7 @@ async function* readUsageEvents(filePath: string): AsyncGenerator<UsageEvent> {
     // Pi splits cache writes by TTL: `cacheWrite` is the default tier and
     // `cacheWrite1h` the extended one. Both are cache creation, so dropping the
     // second would silently under-report usage on providers that offer it.
-    const cacheCreationTokens = readTokenCount(usage.cacheWrite) +
-      readTokenCount(usage.cacheWrite1h)
+    const cacheCreationTokens = readTokenCount(usage.cacheWrite) + readTokenCount(usage.cacheWrite1h)
 
     yield {
       occurredAt,
@@ -152,7 +151,7 @@ function readCostUsd(value: unknown) {
   if (!cost) return 0
   const total = readFiniteNumber(cost.total)
   if (total !== null && total > 0) return total
-  const buckets = ['input', 'output', 'cacheRead', 'cacheWrite']
+  const buckets = ['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h']
     .map((key) => readFiniteNumber(cost[key]) ?? 0)
     .filter((amount) => amount > 0)
   return buckets.reduce((sum, amount) => sum + amount, 0)
@@ -166,7 +165,8 @@ function readModel(message: Record<string, unknown> | null) {
   if (!message) return unknownModel
   for (const key of ['responseModel', 'model', 'modelId']) {
     const value = message[key]
-    if (typeof value === 'string' && value.trim()) return value
+    const trimmed = typeof value === 'string' ? value.trim() : ''
+    if (trimmed) return trimmed
   }
   return unknownModel
 }
@@ -174,7 +174,10 @@ function readModel(message: Record<string, unknown> | null) {
 function sessionsRoot(agentDir?: string) {
   const explicitSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR
   if (!agentDir && explicitSessionDir) return explicitSessionDir
-  const home = agentDir ?? process.env.TOKENBOARD_PI_AGENT_DIR ??
-    process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent')
+  const home =
+    agentDir ??
+    process.env.TOKENBOARD_PI_AGENT_DIR ??
+    process.env.PI_CODING_AGENT_DIR ??
+    join(homedir(), '.pi', 'agent')
   return join(home, 'sessions')
 }

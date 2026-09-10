@@ -101,6 +101,8 @@ function CustomSelectOptionButton(props: {
   )
 }
 
-export const customSelectButtonClass = 'flex h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-black text-[var(--app-text)] outline-none transition hover:bg-[var(--app-hover)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20'
+export const customSelectButtonClass =
+  'flex h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-black text-[var(--app-text)] outline-none transition hover:bg-[var(--app-hover)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20'
 
-const customSelectOptionClass = 'flex min-h-10 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm font-black text-[var(--app-text)] transition hover:bg-[var(--app-hover)] focus:bg-[var(--app-hover)] focus:outline-none'
+const customSelectOptionClass =
+  'flex min-h-10 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm font-black text-[var(--app-text)] transition hover:bg-[var(--app-hover)] focus:bg-[var(--app-hover)] focus:outline-none'

@@ -80,14 +80,9 @@ function pruneDailyReportHistory(input: {
   })
 }
 
-function deleteDailyReportHistoryShare(input: {
-  env: WebhookEnv
-  userId: string
-  id: string
-}) {
-  return input.env.DB
-    .prepare(
-      `
+function deleteDailyReportHistoryShare(input: { env: WebhookEnv; userId: string; id: string }) {
+  return input.env.DB.prepare(
+    `
         DELETE FROM daily_report_history
         WHERE user_id = ?
           AND id = ?
@@ -101,7 +96,7 @@ function deleteDailyReportHistoryShare(input: {
               AND webhook_delivery_logs.status = 'success'
           )
       `
-    )
+  )
     .bind(input.userId, input.id)
     .run()
 }
@@ -133,7 +128,9 @@ export async function cleanupNewDailyReportHistoryShare(input: {
       id: input.share.id
     })
   } catch (error) {
-    console.error(`TokenBoard daily report history cleanup failed for subscription ${input.subscription.id}: ${errorMessage(error)}`)
+    console.error(
+      `TokenBoard daily report history cleanup failed for subscription ${input.subscription.id}: ${errorMessage(error)}`
+    )
   }
 }
 
@@ -146,7 +143,9 @@ export async function pruneDailyReportHistoryAfterDelivery(input: {
   try {
     await pruneDailyReportHistory(input)
   } catch (error) {
-    console.error(`TokenBoard daily report history prune failed for subscription ${input.subscription.id}: ${errorMessage(error)}`)
+    console.error(
+      `TokenBoard daily report history prune failed for subscription ${input.subscription.id}: ${errorMessage(error)}`
+    )
   }
 }
 

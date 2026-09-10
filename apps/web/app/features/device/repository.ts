@@ -1,8 +1,4 @@
-import type {
-  DeviceInstallationClaimRecord,
-  DevicePairingRepository,
-  PairingCodeRecord
-} from './service'
+import type { DeviceInstallationClaimRecord, DevicePairingRepository, PairingCodeRecord } from './service'
 
 type InstallationInput = {
   pairingCodeId: string
@@ -396,14 +392,10 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
 
   async createUploadTokenAndInstallation(input: ReconnectInstallationInput) {
     const hasSourceClaimMetadata = Boolean(
-      input.sourceInstallationId ||
-        input.sourceInstallClaimHash ||
-        input.consumedInstallClaimHash
+      input.sourceInstallationId || input.sourceInstallClaimHash || input.consumedInstallClaimHash
     )
     const shouldConsumeSourceClaim = Boolean(
-      input.sourceInstallationId &&
-        input.sourceInstallClaimHash &&
-        input.consumedInstallClaimHash
+      input.sourceInstallationId && input.sourceInstallClaimHash && input.consumedInstallClaimHash
     )
     if (hasSourceClaimMetadata && !shouldConsumeSourceClaim) {
       throw new Error('Reconnect source metadata is incomplete')
@@ -448,12 +440,7 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
             AND expires_at > ?
         `
       )
-      .bind(
-        input.pairingCodeId,
-        input.userId,
-        input.deviceId,
-        input.consumedAt
-      )
+      .bind(input.pairingCodeId, input.userId, input.deviceId, input.consumedAt)
   }
 
   private reconnectSourceClaimConsumeStatement(input: ReconnectInstallationInput) {
@@ -829,8 +816,7 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
     metadata?: string | null
     createdAt: string
   }) {
-    await this.createAuditLogStatement(input)
-      .run()
+    await this.createAuditLogStatement(input).run()
   }
 
   private createAuditLogStatement(input: {
@@ -870,7 +856,6 @@ export class D1DevicePairingRepository implements DevicePairingRepository {
         input.createdAt
       )
   }
-
 }
 
 function assertBatchSucceeded(results: D1Result<unknown>[], expectedStatements: number) {
@@ -883,9 +868,7 @@ function assertBatchSucceeded(results: D1Result<unknown>[], expectedStatements: 
       ? batchResults[failedIndex]?.error
       : `expected ${expectedStatements} results, received ${batchResults.length}`
   const statementNumber = failedIndex >= 0 ? failedIndex + 1 : batchResults.length + 1
-  throw new Error(
-    `D1 batch statement ${statementNumber} failed${error ? `: ${error}` : ''}`
-  )
+  throw new Error(`D1 batch statement ${statementNumber} failed${error ? `: ${error}` : ''}`)
 }
 
 function assertStatementChanged(result: D1Result<unknown> | undefined, message: string) {

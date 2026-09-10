@@ -5,4 +5,3 @@ export function formatUsd(value: number) {
     maximumFractionDigits: 2
   }).format(value)
 }
-

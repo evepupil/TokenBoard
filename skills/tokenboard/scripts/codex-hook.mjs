@@ -49,7 +49,13 @@ export function uninstallCodexHook({ paths, fs }) {
   const backupPath = `${paths.codexConfigPath}.bak.${timestamp()}`
   fs.writeFile(backupPath, text)
   fs.writeFile(paths.codexConfigPath, next)
-  return { source: codexSource, action: 'uninstall', changed: true, detail: original ? 'Codex hook restored' : 'Codex hook removed', backupPath }
+  return {
+    source: codexSource,
+    action: 'uninstall',
+    changed: true,
+    detail: original ? 'Codex hook restored' : 'Codex hook removed',
+    backupPath
+  }
 }
 
 export function getCodexHookStatus({ paths, fs }) {
@@ -78,8 +84,7 @@ function readCodexNotifyForWrite(text) {
 function isCodexNotifyCommand(value, notifyPath) {
   if (!Array.isArray(value)) return false
   const notifyIndex = value.findIndex((part) => part === notifyPath)
-  return isNodeExecutingNotify(value, notifyIndex) &&
-    hasSourceArg(value, notifyIndex + 1, codexSource)
+  return isNodeExecutingNotify(value, notifyIndex) && hasSourceArg(value, notifyIndex + 1, codexSource)
 }
 
 function hasSourceArg(args, startIndex, source) {
@@ -137,7 +142,10 @@ function readOriginalCodexNotify(paths, fs) {
 function captureOriginalCodexNotify({ current, paths, fs }) {
   if (current && current.length > 0) {
     fs.mkdir(dirname(paths.codexOriginalPath), { recursive: true })
-    fs.writeFile(paths.codexOriginalPath, `${JSON.stringify({ notify: current, capturedAt: new Date().toISOString() }, null, 2)}\n`)
+    fs.writeFile(
+      paths.codexOriginalPath,
+      `${JSON.stringify({ notify: current, capturedAt: new Date().toISOString() }, null, 2)}\n`
+    )
     return
   }
 

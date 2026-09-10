@@ -167,7 +167,7 @@ async function markSubscriptionFailure(input: {
     .bind(
       nextRunAfterFailure(input, shouldRetry),
       shouldRetry ? input.reportDate : null,
-      shouldRetry ? input.subscription.pendingScheduleSlot ?? input.scheduleSlot : null,
+      shouldRetry ? (input.subscription.pendingScheduleSlot ?? input.scheduleSlot) : null,
       shouldRetry ? input.attempt : 0,
       input.now.toISOString(),
       input.error,
@@ -262,20 +262,11 @@ async function markSubscriptionTestFailure(input: {
         WHERE id = ?
       `
     )
-    .bind(
-      input.now.toISOString(),
-      input.error,
-      input.now.toISOString(),
-      input.subscription.id
-    )
+    .bind(input.now.toISOString(), input.error, input.now.toISOString(), input.subscription.id)
     .run()
 }
 
-async function markSubscriptionTestSuccess(
-  db: D1Database,
-  subscription: DueWebhookSubscription,
-  now: Date
-) {
+async function markSubscriptionTestSuccess(db: D1Database, subscription: DueWebhookSubscription, now: Date) {
   await db
     .prepare(
       `

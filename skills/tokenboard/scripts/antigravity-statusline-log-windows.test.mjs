@@ -48,11 +48,13 @@ test('statusline log recovers a lock when legacy Windows reports the pid missing
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const livenessPath = fileURLToPath(new URL('./process-liveness.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace(/const lockWaitTimeoutMs = [^\n]+/, 'const lockWaitTimeoutMs = 500')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      /const lockWaitTimeoutMs = [^\n]+/,
+      'const lockWaitTimeoutMs = 500'
+    )
     const liveness = (await readFile(livenessPath, 'utf8'))
-      .replace("const platform = options.platform || process.platform", "const platform = 'win32'")
-      .replace("const nodeVersion = options.nodeVersion || process.versions.node", "const nodeVersion = '22.12.0'")
+      .replace('const platform = options.platform || process.platform', "const platform = 'win32'")
+      .replace('const nodeVersion = options.nodeVersion || process.versions.node', "const nodeVersion = '22.12.0'")
       .replace('return isWindowsProcessAlive(pid, runTasklist, options.env)', "return 'dead'")
     await writeFile(modulePath, source)
     await writeFile(join(root, 'process-liveness.mjs'), liveness)
@@ -77,11 +79,13 @@ test('statusline log keeps an expired lock when legacy Windows liveness is posit
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const livenessPath = fileURLToPath(new URL('./process-liveness.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace(/const lockWaitTimeoutMs = [^\n]+/, 'const lockWaitTimeoutMs = 100')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      /const lockWaitTimeoutMs = [^\n]+/,
+      'const lockWaitTimeoutMs = 100'
+    )
     const liveness = (await readFile(livenessPath, 'utf8'))
-      .replace("const platform = options.platform || process.platform", "const platform = 'win32'")
-      .replace("const nodeVersion = options.nodeVersion || process.versions.node", "const nodeVersion = '22.12.0'")
+      .replace('const platform = options.platform || process.platform', "const platform = 'win32'")
+      .replace('const nodeVersion = options.nodeVersion || process.versions.node', "const nodeVersion = '22.12.0'")
       .replace('return isWindowsProcessAlive(pid, runTasklist, options.env)', "return 'alive'")
     await writeFile(modulePath, source)
     await writeFile(join(root, 'process-liveness.mjs'), liveness)
@@ -111,12 +115,17 @@ test('statusline log never evicts an old lock when legacy Windows liveness is un
     const sourcePath = fileURLToPath(new URL('./antigravity-statusline-log.mjs', import.meta.url))
     const livenessPath = fileURLToPath(new URL('./process-liveness.mjs', import.meta.url))
     const modulePath = join(root, 'antigravity-statusline-log.mjs')
-    const source = (await readFile(sourcePath, 'utf8'))
-      .replace(/const lockWaitTimeoutMs = [^\n]+/, 'const lockWaitTimeoutMs = 100')
+    const source = (await readFile(sourcePath, 'utf8')).replace(
+      /const lockWaitTimeoutMs = [^\n]+/,
+      'const lockWaitTimeoutMs = 100'
+    )
     const liveness = (await readFile(livenessPath, 'utf8'))
-      .replace("const platform = options.platform || process.platform", "const platform = 'win32'")
-      .replace("const nodeVersion = options.nodeVersion || process.versions.node", "const nodeVersion = '22.12.0'")
-      .replace('const runTasklist = options.runTasklist || spawnSync', "const runTasklist = () => ({ error: new Error('timed out') })")
+      .replace('const platform = options.platform || process.platform', "const platform = 'win32'")
+      .replace('const nodeVersion = options.nodeVersion || process.versions.node', "const nodeVersion = '22.12.0'")
+      .replace(
+        'const runTasklist = options.runTasklist || spawnSync',
+        "const runTasklist = () => ({ error: new Error('timed out') })"
+      )
     await writeFile(modulePath, source)
     await writeFile(join(root, 'process-liveness.mjs'), liveness)
 

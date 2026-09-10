@@ -1,4 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -32,6 +41,9 @@ describe('Wrangler deploy config', () => {
     expect(config).toContain('"TOKENBOARD_USAGE_SUMMARY_STRICT": "false"')
     expect(config).toContain('"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "90"')
     expect(config).toContain('"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "5"')
+    expect(config).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_ENABLED": "true"')
+    expect(config).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "24"')
+    expect(config).toContain('"TOKENBOARD_MODEL_PRICING_SOURCE_URL": "https://models.dev/api.json"')
     expect(config).toContain('"database_id": "4af5cf99-10d9-4114-b707-f82e75f89746"')
     expect(config).toContain('"binding": "ASSETS"')
     expect(config).toContain('"run_worker_first"')
@@ -67,32 +79,34 @@ describe('Wrangler deploy config', () => {
     expect(example).toContain('"TOKENBOARD_USAGE_SUMMARY_STRICT": "<tokenboard-usage-summary-strict>"')
     expect(example).toContain('"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "<tokenboard-webhook-log-retention-days>"')
     expect(example).toContain('"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "<tokenboard-webhook-cron-batch-size>"')
+    expect(example).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_ENABLED": "true"')
+    expect(example).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "24"')
+    const sourceUrl = /"TOKENBOARD_MODEL_PRICING_SOURCE_URL"\s*:\s*"([^"]+)"/.exec(example)?.[1]
+    expect(sourceUrl).toBe('https://models.dev/api.json')
     expect(example).toContain('"database_id": "<your-d1-database-id>"')
-    expect(example).not.toMatch(/https:\/\/[a-z0-9.-]+\.[a-z]{2,}/i)
     expect(example).not.toMatch(/"pattern":\s*"[a-z0-9.-]+\.[a-z]{2,}"/i)
     expect(example).not.toMatch(/"database_id":\s*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"/i)
   })
 
   test('manual production deploy helper verifies migrated schema before Worker deploy', () => {
     const deployScript = readPackageFile('scripts/deploy.mjs')
-    const schemaCheckCommand = "'d1', 'execute', 'DB', '--remote', '--file', 'db/verify-critical-schema.sql', '--config', configPath"
+    const schemaCheckCommand = /runPnpm\(\[\s*'exec',\s*'wrangler',\s*'d1',\s*'execute'/
+    const schemaCheckIndex = deployScript.search(schemaCheckCommand)
 
     expect(deployScript).toContain('wrangler.production.ci.jsonc')
     expect(deployScript).toContain('scripts/write-production-config.mjs')
     expect(deployScript).toContain('scripts/check-production-config.mjs')
     expect(deployScript).toContain("runPnpm(['run', 'build'])")
     expect(deployScript).toContain("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
-    expect(deployScript).toContain(schemaCheckCommand)
+    expect(schemaCheckIndex).toBeGreaterThan(-1)
     expect(deployScript).toContain("'deploy', '--config', configPath")
     expect(deployScript.indexOf("runPnpm(['run', 'build'])")).toBeLessThan(
       deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
     )
     expect(deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")).toBeLessThan(
-      deployScript.indexOf(schemaCheckCommand)
+      schemaCheckIndex
     )
-    expect(deployScript.indexOf(schemaCheckCommand)).toBeLessThan(
-      deployScript.indexOf("'deploy', '--config', configPath")
-    )
+    expect(schemaCheckIndex).toBeLessThan(deployScript.indexOf("'deploy', '--config', configPath"))
     expect(deployScript).not.toContain('--config wrangler.jsonc')
   })
 
@@ -143,6 +157,46 @@ describe('Wrangler deploy config', () => {
     }
   }, 30_000)
 
+  test('model pricing migrations add the staged catalogue schema before the critical gate', () => {
+    const migrationsDir = resolve(packageDir, 'db/migrations')
+    const baseMigration = readFileSync(join(migrationsDir, '0030_model_pricing.sql'), 'utf8')
+    const stagingMigration = readFileSync(join(migrationsDir, '0031_model_pricing_staging.sql'), 'utf8')
+    const schemaCheck = readPackageFile('db/verify-critical-schema.sql')
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-model-pricing-migration-gate-'))
+    const dbPath = join(tempDir, 'pricing.db')
+
+    try {
+      for (const migration of readdirSync(migrationsDir)
+        .filter((name) => name.endsWith('.sql') && name < '0030_model_pricing.sql')
+        .sort()) {
+        runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
+      }
+      runSqlite(dbPath, baseMigration)
+      const preStagingCheck = runSqlite(dbPath, schemaCheck, false)
+      expect(preStagingCheck.status).not.toBe(0)
+      expect(preStagingCheck.stderr).toMatch(/model_pricing_staging/)
+
+      runSqlite(dbPath, stagingMigration)
+      const currentCheck = runSqlite(dbPath, schemaCheck, false)
+      expect(currentCheck.status).toBe(0)
+      expect(currentCheck.stderr).toBe('')
+
+      // The staging migration contains only CREATE IF NOT EXISTS statements,
+      // so a retry after an interrupted deployment must remain safe.
+      expect(() => runSqlite(dbPath, stagingMigration)).not.toThrow()
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  test('model pricing migration indexes stay aligned with the Drizzle schema', () => {
+    const baseMigration = readPackageFile('db/migrations/0030_model_pricing.sql')
+    const schema = readDrizzleSchema()
+
+    expect(baseMigration).toContain('model_pricing_active_generation_idx')
+    expect(schema).toContain("index('model_pricing_active_generation_idx')")
+  })
+
   test('Drizzle schema declares webhook migration indexes', () => {
     const schema = readDrizzleSchema()
 
@@ -189,8 +243,10 @@ describe('Wrangler deploy config', () => {
     expect(migration).toContain("ADD COLUMN schedule_times_local TEXT NOT NULL DEFAULT '18:00'")
     expect(migration).toContain("ADD COLUMN schedule_weekdays TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6'")
     expect(migration).toContain('ADD COLUMN schedule_slot TEXT')
-    expect(migration).toContain("SET schedule_times_local = schedule_time_local")
-    expect(migration).toContain("SET pending_schedule_slot = pending_report_date || 'T' || COALESCE(schedule_time_local, '18:00')")
+    expect(migration).toContain('SET schedule_times_local = schedule_time_local')
+    expect(migration).toContain(
+      "SET pending_schedule_slot = pending_report_date || 'T' || COALESCE(schedule_time_local, '18:00')"
+    )
     expect(migration).toContain('WHERE pending_report_date IS NOT NULL')
     expect(migration).toContain('CREATE INDEX IF NOT EXISTS webhook_delivery_logs_subscription_idx')
     expect(migration).toContain("SET schedule_slot = report_date || 'T' || COALESCE((")
@@ -205,7 +261,9 @@ describe('Wrangler deploy config', () => {
       migration.indexOf("SET schedule_slot = report_date || 'T' || COALESCE((")
     )
     expect(migration.indexOf('ADD COLUMN pending_schedule_slot TEXT')).toBeLessThan(
-      migration.indexOf("SET pending_schedule_slot = pending_report_date || 'T' || COALESCE(schedule_time_local, '18:00')")
+      migration.indexOf(
+        "SET pending_schedule_slot = pending_report_date || 'T' || COALESCE(schedule_time_local, '18:00')"
+      )
     )
     expect(migration.indexOf("SET schedule_slot = report_date || 'T' || COALESCE((")).toBeLessThan(
       migration.indexOf('CREATE UNIQUE INDEX IF NOT EXISTS webhook_delivery_logs_daily_success_idx')
@@ -398,14 +456,42 @@ describe('Wrangler deploy config', () => {
 
     try {
       for (const [name, value, message] of [
-        ['TOKENBOARD_DAILY_REPORT_HISTORY_DAYS', '0', 'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31'],
-        ['TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT', '501', 'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'],
+        [
+          'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS',
+          '0',
+          'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31'
+        ],
+        [
+          'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT',
+          '501',
+          'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'
+        ],
         ['TOKENBOARD_USAGE_SUMMARY_STRICT', 'yes', 'TOKENBOARD_USAGE_SUMMARY_STRICT must be true, false, 1, or 0'],
-        ['TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS', '366', 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to 365'],
-        ['TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE', '6', 'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE must be an integer from 1 to 5'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://example.com/TokenBoard.git', 'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://secret@github.com/MisonL/TokenBoard.git', 'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://github.com:8443/MisonL/TokenBoard.git', 'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
+        [
+          'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS',
+          '366',
+          'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to 365'
+        ],
+        [
+          'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE',
+          '6',
+          'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE must be an integer from 1 to 5'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://example.com/TokenBoard.git',
+          'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://secret@github.com/MisonL/TokenBoard.git',
+          'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://github.com:8443/MisonL/TokenBoard.git',
+          'TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
         ['TOKENBOARD_COLLECTOR_REF', 'bad ref', 'TOKENBOARD_COLLECTOR_REF must be a non-empty branch or ref name']
       ]) {
         const outputFile = join(tempDir, `wrangler.production.${name}.jsonc`)
@@ -447,8 +533,14 @@ describe('Wrangler deploy config', () => {
     try {
       const content = readPackageFile('wrangler.production.example.jsonc')
         .replace('"pattern": "<your-tokenboard-domain>"', '"pattern": "tokenboard.example.com"')
-        .replace('"BETTER_AUTH_URL": "https://<your-tokenboard-domain>"', '"BETTER_AUTH_URL": "https://tokenboard.example.com"')
-        .replace('"TOKENBOARD_COLLECTOR_REPO_URL": "<tokenboard-collector-repo-url>"', '"TOKENBOARD_COLLECTOR_REPO_URL": "https://github.com/MisonL/TokenBoard.git"')
+        .replace(
+          '"BETTER_AUTH_URL": "https://<your-tokenboard-domain>"',
+          '"BETTER_AUTH_URL": "https://tokenboard.example.com"'
+        )
+        .replace(
+          '"TOKENBOARD_COLLECTOR_REPO_URL": "<tokenboard-collector-repo-url>"',
+          '"TOKENBOARD_COLLECTOR_REPO_URL": "https://github.com/MisonL/TokenBoard.git"'
+        )
         .replace('"TOKENBOARD_COLLECTOR_REF": "<tokenboard-collector-ref>"', '"TOKENBOARD_COLLECTOR_REF": "master"')
         .replace('"database_id": "<your-d1-database-id>"', '"database_id": "11111111-1111-4111-8111-111111111111"')
       writeFileSync(outputFile, content)
@@ -474,19 +566,74 @@ describe('Wrangler deploy config', () => {
 
     try {
       for (const [name, value, message] of [
-        ['TOKENBOARD_DAILY_REPORT_HISTORY_DAYS', 'abc', 'vars.TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31'],
-        ['TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT', '501', 'vars.TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'],
+        [
+          'TOKENBOARD_DAILY_REPORT_HISTORY_DAYS',
+          'abc',
+          'vars.TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31'
+        ],
+        [
+          'TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT',
+          '501',
+          'vars.TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT must be an integer from 1 to 500'
+        ],
         ['TOKENBOARD_USAGE_SUMMARY_STRICT', 'yes', 'vars.TOKENBOARD_USAGE_SUMMARY_STRICT must be true, false, 1, or 0'],
-        ['TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS', '366', 'vars.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to 365'],
-        ['TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE', '6', 'vars.TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE must be an integer from 1 to 5'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://example.com/TokenBoard.git', 'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://secret@github.com/MisonL/TokenBoard.git', 'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
-        ['TOKENBOARD_COLLECTOR_REPO_URL', 'https://github.com:8443/MisonL/TokenBoard.git', 'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'],
+        [
+          'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS',
+          '366',
+          'vars.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS must be an integer from 1 to 365'
+        ],
+        [
+          'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE',
+          '6',
+          'vars.TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE must be an integer from 1 to 5'
+        ],
+        [
+          'TOKENBOARD_MODEL_PRICING_SOURCE_URL',
+          'https://example.com/api.json',
+          'vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json'
+        ],
+        [
+          'TOKENBOARD_MODEL_PRICING_SOURCE_URL',
+          'https://user:pass@models.dev/api.json',
+          'vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json'
+        ],
+        [
+          'TOKENBOARD_MODEL_PRICING_SOURCE_URL',
+          'https://models.dev:8443/api.json',
+          'vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json'
+        ],
+        [
+          'TOKENBOARD_MODEL_PRICING_SOURCE_URL',
+          'https://models.dev:443/api.json',
+          'vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json'
+        ],
+        [
+          'TOKENBOARD_MODEL_PRICING_SOURCE_URL',
+          'https://models.dev:0443/api.json',
+          'vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://example.com/TokenBoard.git',
+          'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://secret@github.com/MisonL/TokenBoard.git',
+          'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
+        [
+          'TOKENBOARD_COLLECTOR_REPO_URL',
+          'https://github.com:8443/MisonL/TokenBoard.git',
+          'vars.TOKENBOARD_COLLECTOR_REPO_URL must be a valid https GitHub repository URL'
+        ],
         ['TOKENBOARD_COLLECTOR_REF', 'bad ref', 'vars.TOKENBOARD_COLLECTOR_REF must be a non-empty branch or ref name']
       ]) {
         const outputFile = join(tempDir, `wrangler.production.${name}.jsonc`)
-        const content = filledProductionExample()
-          .replace(`"${name}": "${resourceControlDefault(name)}"`, `"${name}": "${value}"`)
+        const content = filledProductionExample().replace(
+          `"${name}": "${resourceControlDefault(name)}"`,
+          `"${name}": "${value}"`
+        )
         writeFileSync(outputFile, content)
 
         const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
@@ -514,9 +661,18 @@ describe('Wrangler deploy config', () => {
     try {
       mkdirSync(scriptDir)
       copyFileSync(resolve(packageDir, 'scripts/deploy.mjs'), join(scriptDir, 'deploy.mjs'))
-      copyFileSync(resolve(packageDir, 'scripts/check-production-config.mjs'), join(scriptDir, 'check-production-config.mjs'))
-      copyFileSync(resolve(packageDir, 'scripts/write-production-config.mjs'), join(scriptDir, 'write-production-config.mjs'))
-      copyFileSync(resolve(packageDir, 'wrangler.production.example.jsonc'), join(tempDir, 'wrangler.production.example.jsonc'))
+      copyFileSync(
+        resolve(packageDir, 'scripts/check-production-config.mjs'),
+        join(scriptDir, 'check-production-config.mjs')
+      )
+      copyFileSync(
+        resolve(packageDir, 'scripts/write-production-config.mjs'),
+        join(scriptDir, 'write-production-config.mjs')
+      )
+      copyFileSync(
+        resolve(packageDir, 'wrangler.production.example.jsonc'),
+        join(tempDir, 'wrangler.production.example.jsonc')
+      )
       writeFileSync(pnpmStub, 'process.exit(0)\n')
 
       const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
@@ -583,7 +739,9 @@ describe('Wrangler deploy config', () => {
     const localConfig = join(tempDir, 'wrangler.local.jsonc')
 
     try {
-      writeFileSync(localConfig, `
+      writeFileSync(
+        localConfig,
+        `
         {
           "name": "tokenboard",
           "main": "./dist/index.js",
@@ -598,7 +756,8 @@ describe('Wrangler deploy config', () => {
             }
           ]
         }
-      `)
+      `
+      )
 
       const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
         cwd: packageDir,
@@ -621,8 +780,10 @@ describe('Wrangler deploy config', () => {
     const outputFile = join(tempDir, 'wrangler.production.no-cron.jsonc')
 
     try {
-      const content = filledProductionExample()
-        .replace(/\s+"triggers":\s*\{\s*"crons":\s*\[\s*"\*\/15 \* \* \* \*"\s*\]\s*\},/, '')
+      const content = filledProductionExample().replace(
+        /\s+"triggers":\s*\{\s*"crons":\s*\[\s*"\*\/15 \* \* \* \*"\s*\]\s*\},/,
+        ''
+      )
       writeFileSync(outputFile, content)
 
       const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
@@ -636,6 +797,30 @@ describe('Wrangler deploy config', () => {
 
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain('triggers.crons')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker accepts a missing model pricing source URL because the runtime has a safe default', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-default-model-pricing-source-'))
+    const outputFile = join(tempDir, 'wrangler.production.default-model-pricing-source.jsonc')
+
+    try {
+      const content = filledProductionExample().replace(/\s+"TOKENBOARD_MODEL_PRICING_SOURCE_URL":\s*"[^"]+",?\n/, '')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_WRANGLER_CONFIG: outputFile
+        }
+      })
+
+      expect(result.status).toBe(0)
+      expect(result.stderr).toBe('')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
@@ -671,7 +856,12 @@ describe('Wrangler deploy config', () => {
     for (const badRoute of [
       'tokenboard.example.com/path',
       'tokenboard.example.com?bad=1',
-      'tokenboard.example.com#hash'
+      'tokenboard.example.com#hash',
+      '127.1',
+      '192.168.1',
+      '169.254.1',
+      '0x7f.0.0.1',
+      '0177.0.0.1'
     ]) {
       const generatorResult = spawnSync(
         process.execPath,
@@ -695,6 +885,83 @@ describe('Wrangler deploy config', () => {
     }
   })
 
+  test('production config generator rejects private, credentialed, and port-bearing auth URLs', () => {
+    for (const betterAuthUrl of [
+      'https://10.0.0.1',
+      'https://127.0.0.1.',
+      'https://example',
+      'https://user:pass@example.com',
+      'https://tokenboard.example.com:8443',
+      'https://tokenboard.example.com:443',
+      'https://tokenboard.example.com:0443'
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [resolve(packageDir, 'scripts/write-production-config.mjs'), 'wrangler.production.example.jsonc'],
+        {
+          cwd: packageDir,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            TOKENBOARD_WORKER_ROUTE: 'tokenboard.example.com',
+            BETTER_AUTH_URL: betterAuthUrl,
+            TOKENBOARD_COLLECTOR_REPO_URL: 'https://github.com/MisonL/TokenBoard.git',
+            TOKENBOARD_COLLECTOR_REF: 'master',
+            D1_DATABASE_ID: '11111111-1111-4111-8111-111111111111'
+          }
+        }
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('public hostname without credentials or an explicit port')
+    }
+  })
+
+  test('production config checker rejects private and port-bearing auth URLs and routes', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-unsafe-production-config-'))
+
+    try {
+      for (const [field, value] of [
+        ['BETTER_AUTH_URL', 'https://10.0.0.1'],
+        ['BETTER_AUTH_URL', 'https://example'],
+        ['BETTER_AUTH_URL', 'https://user:pass@example.com'],
+        ['BETTER_AUTH_URL', 'https://tokenboard.example.com:8443'],
+        ['BETTER_AUTH_URL', 'https://tokenboard.example.com:443'],
+        ['BETTER_AUTH_URL', 'https://tokenboard.example.com:0443'],
+        ['route', '10.0.0.1'],
+        ['route', '127.0.0.1.'],
+        ['route', '127.1'],
+        ['route', '192.168.1'],
+        ['route', '169.254.1'],
+        ['route', '0x7f.0.0.1'],
+        ['route', '0177.0.0.1']
+      ]) {
+        const outputFile = join(
+          tempDir,
+          `wrangler.production.unsafe-${field}-${value.replace(/[^a-z0-9]/gi, '-')}.jsonc`
+        )
+        const content = filledProductionExample().replace(
+          field === 'route'
+            ? '"pattern": "tokenboard.example.com"'
+            : '"BETTER_AUTH_URL": "https://tokenboard.example.com"',
+          field === 'route' ? `"pattern": "${value}"` : `"BETTER_AUTH_URL": "${value}"`
+        )
+        writeFileSync(outputFile, content)
+
+        const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+          cwd: packageDir,
+          encoding: 'utf8',
+          env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+        })
+
+        expect(result.status).toBe(1)
+        expect(result.stderr).toMatch(/public hostname without credentials|production custom domain host/)
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
   test('production config checker rejects configured route values that are not bare hosts', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-bad-route-config-'))
 
@@ -705,8 +972,10 @@ describe('Wrangler deploy config', () => {
         'tokenboard.example.com#hash'
       ]) {
         const outputFile = join(tempDir, `wrangler.${badRoute.replace(/[^a-z0-9]/gi, '-')}.jsonc`)
-        const content = filledProductionExample()
-          .replace('"pattern": "tokenboard.example.com"', `"pattern": "${badRoute}"`)
+        const content = filledProductionExample().replace(
+          '"pattern": "tokenboard.example.com"',
+          `"pattern": "${badRoute}"`
+        )
         writeFileSync(outputFile, content)
 
         const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
@@ -731,8 +1000,10 @@ describe('Wrangler deploy config', () => {
     const outputFile = join(tempDir, 'wrangler.production.commented.jsonc')
 
     try {
-      const content = filledProductionExample()
-        .replace('{', '{\n  // "workers_dev": true,\n  // "pattern": "localhost",\n  // "database_id": "00000000-0000-0000-0000-000000000000",')
+      const content = filledProductionExample().replace(
+        '{',
+        '{\n  // "workers_dev": true,\n  // "pattern": "localhost",\n  // "database_id": "00000000-0000-0000-0000-000000000000",'
+      )
       writeFileSync(outputFile, content)
 
       const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
@@ -756,23 +1027,41 @@ function readPackageFile(relativePath: string): string {
 }
 
 function readDrizzleSchema() {
-  return [
-    readPackageFile('app/db/schema.ts'),
-    readPackageFile('app/db/schema-identity.ts')
-  ].join('\n')
+  return [readPackageFile('app/db/schema.ts'), readPackageFile('app/db/schema-identity.ts')].join('\n')
 }
 
 function filledProductionExample() {
   return readPackageFile('wrangler.production.example.jsonc')
     .replace('"pattern": "<your-tokenboard-domain>"', '"pattern": "tokenboard.example.com"')
-    .replace('"BETTER_AUTH_URL": "https://<your-tokenboard-domain>"', '"BETTER_AUTH_URL": "https://tokenboard.example.com"')
-    .replace('"TOKENBOARD_COLLECTOR_REPO_URL": "<tokenboard-collector-repo-url>"', '"TOKENBOARD_COLLECTOR_REPO_URL": "https://github.com/MisonL/TokenBoard.git"')
+    .replace(
+      '"BETTER_AUTH_URL": "https://<your-tokenboard-domain>"',
+      '"BETTER_AUTH_URL": "https://tokenboard.example.com"'
+    )
+    .replace(
+      '"TOKENBOARD_COLLECTOR_REPO_URL": "<tokenboard-collector-repo-url>"',
+      '"TOKENBOARD_COLLECTOR_REPO_URL": "https://github.com/MisonL/TokenBoard.git"'
+    )
     .replace('"TOKENBOARD_COLLECTOR_REF": "<tokenboard-collector-ref>"', '"TOKENBOARD_COLLECTOR_REF": "master"')
-    .replace('"TOKENBOARD_DAILY_REPORT_HISTORY_DAYS": "<tokenboard-daily-report-history-days>"', '"TOKENBOARD_DAILY_REPORT_HISTORY_DAYS": "30"')
-    .replace('"TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "<tokenboard-usage-summary-backfill-limit>"', '"TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "50"')
-    .replace('"TOKENBOARD_USAGE_SUMMARY_STRICT": "<tokenboard-usage-summary-strict>"', '"TOKENBOARD_USAGE_SUMMARY_STRICT": "false"')
-    .replace('"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "<tokenboard-webhook-log-retention-days>"', '"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "90"')
-    .replace('"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "<tokenboard-webhook-cron-batch-size>"', '"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "5"')
+    .replace(
+      '"TOKENBOARD_DAILY_REPORT_HISTORY_DAYS": "<tokenboard-daily-report-history-days>"',
+      '"TOKENBOARD_DAILY_REPORT_HISTORY_DAYS": "30"'
+    )
+    .replace(
+      '"TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "<tokenboard-usage-summary-backfill-limit>"',
+      '"TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT": "50"'
+    )
+    .replace(
+      '"TOKENBOARD_USAGE_SUMMARY_STRICT": "<tokenboard-usage-summary-strict>"',
+      '"TOKENBOARD_USAGE_SUMMARY_STRICT": "false"'
+    )
+    .replace(
+      '"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "<tokenboard-webhook-log-retention-days>"',
+      '"TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS": "90"'
+    )
+    .replace(
+      '"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "<tokenboard-webhook-cron-batch-size>"',
+      '"TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE": "5"'
+    )
     .replace('"database_id": "<your-d1-database-id>"', '"database_id": "11111111-1111-4111-8111-111111111111"')
 }
 
@@ -782,6 +1071,7 @@ function resourceControlDefault(name: string) {
   if (name === 'TOKENBOARD_USAGE_SUMMARY_STRICT') return 'false'
   if (name === 'TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS') return '90'
   if (name === 'TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE') return '5'
+  if (name === 'TOKENBOARD_MODEL_PRICING_SOURCE_URL') return 'https://models.dev/api.json'
   if (name === 'TOKENBOARD_COLLECTOR_REPO_URL') return 'https://github.com/MisonL/TokenBoard.git'
   if (name === 'TOKENBOARD_COLLECTOR_REF') return 'master'
   throw new Error(`Unknown resource control variable ${name}`)

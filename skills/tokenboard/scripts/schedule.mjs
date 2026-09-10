@@ -17,26 +17,17 @@ export function buildWindowsTaskArgs({
   taskName = windowsTaskName(dailyScheduleTimes[0]),
   startTime = dailyScheduleTimes[0]
 }) {
-  const command = taskCommand || buildWindowsTaskCommand({
-    nodePath,
-    scriptPath,
-    packageManager,
-    pathEnv,
-    homeDir,
-    configDir
-  })
-  return [
-    '/Create',
-    '/F',
-    '/SC',
-    'DAILY',
-    '/TN',
-    taskName,
-    '/TR',
-    command,
-    '/ST',
-    startTime
-  ]
+  const command =
+    taskCommand ||
+    buildWindowsTaskCommand({
+      nodePath,
+      scriptPath,
+      packageManager,
+      pathEnv,
+      homeDir,
+      configDir
+    })
+  return ['/Create', '/F', '/SC', 'DAILY', '/TN', taskName, '/TR', command, '/ST', startTime]
 }
 
 export function buildWindowsTaskDefinitions({
@@ -99,7 +90,16 @@ export function buildWindowsTaskCommand({ nodePath, scriptPath, packageManager, 
   return `cmd.exe /d /s /c ${quoteWindowsArg(command)}`
 }
 
-export function buildMacLaunchAgentPlist({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir, logDir, scheduleTimes = dailyScheduleTimes }) {
+export function buildMacLaunchAgentPlist({
+  nodePath,
+  scriptPath,
+  packageManager,
+  pathEnv,
+  homeDir,
+  configDir,
+  logDir,
+  scheduleTimes = dailyScheduleTimes
+}) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath })
   const stateDir = configDir || `${homeDir.replace(/\/$/, '')}/.tokenboard`
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -112,6 +112,8 @@ ${buildMacEnvironment({ normalizedPath, stateDir, packageManager, logDir })}
 ${buildMacProgramArguments({ nodePath, scriptPath })}
 \t<key>RunAtLoad</key>
 \t<false/>
+\t<key>Umask</key>
+\t<integer>63</integer>
 \t<key>StandardErrorPath</key>
 \t<string>${escapeXml(`${logDir}/daily-sync.err.log`)}</string>
 \t<key>StandardOutPath</key>
@@ -155,18 +157,29 @@ function buildMacProgramArguments({ nodePath, scriptPath }) {
 }
 
 function buildMacCalendarIntervals(scheduleTimes) {
-  return scheduleTimes.map((time) => {
-    const [hour, minute] = parseScheduleTime(time)
-    return `\t\t<dict>
+  return scheduleTimes
+    .map((time) => {
+      const [hour, minute] = parseScheduleTime(time)
+      return `\t\t<dict>
 \t\t\t<key>Hour</key>
 \t\t\t<integer>${hour}</integer>
 \t\t\t<key>Minute</key>
 \t\t\t<integer>${minute}</integer>
 \t\t</dict>`
-  }).join('\n')
+    })
+    .join('\n')
 }
 
-export function buildLinuxSystemdUnits({ nodePath, scriptPath, packageManager, pathEnv, homeDir, configDir, timezone, scheduleTimes = dailyScheduleTimes }) {
+export function buildLinuxSystemdUnits({
+  nodePath,
+  scriptPath,
+  packageManager,
+  pathEnv,
+  homeDir,
+  configDir,
+  timezone,
+  scheduleTimes = dailyScheduleTimes
+}) {
   const normalizedPath = normalizePathEnv({ pathEnv, homeDir, nodePath })
   const stateDir = configDir || `${homeDir.replace(/\/$/, '')}/.tokenboard`
   const timezoneSuffix = typeof timezone === 'string' && timezone.length > 0 ? ` ${timezone}` : ''

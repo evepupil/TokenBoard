@@ -12,19 +12,22 @@ export const POST = createRoute(async (c) => {
     const displayName = String(body.displayName || 'TokenBoard').slice(0, 80)
     const publicUrl = String(body.publicUrl || 'Private preview').slice(0, 160)
 
-    const svg = renderUsageCardSvg({
-      displayName,
-      publicUrl,
-      totalTokens: 1234567,
-      totalTokensWithoutCacheRead: 345678,
-      totalCostUsd: 42.5,
-      monthTokens: 89012,
-      monthTokensWithoutCacheRead: 45678,
-      monthCostUsd: 6.78,
-      todayTokens: 1200,
-      todayTokensWithoutCacheRead: 860,
-      todayCostUsd: 0.2
-    }, config)
+    const svg = renderUsageCardSvg(
+      {
+        displayName,
+        publicUrl,
+        totalTokens: 1234567,
+        totalTokensWithoutCacheRead: 345678,
+        totalCostUsd: 42.5,
+        monthTokens: 89012,
+        monthTokensWithoutCacheRead: 45678,
+        monthCostUsd: 6.78,
+        todayTokens: 1200,
+        todayTokensWithoutCacheRead: 860,
+        todayCostUsd: 0.2
+      },
+      config
+    )
 
     return new Response(svg, {
       headers: {

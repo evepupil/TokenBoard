@@ -23,22 +23,28 @@ describe('D1 rate limiter', () => {
     }
     const now = new Date('2026-06-11T00:00:00.000Z')
 
-    await expect(enforceRateLimit(db, {
-      policy,
-      subject: { kind: 'upload-token', value: 'secret-token-hash' },
-      now
-    })).resolves.toMatchObject({ remaining: 1 })
-    await expect(enforceRateLimit(db, {
-      policy,
-      subject: { kind: 'upload-token', value: 'secret-token-hash' },
-      now
-    })).resolves.toMatchObject({ remaining: 0 })
+    await expect(
+      enforceRateLimit(db, {
+        policy,
+        subject: { kind: 'upload-token', value: 'secret-token-hash' },
+        now
+      })
+    ).resolves.toMatchObject({ remaining: 1 })
+    await expect(
+      enforceRateLimit(db, {
+        policy,
+        subject: { kind: 'upload-token', value: 'secret-token-hash' },
+        now
+      })
+    ).resolves.toMatchObject({ remaining: 0 })
 
-    await expect(enforceRateLimit(db, {
-      policy,
-      subject: { kind: 'upload-token', value: 'secret-token-hash' },
-      now
-    })).rejects.toMatchObject({
+    await expect(
+      enforceRateLimit(db, {
+        policy,
+        subject: { kind: 'upload-token', value: 'secret-token-hash' },
+        now
+      })
+    ).rejects.toMatchObject({
       code: 'RATE_LIMITED',
       status: 429
     })
@@ -62,10 +68,7 @@ describe('D1 rate limiter', () => {
       subject: { kind: 'ip', value: '203.0.113.10' },
       now: new Date('2026-06-11T00:01:00.000Z')
     })
-    const row = await db
-      .prepare('SELECT key FROM api_rate_limits LIMIT 1')
-      .bind()
-      .first<{ key: string }>()
+    const row = await db.prepare('SELECT key FROM api_rate_limits LIMIT 1').bind().first<{ key: string }>()
 
     expect(result.remaining).toBe(0)
     expect(row?.key).toMatch(/^rl:v1:device-pair:ip:/)
@@ -93,10 +96,7 @@ describe('D1 rate limiter', () => {
 
     await pruneExpiredRateLimits(db, new Date('2026-06-11T00:01:30.000Z'))
 
-    const rows = await db
-      .prepare('SELECT key FROM api_rate_limits ORDER BY key')
-      .bind()
-      .all<{ key: string }>()
+    const rows = await db.prepare('SELECT key FROM api_rate_limits ORDER BY key').bind().all<{ key: string }>()
 
     expect(rows.results).toHaveLength(1)
     expect(rows.results[0]?.key).toMatch(/^rl:v1:ingest:ip:/)

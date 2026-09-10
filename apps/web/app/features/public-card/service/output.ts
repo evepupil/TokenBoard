@@ -41,26 +41,29 @@ export async function getPublicUsageCard(
   summaryStrict = false
 ) {
   const profile = await getPublicUsageProfileCore(db, slug, now, summaryStrict, false, true)
-  return renderUsageCardSvg({
-    displayName: profile.displayName,
-    publicUrl,
-    totalTokens: profile.totalTokens,
-    totalTokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
-    totalCacheReadRate: profile.totalCacheReadRate,
-    totalCostUsd: profile.totalCostUsd,
-    totalCostAvailable: profile.totalCostAvailable,
-    monthTokens: profile.monthTokens,
-    monthTokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
-    monthCacheReadRate: profile.monthCacheReadRate,
-    monthCostUsd: profile.monthCostUsd,
-    monthCostAvailable: profile.monthCostAvailable,
-    todayTokens: profile.todayTokens,
-    todayTokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
-    todayCacheReadRate: profile.todayCacheReadRate,
-    todayCostUsd: profile.todayCostUsd,
-    todayCostAvailable: profile.todayCostAvailable,
-    sourceSplit: profile.sourceSplit
-  }, profile.publicCardConfig)
+  return renderUsageCardSvg(
+    {
+      displayName: profile.displayName,
+      publicUrl,
+      totalTokens: profile.totalTokens,
+      totalTokensWithoutCacheRead: profile.totalTokensWithoutCacheRead,
+      totalCacheReadRate: profile.totalCacheReadRate,
+      totalCostUsd: profile.totalCostUsd,
+      totalCostAvailable: profile.totalCostAvailable,
+      monthTokens: profile.monthTokens,
+      monthTokensWithoutCacheRead: profile.monthTokensWithoutCacheRead,
+      monthCacheReadRate: profile.monthCacheReadRate,
+      monthCostUsd: profile.monthCostUsd,
+      monthCostAvailable: profile.monthCostAvailable,
+      todayTokens: profile.todayTokens,
+      todayTokensWithoutCacheRead: profile.todayTokensWithoutCacheRead,
+      todayCacheReadRate: profile.todayCacheReadRate,
+      todayCostUsd: profile.todayCostUsd,
+      todayCostAvailable: profile.todayCostAvailable,
+      sourceSplit: profile.sourceSplit
+    },
+    profile.publicCardConfig
+  )
 }
 
 export function getEmptyPublicCard() {

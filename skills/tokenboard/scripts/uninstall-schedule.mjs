@@ -18,7 +18,9 @@ export function uninstallSchedule(options = {}) {
     configDir: options.configDir || configDir(),
     env,
     spawn: options.spawn || spawnSync,
-    getUid: options.getUid || (() => Number.parseInt(env.TOKENBOARD_INSTALL_SCHEDULE_TEST_UID || process.getuid?.() || 0, 10)),
+    getUid:
+      options.getUid ||
+      (() => Number.parseInt(env.TOKENBOARD_INSTALL_SCHEDULE_TEST_UID || process.getuid?.() || 0, 10)),
     exists: options.exists || existsSync,
     rm: options.rm || rmSync,
     log: options.log || console.log
@@ -87,7 +89,9 @@ function readScheduleTimes(config) {
     return dailyScheduleTimes
   }
 
-  const scheduleTimes = config.scheduleTimes.filter((time) => typeof time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(time))
+  const scheduleTimes = config.scheduleTimes.filter(
+    (time) => typeof time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(time)
+  )
   return scheduleTimes.length > 0 ? scheduleTimes : dailyScheduleTimes
 }
 

@@ -2,10 +2,7 @@ import { createRoute } from 'honox/factory'
 import { ZodError } from 'zod'
 import { requireUser } from '../../features/auth/middleware'
 import { NotificationsPage } from '../../features/notifications/components'
-import {
-  dailyReportHistoryRetentionDays,
-  listDailyReportHistory
-} from '../../features/notifications/report-history'
+import { dailyReportHistoryRetentionDays, listDailyReportHistory } from '../../features/notifications/report-history'
 import { getDailyReportShareSettings } from '../../features/notifications/report-share'
 import { scheduleTimeSlotCount } from '../../features/notifications/schedule-fields'
 import {
@@ -24,10 +21,7 @@ import {
   updateDailyReportShareSettings,
   updateWebhookSubscription
 } from '../../features/notifications/service'
-import {
-  NotificationFormError,
-  notificationFormErrorMessage
-} from '../../features/notifications/errors'
+import { NotificationFormError, notificationFormErrorMessage } from '../../features/notifications/errors'
 import { getProfileTimezoneSettings } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
 

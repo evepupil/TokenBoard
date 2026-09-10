@@ -1,10 +1,23 @@
 import { randomBytes } from 'node:crypto'
-import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { acquireLock, lockHasToken, releaseLock } from './coordinator-lock.mjs'
 import { errorMessage } from './error-message.mjs'
 import { currentProcessStartIdentity } from './process-liveness.mjs'
-import { acquireLegacyRetryFence, prepareLegacyRetryFenceForAll, releaseLegacyRetryFence } from './scheduled-retry-legacy-fence.mjs'
+import {
+  acquireLegacyRetryFence,
+  prepareLegacyRetryFenceForAll,
+  releaseLegacyRetryFence
+} from './scheduled-retry-legacy-fence.mjs'
 
 export const scheduledRetryStateFileName = 'scheduled-sync-retry.json'
 export const scheduledRetryLockFileName = 'scheduled-sync-retry.lock'
@@ -74,7 +87,10 @@ export function runScheduledRetry(options = {}) {
       error
     })
     cleanupError = cleanupError
-      ? new AggregateError([cleanupError, legacyCleanupError], `${errorMessage(cleanupError)}; ${errorMessage(legacyCleanupError)}`)
+      ? new AggregateError(
+          [cleanupError, legacyCleanupError],
+          `${errorMessage(cleanupError)}; ${errorMessage(legacyCleanupError)}`
+        )
       : legacyCleanupError
   }
   try {
@@ -88,7 +104,10 @@ export function runScheduledRetry(options = {}) {
       error
     })
     cleanupError = cleanupError
-      ? new AggregateError([cleanupError, guardCleanupError], `${errorMessage(cleanupError)}; ${errorMessage(guardCleanupError)}`)
+      ? new AggregateError(
+          [cleanupError, guardCleanupError],
+          `${errorMessage(cleanupError)}; ${errorMessage(guardCleanupError)}`
+        )
       : guardCleanupError
   }
 
@@ -104,82 +123,103 @@ export function runScheduledRetry(options = {}) {
 }
 
 function executeScheduledRetry({ source, maxAttempts, delayMs, runAttempt, runtime, progress }) {
-  writeRetryState(retryState({
-    source,
-    status: 'deferred',
-    retryAttempt: 0,
-    maxAttempts,
-    now: runtime.now(),
-    nextRetryAt: new Date(runtime.now()).toISOString()
-  }), runtime)
+  writeRetryState(
+    retryState({
+      source,
+      status: 'deferred',
+      retryAttempt: 0,
+      maxAttempts,
+      now: runtime.now(),
+      nextRetryAt: new Date(runtime.now()).toISOString()
+    }),
+    runtime
+  )
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     progress.retryAttempt = attempt
-    writeRetryState(retryState({
-      source,
-      status: 'retrying',
-      retryAttempt: attempt,
-      maxAttempts,
-      now: runtime.now()
-    }), runtime)
+    writeRetryState(
+      retryState({
+        source,
+        status: 'retrying',
+        retryAttempt: attempt,
+        maxAttempts,
+        now: runtime.now()
+      }),
+      runtime
+    )
 
     try {
       const exitCode = readExitCode(runAttempt({ attempt }))
-      writeRetryState(retryState({
-        source,
-        status: exitCode === 0 ? 'completed' : 'failed',
-        retryAttempt: attempt,
-        maxAttempts,
-        now: runtime.now(),
-        ...(exitCode === 0 ? {} : { error: `sync exited with code ${exitCode}` })
-      }), runtime)
-      return { exitCode, skipped: false, attempts: attempt }
-    } catch (error) {
-      if (!isSyncLockTimeout(error)) {
-        writeRetryState(retryState({
+      writeRetryState(
+        retryState({
           source,
-          status: 'failed',
+          status: exitCode === 0 ? 'completed' : 'failed',
           retryAttempt: attempt,
           maxAttempts,
           now: runtime.now(),
-          error: errorMessage(error)
-        }), runtime)
+          ...(exitCode === 0 ? {} : { error: `sync exited with code ${exitCode}` })
+        }),
+        runtime
+      )
+      return { exitCode, skipped: false, attempts: attempt }
+    } catch (error) {
+      if (!isSyncLockTimeout(error)) {
+        writeRetryState(
+          retryState({
+            source,
+            status: 'failed',
+            retryAttempt: attempt,
+            maxAttempts,
+            now: runtime.now(),
+            error: errorMessage(error)
+          }),
+          runtime
+        )
         throw error
       }
 
       if (attempt === maxAttempts) {
-        writeRetryState(retryState({
-          source,
-          status: 'exhausted',
-          retryAttempt: attempt,
-          maxAttempts,
-          now: runtime.now(),
-          error: errorMessage(error)
-        }), runtime)
+        writeRetryState(
+          retryState({
+            source,
+            status: 'exhausted',
+            retryAttempt: attempt,
+            maxAttempts,
+            now: runtime.now(),
+            error: errorMessage(error)
+          }),
+          runtime
+        )
         return { exitCode: 1, skipped: false, attempts: attempt, exhausted: true }
       }
 
       const now = runtime.now()
-      writeRetryState(retryState({
-        source,
-        status: 'deferred',
-        retryAttempt: attempt,
-        maxAttempts,
-        now,
-        nextRetryAt: new Date(now + delayMs).toISOString(),
-        error: errorMessage(error)
-      }), runtime)
+      writeRetryState(
+        retryState({
+          source,
+          status: 'deferred',
+          retryAttempt: attempt,
+          maxAttempts,
+          now,
+          nextRetryAt: new Date(now + delayMs).toISOString(),
+          error: errorMessage(error)
+        }),
+        runtime
+      )
       try {
         runtime.sleep(delayMs)
       } catch (sleepError) {
-        writeRetryState(retryState({
-          source,
-          status: 'failed',
-          retryAttempt: attempt,
-          maxAttempts,
-          now: runtime.now(),
-          error: errorMessage(sleepError)
-        }), runtime)
+        writeRetryState(
+          retryState({
+            source,
+            status: 'failed',
+            retryAttempt: attempt,
+            maxAttempts,
+            now: runtime.now(),
+            error: errorMessage(sleepError)
+          }),
+          runtime
+        )
         throw sleepError
       }
     }
@@ -195,19 +235,21 @@ function releaseRetryLock(lockPath, runtime, owner) {
 }
 
 function recordRetryLockReleaseFailure({ source, maxAttempts, retryAttempt, runtime, error }) {
-  const releaseError = new Error(
-    `TokenBoard scheduled retry lock release failed: ${errorMessage(error)}`,
-    { cause: error }
-  )
+  const releaseError = new Error(`TokenBoard scheduled retry lock release failed: ${errorMessage(error)}`, {
+    cause: error
+  })
   try {
-    writeRetryState(retryState({
-      source,
-      status: 'failed',
-      retryAttempt,
-      maxAttempts,
-      now: runtime.now(),
-      error: errorMessage(releaseError)
-    }), runtime)
+    writeRetryState(
+      retryState({
+        source,
+        status: 'failed',
+        retryAttempt,
+        maxAttempts,
+        now: runtime.now(),
+        error: errorMessage(releaseError)
+      }),
+      runtime
+    )
     return releaseError
   } catch (stateError) {
     return new AggregateError(
@@ -266,10 +308,12 @@ function prepareRetryLocks({ source, runtime, lockPath }) {
     }
 
     if (source === 'all') {
-      if (prepareLegacyRetryFenceForAll({
-        runtime,
-        lockPath: scheduledRetryLegacyLockPath(runtime.stateDir)
-      })) {
+      if (
+        prepareLegacyRetryFenceForAll({
+          runtime,
+          lockPath: scheduledRetryLegacyLockPath(runtime.stateDir)
+        })
+      ) {
         releasePreparedRetryLocks({ runtime, guardOwners, legacyOwner, transitionPath, transitionOwner })
         return { skipped: true, skippedReason: 'active-legacy-retry' }
       }
@@ -416,7 +460,10 @@ function readRequiredString(value, message) {
 
 function retryRuntime(options) {
   const provided = options.runtime || {}
-  const stateDir = readRequiredString(options.stateDir || provided.stateDir, 'TokenBoard scheduled retry stateDir is required')
+  const stateDir = readRequiredString(
+    options.stateDir || provided.stateDir,
+    'TokenBoard scheduled retry stateDir is required'
+  )
   const processValue = options.process || provided.process || process
   const platform = options.platform || provided.platform || process.platform
   const nodeVersion = options.nodeVersion || provided.nodeVersion || process.versions.node
@@ -428,14 +475,17 @@ function retryRuntime(options) {
     process: processValue,
     platform,
     nodeVersion,
-    processStartIdentity: options.processStartIdentity || provided.processStartIdentity || currentProcessStartIdentity({
-      pid: processValue.pid,
-      platform,
-      nodeVersion,
-      readProcessStartIdentity,
-      runProcessIdentity,
-      kill: processValue.kill?.bind(processValue)
-    }),
+    processStartIdentity:
+      options.processStartIdentity ||
+      provided.processStartIdentity ||
+      currentProcessStartIdentity({
+        pid: processValue.pid,
+        platform,
+        nodeVersion,
+        readProcessStartIdentity,
+        runProcessIdentity,
+        kill: processValue.kill?.bind(processValue)
+      }),
     readProcessStartIdentity,
     runProcessIdentity,
     runTasklist: options.runTasklist || provided.runTasklist,

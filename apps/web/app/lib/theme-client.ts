@@ -1,11 +1,4 @@
-import {
-  getThemeToggleTargetLabel,
-  isTheme,
-  themeChromeColors,
-  themeColorSchemes,
-  themeKey,
-  type Theme
-} from './theme'
+import { getThemeToggleTargetLabel, isTheme, themeChromeColors, themeColorSchemes, themeKey, type Theme } from './theme'
 
 export function initTheme() {
   applyTheme(getStoredTheme() ?? getPreferredTheme())
@@ -30,9 +23,7 @@ function getPreferredTheme(): Theme {
 }
 
 function readDocumentTheme(targetDocument: Document): Theme | null {
-  return isTheme(targetDocument.documentElement.dataset.theme)
-    ? targetDocument.documentElement.dataset.theme
-    : null
+  return isTheme(targetDocument.documentElement.dataset.theme) ? targetDocument.documentElement.dataset.theme : null
 }
 
 function applyTheme(theme: Theme, targetDocument: Document = document) {
@@ -53,7 +44,5 @@ export function syncThemeMeta(theme: Theme, targetDocument: Document = document)
 }
 
 function setMetaContent(targetDocument: Document, name: string, content: string) {
-  targetDocument
-    .querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
-    ?.setAttribute('content', content)
+  targetDocument.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)?.setAttribute('content', content)
 }

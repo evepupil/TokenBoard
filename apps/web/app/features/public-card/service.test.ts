@@ -1,10 +1,5 @@
 ﻿import { describe, expect, test } from 'vitest'
-import {
-  getPublicRouteSlug,
-  getPublicUsageCard,
-  getPublicUsageJson,
-  normalizePublicSlug
-} from './service'
+import { getPublicRouteSlug, getPublicUsageCard, getPublicUsageJson, normalizePublicSlug } from './service'
 import { getPublicTotals } from './service/totals'
 
 describe('public card service', () => {
@@ -60,8 +55,11 @@ describe('public card service', () => {
                   ]),
                   topModels: JSON.stringify([
                     {
-                      model: 'gpt-5.4', totalTokens: 500, totalTokensWithoutCacheRead: 410,
-                      costUsd: 1.5, costAvailable: 0
+                      model: 'gpt-5.4',
+                      totalTokens: 500,
+                      totalTokensWithoutCacheRead: 410,
+                      costUsd: 1.5,
+                      costAvailable: 0
                     }
                   ])
                 }
@@ -85,18 +83,20 @@ describe('public card service', () => {
       total: { tokens: 1200, tokensWithoutCacheRead: 900, cacheReadRate: 0.25, costUsd: 3.75, costAvailable: false },
       month: { tokens: 500, tokensWithoutCacheRead: 380, cacheReadRate: 0.24, costUsd: 1.5, costAvailable: false },
       sourceSplit: [{ source: 'codex', totalTokens: 300, totalTokensWithoutCacheRead: 240, cacheReadRate: 0.2 }],
-      topModels: [{
-        model: 'gpt-5.4', totalTokens: 500, totalTokensWithoutCacheRead: 410,
-        cacheReadRate: 0.18, costUsd: 1.5, costAvailable: false
-      }]
+      topModels: [
+        {
+          model: 'gpt-5.4',
+          totalTokens: 500,
+          totalTokensWithoutCacheRead: 410,
+          cacheReadRate: 0.18,
+          costUsd: 1.5,
+          costAvailable: false
+        }
+      ]
     })
     expect(JSON.stringify(result)).not.toContain('internal-user-id')
     expect(bindings[0]).toEqual(['eve'])
-    expect(bindings[1]).toEqual([
-      'internal-user-id',
-      '2026-04-29',
-      '2026-04-01'
-    ])
+    expect(bindings[1]).toEqual(['internal-user-id', '2026-04-29', '2026-04-01'])
     expect(bindings).toHaveLength(2)
     expect(sqlStatements).toHaveLength(2)
     expect(sqlStatements[1]).toContain('effective_daily_usage_summary')
@@ -109,8 +109,26 @@ describe('public card service', () => {
       "source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness')"
     )
     expect(sqlStatements[1]).toContain("'costAvailable'")
+    expect(sqlStatements[1]).toContain('user_usage_totals.cost_usd')
+    expect(sqlStatements[1]).toContain(
+      "COALESCE(SUM(CASE WHEN source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness') THEN 0 ELSE cost_usd END), 0)"
+    )
+    expect(sqlStatements[1]).toContain(
+      "COALESCE(SUM(CASE WHEN month_usage.usage_date = params.today THEN CASE WHEN month_usage.source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness') THEN 0 ELSE month_usage.cost_usd END ELSE 0 END), 0) as todayCostUsd"
+    )
+    expect(sqlStatements[1]).toContain(
+      "COALESCE(SUM(CASE WHEN month_usage.source IN ('antigravity-cli', 'antigravity', 'antigravity-ide', 'grok-build', 'deepseek-harness') THEN 0 ELSE month_usage.cost_usd END), 0) as monthCostUsd"
+    )
+    expect(sqlStatements[1]).not.toContain('COALESCE(SUM(effective_daily_usage_summary.cost_usd), 0)')
+    expect(sqlStatements[1]).toContain('user_usage_totals.updated_at')
+    expect(sqlStatements[1]).toContain('effective_daily_usage_summary.updated_at > user_usage_totals.updated_at')
+    expect(sqlStatements[1]).not.toContain(
+      "source IN ('antigravity-cli', 'antigravity', 'antigravity-ide')) THEN COALESCE"
+    )
     expect(sqlStatements[1]).toContain('effective_daily_usage_summary.usage_date >= params.month_start')
-    expect(sqlStatements[1]).toContain("effective_daily_usage_summary.usage_date < date(params.month_start, '+1 month')")
+    expect(sqlStatements[1]).toContain(
+      "effective_daily_usage_summary.usage_date < date(params.month_start, '+1 month')"
+    )
     expect(sqlStatements[1]).not.toContain('CASE WHEN daily_usage_summary.usage_date')
   })
 

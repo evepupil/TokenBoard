@@ -10,7 +10,18 @@ runNode(['scripts/check-production-config.mjs'], {
 
 runPnpm(['run', 'build'])
 runPnpm(['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath])
-runPnpm(['exec', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--file', 'db/verify-critical-schema.sql', '--config', configPath])
+runPnpm([
+  'exec',
+  'wrangler',
+  'd1',
+  'execute',
+  'DB',
+  '--remote',
+  '--file',
+  'db/verify-critical-schema.sql',
+  '--config',
+  configPath
+])
 runPnpm(['exec', 'wrangler', 'deploy', '--config', configPath])
 
 function resolveDeployConfigPath() {

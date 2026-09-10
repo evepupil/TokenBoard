@@ -23,6 +23,5 @@ const handler: ErrorHandler = (e, c) => {
 export default handler
 
 function expectsJson(c: Parameters<ErrorHandler>[1]) {
-  return c.req.path.startsWith('/api/') ||
-    (c.req.header('accept') || '').includes('application/json')
+  return c.req.path.startsWith('/api/') || (c.req.header('accept') || '').includes('application/json')
 }

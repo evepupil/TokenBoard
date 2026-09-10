@@ -13,7 +13,7 @@ test('refresh handler CLI updates an already installed Codex hook without changi
   const codexHome = join(root, 'codex')
   const notifyPath = join(root, 'bin', 'notify.cjs')
   const configPath = join(codexHome, 'config.toml')
-  const codexConfig = `model = "gpt-5"\nnotify = ["/usr/bin/env", "node", "${notifyPath}", "--source=codex"]\n`
+  const codexConfig = `model = "gpt-5"\nnotify = ["/usr/bin/env", "node", ${JSON.stringify(notifyPath)}, "--source=codex"]\n`
 
   try {
     await mkdir(codexHome, { recursive: true })

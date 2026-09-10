@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -99,31 +99,52 @@ test('status rejects non-canonical scheduled retry timestamps instead of normali
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-timestamp-'))
   try {
     writeFileSync(join(root, 'config.json'), '{}\n')
-    writeFileSync(join(root, 'scheduled-sync-retry.json'), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'all',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00+08:00',
-      nextRetryAt: '2026-07-29'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      join(root, 'scheduled-sync-retry.json'),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'all',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00+08:00',
+        nextRetryAt: '2026-07-29'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.deepEqual(JSON.parse(result.stdout).scheduledRetry, { status: 'invalid' })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('status fails visibly when the scheduled retry state is not readable', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-unreadable-'))
+  try {
+    writeFileSync(join(root, 'config.json'), '{}\n')
+    mkdirSync(join(root, 'scheduled-sync-retry.json'))
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /EISDIR|directory|read/i)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -133,28 +154,27 @@ test('status preserves the legacy all-source retry state regardless of its store
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-all-legacy-source-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'all' }))
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'codex',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z',
-      nextRetryAt: '2026-07-29T09:01:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'codex',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z',
+        nextRetryAt: '2026-07-29T09:01:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.equal(JSON.parse(result.stdout).scheduledRetry.status, 'deferred')
@@ -167,28 +187,27 @@ test('status reads the retry state for the configured source', () => {
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-source-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryStatePath(root, 'codex'), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'codex',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z',
-      nextRetryAt: '2026-07-29T09:01:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryStatePath(root, 'codex'),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'codex',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z',
+        nextRetryAt: '2026-07-29T09:01:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.equal(JSON.parse(result.stdout).scheduledRetry.status, 'deferred')
@@ -201,28 +220,27 @@ test('status falls back to a legacy retry state only when its source matches', (
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-legacy-source-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'codex',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z',
-      nextRetryAt: '2026-07-29T09:01:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'codex',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z',
+        nextRetryAt: '2026-07-29T09:01:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.equal(JSON.parse(result.stdout).scheduledRetry.status, 'deferred')
@@ -235,27 +253,26 @@ test('status exposes a legacy all-source retry state for a configured source', (
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-legacy-all-source-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'all',
-      status: 'retrying',
-      retryAttempt: 2,
-      maxAttempts: 5,
-      updatedAt: '2026-07-29T09:00:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'all',
+        status: 'retrying',
+        retryAttempt: 2,
+        maxAttempts: 5,
+        updatedAt: '2026-07-29T09:00:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.deepEqual(JSON.parse(result.stdout).scheduledRetry, {
@@ -273,35 +290,37 @@ test('status prefers the newer legacy all-source retry state when source state i
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-newer-legacy-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryStatePath(root, 'codex'), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'codex',
-      status: 'completed',
-      retryAttempt: 1,
-      maxAttempts: 5,
-      updatedAt: '2026-07-29T09:00:00.000Z'
-    }))
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'all',
-      status: 'retrying',
-      retryAttempt: 2,
-      maxAttempts: 5,
-      updatedAt: '2026-07-29T09:05:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryStatePath(root, 'codex'),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'codex',
+        status: 'completed',
+        retryAttempt: 1,
+        maxAttempts: 5,
+        updatedAt: '2026-07-29T09:00:00.000Z'
+      })
     )
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'all',
+        status: 'retrying',
+        retryAttempt: 2,
+        maxAttempts: 5,
+        updatedAt: '2026-07-29T09:05:00.000Z'
+      })
+    )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.deepEqual(JSON.parse(result.stdout).scheduledRetry, {
@@ -321,18 +340,14 @@ test('status preserves an invalid legacy retry state for a configured source', (
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
     writeFileSync(scheduledRetryLegacyStatePath(root), '{ invalid json\n')
 
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
-    )
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.deepEqual(JSON.parse(result.stdout).scheduledRetry, { status: 'invalid' })
@@ -346,27 +361,26 @@ test('status keeps an invalid source retry state authoritative over a valid lega
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
     writeFileSync(scheduledRetryStatePath(root, 'codex'), '{ invalid json\n')
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'all',
-      status: 'retrying',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'all',
+        status: 'retrying',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.deepEqual(JSON.parse(result.stdout).scheduledRetry, { status: 'invalid' })
@@ -379,28 +393,27 @@ test('status ignores a source retry state whose payload belongs to another sourc
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-source-mismatch-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryStatePath(root, 'codex'), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'claude-code',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z',
-      nextRetryAt: '2026-07-29T09:01:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryStatePath(root, 'codex'),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'claude-code',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z',
+        nextRetryAt: '2026-07-29T09:01:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.equal('scheduledRetry' in JSON.parse(result.stdout), false)
@@ -413,28 +426,27 @@ test('status does not expose a legacy retry state belonging to another source', 
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-legacy-mismatch-'))
   try {
     writeFileSync(join(root, 'config.json'), JSON.stringify({ source: 'codex' }))
-    writeFileSync(scheduledRetryLegacyStatePath(root), JSON.stringify({
-      schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
-      source: 'claude-code',
-      status: 'deferred',
-      retryAttempt: 1,
-      maxAttempts: 3,
-      updatedAt: '2026-07-29T09:00:00.000Z',
-      nextRetryAt: '2026-07-29T09:01:00.000Z'
-    }))
-
-    const result = spawnSync(
-      process.execPath,
-      [fileURLToPath(new URL('./status.mjs', import.meta.url))],
-      {
-        env: {
-          ...process.env,
-          TOKENBOARD_CONFIG_DIR: root,
-          TOKENBOARD_STATE_DIR: root
-        },
-        encoding: 'utf8'
-      }
+    writeFileSync(
+      scheduledRetryLegacyStatePath(root),
+      JSON.stringify({
+        schemaVersion: 'tokenboard-scheduled-sync-retry/v1',
+        source: 'claude-code',
+        status: 'deferred',
+        retryAttempt: 1,
+        maxAttempts: 3,
+        updatedAt: '2026-07-29T09:00:00.000Z',
+        nextRetryAt: '2026-07-29T09:01:00.000Z'
+      })
     )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: {
+        ...process.env,
+        TOKENBOARD_CONFIG_DIR: root,
+        TOKENBOARD_STATE_DIR: root
+      },
+      encoding: 'utf8'
+    })
 
     assert.equal(result.status, 0)
     assert.equal('scheduledRetry' in JSON.parse(result.stdout), false)

@@ -22,12 +22,12 @@ const MACOS_CLONEFILE_SERVER_SCRIPT = [
   "clonefile = Fiddle::Function.new(Fiddle::Handle::DEFAULT['clonefile'], [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_INT], Fiddle::TYPE_INT)",
   'STDIN.each_line do |line|',
   '  request = JSON.parse(line)',
-  "  result = clonefile.call(request.fetch('source').b + \"\\0\", request.fetch('target').b + \"\\0\", 0)",
+  '  result = clonefile.call(request.fetch(\'source\').b + "\\0", request.fetch(\'target\').b + "\\0", 0)',
   '  response = result == 0 ? { ok: true } : { ok: false, errno: Fiddle.last_error }',
   '  STDOUT.write(JSON.generate(response) + "\\n")',
   '  STDOUT.flush',
   'end'
-].join("\n")
+].join('\n')
 
 type SessionCopyFile = typeof copyFile
 type SpawnProcess = typeof spawn
@@ -58,10 +58,12 @@ export function createCodexSessionCloner(options: CodexSessionClonerOptions = {}
 class NodeCodexSessionCloner implements CodexSessionCloner {
   private cloneUnavailable = false
 
-  constructor(private readonly input: {
-    copyFile: SessionCopyFile
-    onFallback?: () => void
-  }) {}
+  constructor(
+    private readonly input: {
+      copyFile: SessionCopyFile
+      onFallback?: () => void
+    }
+  ) {}
 
   async copy(source: string, target: string) {
     if (this.cloneUnavailable) {
@@ -86,11 +88,13 @@ class MacOsCodexSessionCloner implements CodexSessionCloner {
   private cloneUnavailable = false
   private client: MacOsCloneClient | null = null
 
-  constructor(private readonly input: {
-    copyFile: SessionCopyFile
-    onFallback?: () => void
-    spawnProcess: SpawnProcess
-  }) {}
+  constructor(
+    private readonly input: {
+      copyFile: SessionCopyFile
+      onFallback?: () => void
+      spawnProcess: SpawnProcess
+    }
+  ) {}
 
   async copy(source: string, target: string) {
     if (this.cloneUnavailable) {
@@ -119,12 +123,11 @@ class MacOsCodexSessionCloner implements CodexSessionCloner {
 
   private createClient() {
     try {
-      return new MacOsCloneClient(this.input.spawnProcess('/usr/bin/ruby', [
-        '-e',
-        MACOS_CLONEFILE_SERVER_SCRIPT
-      ], {
-        stdio: ['pipe', 'pipe', 'pipe']
-      }))
+      return new MacOsCloneClient(
+        this.input.spawnProcess('/usr/bin/ruby', ['-e', MACOS_CLONEFILE_SERVER_SCRIPT], {
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+      )
     } catch (error) {
       if (readErrorCode(error) === 'ENOENT') {
         throw withErrorCode('macOS clonefile helper is unavailable', 'ERR_MACOS_CLONE_HELPER_UNAVAILABLE')
@@ -173,7 +176,8 @@ class MacOsCloneClient {
     })
     child.once('close', () => {
       this.closed = true
-      if (!this.closing) this.fail(withErrorCode('macOS clonefile helper exited unexpectedly', 'ERR_MACOS_CLONE_PROCESS_FAILED'))
+      if (!this.closing)
+        this.fail(withErrorCode('macOS clonefile helper exited unexpectedly', 'ERR_MACOS_CLONE_PROCESS_FAILED'))
       this.resolveClosed?.()
       this.resolveClosed = null
     })
@@ -221,7 +225,9 @@ class MacOsCloneClient {
     if (this.failure) return
     this.responseBytes += chunk.length
     if (this.responseBytes > MACOS_CLONE_RESPONSE_MAX_BYTES) {
-      this.fail(withErrorCode('macOS clonefile helper returned an oversized response', 'ERR_MACOS_CLONE_PROCESS_FAILED'))
+      this.fail(
+        withErrorCode('macOS clonefile helper returned an oversized response', 'ERR_MACOS_CLONE_PROCESS_FAILED')
+      )
       return
     }
     this.responseText += this.decoder.write(chunk)
@@ -239,7 +245,9 @@ class MacOsCloneClient {
   private readResponseLine(line: string) {
     const pending = this.pending
     if (!pending) {
-      this.fail(withErrorCode('macOS clonefile helper returned an unexpected response', 'ERR_MACOS_CLONE_PROCESS_FAILED'))
+      this.fail(
+        withErrorCode('macOS clonefile helper returned an unexpected response', 'ERR_MACOS_CLONE_PROCESS_FAILED')
+      )
       return
     }
     let response: unknown
@@ -267,9 +275,10 @@ class MacOsCloneClient {
 
   private fail(error: unknown) {
     if (this.failure) return
-    this.failure = error instanceof Error
-      ? error
-      : withErrorCode('macOS clonefile helper failed unexpectedly', 'ERR_MACOS_CLONE_PROCESS_FAILED')
+    this.failure =
+      error instanceof Error
+        ? error
+        : withErrorCode('macOS clonefile helper failed unexpectedly', 'ERR_MACOS_CLONE_PROCESS_FAILED')
     const pending = this.pending
     this.pending = null
     if (pending) clearPendingCloneTimeout(pending)
@@ -300,9 +309,7 @@ function readCloneErrno(value: unknown) {
   if (!value || typeof value !== 'object' || !('ok' in value) || value.ok !== false || !('errno' in value)) {
     return null
   }
-  return typeof value.errno === 'number' && Number.isSafeInteger(value.errno) && value.errno > 0
-    ? value.errno
-    : null
+  return typeof value.errno === 'number' && Number.isSafeInteger(value.errno) && value.errno > 0 ? value.errno : null
 }
 
 function isCopyOnWriteCloneUnavailable(error: unknown) {

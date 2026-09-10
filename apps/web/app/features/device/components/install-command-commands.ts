@@ -1,8 +1,12 @@
 export const defaultCollectorRepoUrl = 'https://github.com/evepupil/TokenBoard.git'
 import {
-  createBashCloneRepoCommands, createBashUpdateExistingRepoCommands,
-  createPowerShellCloneRepoCommands, createPowerShellUpdateExistingRepoCommands,
-  escapeBashArg, escapePowerShellArg, indent
+  createBashCloneRepoCommands,
+  createBashUpdateExistingRepoCommands,
+  createPowerShellCloneRepoCommands,
+  createPowerShellUpdateExistingRepoCommands,
+  escapeBashArg,
+  escapePowerShellArg,
+  indent
 } from './install-command-git'
 
 type CommandInput = {
@@ -198,11 +202,13 @@ function createDeviceLinkReconnectCommandContext(input: DeviceLinkReconnectComma
   return {
     bashBaseUrl: escapeBashArg(input.baseUrl),
     bashTimezone: escapeBashArg(input.timezone),
-    bashSetupRepoArg: collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${escapeBashArg(collectorRepoUrl)}`,
+    bashSetupRepoArg:
+      collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${escapeBashArg(collectorRepoUrl)}`,
     bashSetupRepoRefArg: collectorRepoRef ? ` --repo-ref ${escapeBashArg(collectorRepoRef)}` : '',
     powerShellBaseUrl: escapePowerShellArg(input.baseUrl),
     powerShellTimezone: escapePowerShellArg(input.timezone),
-    powerShellSetupRepoArg: collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${escapePowerShellArg(collectorRepoUrl)}`,
+    powerShellSetupRepoArg:
+      collectorRepoUrl === defaultCollectorRepoUrl ? '' : ` --repo-url ${escapePowerShellArg(collectorRepoUrl)}`,
     powerShellSetupRepoRefArg: collectorRepoRef ? ` --repo-ref ${escapePowerShellArg(collectorRepoRef)}` : ''
   }
 }

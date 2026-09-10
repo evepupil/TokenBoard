@@ -17,11 +17,7 @@ export function collectorDir() {
 }
 
 export function readPackageManager(flags = {}, config = {}) {
-  const value =
-    flags['package-manager'] ||
-    process.env.TOKENBOARD_PACKAGE_MANAGER ||
-    config.packageManager ||
-    'pnpm'
+  const value = flags['package-manager'] || process.env.TOKENBOARD_PACKAGE_MANAGER || config.packageManager || 'pnpm'
 
   if (value === 'pnpm' || value === 'bun' || value === 'npm') {
     return value
@@ -277,9 +273,7 @@ function persistedServerProfile(profile) {
 function persistedServerProfiles(servers) {
   const next = {}
   for (const [serverOrigin, profile] of Object.entries(servers || {})) {
-    next[serverOrigin] = profile && typeof profile === 'object'
-      ? persistedServerProfile(profile)
-      : profile
+    next[serverOrigin] = profile && typeof profile === 'object' ? persistedServerProfile(profile) : profile
   }
   return next
 }
@@ -297,6 +291,7 @@ const profileScopedRootKeys = new Set([
   'repoRef',
   'packageManager',
   'scheduleTimes',
+  'codexSymlinkRoots',
   'createdAt',
   'updatedAt'
 ])

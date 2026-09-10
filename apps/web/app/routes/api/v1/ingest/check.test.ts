@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { verifyUploadToken } from '../../../../features/auth/middleware'
 import { ApiError } from '../../../../lib/errors'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit
-} from '../../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit } from '../../../../lib/rate-limit'
 import { POST } from './check'
 
 vi.mock('../../../../features/auth/middleware', () => ({
@@ -59,7 +56,7 @@ describe('snapshot check route', () => {
       new ApiError('RATE_LIMITED', 'Too many requests. Try again later.', 429)
     )
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(429)
     expect(mockedClientIpRateLimitSubject).toHaveBeenCalledWith(request.headers)

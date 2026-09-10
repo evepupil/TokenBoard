@@ -6,17 +6,9 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createSqliteD1, runSql } from '../../test/sqlite-d1'
 import { D1DevicePairingRepository } from './repository'
-import {
-  pairDevice,
-  renameDevice,
-  revokeDevice,
-  revokeInstallation,
-  revokeUploadToken
-} from './service'
+import { pairDevice, renameDevice, revokeDevice, revokeInstallation, revokeUploadToken } from './service'
 
-const crashFixturePath = fileURLToPath(
-  new URL('../../test/fixtures/device-pairing-crash.ts', import.meta.url)
-)
+const crashFixturePath = fileURLToPath(new URL('../../test/fixtures/device-pairing-crash.ts', import.meta.url))
 
 describe('device pairing sqlite contract', () => {
   const tempDirs: string[] = []
@@ -37,35 +29,25 @@ describe('device pairing sqlite contract', () => {
 
     expect(result.status, result.stderr).toBe(42)
     expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_1'")).toBeNull()
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'"))
-      .toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'")).toBe(0)
   }, 15000)
 
   test('creates credentials and consumes the pairing code in one batch', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedPairing(dbPath)
 
-    const result = await pairDevice(
-      new D1DevicePairingRepository(db),
-      pairingRequest(),
-      pairingDeps()
-    )
+    const result = await pairDevice(new D1DevicePairingRepository(db), pairingRequest(), pairingDeps())
 
     expect(result.deviceId).toBe('dev_attempt')
-    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_1'"))
-      .toBe('2026-07-11T01:00:00.000Z')
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'"))
-      .toBe(1)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'"))
-      .toBe(1)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'"))
-      .toBe(1)
+    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_1'")).toBe(
+      '2026-07-11T01:00:00.000Z'
+    )
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'")).toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'")).toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'")).toBe(1)
   })
 
   test('rejects a new-device pairing consumed after lookup without writing orphan credentials', async () => {
@@ -75,94 +57,85 @@ describe('device pairing sqlite contract', () => {
     const findUsablePairingCode = repository.findUsablePairingCode.bind(repository)
     repository.findUsablePairingCode = async (codeHash, now) => {
       const pairing = await findUsablePairingCode(codeHash, now)
-      runSql(dbPath, `
+      runSql(
+        dbPath,
+        `
         UPDATE pairing_codes
         SET consumed_at = '2026-07-11T01:00:01.000Z'
         WHERE id = 'pair_1';
-      `)
+      `
+      )
       return pairing
     }
 
-    await expect(pairDevice(
-      repository,
-      pairingRequest(),
-      pairingDeps()
-    )).rejects.toMatchObject({
+    await expect(pairDevice(repository, pairingRequest(), pairingDeps())).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
       message: 'Invalid or expired pairing code'
     })
 
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'"))
-      .toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'")).toBe(0)
   })
 
   test('rolls back every pairing write when the audit insert fails', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedPairing(dbPath)
-    runSql(dbPath, `
+    runSql(
+      dbPath,
+      `
       INSERT INTO audit_logs (
         id, user_id, actor_type, action, target_type, target_id, created_at
       ) VALUES (
         'audit_attempt', 'user_1', 'user', 'existing', 'device', null,
         '2026-07-11T00:00:00.000Z'
       );
-    `)
+    `
+    )
 
-    await expect(pairDevice(
-      new D1DevicePairingRepository(db),
-      pairingRequest(),
-      pairingDeps()
-    )).rejects.toThrow()
+    await expect(pairDevice(new D1DevicePairingRepository(db), pairingRequest(), pairingDeps())).rejects.toThrow()
 
     expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_1'")).toBeNull()
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'"))
-      .toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM devices WHERE id = 'dev_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'")).toBe(0)
   })
 
   test('reports an inactive reconnect target when it is revoked after pairing-code lookup', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedReconnectPairing(dbPath)
     const repository = new D1DevicePairingRepository(db)
-    expect(await repository.findUsablePairingCode(
-      'hash:reconnect-pairing',
-      '2026-07-11T01:00:00.000Z'
-    )).not.toBeNull()
-    runSql(dbPath, `
+    expect(await repository.findUsablePairingCode('hash:reconnect-pairing', '2026-07-11T01:00:00.000Z')).not.toBeNull()
+    runSql(
+      dbPath,
+      `
       UPDATE device_installations
       SET revoked_at = '2026-07-11T01:00:01.000Z'
       WHERE id = 'inst_old';
-    `)
+    `
+    )
 
-    await expect(repository.createUploadTokenAndInstallation({
-      pairingCodeId: 'pair_reconnect',
-      consumedAt: '2026-07-11T01:00:02.000Z',
-      uploadTokenId: 'ut_reconnect',
-      uploadTokenHash: 'hash:reconnect-upload',
-      deviceId: 'dev_old',
-      installationId: 'inst_reconnect',
-      installClaimHash: 'hash:reconnect-claim',
-      userId: 'user_1',
-      deviceName: 'Reinstalled',
-      platform: 'linux',
-      auditLogId: 'audit_reconnect',
-      auditAction: 'device.reconnect',
-      createdAt: '2026-07-11T01:00:02.000Z'
-    })).rejects.toThrow('Reconnect target is no longer active')
+    await expect(
+      repository.createUploadTokenAndInstallation({
+        pairingCodeId: 'pair_reconnect',
+        consumedAt: '2026-07-11T01:00:02.000Z',
+        uploadTokenId: 'ut_reconnect',
+        uploadTokenHash: 'hash:reconnect-upload',
+        deviceId: 'dev_old',
+        installationId: 'inst_reconnect',
+        installClaimHash: 'hash:reconnect-claim',
+        userId: 'user_1',
+        deviceName: 'Reinstalled',
+        platform: 'linux',
+        auditLogId: 'audit_reconnect',
+        auditAction: 'device.reconnect',
+        createdAt: '2026-07-11T01:00:02.000Z'
+      })
+    ).rejects.toThrow('Reconnect target is no longer active')
 
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'"))
-      .toBe(0)
-    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'"))
-      .toBeNull()
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'")).toBe(0)
+    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'")).toBeNull()
   })
 
   test('creates reconnect credentials and consumes the reconnect pairing code in one batch', async () => {
@@ -181,143 +154,151 @@ describe('device pairing sqlite contract', () => {
     )
 
     expect(result.deviceId).toBe('dev_old')
-    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'"))
-      .toBe('2026-07-11T01:00:00.000Z')
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'"))
-      .toBe(1)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'"))
-      .toBe(1)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'"))
-      .toBe(1)
+    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'")).toBe(
+      '2026-07-11T01:00:00.000Z'
+    )
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_attempt'")).toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_attempt'")).toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_attempt'")).toBe(1)
   })
 
   test('preserves a device-link claim when the pairing code is consumed after lookup', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedReconnectPairing(dbPath)
     const repository = new D1DevicePairingRepository(db)
-    expect(await repository.findUsablePairingCode(
-      'hash:reconnect-pairing',
-      '2026-07-11T01:00:00.000Z'
-    )).not.toBeNull()
-    runSql(dbPath, `
+    expect(await repository.findUsablePairingCode('hash:reconnect-pairing', '2026-07-11T01:00:00.000Z')).not.toBeNull()
+    runSql(
+      dbPath,
+      `
       UPDATE pairing_codes
       SET consumed_at = '2026-07-11T01:00:01.000Z'
       WHERE id = 'pair_reconnect';
-    `)
+    `
+    )
 
-    await expect(repository.createUploadTokenAndInstallation({
-      pairingCodeId: 'pair_reconnect',
-      consumedAt: '2026-07-11T01:00:02.000Z',
-      uploadTokenId: 'ut_reconnect',
-      uploadTokenHash: 'hash:reconnect-upload',
-      deviceId: 'dev_old',
-      installationId: 'inst_reconnect',
-      installClaimHash: 'hash:reconnect-claim',
-      userId: 'user_1',
-      deviceName: 'Reinstalled',
-      platform: 'linux',
-      auditLogId: 'audit_reconnect',
-      auditAction: 'device.reconnect',
-      createdAt: '2026-07-11T01:00:02.000Z',
-      sourceInstallationId: 'inst_old',
-      sourceInstallClaimHash: 'hash:old-claim',
-      consumedInstallClaimHash: 'hash:consumed-claim'
-    })).rejects.toThrow('Reconnect pairing code is no longer current')
+    await expect(
+      repository.createUploadTokenAndInstallation({
+        pairingCodeId: 'pair_reconnect',
+        consumedAt: '2026-07-11T01:00:02.000Z',
+        uploadTokenId: 'ut_reconnect',
+        uploadTokenHash: 'hash:reconnect-upload',
+        deviceId: 'dev_old',
+        installationId: 'inst_reconnect',
+        installClaimHash: 'hash:reconnect-claim',
+        userId: 'user_1',
+        deviceName: 'Reinstalled',
+        platform: 'linux',
+        auditLogId: 'audit_reconnect',
+        auditAction: 'device.reconnect',
+        createdAt: '2026-07-11T01:00:02.000Z',
+        sourceInstallationId: 'inst_old',
+        sourceInstallClaimHash: 'hash:old-claim',
+        consumedInstallClaimHash: 'hash:consumed-claim'
+      })
+    ).rejects.toThrow('Reconnect pairing code is no longer current')
 
-    expect(readColumn(
-      dbPath,
-      "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
-      'install_claim_hash'
-    )).toBe('hash:old-claim')
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'"))
-      .toBe(0)
+    expect(
+      readColumn(
+        dbPath,
+        "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
+        'install_claim_hash'
+      )
+    ).toBe('hash:old-claim')
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'")).toBe(0)
   })
 
   test('rejects a rotated device-link source claim without creating reconnect credentials', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedReconnectPairing(dbPath)
-    runSql(dbPath, `
+    runSql(
+      dbPath,
+      `
       UPDATE device_installations
       SET install_claim_hash = 'hash:rotated-claim'
       WHERE id = 'inst_old';
-    `)
+    `
+    )
 
-    await expect(new D1DevicePairingRepository(db).createUploadTokenAndInstallation({
-      pairingCodeId: 'pair_reconnect',
-      consumedAt: '2026-07-11T01:00:02.000Z',
-      uploadTokenId: 'ut_reconnect',
-      uploadTokenHash: 'hash:reconnect-upload',
-      deviceId: 'dev_old',
-      installationId: 'inst_reconnect',
-      installClaimHash: 'hash:reconnect-claim',
-      userId: 'user_1',
-      deviceName: 'Reinstalled',
-      platform: 'linux',
-      auditLogId: 'audit_reconnect',
-      auditAction: 'device.reconnect',
-      createdAt: '2026-07-11T01:00:02.000Z',
-      sourceInstallationId: 'inst_old',
-      sourceInstallClaimHash: 'hash:old-claim',
-      consumedInstallClaimHash: 'hash:consumed-claim'
-    })).rejects.toThrow('Reconnect source installation is no longer current')
+    await expect(
+      new D1DevicePairingRepository(db).createUploadTokenAndInstallation({
+        pairingCodeId: 'pair_reconnect',
+        consumedAt: '2026-07-11T01:00:02.000Z',
+        uploadTokenId: 'ut_reconnect',
+        uploadTokenHash: 'hash:reconnect-upload',
+        deviceId: 'dev_old',
+        installationId: 'inst_reconnect',
+        installClaimHash: 'hash:reconnect-claim',
+        userId: 'user_1',
+        deviceName: 'Reinstalled',
+        platform: 'linux',
+        auditLogId: 'audit_reconnect',
+        auditAction: 'device.reconnect',
+        createdAt: '2026-07-11T01:00:02.000Z',
+        sourceInstallationId: 'inst_old',
+        sourceInstallClaimHash: 'hash:old-claim',
+        consumedInstallClaimHash: 'hash:consumed-claim'
+      })
+    ).rejects.toThrow('Reconnect source installation is no longer current')
 
-    expect(readColumn(
-      dbPath,
-      "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
-      'install_claim_hash'
-    )).toBe('hash:rotated-claim')
-    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'"))
-      .toBeNull()
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_reconnect'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_reconnect'"))
-      .toBe(0)
+    expect(
+      readColumn(
+        dbPath,
+        "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
+        'install_claim_hash'
+      )
+    ).toBe('hash:rotated-claim')
+    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'")).toBeNull()
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_reconnect'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE id = 'audit_reconnect'")).toBe(0)
   })
 
   test('rolls back source-claim consumption when reconnect auditing fails', async () => {
     const { db, dbPath } = createDeviceDb(tempDirs)
     seedReconnectPairing(dbPath)
-    runSql(dbPath, `
+    runSql(
+      dbPath,
+      `
       INSERT INTO audit_logs (
         id, user_id, actor_type, action, target_type, target_id, created_at
       ) VALUES (
         'audit_reconnect', 'user_1', 'user', 'existing', 'device', 'dev_old',
         '2026-07-11T00:00:00.000Z'
       );
-    `)
+    `
+    )
 
-    await expect(new D1DevicePairingRepository(db).createUploadTokenAndInstallation({
-      pairingCodeId: 'pair_reconnect',
-      consumedAt: '2026-07-11T01:00:02.000Z',
-      uploadTokenId: 'ut_reconnect',
-      uploadTokenHash: 'hash:reconnect-upload',
-      deviceId: 'dev_old',
-      installationId: 'inst_reconnect',
-      installClaimHash: 'hash:reconnect-claim',
-      userId: 'user_1',
-      deviceName: 'Reinstalled',
-      platform: 'linux',
-      auditLogId: 'audit_reconnect',
-      auditAction: 'device.reconnect',
-      createdAt: '2026-07-11T01:00:02.000Z',
-      sourceInstallationId: 'inst_old',
-      sourceInstallClaimHash: 'hash:old-claim',
-      consumedInstallClaimHash: 'hash:consumed-claim'
-    })).rejects.toThrow()
+    await expect(
+      new D1DevicePairingRepository(db).createUploadTokenAndInstallation({
+        pairingCodeId: 'pair_reconnect',
+        consumedAt: '2026-07-11T01:00:02.000Z',
+        uploadTokenId: 'ut_reconnect',
+        uploadTokenHash: 'hash:reconnect-upload',
+        deviceId: 'dev_old',
+        installationId: 'inst_reconnect',
+        installClaimHash: 'hash:reconnect-claim',
+        userId: 'user_1',
+        deviceName: 'Reinstalled',
+        platform: 'linux',
+        auditLogId: 'audit_reconnect',
+        auditAction: 'device.reconnect',
+        createdAt: '2026-07-11T01:00:02.000Z',
+        sourceInstallationId: 'inst_old',
+        sourceInstallClaimHash: 'hash:old-claim',
+        consumedInstallClaimHash: 'hash:consumed-claim'
+      })
+    ).rejects.toThrow()
 
-    expect(readColumn(
-      dbPath,
-      "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
-      'install_claim_hash'
-    )).toBe('hash:old-claim')
-    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'"))
-      .toBeNull()
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'"))
-      .toBe(0)
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_reconnect'"))
-      .toBe(0)
+    expect(
+      readColumn(
+        dbPath,
+        "SELECT install_claim_hash FROM device_installations WHERE id = 'inst_old'",
+        'install_claim_hash'
+      )
+    ).toBe('hash:old-claim')
+    expect(readScalar(dbPath, "SELECT consumed_at FROM pairing_codes WHERE id = 'pair_reconnect'")).toBeNull()
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM device_installations WHERE id = 'inst_reconnect'")).toBe(0)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM upload_tokens WHERE id = 'ut_reconnect'")).toBe(0)
   })
 })
 
@@ -335,18 +316,21 @@ describe('device revocation sqlite contract', () => {
     seedRevocationTarget(dbPath)
     rejectRevocationAudits(dbPath)
 
-    await expect(revokeDevice(db, {
-      userId: 'user_1',
-      deviceId: 'dev_1',
-      now: '2026-07-11T01:00:00.000Z'
-    })).rejects.toThrow('audit failed')
+    await expect(
+      revokeDevice(db, {
+        userId: 'user_1',
+        deviceId: 'dev_1',
+        now: '2026-07-11T01:00:00.000Z'
+      })
+    ).rejects.toThrow('audit failed')
 
-    expect(readColumn(dbPath, 'SELECT revoked_at FROM upload_tokens WHERE id = \'ut_1\'', 'revoked_at'))
-      .toBeNull()
-    expect(readColumn(dbPath, 'SELECT revoked_at FROM device_installations WHERE id = \'inst_1\'', 'revoked_at'))
-      .toBeNull()
-    expect(readColumn(dbPath, 'SELECT updated_at FROM devices WHERE id = \'dev_1\'', 'updated_at'))
-      .toBe('2026-07-11T00:00:00.000Z')
+    expect(readColumn(dbPath, "SELECT revoked_at FROM upload_tokens WHERE id = 'ut_1'", 'revoked_at')).toBeNull()
+    expect(
+      readColumn(dbPath, "SELECT revoked_at FROM device_installations WHERE id = 'inst_1'", 'revoked_at')
+    ).toBeNull()
+    expect(readColumn(dbPath, "SELECT updated_at FROM devices WHERE id = 'dev_1'", 'updated_at')).toBe(
+      '2026-07-11T00:00:00.000Z'
+    )
   })
 
   test('rolls back installation revocation when the audit insert fails', async () => {
@@ -354,16 +338,18 @@ describe('device revocation sqlite contract', () => {
     seedRevocationTarget(dbPath)
     rejectRevocationAudits(dbPath)
 
-    await expect(revokeInstallation(db, {
-      userId: 'user_1',
-      installationId: 'inst_1',
-      now: '2026-07-11T01:00:00.000Z'
-    })).rejects.toThrow('audit failed')
+    await expect(
+      revokeInstallation(db, {
+        userId: 'user_1',
+        installationId: 'inst_1',
+        now: '2026-07-11T01:00:00.000Z'
+      })
+    ).rejects.toThrow('audit failed')
 
-    expect(readColumn(dbPath, 'SELECT revoked_at FROM upload_tokens WHERE id = \'ut_1\'', 'revoked_at'))
-      .toBeNull()
-    expect(readColumn(dbPath, 'SELECT revoked_at FROM device_installations WHERE id = \'inst_1\'', 'revoked_at'))
-      .toBeNull()
+    expect(readColumn(dbPath, "SELECT revoked_at FROM upload_tokens WHERE id = 'ut_1'", 'revoked_at')).toBeNull()
+    expect(
+      readColumn(dbPath, "SELECT revoked_at FROM device_installations WHERE id = 'inst_1'", 'revoked_at')
+    ).toBeNull()
   })
 
   test('rolls back a device rename when the audit insert fails', async () => {
@@ -371,15 +357,16 @@ describe('device revocation sqlite contract', () => {
     seedRevocationTarget(dbPath)
     rejectAuditAction(dbPath, 'device.rename')
 
-    await expect(renameDevice(db, {
-      userId: 'user_1',
-      deviceId: 'dev_1',
-      name: 'Renamed',
-      now: '2026-07-11T01:00:00.000Z'
-    })).rejects.toThrow('audit failed')
+    await expect(
+      renameDevice(db, {
+        userId: 'user_1',
+        deviceId: 'dev_1',
+        name: 'Renamed',
+        now: '2026-07-11T01:00:00.000Z'
+      })
+    ).rejects.toThrow('audit failed')
 
-    expect(readColumn(dbPath, "SELECT name FROM devices WHERE id = 'dev_1'", 'name'))
-      .toBe('Workstation')
+    expect(readColumn(dbPath, "SELECT name FROM devices WHERE id = 'dev_1'", 'name')).toBe('Workstation')
   })
 
   test('does not record a second installation audit when the state change loses a race', async () => {
@@ -394,8 +381,7 @@ describe('device revocation sqlite contract', () => {
     await revokeInstallation(db, input)
     await expect(revokeInstallation(db, input)).rejects.toThrow('Installation not found')
 
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE action = 'installation.revoke'"))
-      .toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE action = 'installation.revoke'")).toBe(1)
   })
 
   test('does not record a second token audit when the state change loses a race', async () => {
@@ -410,8 +396,7 @@ describe('device revocation sqlite contract', () => {
     await revokeUploadToken(db, input)
     await expect(revokeUploadToken(db, input)).rejects.toThrow('Upload token not found')
 
-    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE action = 'token.revoke'"))
-      .toBe(1)
+    expect(readCount(dbPath, "SELECT COUNT(*) FROM audit_logs WHERE action = 'token.revoke'")).toBe(1)
   })
 })
 
@@ -419,7 +404,9 @@ function createDeviceDb(tempDirs: string[]) {
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-device-contract-'))
   tempDirs.push(root)
   const dbPath = join(root, 'device.db')
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     PRAGMA foreign_keys = ON;
     CREATE TABLE users (id TEXT PRIMARY KEY NOT NULL);
     CREATE TABLE pairing_codes (
@@ -478,12 +465,15 @@ function createDeviceDb(tempDirs: string[]) {
       metadata TEXT,
       created_at TEXT NOT NULL
     );
-  `)
+  `
+  )
   return { db: createSqliteD1(dbPath), dbPath }
 }
 
 function seedPairing(dbPath: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     INSERT INTO users (id) VALUES ('user_1');
     INSERT INTO pairing_codes (
       id, user_id, code_hash, pairing_type, expires_at, created_at
@@ -491,11 +481,14 @@ function seedPairing(dbPath: string) {
       'pair_1', 'user_1', 'hash:pairing-code', 'new_device',
       '2026-07-11T02:00:00.000Z', '2026-07-11T00:00:00.000Z'
     );
-  `)
+  `
+  )
 }
 
 function seedRevocationTarget(dbPath: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     INSERT INTO users (id) VALUES ('user_1');
     INSERT INTO devices (
       id, user_id, name, platform, created_at, updated_at
@@ -517,11 +510,14 @@ function seedRevocationTarget(dbPath: string) {
       'ut_1', 'user_1', 'Workstation', 'hash:upload', 'dev_1', 'inst_1',
       '2026-07-11T00:00:00.000Z'
     );
-  `)
+  `
+  )
 }
 
 function seedReconnectPairing(dbPath: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     INSERT INTO users (id) VALUES ('user_1');
     INSERT INTO devices (
       id, user_id, name, platform, created_at, updated_at
@@ -544,29 +540,36 @@ function seedReconnectPairing(dbPath: string) {
       'pair_reconnect', 'user_1', 'hash:reconnect-pairing', 'reconnect_device',
       'dev_old', '2026-07-11T02:00:00.000Z', '2026-07-11T00:00:00.000Z'
     );
-  `)
+  `
+  )
 }
 
 function rejectRevocationAudits(dbPath: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     CREATE TRIGGER reject_revocation_audit
     BEFORE INSERT ON audit_logs
     WHEN NEW.action IN ('device.revoke', 'installation.revoke')
     BEGIN
       SELECT RAISE(ABORT, 'audit failed');
     END;
-  `)
+  `
+  )
 }
 
 function rejectAuditAction(dbPath: string, action: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     CREATE TRIGGER reject_selected_audit
     BEFORE INSERT ON audit_logs
     WHEN NEW.action = '${action}'
     BEGIN
       SELECT RAISE(ABORT, 'audit failed');
     END;
-  `)
+  `
+  )
 }
 
 function pairingRequest() {

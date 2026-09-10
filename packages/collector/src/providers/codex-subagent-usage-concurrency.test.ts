@@ -22,26 +22,31 @@ describe('Codex subagent usage correction concurrency', () => {
     let concurrentReadTimeout: ReturnType<typeof setTimeout> | undefined
 
     try {
-      await Promise.all(names.map((name) => writeJsonl(
-        join(codexHome, 'sessions', '2026', '07', '25', `${name}.jsonl`),
-        [subagentSessionMeta(name, 'parent', '2026-07-25T01:00:00.000Z')]
-      )))
+      await Promise.all(
+        names.map((name) =>
+          writeJsonl(join(codexHome, 'sessions', '2026', '07', '25', `${name}.jsonl`), [
+            subagentSessionMeta(name, 'parent', '2026-07-25T01:00:00.000Z')
+          ])
+        )
+      )
 
       await applyCodexSubagentUsageCorrections({
-        snapshots: [{
-          source: 'codex',
-          usageDate: '2026-07-25',
-          timezone: 'UTC',
-          model: 'gpt-5.6',
-          inputTokens: 300,
-          outputTokens: 30,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 0,
-          totalTokens: 330,
-          costUsd: 0,
-          sessionCount: 3,
-          collectedAt: '2026-07-25T02:00:00.000Z'
-        }],
+        snapshots: [
+          {
+            source: 'codex',
+            usageDate: '2026-07-25',
+            timezone: 'UTC',
+            model: 'gpt-5.6',
+            inputTokens: 300,
+            outputTokens: 30,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            totalTokens: 330,
+            costUsd: 0,
+            sessionCount: 3,
+            collectedAt: '2026-07-25T02:00:00.000Z'
+          }
+        ],
         sessions: {
           sessions: names.map((name) => ({
             directory: '2026/07/25',

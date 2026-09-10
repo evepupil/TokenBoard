@@ -24,16 +24,8 @@ export const codexChildSessionReadLimits = {
   maxBytes: maxCodexChildSessionBytes,
   maxLineBytes: maxCodexChildSessionLineBytes,
   maxDiscardedLineBytes: maxDiscardedCodexChildSessionLineBytes,
-  relevantMetadataKeys: [
-    'total_token_usage',
-    'last_token_usage',
-    'subagent'
-  ],
-  discardableLineTypes: [
-    'compacted',
-    'event_msg',
-    'response_item'
-  ],
+  relevantMetadataKeys: ['total_token_usage', 'last_token_usage', 'subagent'],
+  discardableLineTypes: ['compacted', 'event_msg', 'response_item', 'turn_context'],
   label: 'Codex child session'
 } as const
 
@@ -161,13 +153,16 @@ export class ChildUsageEventMerger {
 }
 
 export function sumDatedUsage(usages: DatedUsage[]) {
-  return usages.reduce((total, usage) => ({
-    inputTokens: total.inputTokens + usage.inputTokens,
-    outputTokens: total.outputTokens + usage.outputTokens,
-    cacheCreationTokens: total.cacheCreationTokens + usage.cacheCreationTokens,
-    cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
-    totalTokens: total.totalTokens + usage.totalTokens
-  }), { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0 })
+  return usages.reduce(
+    (total, usage) => ({
+      inputTokens: total.inputTokens + usage.inputTokens,
+      outputTokens: total.outputTokens + usage.outputTokens,
+      cacheCreationTokens: total.cacheCreationTokens + usage.cacheCreationTokens,
+      cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
+      totalTokens: total.totalTokens + usage.totalTokens
+    }),
+    { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0 }
+  )
 }
 
 function addDatedUsage(byDate: Map<string, DatedUsage>, usageDate: string, usage: TotalUsage) {
@@ -249,7 +244,9 @@ export function formatCodexUsageDate(value: string, timezone: string) {
     }
     throw error
   }
-  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value])
+  )
   return cacheFormattedUsageDate(cacheKey, `${values.year}-${values.month}-${values.day}`)
 }
 

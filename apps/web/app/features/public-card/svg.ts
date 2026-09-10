@@ -1,11 +1,6 @@
 import { formatUsd } from '../../lib/money'
 import { cacheReadRateFromTotals, formatPercentRate } from '../../lib/usage-metrics'
-import {
-  defaultPublicCardConfig,
-  parsePublicCardConfig,
-  type PublicCardConfig,
-  type PublicCardMetric
-} from './config'
+import { defaultPublicCardConfig, parsePublicCardConfig, type PublicCardConfig, type PublicCardMetric } from './config'
 import { palettes, type Palette, type UsageCardInput } from './svg-types'
 
 export type { UsageCardInput } from './svg-types'
@@ -167,24 +162,33 @@ function metricValue(input: UsageCardInput, metric: PublicCardMetric) {
   const values = {
     totalTokens: formatInteger(input.totalTokens),
     totalTokensWithoutCacheRead: formatInteger(input.totalTokensWithoutCacheRead ?? input.totalTokens),
-    totalCacheReadRate: formatPercentRate(input.totalCacheReadRate ?? cacheReadRateFromTotals({
-      totalTokens: input.totalTokens,
-      totalTokensWithoutCacheRead: input.totalTokensWithoutCacheRead ?? input.totalTokens
-    })),
+    totalCacheReadRate: formatPercentRate(
+      input.totalCacheReadRate ??
+        cacheReadRateFromTotals({
+          totalTokens: input.totalTokens,
+          totalTokensWithoutCacheRead: input.totalTokensWithoutCacheRead ?? input.totalTokens
+        })
+    ),
     totalCost: formatUsd(input.totalCostUsd),
     monthTokens: formatInteger(input.monthTokens),
     monthTokensWithoutCacheRead: formatInteger(input.monthTokensWithoutCacheRead ?? input.monthTokens),
-    monthCacheReadRate: formatPercentRate(input.monthCacheReadRate ?? cacheReadRateFromTotals({
-      totalTokens: input.monthTokens,
-      totalTokensWithoutCacheRead: input.monthTokensWithoutCacheRead ?? input.monthTokens
-    })),
+    monthCacheReadRate: formatPercentRate(
+      input.monthCacheReadRate ??
+        cacheReadRateFromTotals({
+          totalTokens: input.monthTokens,
+          totalTokensWithoutCacheRead: input.monthTokensWithoutCacheRead ?? input.monthTokens
+        })
+    ),
     monthCost: formatUsd(input.monthCostUsd),
     todayTokens: formatInteger(input.todayTokens ?? 0),
     todayTokensWithoutCacheRead: formatInteger(input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0),
-    todayCacheReadRate: formatPercentRate(input.todayCacheReadRate ?? cacheReadRateFromTotals({
-      totalTokens: input.todayTokens ?? 0,
-      totalTokensWithoutCacheRead: input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0
-    })),
+    todayCacheReadRate: formatPercentRate(
+      input.todayCacheReadRate ??
+        cacheReadRateFromTotals({
+          totalTokens: input.todayTokens ?? 0,
+          totalTokensWithoutCacheRead: input.todayTokensWithoutCacheRead ?? input.todayTokens ?? 0
+        })
+    ),
     todayCost: formatUsd(input.todayCostUsd ?? 0)
   } satisfies Record<PublicCardMetric, string>
   return values[metric]
@@ -251,9 +255,5 @@ function formatInteger(value: number) {
 }
 
 function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 }

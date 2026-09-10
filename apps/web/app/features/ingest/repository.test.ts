@@ -58,29 +58,23 @@ describe('upsertUsageSnapshots', () => {
       }
     } as unknown as D1Database
 
-    const result = await upsertUsageSnapshots(db, [
-      makeRecord(),
-      makeRecord({ model: 'claude-opus-4-5' })
-    ])
+    const result = await upsertUsageSnapshots(db, [makeRecord(), makeRecord({ model: 'claude-opus-4-5' })])
 
     expect(result).toEqual({ upserted: 2 })
     expect(sqlStatements[0]).toContain('INSERT INTO daily_usage')
-    expect(sqlStatements[0]).toContain(
-      'ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET'
-    )
-    expect(sqlStatements[0]).toContain('WHERE daily_usage.snapshot_hash IS NULL')
+    expect(sqlStatements[0]).toContain('ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET')
+    expect(sqlStatements[0]).toContain('daily_usage.snapshot_hash IS NULL')
     expect(sqlStatements[0]).toContain('OR daily_usage.snapshot_hash <> excluded.snapshot_hash')
+    expect(sqlStatements[0]).toContain("excluded.source = 'codex'")
+    expect(sqlStatements[0]).toContain('daily_usage.total_tokens > 0')
     expect(runCount).toBe(0)
     expect(batches).toHaveLength(2)
     expect(batches[0]).toHaveLength(2)
     expect(batches[1]).toHaveLength(3)
     expect(sqlStatements.some((sql) => sql.includes('INSERT INTO daily_usage_summary'))).toBe(true)
     expect(sqlStatements.some((sql) => sql.includes('INSERT INTO user_usage_totals'))).toBe(true)
-    const upsertBindings = bindings.filter((values) => values.length === 15)
-    expect(upsertBindings.map((values) => values[5]).sort()).toEqual([
-      'claude-opus-4-5',
-      'claude-sonnet-4-5'
-    ])
+    const upsertBindings = bindings.filter((values) => values.length === 22)
+    expect(upsertBindings.map((values) => values[5]).sort()).toEqual(['claude-opus-4-5', 'claude-sonnet-4-5'])
     expect(upsertBindings.find((values) => values[5] === 'claude-sonnet-4-5')).toEqual([
       'seed-user',
       'dev_123',
@@ -96,7 +90,14 @@ describe('upsertUsageSnapshots', () => {
       0.12,
       2,
       expect.stringMatching(/^[a-f0-9]{64}$/),
-      '2026-04-28T07:00:00.000Z'
+      '2026-04-28T07:00:00.000Z',
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
     ])
   })
 
@@ -217,11 +218,7 @@ describe('upsertUsageSnapshots', () => {
     expect(totalRefreshSql).toContain('FROM usage_summary_backfill_state')
     expect(totalRefreshSql).toContain('LEFT JOIN daily_usage_summary')
     expect(totalRefreshSql).not.toMatch(/FROM daily_usage(?!_summary)/)
-    expect(
-      sqlStatements.some((sql) =>
-        sql.includes('COALESCE(SUM(total_tokens - cache_read_tokens), 0)')
-      )
-    ).toBe(true)
+    expect(sqlStatements.some((sql) => sql.includes('COALESCE(SUM(total_tokens - cache_read_tokens), 0)'))).toBe(true)
     expect(batches).toHaveLength(2)
     expect(batches[0]).toHaveLength(3)
     expect(batches[1]).toHaveLength(3)
@@ -256,10 +253,7 @@ describe('upsertUsageSnapshots', () => {
       }
     } as unknown as D1Database
 
-    const result = await upsertUsageSnapshots(db, [
-      makeRecord(),
-      makeRecord({ model: 'claude-opus-4-5' })
-    ])
+    const result = await upsertUsageSnapshots(db, [makeRecord(), makeRecord({ model: 'claude-opus-4-5' })])
 
     expect(result).toEqual({ upserted: 0 })
     expect(sqlStatements.some((sql) => sql.includes('expected_summary'))).toBe(true)
@@ -407,13 +401,14 @@ describe('upsertUsageSnapshots', () => {
 
     expect(sqlStatements[0]).toContain('UPDATE upload_tokens')
     expect(sqlStatements[0]).toContain('last_used_at = ?')
-    expect(bindings[0]).toEqual(['2026-04-28T08:00:00.000Z', 'hash:upload-token'])
+    expect(bindings[0]).toEqual(['2026-04-28T08:00:00.000Z', 'hash:upload-token', '2026-04-28T08:00:00.000Z'])
     expect(sqlStatements[1]).toContain('UPDATE devices')
     expect(sqlStatements[1]).toContain('last_synced_at = ?')
     expect(bindings[1]).toEqual([
       '2026-04-28T08:00:00.000Z',
       '2026-04-28T08:00:00.000Z',
-      'dev_123'
+      'dev_123',
+      '2026-04-28T08:00:00.000Z'
     ])
     expect(sqlStatements[2]).toContain('UPDATE device_installations')
     expect(sqlStatements[2]).toContain('last_seen_at = ?')
@@ -421,6 +416,7 @@ describe('upsertUsageSnapshots', () => {
       '2026-04-28T08:00:00.000Z',
       '2026-04-28T08:00:00.000Z',
       'inst_123',
+      '2026-04-28T08:00:00.000Z',
       'hash:upload-token'
     ])
     expect(runCount).toBe(0)
@@ -801,9 +797,7 @@ describe('findExistingSnapshotHashes', () => {
     const result = await findExistingSnapshotHashes(db, {
       userId: 'seed-user',
       deviceId: 'dev_123',
-      keys: [
-        { source: 'codex', usageDate: '2026-04-28', model: 'gpt-5' }
-      ]
+      keys: [{ source: 'codex', usageDate: '2026-04-28', model: 'gpt-5' }]
     })
 
     expect(result).toEqual([])
@@ -842,9 +836,7 @@ describe('findExistingSnapshotHashes', () => {
     const result = await findExistingSnapshotHashes(db, {
       userId: 'seed-user',
       deviceId: 'dev_123',
-      keys: [
-        { source: 'codex', usageDate: '2026-04-28', model: 'gpt-5' }
-      ]
+      keys: [{ source: 'codex', usageDate: '2026-04-28', model: 'gpt-5' }]
     })
 
     expect(result).toEqual([])

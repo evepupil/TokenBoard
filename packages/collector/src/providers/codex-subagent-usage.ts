@@ -43,9 +43,15 @@ import {
   sumMetrics,
   type Metric
 } from './codex-subagent-usage-math'
+import { resolveCodexSessionRoot } from './codex-symlink-policy'
 
 type SubagentMeta = {
   startedAt: string
+}
+
+type ResolvedSessionFile = {
+  sourceFilePath: string
+  readFilePath: string
 }
 
 type OversizedIrrelevantChildRowSummary = {
@@ -53,7 +59,8 @@ type OversizedIrrelevantChildRowSummary = {
   largestBytes: number
 }
 
-const oversizedIrrelevantChildRowPattern = /^Skipped ([1-9][0-9]*) oversized Codex child session JSONL rows? without usage or subagent metadata \(largest ([1-9][0-9]*) bytes\)$/
+const oversizedIrrelevantChildRowPattern =
+  /^Skipped ([1-9][0-9]*) oversized Codex child session JSONL rows? without usage or subagent metadata \(largest ([1-9][0-9]*) bytes\)$/
 
 export async function applyCodexSubagentUsageCorrections(input: {
   snapshots: UsageSnapshot[]
@@ -66,15 +73,17 @@ export async function applyCodexSubagentUsageCorrections(input: {
   readChildUsageByDate?: ReadChildUsageByDate
   readChildUsageEvents?: ReadChildUsageEvents
   maxConcurrentChildReads?: number
+  codexSymlinkRoots?: readonly string[]
 }) {
   if (input.snapshots.length === 0) return input.snapshots
 
   const timezone = input.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   const readerRuntime = createChildReaderRuntime(input)
   const diagnostics = createCodexSubagentDiagnostics(input.stderr)
-  const earliestSnapshotDate = input.snapshots.reduce((earliest, snapshot) =>
-    snapshot.usageDate < earliest ? snapshot.usageDate : earliest
-  , input.snapshots[0].usageDate)
+  const earliestSnapshotDate = input.snapshots.reduce(
+    (earliest, snapshot) => (snapshot.usageDate < earliest ? snapshot.usageDate : earliest),
+    input.snapshots[0].usageDate
+  )
   try {
     const adjustments = await withCodexSubagentUsageCache({
       stateDir: input.stateDir,
@@ -82,16 +91,18 @@ export async function applyCodexSubagentUsageCorrections(input: {
       cacheFiles: input.cacheFiles,
       readChildUsageByDate: readerRuntime.read,
       readChildUsageEvents: readerRuntime.readEvents,
-      callback: (reader) => collectSubagentAdjustments({
-        sessions: input.sessions,
-        codexHomes: input.codexHomes,
-        timezone,
-        earliestSnapshotDate,
-        stderr: diagnostics.report,
-        readChildUsageByDate: reader.read,
-        readChildUsageEvents: reader.readEvents,
-        maxConcurrentChildReads: readerRuntime.concurrency
-      })
+      callback: (reader) =>
+        collectSubagentAdjustments({
+          sessions: input.sessions,
+          codexHomes: input.codexHomes,
+          timezone,
+          earliestSnapshotDate,
+          stderr: diagnostics.report,
+          readChildUsageByDate: reader.read,
+          readChildUsageEvents: reader.readEvents,
+          maxConcurrentChildReads: readerRuntime.concurrency,
+          codexSymlinkRoots: input.codexSymlinkRoots
+        })
     })
     if (adjustments.size === 0) return input.snapshots
     return input.snapshots.map((snapshot) =>
@@ -151,6 +162,7 @@ async function collectSubagentAdjustments(input: {
   readChildUsageByDate: ReadChildUsageByDate
   readChildUsageEvents: ReadChildUsageEvents
   maxConcurrentChildReads: number
+  codexSymlinkRoots?: readonly string[]
 }) {
   const adjustments = new Map<string, Metric>()
   const rows = extractRows(input.sessions).filter((row) =>
@@ -175,9 +187,10 @@ async function collectSessionAdjustments(
     stderr?: (line: string) => void
     readChildUsageByDate: ReadChildUsageByDate
     readChildUsageEvents: ReadChildUsageEvents
+    codexSymlinkRoots?: readonly string[]
   }
 ) {
-  const sessionFiles = await resolveSessionFiles(row, input.codexHomes)
+  const sessionFiles = await resolveSessionFiles(row, input.codexHomes, input.codexSymlinkRoots)
   if (sessionFiles.length === 0) return []
 
   const meta = await readSubagentMetaFromFiles(sessionFiles, input.stderr)
@@ -194,11 +207,11 @@ async function collectSessionAdjustments(
     input.readChildUsageByDate,
     input.readChildUsageEvents
   )
-  const adjustments = correctedByDate.length > 0
-    ? buildSessionAdjustments(originals, correctedByDate)
-    : []
+  const adjustments = correctedByDate.length > 0 ? buildSessionAdjustments(originals, correctedByDate) : []
   if (correctedByDate.length > 0 && adjustments.length === 0) {
-    input.stderr?.(`Skipping Codex subagent usage correction for ${originalTotal.usageDate}/${originalTotal.model}: corrected usage exceeds session row`)
+    input.stderr?.(
+      `Skipping Codex subagent usage correction for ${originalTotal.usageDate}/${originalTotal.model}: corrected usage exceeds session row`
+    )
   }
   return adjustments
 }
@@ -209,9 +222,12 @@ function createChildReaderRuntime(input: {
   maxConcurrentChildReads?: number
 }) {
   const hasInjectedReader = Boolean(input.readChildUsageByDate || input.readChildUsageEvents)
-  const concurrency = input.maxConcurrentChildReads === undefined
-    ? (hasInjectedReader ? 1 : defaultCodexSubagentWorkerCount())
-    : normalizeCodexSubagentWorkerCount(input.maxConcurrentChildReads)
+  const concurrency =
+    input.maxConcurrentChildReads === undefined
+      ? hasInjectedReader
+        ? 1
+        : defaultCodexSubagentWorkerCount()
+      : normalizeCodexSubagentWorkerCount(input.maxConcurrentChildReads)
   if (hasInjectedReader || concurrency === 1) {
     return {
       concurrency,
@@ -251,11 +267,7 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-function sessionCouldAffectSnapshotWindow(
-  row: UnknownRecord,
-  earliestSnapshotDate: string,
-  timezone: string
-) {
+function sessionCouldAffectSnapshotWindow(row: UnknownRecord, earliestSnapshotDate: string, timezone: string) {
   const lastActivity = readString(row, ['lastActivity', 'date', 'usageDate'])
   if (!lastActivity) return true
   try {
@@ -268,11 +280,14 @@ function sessionCouldAffectSnapshotWindow(
 
 function buildSessionAdjustments(originals: Metric[], correctedByDate: Metric[]) {
   const originalPartsByModel = originals.map((original) =>
-    distributeMetric(original, correctedByDate.map((usage) => ({
-      ...original,
-      usageDate: usage.usageDate,
-      totalTokens: usage.totalTokens
-    })))
+    distributeMetric(
+      original,
+      correctedByDate.map((usage) => ({
+        ...original,
+        usageDate: usage.usageDate,
+        totalTokens: usage.totalTokens
+      }))
+    )
   )
   const adjustments: Metric[] = []
   for (const [dateIndex, correctedTotal] of correctedByDate.entries()) {
@@ -287,7 +302,7 @@ function buildSessionAdjustments(originals: Metric[], correctedByDate: Metric[])
 }
 
 async function readCorrectedSubagentMetrics(
-  sessionFiles: string[],
+  sessionFiles: ResolvedSessionFile[],
   meta: SubagentMeta,
   original: Metric,
   timezone: string,
@@ -295,15 +310,16 @@ async function readCorrectedSubagentMetrics(
   readChildUsageByDate: ReadChildUsageByDate,
   readChildUsageEvents: ReadChildUsageEvents
 ) {
-  const usageByDate = sessionFiles.length === 1
-    ? await readChildUsageByDate(sessionFiles[0], meta.startedAt, timezone, stderr)
-    : await readCrossProfileChildUsageByDate(
-      sessionFiles,
-      meta.startedAt,
-      timezone,
-      stderr,
-      readChildUsageEvents
-    )
+  const usageByDate =
+    sessionFiles.length === 1
+      ? await readChildUsageByDate(
+          sessionFiles[0].readFilePath,
+          meta.startedAt,
+          timezone,
+          stderr,
+          sessionFiles[0].sourceFilePath
+        )
+      : await readCrossProfileChildUsageByDate(sessionFiles, meta.startedAt, timezone, stderr, readChildUsageEvents)
   // last_token_usage is the provider-recorded per-request usage. If Codex sent
   // copied parent context again, that charged input remains in this child total.
   if (usageByDate.length === 0) return []
@@ -331,7 +347,8 @@ function correctedChildInputTokens(usage: {
   // Legacy Codex records report cached input inside input_tokens, while newer
   // records can report it as a separate additive field. The total proves which
   // representation produced this event; without that proof preserve input.
-  const cacheReadIsIncludedInInput = usage.cacheReadTokens <= usage.inputTokens &&
+  const cacheReadIsIncludedInInput =
+    usage.cacheReadTokens <= usage.inputTokens &&
     usage.totalTokens === usage.inputTokens + usage.cacheCreationTokens + usage.outputTokens
   return cacheReadIsIncludedInInput
     ? subtractNonNegative(usage.inputTokens, usage.cacheReadTokens, 'subagent input')
@@ -339,7 +356,7 @@ function correctedChildInputTokens(usage: {
 }
 
 async function readCrossProfileChildUsageByDate(
-  sessionFiles: string[],
+  sessionFiles: ResolvedSessionFile[],
   timestamp: string,
   timezone: string,
   stderr: ((line: string) => void) | undefined,
@@ -347,29 +364,33 @@ async function readCrossProfileChildUsageByDate(
 ) {
   const merger = new ChildUsageEventMerger()
   for (const sessionFile of sessionFiles) {
-    merger.add(await readChildUsageEvents(sessionFile, timestamp, timezone, stderr))
+    merger.add(
+      await readChildUsageEvents(sessionFile.readFilePath, timestamp, timezone, stderr, sessionFile.sourceFilePath)
+    )
   }
   return merger.toUsageByDate()
 }
 
-function subtractAdjustment(
-  snapshot: UsageSnapshot,
-  adjustment: Metric | undefined,
-  stderr?: (line: string) => void
-) {
+function subtractAdjustment(snapshot: UsageSnapshot, adjustment: Metric | undefined, stderr?: (line: string) => void) {
   if (!adjustment) return snapshot
   // ccusage daily can already be based on child request usage while session rows
   // still contain larger cumulative counters. In that case there is nothing to
   // subtract from the daily snapshot without undercounting charged usage.
   if (!canSubtractAdjustment(snapshot, adjustment)) {
-    stderr?.(`Skipping Codex subagent usage correction for ${snapshot.usageDate}/${snapshot.model}: corrected usage exceeds daily snapshot`)
+    stderr?.(
+      `Skipping Codex subagent usage correction for ${snapshot.usageDate}/${snapshot.model}: corrected usage exceeds daily snapshot`
+    )
     return snapshot
   }
   return usageSnapshotSchema.parse({
     ...snapshot,
     inputTokens: subtractNonNegative(snapshot.inputTokens, adjustment.inputTokens, snapshotKey(snapshot)),
     outputTokens: subtractNonNegative(snapshot.outputTokens, adjustment.outputTokens, snapshotKey(snapshot)),
-    cacheCreationTokens: subtractNonNegative(snapshot.cacheCreationTokens, adjustment.cacheCreationTokens, snapshotKey(snapshot)),
+    cacheCreationTokens: subtractNonNegative(
+      snapshot.cacheCreationTokens,
+      adjustment.cacheCreationTokens,
+      snapshotKey(snapshot)
+    ),
     cacheReadTokens: subtractNonNegative(snapshot.cacheReadTokens, adjustment.cacheReadTokens, snapshotKey(snapshot)),
     totalTokens: subtractNonNegative(snapshot.totalTokens, adjustment.totalTokens, snapshotKey(snapshot)),
     costUsd: subtractNonNegative(snapshot.costUsd, adjustment.costUsd, snapshotKey(snapshot))
@@ -432,54 +453,65 @@ async function readSubagentMeta(filePath: string, stderr?: (line: string) => voi
   for await (const record of readJsonlRecords(filePath, stderr, codexChildSessionReadLimits)) {
     if (record.type !== 'session_meta') continue
     const payload = readRecord(record.payload)
-    const parentThreadId = readParentThreadId(payload)
     const startedAt = readString(payload, ['timestamp']) || readString(record, ['timestamp'])
-    if (parentThreadId && startedAt) return { startedAt }
-    if (startedAt && !hasSubagentMetadata(payload)) return null
+    if (startedAt && hasSubagentMetadata(payload)) return { startedAt }
   }
   return null
 }
 
-async function readSubagentMetaFromFiles(sessionFiles: string[], stderr?: (line: string) => void) {
+async function readSubagentMetaFromFiles(sessionFiles: ResolvedSessionFile[], stderr?: (line: string) => void) {
   for (const sessionFile of sessionFiles) {
-    const meta = await readSubagentMeta(sessionFile, stderr)
+    const meta = await readSubagentMeta(sessionFile.readFilePath, stderr)
     if (meta) return meta
   }
   return null
 }
 
-async function resolveSessionFiles(row: UnknownRecord, codexHomes: string[]) {
-  const sessionFiles = new Set<string>()
+async function resolveSessionFiles(row: UnknownRecord, codexHomes: string[], codexSymlinkRoots?: readonly string[]) {
+  const sessionFiles = new Map<string, ResolvedSessionFile>()
   for (const codexHome of codexHomes) {
-    const sessionFile = await resolveSessionFileInHome(row, codexHome)
-    if (sessionFile) sessionFiles.add(sessionFile)
+    const sessionFile = await resolveSessionFileInHome(row, codexHome, codexSymlinkRoots)
+    if (sessionFile) sessionFiles.set(sessionFile.sourceFilePath, sessionFile)
   }
-  return [...sessionFiles]
+  return [...sessionFiles.values()]
 }
 
-async function resolveSessionFileInHome(row: UnknownRecord, codexHome: string) {
+async function resolveSessionFileInHome(row: UnknownRecord, codexHome: string, codexSymlinkRoots?: readonly string[]) {
   for (const rootName of ['sessions', 'archived_sessions']) {
     const sessionsDir = resolve(codexHome, rootName)
+    const resolvedSessionsDir = await resolveCodexSessionRoot(sessionsDir, {
+      rejectRootSymlink: true,
+      allowedRootSymlinks: codexSymlinkRoots,
+      rootBoundary: codexHome
+    })
+    if (!resolvedSessionsDir) continue
+    const sourceRoot = sessionsDir
     const sessionId = readString(row, ['sessionId'])
     if (sessionId) {
-      const file = await existingSessionFile(sessionsDir, `${sessionId}.jsonl`)
+      const file = await existingSessionFile(sourceRoot, resolvedSessionsDir, `${sessionId}.jsonl`)
       if (file) return file
     }
 
     const directory = readString(row, ['directory'])
     const sessionFile = readString(row, ['sessionFile'])
     if (directory && sessionFile) {
-      const file = await existingSessionFile(sessionsDir, directory, `${sessionFile}.jsonl`)
+      const file = await existingSessionFile(sourceRoot, resolvedSessionsDir, directory, `${sessionFile}.jsonl`)
       if (file) return file
     }
   }
   return null
 }
 
-async function existingSessionFile(sessionsDir: string, ...segments: string[]) {
-  const filePath = resolve(sessionsDir, ...segments)
-  if (!isPathInside(sessionsDir, filePath)) return null
-  return inspectSessionFilePath(sessionsDir, filePath)
+async function existingSessionFile(
+  sourceRoot: string,
+  readRoot: string,
+  ...segments: string[]
+): Promise<ResolvedSessionFile | null> {
+  const sourceFilePath = resolve(sourceRoot, ...segments)
+  const readFilePath = resolve(readRoot, ...segments)
+  if (!isPathInside(sourceRoot, sourceFilePath) || !isPathInside(readRoot, readFilePath)) return null
+  const inspected = await inspectSessionFilePath(readRoot, readFilePath)
+  return inspected ? { sourceFilePath, readFilePath } : null
 }
 
 function isPathInside(parent: string, child: string) {
@@ -524,13 +556,6 @@ async function inspectPathEntry(path: string) {
   }
 }
 
-function readParentThreadId(payload: UnknownRecord | null) {
-  const source = readRecord(payload?.source)
-  const subagent = readRecord(source?.subagent)
-  const threadSpawn = readRecord(subagent?.thread_spawn)
-  return readString(threadSpawn, ['parent_thread_id'])
-}
-
 function hasSubagentMetadata(payload: UnknownRecord | null) {
   const source = readRecord(payload?.source)
   return readRecord(source?.subagent) !== null
@@ -547,12 +572,20 @@ function readModel(row: UnknownRecord) {
 }
 
 function readCostUsd(row: UnknownRecord, parent: UnknownRecord) {
-  const directCost = readNumber(row, ['costUsd', 'costUSD', 'cost'])
+  const directCost = readCostNumber(row, ['costUsd', 'costUSD', 'cost'])
   if (directCost > 0 || row === parent) return directCost
 
-  const parentCost = readNumber(parent, ['costUsd', 'costUSD', 'cost'])
+  const parentCost = readCostNumber(parent, ['costUsd', 'costUSD', 'cost'])
   const parentTokens = readTotalTokens(parent)
   const rowTokens = readTotalTokens(row)
   if (parentCost <= 0 || parentTokens <= 0 || rowTokens <= 0) return 0
   return parentCost * (rowTokens / parentTokens)
+}
+
+function readCostNumber(record: UnknownRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value
+  }
+  return 0
 }

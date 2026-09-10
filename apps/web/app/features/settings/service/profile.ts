@@ -1,9 +1,7 @@
 import { ApiError } from '../../../lib/errors'
 import { defaultTimezone, normalizeTimezone } from '../../../lib/timezone'
-import {
-  parsePublicCardConfig,
-  stringifyPublicCardConfig
-} from '../../public-card/config'
+import { parsePublicCardConfig, stringifyPublicCardConfig } from '../../public-card/config'
+import { isReservedPublicSlug } from '../../public-card/service/slug'
 import { publicProfileSchema, type PublicProfileInput } from '../schema'
 import {
   profileTimezoneSource,
@@ -15,11 +13,7 @@ import {
   type ProfileTimezoneSettings
 } from './types'
 
-export async function getProfileSettings(
-  db: D1Database,
-  userId: string,
-  origin: string
-): Promise<ProfileSettings> {
+export async function getProfileSettings(db: D1Database, userId: string, origin: string): Promise<ProfileSettings> {
   const row = await db
     .prepare(
       `
@@ -49,10 +43,7 @@ export async function getProfileSettings(
   return toProfileSettings(row, origin)
 }
 
-export async function getProfileTimezoneSettings(
-  db: D1Database,
-  userId: string
-): Promise<ProfileTimezoneSettings> {
+export async function getProfileTimezoneSettings(db: D1Database, userId: string): Promise<ProfileTimezoneSettings> {
   const row = await db
     .prepare(
       `
@@ -75,11 +66,7 @@ export async function getProfileTimezoneSettings(
   return toProfileTimezoneSettings(row)
 }
 
-export async function getProfileDisplayName(
-  db: D1Database,
-  userId: string,
-  fallback?: string | null
-) {
+export async function getProfileDisplayName(db: D1Database, userId: string, fallback?: string | null) {
   const row = await db
     .prepare('SELECT display_name as displayName FROM profiles WHERE user_id = ? LIMIT 1')
     .bind(userId)
@@ -167,6 +154,17 @@ export async function updateProfilePageSettings(
 }
 
 async function assertSlugAvailable(db: D1Database, slug: string, userId: string) {
+  if (isReservedPublicSlug(slug)) {
+    const owner = await db
+      .prepare('SELECT user_id as userId FROM profiles WHERE slug = ? LIMIT 1')
+      .bind(slug)
+      .first<{ userId: string }>()
+    if (owner?.userId !== userId) {
+      throw new ApiError('BAD_REQUEST', 'Slug is reserved', 400)
+    }
+    return
+  }
+
   const conflict = await db
     .prepare('SELECT user_id as userId FROM profiles WHERE slug = ? AND user_id <> ? LIMIT 1')
     .bind(slug, userId)
@@ -236,11 +234,7 @@ function normalizeDisplayName(value: unknown) {
 }
 
 function normalizeStoredSlug(slug: unknown, displayName: unknown, userId: unknown) {
-  const candidates = [
-    slug,
-    displayName,
-    userId
-  ].map(slugCandidate)
+  const candidates = [slug, displayName, userId].map(slugCandidate)
 
   return candidates.find((candidate) => candidate.length >= 3)?.slice(0, 32) ?? 'user'
 }

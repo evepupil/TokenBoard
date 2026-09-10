@@ -10,10 +10,7 @@ import {
   requireEncryptionKey,
   type WebhookEnv
 } from './config'
-import {
-  getWebhookSubscriptionForUser,
-  listWebhookSubscriptions
-} from './queries'
+import { getWebhookSubscriptionForUser, listWebhookSubscriptions } from './queries'
 import {
   parseWebhookSubscriptionForm,
   scheduleTimesFromForm,
@@ -68,9 +65,8 @@ export async function createWebhookSubscription(input: {
   const webhookUrl = parseProviderWebhookUrl(input.form.provider, input.form.webhookUrl)
   const now = input.now ?? new Date()
 
-  await input.env.DB
-    .prepare(
-      `
+  await input.env.DB.prepare(
+    `
         INSERT INTO webhook_subscriptions (
           id,
           user_id,
@@ -92,7 +88,7 @@ export async function createWebhookSubscription(input: {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
-    )
+  )
     .bind(
       randomId('whs'),
       input.userId,
@@ -142,9 +138,8 @@ export async function updateWebhookSubscription(input: {
     : null
   const resetFlag = resetsDeliveryState ? 1 : 0
 
-  await input.env.DB
-    .prepare(
-      `
+  await input.env.DB.prepare(
+    `
         UPDATE webhook_subscriptions
         SET
           name = ?,
@@ -164,7 +159,7 @@ export async function updateWebhookSubscription(input: {
         WHERE user_id = ?
           AND id = ?
       `
-    )
+  )
     .bind(
       input.form.name,
       input.form.timezone,
@@ -223,12 +218,14 @@ export async function setWebhookSubscriptionEnabled(input: {
     .bind(
       input.enabled ? 1 : 0,
       input.enabled ? 1 : 0,
-      existing ? nextScheduledRunAt({
-        now,
-        timezone: existing.timezone,
-        scheduleTimesLocal: existing.scheduleTimesLocal,
-        scheduleWeekdays: existing.scheduleWeekdays
-      }) : null,
+      existing
+        ? nextScheduledRunAt({
+            now,
+            timezone: existing.timezone,
+            scheduleTimesLocal: existing.scheduleTimesLocal,
+            scheduleWeekdays: existing.scheduleWeekdays
+          })
+        : null,
       input.enabled ? 1 : 0,
       input.enabled ? 1 : 0,
       nowIso,
@@ -238,11 +235,7 @@ export async function setWebhookSubscriptionEnabled(input: {
     .run()
 }
 
-export async function deleteWebhookSubscription(input: {
-  db: D1Database
-  userId: string
-  subscriptionId: string
-}) {
+export async function deleteWebhookSubscription(input: { db: D1Database; userId: string; subscriptionId: string }) {
   await input.db
     .prepare('DELETE FROM webhook_subscriptions WHERE user_id = ? AND id = ?')
     .bind(input.userId, input.subscriptionId)
@@ -265,10 +258,12 @@ function shouldResetDeliveryState(
   existing: WebhookSubscriptionSummary,
   form: ReturnType<typeof parseWebhookUpdateForm>
 ) {
-  return existing.enabled !== form.enabled
-    || existing.timezone !== form.timezone
-    || !sameStringList(existing.scheduleTimesLocal, form.scheduleTimesLocal)
-    || !sameNumberList(existing.scheduleWeekdays, form.scheduleWeekdays)
+  return (
+    existing.enabled !== form.enabled ||
+    existing.timezone !== form.timezone ||
+    !sameStringList(existing.scheduleTimesLocal, form.scheduleTimesLocal) ||
+    !sameNumberList(existing.scheduleWeekdays, form.scheduleWeekdays)
+  )
 }
 
 function sameStringList(left: string[], right: string[]) {

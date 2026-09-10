@@ -17,11 +17,14 @@ const defaultRepoUrl = 'https://github.com/evepupil/TokenBoard.git'
 
 function run(command, args, options = {}) {
   try {
-    runStep({ command, args, options }, {
-      spawn: spawnSync,
-      remove: rmSync,
-      platform: process.platform
-    })
+    runStep(
+      { command, args, options },
+      {
+        spawn: spawnSync,
+        remove: rmSync,
+        platform: process.platform
+      }
+    )
   } catch (error) {
     console.error(errorMessage(error))
     process.exit(1)
@@ -41,20 +44,19 @@ export function buildInstallCollectorPlan({
     throw new Error(`Refusing to replace TokenBoard config directory as collector checkout: ${dir}`)
   }
 
-  const steps = exists && isGitRepo
-    ? [
-        { command: 'git', args: ['remote', 'set-url', 'origin', repoUrl], options: { cwd: dir } },
-        ...buildFetchAndCheckoutRefSteps({ dir, repoRef }),
-        ...(repoRef ? [] : buildDefaultBranchPullSteps({ dir }))
-      ]
-    : exists
+  const steps =
+    exists && isGitRepo
       ? [
-          { command: 'remove', args: [dir], options: { recursive: true, force: true } },
-          ...buildCloneSteps({ repoUrl, repoRef, dir })
+          { command: 'git', args: ['remote', 'set-url', 'origin', repoUrl], options: { cwd: dir } },
+          ...buildFetchAndCheckoutRefSteps({ dir, repoRef }),
+          ...(repoRef ? [] : buildDefaultBranchPullSteps({ dir }))
         ]
-      : [
-        ...buildCloneSteps({ repoUrl, repoRef, dir })
-      ]
+      : exists
+        ? [
+            { command: 'remove', args: [dir], options: { recursive: true, force: true } },
+            ...buildCloneSteps({ repoUrl, repoRef, dir })
+          ]
+        : [...buildCloneSteps({ repoUrl, repoRef, dir })]
 
   steps.push({
     command: corepackCommand(platform),

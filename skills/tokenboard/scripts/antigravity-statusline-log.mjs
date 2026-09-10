@@ -69,9 +69,7 @@ function buildUsageLogHeader(input) {
 function compactJsonl(filePath, line, maxBytes, currentSize, withUsageHeader) {
   const previousGeneration = withUsageHeader ? readUsageLogGeneration(filePath) : undefined
   let retainedFromOffsetBytes = currentSize
-  let generation = withUsageHeader
-    ? nextUsageLogGeneration(previousGeneration, retainedFromOffsetBytes)
-    : undefined
+  let generation = withUsageHeader ? nextUsageLogGeneration(previousGeneration, retainedFromOffsetBytes) : undefined
   let header = withUsageHeader
     ? buildUsageLogHeader({
         generation,

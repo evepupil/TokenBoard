@@ -134,12 +134,7 @@ describe('uploadSnapshots resilience', () => {
       await expect(uploadSnapshots(config, [unchangedSnapshot], fetcher)).rejects.toThrow(
         'TokenBoard request timed out after 1ms'
       )
-      expect(requests).toEqual([
-        `${config.endpoint}/check`,
-        config.endpoint,
-        config.endpoint,
-        config.endpoint
-      ])
+      expect(requests).toEqual([`${config.endpoint}/check`, config.endpoint, config.endpoint, config.endpoint])
     } finally {
       vi.unstubAllEnvs()
     }
@@ -166,9 +161,7 @@ describe('uploadSnapshots resilience', () => {
       return url.endsWith('/check') ? successResponse(url) : unauthorizedResponse()
     }
 
-    await expect(uploadSnapshots(config, [unchangedSnapshot], fetcher)).rejects.toThrow(
-      'Upload failed with status 401'
-    )
+    await expect(uploadSnapshots(config, [unchangedSnapshot], fetcher)).rejects.toThrow('Upload failed with status 401')
     expect(requests).toEqual([`${config.endpoint}/check`, config.endpoint])
   })
 

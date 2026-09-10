@@ -7,11 +7,13 @@ const DEFAULT_PACKAGE_COMMAND_RETRIES = 2
 export function codexCommandArgs({
   report,
   rangeArgs = [],
-  singleThread = false
+  singleThread = false,
+  timezone
 }: {
   report: 'daily' | 'session'
   rangeArgs?: string[]
   singleThread?: boolean
+  timezone?: string
 }) {
   return [
     'codex',
@@ -19,7 +21,8 @@ export function codexCommandArgs({
     '--json',
     '--offline',
     ...(singleThread ? ['--single-thread'] : []),
-    ...rangeArgs
+    ...rangeArgs,
+    ...(timezone ? ['--timezone', timezone] : [])
   ]
 }
 

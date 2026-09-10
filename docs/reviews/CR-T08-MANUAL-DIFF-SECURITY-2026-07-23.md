@@ -1,6 +1,8 @@
 # T08 Final Manual Diff Security Review
 
-Date: 2026-07-25
+Created: 2026-07-25
+
+Last updated: 2026-09-05
 
 Baseline: `c43b67c2366e8e842ce21e40d89cdc2aba4e8aea`
 
@@ -871,5 +873,26 @@ content.
 The manual review found no confirmed P1/P2 behavior, data-correctness, privacy, security, or
 compatibility issue in the current diff. CodeRabbit was unavailable due to the documented service
 rate limit and is explicitly not counted as review coverage; the user also prohibited the
-`codex-security` plugin and OMP remains skipped. T08 is complete for this candidate. T07 local
-reconciliation, T09 independent review, and T10 private Cloudflare validation remain outstanding.
+`codex-security` plugin and OMP remains skipped. T08 was complete for that candidate only. T07 local
+reconciliation, T09 independent review, and T10 private Cloudflare validation remained outstanding.
+
+## 2026-09-05 Current Candidate Revalidation
+
+The candidate changed after the historical July closure and the August deployment records. This entry
+is the current local gate for the dirty worktree; it does not claim a release deployment or merge.
+
+- `pnpm test`: passed with usage-core `13/13`, Web `687/687`, and collector `935` passing with `3`
+  existing platform scenarios skipped.
+- `pnpm typecheck`, `pnpm build`, `node --test skills/tokenboard/scripts/*.test.mjs` (`528/528`),
+  `pnpm audit --audit-level=high` (`No known vulnerabilities found`), and `git diff --check HEAD` passed.
+- The collector review initially identified a short-read risk in Codex session-tail fingerprinting.
+  `hashOpenFileTail` now reads until the complete bounded tail is filled and fails closed on early EOF;
+  the deterministic short-read regression and collector typecheck passed. This fix is part of the current
+  candidate and invalidates earlier gate counts.
+- CodeRabbit `0.7.6` returned a complete collector review: the initial short-read finding and four
+  follow-up collector findings were all fixed, and the final collector review returned `findings: 0`.
+  Web, usage-core, skill and docs reviews also returned `findings: 0` after their respective checks. No
+  CodeRabbit result is treated as a substitute for real client, Windows/Linux host, or private Cloudflare
+  validation.
+- No `codex-security` plugin was used. No commit, push, deployment, or destructive worktree operation was
+  performed in this revalidation.

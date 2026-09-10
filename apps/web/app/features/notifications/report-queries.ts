@@ -1,9 +1,6 @@
 import { cacheReadRateFromTotals } from '../../lib/usage-metrics'
-import {
-  effectiveDailyUsageSummaryWith,
-  usageSummaryScopeSql,
-  usageSummaryValue
-} from '../usage/deduped-daily-usage'
+import { costUnavailableSourcesSql } from '../../lib/usage-cost'
+import { effectiveDailyUsageSummaryWith, usageSummaryScopeSql, usageSummaryValue } from '../usage/deduped-daily-usage'
 import type { DailyTokenReport } from './adapters'
 
 type ReportTotalsRow = {
@@ -25,16 +22,8 @@ export async function getDailyTokenReport(input: {
   summaryStrict?: boolean
 }): Promise<DailyTokenReport> {
   const totals = await readReportTotals(input)
-  const sourceSplit = parseReportArray(
-    totals?.sourceSplit,
-    'sourceSplit',
-    parseSourceSplitItem
-  )
-  const topModels = parseReportArray(
-    totals?.topModels,
-    'topModels',
-    parseTopModelItem
-  )
+  const sourceSplit = parseReportArray(totals?.sourceSplit, 'sourceSplit', parseSourceSplitItem)
+  const topModels = parseReportArray(totals?.topModels, 'topModels', parseTopModelItem)
 
   return {
     displayName: input.displayName,
@@ -72,12 +61,7 @@ export async function getDailyTokenReport(input: {
   }
 }
 
-function readReportTotals(input: {
-  db: D1Database
-  userId: string
-  reportDate: string
-  summaryStrict?: boolean
-}) {
+function readReportTotals(input: { db: D1Database; userId: string; reportDate: string; summaryStrict?: boolean }) {
   return input.db
     .prepare(
       `
@@ -94,7 +78,10 @@ function readReportTotals(input: {
             model,
             COALESCE(SUM(total_tokens), 0) as total_tokens,
             COALESCE(SUM(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
-            COALESCE(SUM(cost_usd), 0) as cost_usd,
+            COALESCE(SUM(CASE
+              WHEN source IN (${costUnavailableSourcesSql}) THEN 0
+              ELSE cost_usd
+            END), 0) as cost_usd,
             COALESCE(SUM(session_count), 0) as session_count
           FROM effective_daily_usage_summary
           GROUP BY source, model
@@ -109,13 +96,28 @@ function readReportTotals(input: {
         ),
         model_usage AS (
           SELECT
-            model,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(SUM(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
-            COALESCE(SUM(cost_usd), 0) as cost_usd,
-            json_group_array(json_object('source', source)) as source_split
-          FROM aggregate_usage
-          GROUP BY model
+            model_totals.model,
+            model_totals.total_tokens,
+            model_totals.total_tokens_without_cache_read,
+            model_totals.cost_usd,
+            (
+              SELECT json_group_array(json_object('source', ordered_model_sources.source))
+              FROM (
+                SELECT source
+                FROM aggregate_usage AS model_sources
+                WHERE model_sources.model = model_totals.model
+                ORDER BY source ASC
+              ) AS ordered_model_sources
+            ) as source_split
+          FROM (
+            SELECT
+              model,
+              COALESCE(SUM(total_tokens), 0) as total_tokens,
+              COALESCE(SUM(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
+              COALESCE(SUM(cost_usd), 0) as cost_usd
+            FROM aggregate_usage
+            GROUP BY model
+          ) AS model_totals
         )
         SELECT
           COALESCE(SUM(aggregate_usage.total_tokens), 0) as totalTokens,
@@ -164,21 +166,13 @@ function readReportTotals(input: {
     .first<ReportTotalsRow>()
 }
 
-function reportBindings(input: {
-  userId: string
-  reportDate: string
-  summaryStrict?: boolean
-}) {
+function reportBindings(input: { userId: string; reportDate: string; summaryStrict?: boolean }) {
   return input.summaryStrict
     ? [input.userId, input.reportDate]
     : [input.userId, input.reportDate, input.userId, input.reportDate]
 }
 
-function parseReportArray<T>(
-  value: unknown,
-  column: string,
-  parseItem: (value: unknown, column: string) => T
-) {
+function parseReportArray<T>(value: unknown, column: string, parseItem: (value: unknown, column: string) => T) {
   if (!value) return []
   let parsed = value
   if (typeof value === 'string') {

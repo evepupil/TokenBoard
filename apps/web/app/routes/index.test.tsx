@@ -17,7 +17,7 @@ describe('home route', () => {
   test('redirects authenticated users to the dashboard', async () => {
     mockedGetOptionalUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
 
-    const response = await handler[0](homeContext() as never, async () => undefined) as Response
+    const response = (await handler[0](homeContext() as never, async () => undefined)) as Response
 
     expect(response.status).toBe(302)
     expect(response.headers.get('location')).toBe('/dashboard')
@@ -26,7 +26,7 @@ describe('home route', () => {
   test('keeps hero copy wrapped inside narrow mobile viewports', async () => {
     mockedGetOptionalUser.mockResolvedValue(null)
 
-    const response = await handler[0](homeContext() as never, async () => undefined) as Response
+    const response = (await handler[0](homeContext() as never, async () => undefined)) as Response
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -42,11 +42,7 @@ describe('home route', () => {
 
 function homeContext() {
   return {
-    render: vi.fn(async (body: unknown) => (
-      new Response(await renderToString(body as never))
-    )),
-    redirect: vi.fn((location: string, status = 302) => (
-      new Response(null, { status, headers: { location } })
-    ))
+    render: vi.fn(async (body: unknown) => new Response(await renderToString(body as never))),
+    redirect: vi.fn((location: string, status = 302) => new Response(null, { status, headers: { location } }))
   }
 }

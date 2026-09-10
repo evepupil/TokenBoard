@@ -3,13 +3,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { link, mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { usageSources, type UsageSnapshot, type UsageSource } from '@tokenboard/usage-core'
-import {
-  isValidAntigravityFileScanState,
-  type AntigravityFileScanState
-} from './antigravity-file-scan'
+import { isValidAntigravityFileScanState, type AntigravityFileScanState } from './antigravity-file-scan'
 import { probeCursorProcessLiveness } from './cursor-process-liveness'
 
-export type CursorSnapshot = Omit<UsageSnapshot, 'collectedAt'>
+export type CursorSnapshot = Omit<UsageSnapshot, 'collectedAt'> & {
+  codexContextPricingPending?: true
+}
 
 export type CursorEntry = {
   size: number
@@ -48,6 +47,7 @@ export type CursorState = {
   antigravityCliHistoryComplete?: true
   antigravityCliHistoryCompacted?: true
   antigravityCliHistoryCompactedThroughDate?: string
+  pendingSnapshotRetryCursor?: string
   files: Record<string, CursorEntry>
 }
 
@@ -178,7 +178,7 @@ async function recoverStaleCursorLock(lockPath: string) {
   if (!lockStat || Date.now() - lockStat.mtimeMs < cursorLockStaleMs) return
   const owner = await readCursorLockOwner(lockPath)
   if (owner && probeCursorProcessLiveness(owner.pid) !== 'dead') return
-  if (!await sameCursorLockSnapshot(lockPath, lockStat, owner)) return
+  if (!(await sameCursorLockSnapshot(lockPath, lockStat, owner))) return
   const quarantinePath = `${lockPath}.stale-${process.pid}-${randomBytes(8).toString('hex')}`
   try {
     await rename(lockPath, quarantinePath)
@@ -194,10 +194,14 @@ async function recoverStaleCursorLock(lockPath: string) {
   await rm(quarantinePath, { force: true })
 }
 
-async function sameCursorLockSnapshot(lockPath: string, expectedStat: Awaited<ReturnType<typeof stat>>, owner: CursorLockOwner | null) {
+async function sameCursorLockSnapshot(
+  lockPath: string,
+  expectedStat: Awaited<ReturnType<typeof stat>>,
+  owner: CursorLockOwner | null
+) {
   const currentStat = await stat(lockPath).catch(() => null)
   if (!currentStat || !sameFileStat(expectedStat, currentStat)) return false
-  return !owner || await sameCursorLockOwner(lockPath, owner)
+  return !owner || (await sameCursorLockOwner(lockPath, owner))
 }
 
 function sameFileStat(expected: Awaited<ReturnType<typeof stat>>, current: Awaited<ReturnType<typeof stat>>) {
@@ -210,12 +214,14 @@ async function restoreCursorLock(lockPath: string, quarantinePath: string) {
     await rm(quarantinePath, { force: true })
   } catch (error) {
     if (!isFileExistsError(error)) throw error
-    throw new Error(`Cursor replacement lock could not be restored because another owner exists: ${lockPath}`, { cause: error })
+    throw new Error(`Cursor replacement lock could not be restored because another owner exists: ${lockPath}`, {
+      cause: error
+    })
   }
 }
 
 async function refreshCursorLock(lockPath: string, owner: CursorLockOwner) {
-  if (!await sameCursorLockOwner(lockPath, owner)) return
+  if (!(await sameCursorLockOwner(lockPath, owner))) return
   const now = new Date()
   await utimes(lockPath, now, now).catch(() => undefined)
 }
@@ -223,7 +229,7 @@ async function refreshCursorLock(lockPath: string, owner: CursorLockOwner) {
 async function releaseCursorLock(lockPath: string, owner: CursorLockOwner) {
   const expectedStat = await stat(lockPath).catch(() => null)
   if (!expectedStat) return
-  if (!await sameCursorLockOwner(lockPath, owner)) {
+  if (!(await sameCursorLockOwner(lockPath, owner))) {
     throw new Error(`Cursor lock ownership changed: ${lockPath}`)
   }
   const quarantinePath = `${lockPath}.release-${process.pid}-${randomBytes(8).toString('hex')}`
@@ -234,8 +240,11 @@ async function releaseCursorLock(lockPath: string, owner: CursorLockOwner) {
     throw error
   }
   const quarantinedStat = await stat(quarantinePath).catch(() => null)
-  if (!quarantinedStat || !sameFileStat(expectedStat, quarantinedStat) ||
-      !await sameCursorLockOwner(quarantinePath, owner)) {
+  if (
+    !quarantinedStat ||
+    !sameFileStat(expectedStat, quarantinedStat) ||
+    !(await sameCursorLockOwner(quarantinePath, owner))
+  ) {
     await restoreCursorLock(lockPath, quarantinePath)
     return
   }
@@ -250,7 +259,7 @@ async function sameCursorLockOwner(lockPath: string, expected: CursorLockOwner) 
 export async function assertCursorWriteOwnership(cursorPath: string) {
   const lease = cursorLockContext.getStore()
   if (!lease || lease.cursorPath !== cursorPath) return
-  if (!await sameCursorLockOwner(lease.lockPath, lease.owner)) {
+  if (!(await sameCursorLockOwner(lease.lockPath, lease.owner))) {
     throw new Error(`Cursor lock ownership changed before write: ${lease.lockPath}`)
   }
 }
@@ -313,7 +322,8 @@ function sourceCursorFileName(source: UsageSource) {
 function isValidCursor(value: unknown, source: UsageSource): value is CursorState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as CursorState
-  return candidate.version === 1 &&
+  return (
+    candidate.version === 1 &&
     candidate.source === source &&
     (candidate.codexHookProfileHash === undefined || isSha256(candidate.codexHookProfileHash)) &&
     (candidate.lastScanHighWaterMs === undefined || isFiniteTimestampMs(candidate.lastScanHighWaterMs)) &&
@@ -328,24 +338,36 @@ function isValidCursor(value: unknown, source: UsageSource): value is CursorStat
       isValidAntigravityHistoryAliasMtimes(candidate.antigravityHistoryAliasMtimes)) &&
     (candidate.antigravityHistoryReplayReady === undefined || candidate.antigravityHistoryReplayReady === true) &&
     (candidate.antigravityStatuslineReplayReady === undefined || candidate.antigravityStatuslineReplayReady === true) &&
-    (candidate.antigravityHistoryReplayCompacted === undefined || candidate.antigravityHistoryReplayCompacted === true) &&
-    (candidate.antigravityStatuslineReplayCompacted === undefined || candidate.antigravityStatuslineReplayCompacted === true) &&
+    (candidate.antigravityHistoryReplayCompacted === undefined ||
+      candidate.antigravityHistoryReplayCompacted === true) &&
+    (candidate.antigravityStatuslineReplayCompacted === undefined ||
+      candidate.antigravityStatuslineReplayCompacted === true) &&
     (candidate.antigravityCliMeteringVersion === undefined ||
-      (Number.isSafeInteger(candidate.antigravityCliMeteringVersion) && candidate.antigravityCliMeteringVersion >= 1)) &&
+      (Number.isSafeInteger(candidate.antigravityCliMeteringVersion) &&
+        candidate.antigravityCliMeteringVersion >= 1)) &&
     (candidate.antigravityCliHistoryComplete === undefined || candidate.antigravityCliHistoryComplete === true) &&
     (candidate.antigravityCliHistoryCompacted === undefined || candidate.antigravityCliHistoryCompacted === true) &&
     (candidate.antigravityCliHistoryCompactedThroughDate === undefined ||
       isUsageDate(candidate.antigravityCliHistoryCompactedThroughDate)) &&
+    (candidate.pendingSnapshotRetryCursor === undefined ||
+      (typeof candidate.pendingSnapshotRetryCursor === 'string' &&
+        candidate.pendingSnapshotRetryCursor.length <= 4096)) &&
     candidate.files !== null &&
     typeof candidate.files === 'object' &&
     !Array.isArray(candidate.files) &&
     Object.values(candidate.files).every(isValidCursorEntry)
+  )
 }
 
 function isValidAntigravityHistoryAliasMtimes(value: unknown): value is Record<string, number[]> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.entries(value).every(([key, mtimes]) => /^[a-f0-9]{64}$/.test(key) &&
-      Array.isArray(mtimes) && mtimes.every(isFiniteNumber))
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([key, mtimes]) => /^[a-f0-9]{64}$/.test(key) && Array.isArray(mtimes) && mtimes.every(isFiniteNumber)
+    )
+  )
 }
 
 function isUsageDate(value: unknown) {
@@ -355,7 +377,8 @@ function isUsageDate(value: unknown) {
 function isValidCursorEntry(value: unknown): value is CursorEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as CursorEntry
-  return isFiniteNumber(candidate.size) &&
+  return (
+    isFiniteNumber(candidate.size) &&
     isFiniteNumber(candidate.mtimeMs) &&
     typeof candidate.sha256 === 'string' &&
     (candidate.endsWithNewline === undefined || typeof candidate.endsWithNewline === 'boolean') &&
@@ -369,15 +392,18 @@ function isValidCursorEntry(value: unknown): value is CursorEntry {
     (candidate.antigravityOrigin === undefined ||
       candidate.antigravityOrigin === 'database' ||
       candidate.antigravityOrigin === 'language-server')
+  )
 }
 
 function isValidCursorSnapshot(value: unknown): value is CursorSnapshot {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as CursorSnapshot
   if (!(usageSources as readonly string[]).includes(candidate.source)) return false
-  return typeof candidate.usageDate === 'string' &&
+  return (
+    typeof candidate.usageDate === 'string' &&
     typeof candidate.timezone === 'string' &&
     typeof candidate.model === 'string' &&
+    (candidate.codexContextPricingPending === undefined || candidate.codexContextPricingPending === true) &&
     isFiniteNumber(candidate.inputTokens) &&
     isFiniteNumber(candidate.outputTokens) &&
     isFiniteNumber(candidate.cacheCreationTokens) &&
@@ -385,6 +411,7 @@ function isValidCursorSnapshot(value: unknown): value is CursorSnapshot {
     isFiniteNumber(candidate.totalTokens) &&
     isFiniteNumber(candidate.costUsd) &&
     isFiniteNumber(candidate.sessionCount)
+  )
 }
 
 function isFiniteNumber(value: unknown) {

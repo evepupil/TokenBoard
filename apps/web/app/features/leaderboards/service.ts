@@ -22,9 +22,7 @@ export async function getLeaderboard(
   const metric = leaderboardMetricSchema.catch('tokens').parse(options.metric)
   const today = now.toISOString().slice(0, 10)
   const range =
-    period === 'monthly'
-      ? currentMonthRange(now)
-      : { startDate: today, endDateExclusive: addUtcDaysIso(today, 1) }
+    period === 'monthly' ? currentMonthRange(now) : { startDate: today, endDateExclusive: addUtcDaysIso(today, 1) }
 
   return listLeaderboard(db, {
     period,

@@ -73,10 +73,9 @@ export function getClaudeHookStatus({ paths, fs, nodePath = process.execPath, pl
   const loaded = loadJsonObject(paths.claudeSettingsPath, fs)
   if (loaded.status === 'missing') return 'not-installed'
   if (loaded.status === 'invalid') return 'error'
-  return hasClaudeCommand(
-    normalizeArray(normalizeObject(loaded.value.hooks).SessionEnd),
-    paths.notifyPath
-  ) ? 'installed' : 'not-installed'
+  return hasClaudeCommand(normalizeArray(normalizeObject(loaded.value.hooks).SessionEnd), paths.notifyPath)
+    ? 'installed'
+    : 'not-installed'
 }
 
 export function assertClaudeSettingsValid({ paths, fs }) {
@@ -104,8 +103,7 @@ function isClaudeNotifyHook(hook, notifyPath) {
   if (!hook || typeof hook !== 'object' || typeof hook.command !== 'string') return false
   const argv = splitCommandArgs(hook.command)
   const notifyIndex = argv.findIndex((arg) => arg === notifyPath)
-  return isNodeExecutingNotify(argv, notifyIndex) &&
-    hasSourceArg(argv, notifyIndex + 1, claudeSource)
+  return isNodeExecutingNotify(argv, notifyIndex) && hasSourceArg(argv, notifyIndex + 1, claudeSource)
 }
 
 function hasSourceArg(argv, startIndex, source) {

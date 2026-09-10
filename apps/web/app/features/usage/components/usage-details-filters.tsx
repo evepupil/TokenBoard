@@ -6,25 +6,32 @@ import type { UsageDetailsFilters } from '../service'
 import { formatSource } from '../source-format'
 import { csvHref } from './usage-details-format'
 
-export function UsageDetailsFiltersForm(props: {
-  filters: UsageDetailsFilters
-  devices: UserDevice[]
-}) {
+export function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
   return (
-    <form method="get" class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]" data-submit-feedback="true">
+    <form
+      method="get"
+      class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]"
+      data-submit-feedback="true"
+    >
       <SourceFilter filters={props.filters} />
       <DeviceFilter filters={props.filters} devices={props.devices} />
       <DateFilter label="开始日期" name="startDate" value={props.filters.startDate} />
       <DateFilter label="结束日期" name="endDate" value={props.filters.endDate} />
       <ModelFilter value={props.filters.modelQuery} />
-      <Button class="h-11 w-full sm:mt-7" type="submit" data-submitting-label="正在应用...">应用</Button>
-      <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)}>CSV</LinkButton>
+      <Button class="h-11 w-full sm:mt-7" type="submit" data-submitting-label="正在应用...">
+        应用
+      </Button>
+      <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)}>
+        CSV
+      </LinkButton>
     </form>
   )
 }
 
 function SourceFilter(props: { filters: UsageDetailsFilters }) {
-  return <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-2" />
+  return (
+    <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-2" />
+  )
 }
 
 function DeviceFilter(props: { filters: UsageDetailsFilters; devices: UserDevice[] }) {
@@ -34,13 +41,7 @@ function DeviceFilter(props: { filters: UsageDetailsFilters; devices: UserDevice
   ]
 
   return (
-    <CustomSelect
-      label="设备"
-      name="device"
-      value={props.filters.deviceId}
-      options={options}
-      wrapperClass="mt-2"
-    />
+    <CustomSelect label="设备" name="device" value={props.filters.deviceId} options={options} wrapperClass="mt-2" />
   )
 }
 
@@ -73,7 +74,9 @@ function filterControlClass(extra = '') {
     'mt-2 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3',
     'text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20',
     extra
-  ].filter(Boolean).join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 // Derived from the source enum so a new source cannot be filterable in the

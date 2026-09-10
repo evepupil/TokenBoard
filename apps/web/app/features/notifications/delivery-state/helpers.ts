@@ -19,17 +19,17 @@ export function nextRunAfterClearedPending(
   })
 }
 
-export function nextRunAfterFailure(input: {
-  subscription: DueWebhookSubscription
-  scheduleSlot: string | null
-  attempt: number
-  now: Date
-}, shouldRetry: boolean) {
+export function nextRunAfterFailure(
+  input: {
+    subscription: DueWebhookSubscription
+    scheduleSlot: string | null
+    attempt: number
+    now: Date
+  },
+  shouldRetry: boolean
+) {
   if (shouldRetry) {
-    return addMinutes(
-      input.now,
-      retryDelayMinutes[input.attempt - 1] ?? retryDelayMinutes.at(-1) ?? 30
-    ).toISOString()
+    return addMinutes(input.now, retryDelayMinutes[input.attempt - 1] ?? retryDelayMinutes.at(-1) ?? 30).toISOString()
   }
   return nextScheduledRunAt({
     now: scheduledSlotDate(input.subscription, input.scheduleSlot) ?? input.now,
@@ -45,9 +45,7 @@ export function assertBatchSucceeded(results: D1Result<unknown>[]) {
   if (failedIndex < 0) return
 
   const error = batchResults[failedIndex]?.error
-  throw new Error(
-    `D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`
-  )
+  throw new Error(`D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`)
 }
 
 export function assertClaimedUpdate(result: D1Result<unknown>) {

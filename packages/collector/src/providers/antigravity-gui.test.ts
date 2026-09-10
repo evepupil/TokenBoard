@@ -70,9 +70,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
       const cursorText = await readFile(join(root, 'antigravity-cursor.json'), 'utf8')
       expect(cursorText).not.toContain(cascadeId)
       const cursor = JSON.parse(cursorText)
-      expect(Object.keys(cursor.antigravityCascadeFileScan.files)).toEqual([
-        expect.stringMatching(/^[a-f0-9]{64}$/)
-      ])
+      expect(Object.keys(cursor.antigravityCascadeFileScan.files)).toEqual([expect.stringMatching(/^[a-f0-9]{64}$/)])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -200,20 +198,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
       })
 
       expect(first[0]?.inputTokens).toBe(100)
-      expect(second).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'gemini-3-flash-a',
-        inputTokens: 150,
-        outputTokens: 30,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 35,
-        totalTokens: 215,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-23T16:45:00.000Z'
-      }])
+      expect(second).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'gemini-3-flash-a',
+          inputTokens: 150,
+          outputTokens: 30,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 35,
+          totalTokens: 215,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-23T16:45:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -229,36 +229,40 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         collectedAt: '2026-06-23T16:40:00.000Z',
         listCascadeIds: async () => ['conversation-a'],
         requestGeneratorMetadata: async () => ({
-          generatorMetadata: [{
-            ...generatorMetadataItem({
-              usage: {
-                model: 'MODEL_PLACEHOLDER_M132',
-                inputTokens: '33',
-                outputTokens: '7',
-                cacheReadTokens: '5',
-                responseId: 'response-a'
-              },
-              responseModel: 'gemini-3-flash-a'
-            }),
-            conversationHistory: [{ content: 'raw prompt text' }]
-          }]
+          generatorMetadata: [
+            {
+              ...generatorMetadataItem({
+                usage: {
+                  model: 'MODEL_PLACEHOLDER_M132',
+                  inputTokens: '33',
+                  outputTokens: '7',
+                  cacheReadTokens: '5',
+                  responseId: 'response-a'
+                },
+                responseModel: 'gemini-3-flash-a'
+              }),
+              conversationHistory: [{ content: 'raw prompt text' }]
+            }
+          ]
         })
       })
 
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'gemini-3-flash-a',
-        inputTokens: 33,
-        outputTokens: 7,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 5,
-        totalTokens: 45,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-23T16:40:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'gemini-3-flash-a',
+          inputTokens: 33,
+          outputTokens: 7,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 5,
+          totalTokens: 45,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-23T16:40:00.000Z'
+        }
+      ])
 
       const cursorText = await readFile(join(root, 'antigravity-cursor.json'), 'utf8')
       expect(cursorText).not.toContain('raw prompt text')
@@ -278,37 +282,41 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         collectedAt: '2026-02-06T02:00:00.000Z',
         listCascadeIds: async () => ['conversation-a'],
         requestGeneratorMetadata: async () => ({
-          generatorMetadata: [{
-            executionId: 'execution-placeholder',
-            stepIndices: [4],
-            chatModel: {
-              model: 'MODEL_PLACEHOLDER_M12',
-              chatStartMetadata: { createdAt: '2026-02-06T01:51:19.941441Z' },
-              usage: {
+          generatorMetadata: [
+            {
+              executionId: 'execution-placeholder',
+              stepIndices: [4],
+              chatModel: {
                 model: 'MODEL_PLACEHOLDER_M12',
-                inputTokens: '42',
-                outputTokens: '8',
-                responseId: 'response-placeholder'
+                chatStartMetadata: { createdAt: '2026-02-06T01:51:19.941441Z' },
+                usage: {
+                  model: 'MODEL_PLACEHOLDER_M12',
+                  inputTokens: '42',
+                  outputTokens: '8',
+                  responseId: 'response-placeholder'
+                }
               }
             }
-          }]
+          ]
         })
       })
 
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-02-06',
-        timezone: 'UTC',
-        model: 'MODEL_PLACEHOLDER_M12',
-        inputTokens: 42,
-        outputTokens: 8,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 0,
-        totalTokens: 50,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-02-06T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-02-06',
+          timezone: 'UTC',
+          model: 'MODEL_PLACEHOLDER_M12',
+          inputTokens: 42,
+          outputTokens: 8,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+          totalTokens: 50,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-02-06T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -324,21 +332,23 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         collectedAt: '2026-02-06T02:00:00.000Z',
         listCascadeIds: async () => ['conversation-a'],
         requestGeneratorMetadata: async () => ({
-          generatorMetadata: [{
-            executionId: 'execution-empty-response-model',
-            stepIndices: [4],
-            chatModel: {
-              model: 'MODEL_PLACEHOLDER_M12',
-              responseModel: '',
-              chatStartMetadata: { createdAt: '2026-02-06T01:51:19.941441Z' },
-              usage: {
-                model: 'gemini-3-flash-a',
-                inputTokens: '42',
-                outputTokens: '8',
-                responseId: 'response-empty-response-model'
+          generatorMetadata: [
+            {
+              executionId: 'execution-empty-response-model',
+              stepIndices: [4],
+              chatModel: {
+                model: 'MODEL_PLACEHOLDER_M12',
+                responseModel: '',
+                chatStartMetadata: { createdAt: '2026-02-06T01:51:19.941441Z' },
+                usage: {
+                  model: 'gemini-3-flash-a',
+                  inputTokens: '42',
+                  outputTokens: '8',
+                  responseId: 'response-empty-response-model'
+                }
               }
             }
-          }]
+          ]
         })
       })
 
@@ -412,20 +422,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         })
       })
 
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'Gemini 3.5 Flash (Medium)',
-        inputTokens: 20,
-        outputTokens: 4,
-        cacheCreationTokens: 8,
-        cacheReadTokens: 0,
-        totalTokens: 32,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'Gemini 3.5 Flash (Medium)',
+          inputTokens: 20,
+          outputTokens: 4,
+          cacheCreationTokens: 8,
+          cacheReadTokens: 0,
+          totalTokens: 32,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -461,51 +473,57 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         })
       })
 
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'gemini-3-flash-c',
-        inputTokens: 8901,
-        outputTokens: 0,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 89389,
-        totalTokens: 98290,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'gemini-3-flash-c',
+          inputTokens: 8901,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 89389,
+          totalTokens: 98290,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  test.each([Number.NaN, Number.MAX_SAFE_INTEGER])('keeps invalid or excessive max language server limits bounded', async (maxLanguageServerCascades) => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-max-'))
-    try {
-      const calls: string[] = []
-      await collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        maxLanguageServerCascades,
-        listCascades: async () => Array.from({ length: 20 }, (_, index) => ({
-          id: `conversation-${index}`,
-          mtimeMs: 2000 - index,
-          size: 20
-        })),
-        requestGeneratorMetadata: async (input: { cascadeId: string }) => {
-          calls.push(input.cascadeId)
-          return { generatorMetadata: [] }
-        },
-        readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] })
-      })
+  test.each([Number.NaN, Number.MAX_SAFE_INTEGER])(
+    'keeps invalid or excessive max language server limits bounded',
+    async (maxLanguageServerCascades) => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-max-'))
+      try {
+        const calls: string[] = []
+        await collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          maxLanguageServerCascades,
+          listCascades: async () =>
+            Array.from({ length: 20 }, (_, index) => ({
+              id: `conversation-${index}`,
+              mtimeMs: 2000 - index,
+              size: 20
+            })),
+          requestGeneratorMetadata: async (input: { cascadeId: string }) => {
+            calls.push(input.cascadeId)
+            return { generatorMetadata: [] }
+          },
+          readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] })
+        })
 
-      expect(calls).toHaveLength(12)
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        expect(calls).toHaveLength(12)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('bounds language server scans and resumes with cursor state', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-bounded-'))
@@ -564,18 +582,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] })
       }
 
-      const first = await expectFatalPartialAntigravityUsage(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }))
+      const first = await expectFatalPartialAntigravityUsage(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        })
+      )
       expect(calls).toEqual(['conversation-a', 'conversation-b'])
       expect(first.snapshots).toHaveLength(1)
 
       calls.length = 0
-      const second = await expectFatalPartialAntigravityUsage(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:05:00.000Z'
-      }))
+      const second = await expectFatalPartialAntigravityUsage(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:05:00.000Z'
+        })
+      )
       expect(calls).toEqual(['conversation-b'])
       expect(second.snapshots).toHaveLength(1)
     } finally {
@@ -603,9 +625,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         stateDir: root,
         timezone: 'UTC',
         languageServerPath: '/missing/tokenboard-antigravity-language-server',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
         readDbUsageEvents: async (input?: { lastSeenRowIndexByCascadeHash?: Map<string, number> }) => {
           seenDbCursorSizes.push(input?.lastSeenRowIndexByCascadeHash?.size ?? 0)
           return {
@@ -616,33 +636,41 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         }
       } satisfies Parameters<typeof collectAntigravityGuiUsage>[0]
 
-      const first = await expectPartialAntigravitySnapshots(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }))
-      const second = await expectPartialAntigravitySnapshots(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:05:00.000Z'
-      }))
+      const first = await expectPartialAntigravitySnapshots(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        })
+      )
+      const second = await expectPartialAntigravitySnapshots(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:05:00.000Z'
+        })
+      )
 
-      expect(first).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'gemini-3-flash-a',
-        inputTokens: 100,
-        outputTokens: 20,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 30,
-        totalTokens: 150,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
-      expect(second).toEqual([{
-        ...first[0],
-        collectedAt: '2026-06-24T02:05:00.000Z'
-      }])
+      expect(first).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'gemini-3-flash-a',
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 30,
+          totalTokens: 150,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
+      expect(second).toEqual([
+        {
+          ...first[0],
+          collectedAt: '2026-06-24T02:05:00.000Z'
+        }
+      ])
       expect(seenDbCursorSizes).toEqual([0, 1])
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -727,22 +755,28 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         }
       }
 
-      const first = await expectFatalPartialAntigravityUsage(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }))
-      const second = await expectFatalPartialAntigravityUsage(collectAntigravityGuiUsage({
-        ...options,
-        collectedAt: '2026-06-24T02:05:00.000Z'
-      }))
+      const first = await expectFatalPartialAntigravityUsage(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        })
+      )
+      const second = await expectFatalPartialAntigravityUsage(
+        collectAntigravityGuiUsage({
+          ...options,
+          collectedAt: '2026-06-24T02:05:00.000Z'
+        })
+      )
 
       expect(first.snapshots).toEqual([
         expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })
       ])
-      expect(second.snapshots).toEqual([{
-        ...first.snapshots[0],
-        collectedAt: '2026-06-24T02:05:00.000Z'
-      }])
+      expect(second.snapshots).toEqual([
+        {
+          ...first.snapshots[0],
+          collectedAt: '2026-06-24T02:05:00.000Z'
+        }
+      ])
       expect(seenDbCursorSizes).toEqual([0, 1])
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -758,73 +792,80 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
       message: 'Antigravity metadata request returned invalid JSON for antigravity: Unexpected token',
       expected: 'collection failed'
     }
-  ])('keeps DB snapshots but fails fatal when language-server metadata is invalid: $message', async ({ message, expected }) => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-fatal-metadata-'))
-    const dbEvent = {
-      cascadeHash: 'c'.repeat(64),
-      eventHash: 'e'.repeat(64),
-      createdAt: '2026-06-23T16:30:00.000Z',
-      model: 'gemini-3-flash-a',
-      inputTokens: 100,
-      outputTokens: 20,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 30
-    }
-    try {
-      const thrown = await expectFatalPartialAntigravityUsage(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        listCascadeIds: async () => ['conversation-a'],
-        requestGeneratorMetadata: async () => {
-          throw new Error(message)
-        },
-        readDbUsageEvents: async () => ({
-          cascadeIds: new Set(['conversation-db']),
-          events: [dbEvent],
-          lastReadRowIndexByCascade: new Map([['conversation-db', 3]])
-        })
-      }))
+  ])(
+    'keeps DB snapshots but fails fatal when language-server metadata is invalid: $message',
+    async ({ message, expected }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-fatal-metadata-'))
+      const dbEvent = {
+        cascadeHash: 'c'.repeat(64),
+        eventHash: 'e'.repeat(64),
+        createdAt: '2026-06-23T16:30:00.000Z',
+        model: 'gemini-3-flash-a',
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 30
+      }
+      try {
+        const thrown = await expectFatalPartialAntigravityUsage(
+          collectAntigravityGuiUsage({
+            source: 'antigravity',
+            stateDir: root,
+            timezone: 'UTC',
+            listCascadeIds: async () => ['conversation-a'],
+            requestGeneratorMetadata: async () => {
+              throw new Error(message)
+            },
+            readDbUsageEvents: async () => ({
+              cascadeIds: new Set(['conversation-db']),
+              events: [dbEvent],
+              lastReadRowIndexByCascade: new Map([['conversation-db', 3]])
+            })
+          })
+        )
 
-      expect(thrown.message).toContain(expected)
-      expect(thrown.snapshots).toEqual([
-        expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })
-      ])
-    } finally {
-      await rm(root, { recursive: true, force: true })
+        expect(thrown.message).toContain(expected)
+        expect(thrown.snapshots).toEqual([
+          expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })
+        ])
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 
   test('preserves partial DB snapshots when a metadata request fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-partial-request-'))
     try {
-      const snapshots = await expectPartialAntigravitySnapshots(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
-        readDbUsageEvents: async () => ({
-          cascadeIds: new Set(['conversation-db']),
-          events: [{
-            cascadeHash: 'c'.repeat(64),
-            eventHash: 'e'.repeat(64),
-            createdAt: '2026-06-23T16:30:00.000Z',
-            model: 'gemini-3-flash-a',
-            inputTokens: 100,
-            outputTokens: 20,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 30
-          }]
-        }),
-        requestGeneratorMetadata: async () => {
-          throw new Error('Antigravity metadata request failed for antigravity: HTTP 500')
-        }
-      }))
+      const snapshots = await expectPartialAntigravitySnapshots(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:00:00.000Z',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents: async () => ({
+            cascadeIds: new Set(['conversation-db']),
+            events: [
+              {
+                cascadeHash: 'c'.repeat(64),
+                eventHash: 'e'.repeat(64),
+                createdAt: '2026-06-23T16:30:00.000Z',
+                model: 'gemini-3-flash-a',
+                inputTokens: 100,
+                outputTokens: 20,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 30
+              }
+            ]
+          }),
+          requestGeneratorMetadata: async () => {
+            throw new Error('Antigravity metadata request failed for antigravity: HTTP 500')
+          }
+        })
+      )
 
-      expect(snapshots).toEqual([
-        expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })
-      ])
+      expect(snapshots).toEqual([expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -833,33 +874,35 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
   test('preserves partial DB snapshots when the metadata transport disconnects', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-partial-transport-'))
     try {
-      const snapshots = await expectPartialAntigravitySnapshots(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
-        readDbUsageEvents: async () => ({
-          cascadeIds: new Set(['conversation-db']),
-          events: [{
-            cascadeHash: 'c'.repeat(64),
-            eventHash: 'e'.repeat(64),
-            createdAt: '2026-06-23T16:30:00.000Z',
-            model: 'gemini-3-flash-a',
-            inputTokens: 100,
-            outputTokens: 20,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 30
-          }]
-        }),
-        requestGeneratorMetadata: async () => {
-          throw new Error('Antigravity metadata request transport failed for antigravity: ECONNRESET')
-        }
-      }))
+      const snapshots = await expectPartialAntigravitySnapshots(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:00:00.000Z',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents: async () => ({
+            cascadeIds: new Set(['conversation-db']),
+            events: [
+              {
+                cascadeHash: 'c'.repeat(64),
+                eventHash: 'e'.repeat(64),
+                createdAt: '2026-06-23T16:30:00.000Z',
+                model: 'gemini-3-flash-a',
+                inputTokens: 100,
+                outputTokens: 20,
+                cacheCreationTokens: 0,
+                cacheReadTokens: 30
+              }
+            ]
+          }),
+          requestGeneratorMetadata: async () => {
+            throw new Error('Antigravity metadata request transport failed for antigravity: ECONNRESET')
+          }
+        })
+      )
 
-      expect(snapshots).toEqual([
-        expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })
-      ])
+      expect(snapshots).toEqual([expect.objectContaining({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 30 })])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -874,9 +917,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         stateDir: root,
         timezone: 'UTC',
         collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
         readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] }),
         requestGeneratorMetadata: async (input: { cascadeId: string }) => {
           calls.push(input.cascadeId)
@@ -900,12 +941,14 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         stateDir: root,
         timezone: 'UTC',
         collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [{
-          id: 'conversation-db',
-          mtimeMs: 2000,
-          size: 20,
-          hasDatabaseFile: true
-        }],
+        listCascades: async () => [
+          {
+            id: 'conversation-db',
+            mtimeMs: 2000,
+            size: 20,
+            hasDatabaseFile: true
+          }
+        ],
         readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] }),
         requestGeneratorMetadata: async (input: { cascadeId: string }) => {
           calls.push(input.cascadeId)
@@ -968,28 +1011,28 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
           lastReadRowIndexByCascade: new Map([['conversation-a', 7]])
         }
       }
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:00:00.000Z',
-        languageServerPath: '/missing/tokenboard-antigravity-language-server',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
-        readDbUsageEvents
-      })).rejects.toThrow('spawn /missing/tokenboard-antigravity-language-server ENOENT')
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:05:00.000Z',
-        languageServerPath: '/missing/tokenboard-antigravity-language-server',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
-        readDbUsageEvents
-      })).rejects.toThrow('spawn /missing/tokenboard-antigravity-language-server ENOENT')
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:00:00.000Z',
+          languageServerPath: '/missing/tokenboard-antigravity-language-server',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents
+        })
+      ).rejects.toThrow('spawn /missing/tokenboard-antigravity-language-server ENOENT')
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:05:00.000Z',
+          languageServerPath: '/missing/tokenboard-antigravity-language-server',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents
+        })
+      ).rejects.toThrow('spawn /missing/tokenboard-antigravity-language-server ENOENT')
 
       expect(seenCursorSizes).toEqual([0, 1])
     } finally {
@@ -1056,9 +1099,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         stateDir: root,
         timezone: 'UTC',
         collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
         readDbUsageEvents: async () => {
           throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
         },
@@ -1069,20 +1110,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
       })
 
       expect(calls).toEqual(['conversation-a'])
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'Gemini 3.5 Flash (Medium)',
-        inputTokens: 120,
-        outputTokens: 24,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 30,
-        totalTokens: 174,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'Gemini 3.5 Flash (Medium)',
+          inputTokens: 120,
+          outputTokens: 24,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 30,
+          totalTokens: 174,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1098,9 +1141,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         conversationDir: join(root, 'missing-conversations'),
         timezone: 'UTC',
         collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
         requestGeneratorMetadata: async (input: { cascadeId: string }) => {
           calls.push(input.cascadeId)
           return generatorMetadataResponse()
@@ -1108,20 +1149,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
       })
 
       expect(calls).toEqual(['conversation-a'])
-      expect(snapshots).toEqual([{
-        source: 'antigravity',
-        usageDate: '2026-06-23',
-        timezone: 'UTC',
-        model: 'Gemini 3.5 Flash (Medium)',
-        inputTokens: 120,
-        outputTokens: 24,
-        cacheCreationTokens: 0,
-        cacheReadTokens: 30,
-        totalTokens: 174,
-        costUsd: 0,
-        sessionCount: 1,
-        collectedAt: '2026-06-24T02:00:00.000Z'
-      }])
+      expect(snapshots).toEqual([
+        {
+          source: 'antigravity',
+          usageDate: '2026-06-23',
+          timezone: 'UTC',
+          model: 'Gemini 3.5 Flash (Medium)',
+          inputTokens: 120,
+          outputTokens: 24,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 30,
+          totalTokens: 174,
+          costUsd: 0,
+          sessionCount: 1,
+          collectedAt: '2026-06-24T02:00:00.000Z'
+        }
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1130,19 +1173,19 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
   test('surfaces SQLite errors when language server fallback has no usable events', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-db-fallback-empty-'))
     try {
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
-        readDbUsageEvents: async () => {
-          throw new Error('Failed to read Antigravity SQLite metadata from conversation-a.db')
-        },
-        requestGeneratorMetadata: async () => ({ generatorMetadata: [] })
-      })).rejects.toThrow('Failed to read Antigravity SQLite metadata from conversation-a.db')
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:00:00.000Z',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents: async () => {
+            throw new Error('Failed to read Antigravity SQLite metadata from conversation-a.db')
+          },
+          requestGeneratorMetadata: async () => ({ generatorMetadata: [] })
+        })
+      ).rejects.toThrow('Failed to read Antigravity SQLite metadata from conversation-a.db')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1152,22 +1195,22 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-db-fallback-real-error-'))
     try {
       const calls: string[] = []
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        timezone: 'UTC',
-        collectedAt: '2026-06-24T02:00:00.000Z',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
-        readDbUsageEvents: async () => {
-          throw new Error('Failed to read Antigravity SQLite metadata from conversation-a.db')
-        },
-        requestGeneratorMetadata: async (input: { cascadeId: string }) => {
-          calls.push(input.cascadeId)
-          return generatorMetadataResponse()
-        }
-      })).rejects.toThrow('Failed to read Antigravity SQLite metadata from conversation-a.db')
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          timezone: 'UTC',
+          collectedAt: '2026-06-24T02:00:00.000Z',
+          listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
+          readDbUsageEvents: async () => {
+            throw new Error('Failed to read Antigravity SQLite metadata from conversation-a.db')
+          },
+          requestGeneratorMetadata: async (input: { cascadeId: string }) => {
+            calls.push(input.cascadeId)
+            return generatorMetadataResponse()
+          }
+        })
+      ).rejects.toThrow('Failed to read Antigravity SQLite metadata from conversation-a.db')
 
       expect(calls).toEqual([])
     } finally {
@@ -1183,9 +1226,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         source: 'antigravity' as const,
         stateDir: root,
         timezone: 'UTC',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: 2000, size: 20 }],
         readDbUsageEvents: async () => ({ cascadeIds: new Set<string>(), events: [] }),
         requestGeneratorMetadata: async (input: { cascadeId: string }) => {
           calls.push(input.cascadeId)
@@ -1278,9 +1319,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         stateDir: root,
         timezone: 'UTC',
         languageServerPath: '/missing/tokenboard-antigravity-language-server',
-        listCascades: async () => [
-          { id: 'conversation-db', mtimeMs: 2000, size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-db', mtimeMs: 2000, size: 20 }],
         readDbUsageEvents: async () => {
           run += 1
           return run === 1
@@ -1444,9 +1483,7 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
         source: 'antigravity' as const,
         stateDir: root,
         timezone: 'UTC',
-        listCascades: async () => [
-          { id: 'conversation-a', mtimeMs: Date.parse('2026-01-01T10:00:00.000Z'), size: 20 }
-        ],
+        listCascades: async () => [{ id: 'conversation-a', mtimeMs: Date.parse('2026-01-01T10:00:00.000Z'), size: 20 }],
         requestGeneratorMetadata: async (input: { cascadeId: string }) => {
           calls.push(input.cascadeId)
           return generatorMetadataResponse()
@@ -1473,16 +1510,20 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
   test('rejects unbounded and fractional token metadata', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-'))
     try {
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        listCascadeIds: async () => ['conversation-a'],
-        requestGeneratorMetadata: async () => ({
-          generatorMetadata: [generatorMetadataItem({
-            usage: { inputTokens: '1.5' }
-          })]
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          listCascadeIds: async () => ['conversation-a'],
+          requestGeneratorMetadata: async () => ({
+            generatorMetadata: [
+              generatorMetadataItem({
+                usage: { inputTokens: '1.5' }
+              })
+            ]
+          })
         })
-      })).rejects.toThrow('inputTokens must be a bounded nonnegative integer')
+      ).rejects.toThrow('inputTokens must be a bounded nonnegative integer')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1491,63 +1532,71 @@ describe('collectAntigravityGuiUsage', { timeout: 30_000 }, () => {
   test('rejects non-ISO generator metadata timestamps', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-date-'))
     try {
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        listCascadeIds: async () => ['conversation-a'],
-        requestGeneratorMetadata: async () => ({
-          generatorMetadata: [{
-            executionId: 'execution-a',
-            stepIndices: [3],
-            chatModel: {
-              model: 'Gemini 3.5 Flash (Medium)',
-              chatStartMetadata: { createdAt: 'June 23, 2026 10:00:00' },
-              usage: {
-                model: 'Gemini 3.5 Flash (Medium)',
-                inputTokens: '10',
-                outputTokens: '2',
-                responseId: 'response-a'
+      await expect(
+        collectAntigravityGuiUsage({
+          source: 'antigravity',
+          stateDir: root,
+          listCascadeIds: async () => ['conversation-a'],
+          requestGeneratorMetadata: async () => ({
+            generatorMetadata: [
+              {
+                executionId: 'execution-a',
+                stepIndices: [3],
+                chatModel: {
+                  model: 'Gemini 3.5 Flash (Medium)',
+                  chatStartMetadata: { createdAt: 'June 23, 2026 10:00:00' },
+                  usage: {
+                    model: 'Gemini 3.5 Flash (Medium)',
+                    inputTokens: '10',
+                    outputTokens: '2',
+                    responseId: 'response-a'
+                  }
+                }
               }
-            }
-          }]
+            ]
+          })
         })
-      })).rejects.toThrow('createdAt must be an ISO datetime')
+      ).rejects.toThrow('createdAt must be an ISO datetime')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  test.each([
-    '2026-02-30T00:00:00.000Z',
-    '2025-04-31T23:59:59.000+08:00'
-  ])('rejects impossible ISO calendar dates: %s', async (createdAt) => {
-    const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-calendar-date-'))
-    try {
-      await expect(collectAntigravityGuiUsage({
-        source: 'antigravity',
-        stateDir: root,
-        listCascadeIds: async () => ['conversation-a'],
-        requestGeneratorMetadata: async () => ({
-          generatorMetadata: [{
-            executionId: 'execution-a',
-            stepIndices: [3],
-            chatModel: {
-              model: 'Gemini 3.5 Flash (Medium)',
-              chatStartMetadata: { createdAt },
-              usage: {
-                model: 'Gemini 3.5 Flash (Medium)',
-                inputTokens: '10',
-                outputTokens: '2',
-                responseId: 'response-a'
-              }
-            }
-          }]
-        })
-      })).rejects.toThrow('createdAt must be an ISO datetime')
-    } finally {
-      await rm(root, { recursive: true, force: true })
+  test.each(['2026-02-30T00:00:00.000Z', '2025-04-31T23:59:59.000+08:00'])(
+    'rejects impossible ISO calendar dates: %s',
+    async (createdAt) => {
+      const root = await mkdtemp(join(tmpdir(), 'tokenboard-antigravity-invalid-calendar-date-'))
+      try {
+        await expect(
+          collectAntigravityGuiUsage({
+            source: 'antigravity',
+            stateDir: root,
+            listCascadeIds: async () => ['conversation-a'],
+            requestGeneratorMetadata: async () => ({
+              generatorMetadata: [
+                {
+                  executionId: 'execution-a',
+                  stepIndices: [3],
+                  chatModel: {
+                    model: 'Gemini 3.5 Flash (Medium)',
+                    chatStartMetadata: { createdAt },
+                    usage: {
+                      model: 'Gemini 3.5 Flash (Medium)',
+                      inputTokens: '10',
+                      outputTokens: '2',
+                      responseId: 'response-a'
+                    }
+                  }
+                }
+              ]
+            })
+          })
+        ).rejects.toThrow('createdAt must be an ISO datetime')
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
-  })
+  )
 })
 
 function generatorMetadataResponse(options: { source?: AntigravityGuiSource; responseId?: string } = {}) {
@@ -1622,12 +1671,14 @@ function restoreEnv(name: string, value: string | undefined) {
   process.env[name] = value
 }
 
-function generatorMetadataItem(overrides: {
-  executionId?: string
-  stepIndices?: number[]
-  usage?: Record<string, unknown>
-  responseModel?: string
-} = {}) {
+function generatorMetadataItem(
+  overrides: {
+    executionId?: string
+    stepIndices?: number[]
+    usage?: Record<string, unknown>
+    responseModel?: string
+  } = {}
+) {
   return {
     executionId: overrides.executionId ?? 'execution-a',
     stepIndices: overrides.stepIndices ?? [3],

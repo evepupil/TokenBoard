@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { pairDevice } from '../../../../features/device/service'
-import {
-  clientIpRateLimitSubject,
-  enforceRateLimit
-} from '../../../../lib/rate-limit'
+import { clientIpRateLimitSubject, enforceRateLimit } from '../../../../lib/rate-limit'
 import { ApiError } from '../../../../lib/errors'
 import { POST } from './pair'
 
@@ -68,7 +65,7 @@ describe('device pair route', () => {
       endpoint: 'https://tokenboard.example/api/v1/ingest'
     } as never)
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -106,11 +103,9 @@ describe('device pair route', () => {
       header: vi.fn(),
       json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
     }
-    mockedPairDevice.mockRejectedValue(
-      new ApiError('NOT_FOUND', 'Device has no active installation', 404)
-    )
+    mockedPairDevice.mockRejectedValue(new ApiError('NOT_FOUND', 'Device has no active installation', 404))
 
-    const response = await POST[0](context as never, async () => undefined) as Response
+    const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(404)
     await expect(response.json()).resolves.toEqual({

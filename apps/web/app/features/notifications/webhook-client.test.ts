@@ -8,13 +8,12 @@ const testEncryptionKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
 
 describe('webhook client', () => {
   test('calls injected fetchers with the global context', async () => {
-    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test', testEncryptionKey)
+    const encryptedUrl = await encryptSecret(
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
+      testEncryptionKey
+    )
     const fetchCalls: Array<{ url: string; body: string }> = []
-    const thisSensitiveFetch = vi.fn(function (
-      this: unknown,
-      url: RequestInfo | URL,
-      init?: RequestInit
-    ) {
+    const thisSensitiveFetch = vi.fn(function (this: unknown, url: RequestInfo | URL, init?: RequestInit) {
       if (this !== globalThis) {
         throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
       }
@@ -40,16 +39,22 @@ describe('webhook client', () => {
   test('rejects Feishu business failures returned with HTTP 200', async () => {
     const encryptedUrl = await encryptSecret('https://open.feishu.cn/open-apis/bot/v2/hook/test', testEncryptionKey)
 
-    await expect(sendWebhookRequest({
-      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
-      subscription: subscriptionRow(encryptedUrl, 'feishu'),
-      report: dailyReport(),
-      now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => new Response(JSON.stringify({
-        StatusCode: 19021,
-        StatusMessage: 'invalid signature'
-      }), { status: 200 })
-    })).rejects.toThrow('Webhook returned application code 19021: invalid signature')
+    await expect(
+      sendWebhookRequest({
+        env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+        subscription: subscriptionRow(encryptedUrl, 'feishu'),
+        report: dailyReport(),
+        now: new Date('2026-04-29T01:30:00.000Z'),
+        fetcher: async () =>
+          new Response(
+            JSON.stringify({
+              StatusCode: 19021,
+              StatusMessage: 'invalid signature'
+            }),
+            { status: 200 }
+          )
+      })
+    ).rejects.toThrow('Webhook returned application code 19021: invalid signature')
   })
 
   test('accepts Feishu zero business status', async () => {
@@ -60,61 +65,89 @@ describe('webhook client', () => {
       subscription: subscriptionRow(encryptedUrl, 'feishu'),
       report: dailyReport(),
       now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => new Response(JSON.stringify({
-        StatusCode: 0,
-        StatusMessage: 'success'
-      }), { status: 200 })
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            StatusCode: 0,
+            StatusMessage: 'success'
+          }),
+          { status: 200 }
+        )
     })
 
     expect(response.status).toBe(200)
   })
 
   test('accepts DingTalk string zero business status', async () => {
-    const encryptedUrl = await encryptSecret('https://oapi.dingtalk.com/robot/send?access_token=test', testEncryptionKey)
+    const encryptedUrl = await encryptSecret(
+      'https://oapi.dingtalk.com/robot/send?access_token=test',
+      testEncryptionKey
+    )
 
     const response = await sendWebhookRequest({
       env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
       subscription: subscriptionRow(encryptedUrl, 'dingtalk'),
       report: dailyReport(),
       now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => new Response(JSON.stringify({
-        errcode: '0',
-        errmsg: 'ok'
-      }), { status: 200 })
+      fetcher: async () =>
+        new Response(
+          JSON.stringify({
+            errcode: '0',
+            errmsg: 'ok'
+          }),
+          { status: 200 }
+        )
     })
 
     expect(response.status).toBe(200)
   })
 
   test('rejects non-JSON provider responses returned with HTTP 200', async () => {
-    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test', testEncryptionKey)
+    const encryptedUrl = await encryptSecret(
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
+      testEncryptionKey
+    )
 
-    await expect(sendWebhookRequest({
-      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
-      subscription: subscriptionRow(encryptedUrl, 'wecom'),
-      report: dailyReport(),
-      now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => new Response('ok', { status: 200 })
-    })).rejects.toThrow('Webhook returned non-JSON response')
+    await expect(
+      sendWebhookRequest({
+        env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+        subscription: subscriptionRow(encryptedUrl, 'wecom'),
+        report: dailyReport(),
+        now: new Date('2026-04-29T01:30:00.000Z'),
+        fetcher: async () => new Response('ok', { status: 200 })
+      })
+    ).rejects.toThrow('Webhook returned non-JSON response')
   })
 
   test('rejects DingTalk string business failures returned with HTTP 200', async () => {
-    const encryptedUrl = await encryptSecret('https://oapi.dingtalk.com/robot/send?access_token=test', testEncryptionKey)
+    const encryptedUrl = await encryptSecret(
+      'https://oapi.dingtalk.com/robot/send?access_token=test',
+      testEncryptionKey
+    )
 
-    await expect(sendWebhookRequest({
-      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
-      subscription: subscriptionRow(encryptedUrl, 'dingtalk'),
-      report: dailyReport(),
-      now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => new Response(JSON.stringify({
-        errcode: '310000',
-        errmsg: 'sign not match'
-      }), { status: 200 })
-    })).rejects.toThrow('Webhook returned application code 310000: sign not match')
+    await expect(
+      sendWebhookRequest({
+        env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+        subscription: subscriptionRow(encryptedUrl, 'dingtalk'),
+        report: dailyReport(),
+        now: new Date('2026-04-29T01:30:00.000Z'),
+        fetcher: async () =>
+          new Response(
+            JSON.stringify({
+              errcode: '310000',
+              errmsg: 'sign not match'
+            }),
+            { status: 200 }
+          )
+      })
+    ).rejects.toThrow('Webhook returned application code 310000: sign not match')
   })
 
   test('bounds failed provider response text in webhook errors', async () => {
-    const encryptedUrl = await encryptSecret('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test', testEncryptionKey)
+    const encryptedUrl = await encryptSecret(
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
+      testEncryptionKey
+    )
     const tailMarker = 'tail-marker'
     const response = new Response(`${'x'.repeat(10_000)}${tailMarker}`, { status: 500 })
 
@@ -140,16 +173,18 @@ describe('webhook client', () => {
     const encryptedUrl = await encryptSecret('https://example.com/webhook', testEncryptionKey)
     let called = false
 
-    await expect(sendWebhookRequest({
-      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
-      subscription: subscriptionRow(encryptedUrl, 'wecom'),
-      report: dailyReport(),
-      now: new Date('2026-04-29T01:30:00.000Z'),
-      fetcher: async () => {
-        called = true
-        return new Response('{}', { status: 200 })
-      }
-    })).rejects.toThrow('Webhook URL host or path is not supported')
+    await expect(
+      sendWebhookRequest({
+        env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+        subscription: subscriptionRow(encryptedUrl, 'wecom'),
+        report: dailyReport(),
+        now: new Date('2026-04-29T01:30:00.000Z'),
+        fetcher: async () => {
+          called = true
+          return new Response('{}', { status: 200 })
+        }
+      })
+    ).rejects.toThrow('Webhook URL host or path is not supported')
     expect(called).toBe(false)
   })
 })

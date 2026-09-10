@@ -71,9 +71,7 @@ export function formatUsageMetricUsdWithCostAvailability(
 }
 
 function compactUsd(value: number) {
-  return value < 0
-    ? `-$${compactNumber(Math.abs(value))}`
-    : `$${compactNumber(value)}`
+  return value < 0 ? `-$${compactNumber(Math.abs(value))}` : `$${compactNumber(value)}`
 }
 
 function compactNumber(value: number) {
@@ -87,10 +85,7 @@ function compactUnitForRoundedValue(absValue: number) {
   let unitIndex = compactUnits.findIndex((item) => absValue >= item.value)
   if (unitIndex < 0) unitIndex = compactUnits.length - 1
 
-  while (
-    unitIndex > 0 &&
-    roundCompactValue(absValue / compactUnits[unitIndex].value) >= compactMaximumUnitValue
-  ) {
+  while (unitIndex > 0 && roundCompactValue(absValue / compactUnits[unitIndex].value) >= compactMaximumUnitValue) {
     unitIndex -= 1
   }
 

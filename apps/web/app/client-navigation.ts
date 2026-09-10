@@ -16,8 +16,16 @@ export function initAppNavigation(refreshTimezoneInputs: () => void) {
 }
 
 function getNavigableLink(event: MouseEvent) {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
-    event.shiftKey || event.altKey || !(event.target instanceof Element)) return null
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    !(event.target instanceof Element)
+  )
+    return null
   const link = event.target.closest<HTMLAnchorElement>('a[href]')
   if (!link || (link.target && link.target !== '_self')) return null
   if (link.hasAttribute('download') || link.dataset.noAjax === 'true') return null
@@ -120,7 +128,7 @@ function beginNavigation(): NavigationRequest {
     clearNavigationBusy(activeNavigation)
   }
   const navigation = {
-    id: nextNavigationId += 1,
+    id: (nextNavigationId += 1),
     controller: new AbortController()
   }
   activeNavigation = navigation
@@ -157,7 +165,8 @@ function clearNavigationBusy(navigation: NavigationRequest) {
 function syncDocumentTitle(pageUrl: URL) {
   if (pageUrl.pathname !== '/leaderboards') return
   document.title = leaderboardDocumentTitle({
-    period: pageUrl.searchParams.get('period'), metric: pageUrl.searchParams.get('metric')
+    period: pageUrl.searchParams.get('period'),
+    metric: pageUrl.searchParams.get('metric')
   })
 }
 

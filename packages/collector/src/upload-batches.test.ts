@@ -51,7 +51,7 @@ function createBatchFetch(requests: Array<{ url: string; body: unknown }>) {
   }
 }
 
-function checkRequest(snapshots: typeof unchangedSnapshot[]) {
+function checkRequest(snapshots: (typeof unchangedSnapshot)[]) {
   return {
     url: 'https://tokenboard.example.com/api/v1/ingest/check',
     body: {
@@ -64,7 +64,7 @@ function checkRequest(snapshots: typeof unchangedSnapshot[]) {
   }
 }
 
-function uploadRequest(snapshots: typeof unchangedSnapshot[]) {
+function uploadRequest(snapshots: (typeof unchangedSnapshot)[]) {
   return {
     url: 'https://tokenboard.example.com/api/v1/ingest',
     body: { snapshots }

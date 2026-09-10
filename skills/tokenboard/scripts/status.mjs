@@ -7,7 +7,13 @@ import { deviceLinkStatus } from './device-link.mjs'
 import { hookStatus } from './hooks.mjs'
 import { scheduledRetryLegacyStatePath, scheduledRetryStatePath } from './scheduled-retry.mjs'
 
-export function buildStatus({ configPath, config, hooks = hookStatus(), deviceLink = deviceLinkStatus(), scheduledRetry }) {
+export function buildStatus({
+  configPath,
+  config,
+  hooks = hookStatus(),
+  deviceLink = deviceLinkStatus(),
+  scheduledRetry
+}) {
   return {
     configured: true,
     activeServerConfigured: hasValue(config.activeServer),
@@ -50,10 +56,7 @@ function publicHookStatus(hooks) {
 }
 
 function hookState(value) {
-  return value === 'installed' ||
-    value === 'installed-local-history' ||
-    value === 'not-installed' ||
-    value === 'error'
+  return value === 'installed' || value === 'installed-local-history' || value === 'not-installed' || value === 'error'
     ? value
     : 'unknown'
 }
@@ -67,11 +70,17 @@ function runCli() {
 
   const config = readConfig()
   const source = typeof config.source === 'string' && config.source.trim() ? config.source : 'all'
-  console.log(JSON.stringify(buildStatus({
-    configPath: file,
-    config,
-    scheduledRetry: readScheduledRetry(file, source)
-  }), null, 2))
+  console.log(
+    JSON.stringify(
+      buildStatus({
+        configPath: file,
+        config,
+        scheduledRetry: readScheduledRetry(file, source)
+      }),
+      null,
+      2
+    )
+  )
 }
 
 function readScheduledRetry(configFile, source = 'all') {
@@ -113,14 +122,18 @@ function readRetryState(statePath) {
     return isScheduledRetryState(value) ? value : { status: 'invalid' }
   } catch (error) {
     if (error?.code === 'ENOENT') return null
+    if (!(error instanceof SyntaxError)) throw error
     return { status: 'invalid' }
   }
 }
 
 function isScheduledRetryState(value) {
-  return value && typeof value === 'object' &&
+  return (
+    value &&
+    typeof value === 'object' &&
     value.schemaVersion === 'tokenboard-scheduled-sync-retry/v1' &&
-    typeof value.source === 'string' && value.source.trim().length > 0 &&
+    typeof value.source === 'string' &&
+    value.source.trim().length > 0 &&
     scheduledRetryStatuses.has(value.status) &&
     Number.isSafeInteger(value.retryAttempt) &&
     Number.isSafeInteger(value.maxAttempts) &&
@@ -129,6 +142,7 @@ function isScheduledRetryState(value) {
     value.retryAttempt <= value.maxAttempts &&
     isIsoTimestamp(value.updatedAt) &&
     (value.nextRetryAt === undefined || isIsoTimestamp(value.nextRetryAt))
+  )
 }
 
 const scheduledRetryStatuses = new Set(['deferred', 'retrying', 'completed', 'failed', 'exhausted'])

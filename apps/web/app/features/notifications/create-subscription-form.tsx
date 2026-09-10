@@ -1,11 +1,7 @@
 import { Button } from '../../components/ui/button'
 import { CustomSelect } from '../../components/ui/custom-select'
 import { Input, Label } from '../../components/ui/input'
-import {
-  ScheduleTimeFields,
-  ScheduleWeekdayFields,
-  defaultScheduleWeekdayValues
-} from './schedule-fields'
+import { ScheduleTimeFields, ScheduleWeekdayFields, defaultScheduleWeekdayValues } from './schedule-fields'
 
 export function CreateSubscriptionForm(props: { timezone: string; disabled: boolean }) {
   return (
@@ -18,7 +14,14 @@ export function CreateSubscriptionForm(props: { timezone: string; disabled: bool
       <ProviderSelect disabled={props.disabled} />
       <Label>
         Webhook URL
-        <Input name="webhookUrl" type="url" placeholder="https://..." autocomplete="off" required disabled={props.disabled} />
+        <Input
+          name="webhookUrl"
+          type="url"
+          placeholder="https://..."
+          autocomplete="off"
+          required
+          disabled={props.disabled}
+        />
       </Label>
       <Label>
         加签 secret (钉钉、飞书 / Lark 启用加签时填写)
@@ -31,7 +34,9 @@ export function CreateSubscriptionForm(props: { timezone: string; disabled: bool
       <ScheduleTimeFields scheduleTimesLocal={['18:00']} disabled={props.disabled} />
       <ScheduleWeekdayFields scheduleWeekdays={defaultScheduleWeekdayValues()} disabled={props.disabled} />
       <CreateChecks disabled={props.disabled} />
-      <Button class="w-full" type="submit" disabled={props.disabled} data-submitting-label="正在保存 Webhook...">保存 Webhook</Button>
+      <Button class="w-full" type="submit" disabled={props.disabled} data-submitting-label="正在保存 Webhook...">
+        保存 Webhook
+      </Button>
     </form>
   )
 }

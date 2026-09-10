@@ -1,11 +1,25 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { join } from 'node:path'
 import test from 'node:test'
 import { acquireLock, releaseLock } from './coordinator-lock.mjs'
-import { runScheduledRetry, scheduledRetryLegacyLockPath, scheduledRetryLegacyStatePath, scheduledRetryLockPath, scheduledRetryStatePath, scheduledRetryTransitionLockPath } from './scheduled-retry.mjs'
+import {
+  runScheduledRetry,
+  scheduledRetryLegacyLockPath,
+  scheduledRetryLegacyStatePath,
+  scheduledRetryLockPath,
+  scheduledRetryStatePath,
+  scheduledRetryTransitionLockPath
+} from './scheduled-retry.mjs'
 import { runSyncInvocation } from './sync.mjs'
+import {
+  memoryFileMap,
+  memoryPathSet,
+  memoryPathStartsWith,
+  normalizeMemoryPath,
+  sameMemoryPath
+} from './coordinator-test-helpers.mjs'
 
 test('scheduled retry records deferred lock contention and then completion', () => {
   const fs = memoryRuntime()
@@ -86,14 +100,15 @@ test('scheduled retry writes a failure state before rethrowing an infrastructure
   const fs = memoryRuntime()
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir: '/state',
-      source: 'all',
-      runtime: fs.runtime,
-      runAttempt: () => {
-        throw new Error('config unreadable')
-      }
-    }),
+    () =>
+      runScheduledRetry({
+        stateDir: '/state',
+        source: 'all',
+        runtime: fs.runtime,
+        runAttempt: () => {
+          throw new Error('config unreadable')
+        }
+      }),
     /config unreadable/
   )
 
@@ -111,20 +126,21 @@ test('scheduled retry cleans the all-source primary lock when transition cleanup
   const unlink = fs.runtime.unlink
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir: '/state',
-      source: 'all',
-      runtime: {
-        ...fs.runtime,
-        unlink: (path) => {
-          if (path.startsWith(`${transitionPath}.release-`)) {
-            throw new Error('transition release failed')
+    () =>
+      runScheduledRetry({
+        stateDir: '/state',
+        source: 'all',
+        runtime: {
+          ...fs.runtime,
+          unlink: (path) => {
+            if (memoryPathStartsWith(path, `${transitionPath}.release-`)) {
+              throw new Error('transition release failed')
+            }
+            unlink(path)
           }
-          unlink(path)
-        }
-      },
-      runAttempt: () => 0
-    }),
+        },
+        runAttempt: () => 0
+      }),
     /transition release failed/
   )
 
@@ -142,17 +158,18 @@ test('scheduled retry preserves its legacy marker ownership when transition clea
   let firstMarker
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir,
-      source: 'codex',
-      runtime: fs.runtime,
-      runAttempt: () => {
-        competingOwner = acquireLock(transitionPath, fs.runtime)
-        assert.ok(competingOwner)
-        firstMarker = readOnlyLegacyMarker(fs, legacyPath)
-        return 0
-      }
-    }),
+    () =>
+      runScheduledRetry({
+        stateDir,
+        source: 'codex',
+        runtime: fs.runtime,
+        runAttempt: () => {
+          competingOwner = acquireLock(transitionPath, fs.runtime)
+          assert.ok(competingOwner)
+          firstMarker = readOnlyLegacyMarker(fs, legacyPath)
+          return 0
+        }
+      }),
     /could not acquire the transition lock/
   )
 
@@ -257,22 +274,26 @@ test('scheduled retry leaves an active legacy lock untouched when the legacy fen
 test('scheduled retry reports unknown legacy fence entries instead of silently skipping all sources', () => {
   const stateDir = '/state/scheduled-retry-corrupt-legacy-fence'
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
-  const fs = memoryRuntime({}, {
-    files: new Map([[join(legacyPath, 'unexpected.tmp'), 'leftover']]),
-    directories: new Set([legacyPath])
-  })
+  const fs = memoryRuntime(
+    {},
+    {
+      files: memoryFileMap([[join(legacyPath, 'unexpected.tmp'), 'leftover']]),
+      directories: memoryPathSet([legacyPath])
+    }
+  )
   let collected = false
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir,
-      source: 'all',
-      runtime: fs.runtime,
-      runAttempt: () => {
-        collected = true
-        return 0
-      }
-    }),
+    () =>
+      runScheduledRetry({
+        stateDir,
+        source: 'all',
+        runtime: fs.runtime,
+        runAttempt: () => {
+          collected = true
+          return 0
+        }
+      }),
     (error) => {
       assert.equal(error.code, 'TOKENBOARD_LEGACY_RETRY_FENCE_CORRUPTED')
       assert.match(error.message, /unexpected entries "unexpected\.tmp"/)
@@ -290,18 +311,22 @@ test('scheduled retry reports unknown legacy fence entries instead of silently s
 test('scheduled retry reports unknown legacy fence entries for a source-specific retry', () => {
   const stateDir = '/state/scheduled-retry-corrupt-source-fence'
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
-  const fs = memoryRuntime({}, {
-    files: new Map([[join(legacyPath, 'unexpected.tmp'), 'leftover']]),
-    directories: new Set([legacyPath])
-  })
+  const fs = memoryRuntime(
+    {},
+    {
+      files: memoryFileMap([[join(legacyPath, 'unexpected.tmp'), 'leftover']]),
+      directories: memoryPathSet([legacyPath])
+    }
+  )
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir,
-      source: 'codex',
-      runtime: fs.runtime,
-      runAttempt: () => 0
-    }),
+    () =>
+      runScheduledRetry({
+        stateDir,
+        source: 'codex',
+        runtime: fs.runtime,
+        runAttempt: () => 0
+      }),
     (error) => {
       assert.equal(error.code, 'TOKENBOARD_LEGACY_RETRY_FENCE_CORRUPTED')
       return true
@@ -319,18 +344,22 @@ for (const source of ['all', 'codex']) {
     const stateDir = `/state/scheduled-retry-corrupt-marker-${source}`
     const legacyPath = scheduledRetryLegacyLockPath(stateDir)
     const markerPath = join(legacyPath, 'source-999-truncated.json')
-    const fs = memoryRuntime({}, {
-      files: new Map([[markerPath, '{"pid":999']]),
-      directories: new Set([legacyPath])
-    })
+    const fs = memoryRuntime(
+      {},
+      {
+        files: memoryFileMap([[markerPath, '{"pid":999']]),
+        directories: memoryPathSet([legacyPath])
+      }
+    )
 
     assert.throws(
-      () => runScheduledRetry({
-        stateDir,
-        source,
-        runtime: fs.runtime,
-        runAttempt: () => 0
-      }),
+      () =>
+        runScheduledRetry({
+          stateDir,
+          source,
+          runtime: fs.runtime,
+          runAttempt: () => 0
+        }),
       (error) => {
         assert.equal(error.code, 'TOKENBOARD_LEGACY_RETRY_FENCE_CORRUPTED')
         assert.match(error.message, /corrupted marker files "source-999-truncated\.json"/)
@@ -349,12 +378,15 @@ test('all-source retry keeps a live marker whose start identity was unavailable'
   const stateDir = '/state/scheduled-retry-unknown-marker-identity'
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
   const markerPath = join(legacyPath, 'source-999-unknown.json')
-  const fs = memoryRuntime({}, {
-    files: new Map([[markerPath, JSON.stringify({ pid: 999, token: 'unknown-identity' })]]),
-    directories: new Set([legacyPath]),
-    readProcessStartIdentity: () => 'linux:known-identity',
-    kill: () => true
-  })
+  const fs = memoryRuntime(
+    {},
+    {
+      files: memoryFileMap([[markerPath, JSON.stringify({ pid: 999, token: 'unknown-identity' })]]),
+      directories: memoryPathSet([legacyPath]),
+      readProcessStartIdentity: () => 'linux:known-identity',
+      kill: () => true
+    }
+  )
 
   const result = runScheduledRetry({
     stateDir,
@@ -374,12 +406,15 @@ test('all-source retry keeps an unidentifiable live marker that shares its pid',
   const stateDir = '/state/scheduled-retry-unknown-current-pid'
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
   const markerPath = join(legacyPath, 'source-101-unknown.json')
-  const fs = memoryRuntime({}, {
-    files: new Map([[markerPath, JSON.stringify({ pid: 101, token: 'unknown-current-pid' })]]),
-    directories: new Set([legacyPath]),
-    readProcessStartIdentity: () => ({ status: 'unknown' }),
-    kill: () => true
-  })
+  const fs = memoryRuntime(
+    {},
+    {
+      files: memoryFileMap([[markerPath, JSON.stringify({ pid: 101, token: 'unknown-current-pid' })]]),
+      directories: memoryPathSet([legacyPath]),
+      readProcessStartIdentity: () => ({ status: 'unknown' }),
+      kill: () => true
+    }
+  )
 
   const result = runScheduledRetry({
     stateDir,
@@ -432,7 +467,7 @@ test('source retry holds a legacy compatibility lock for its whole lifecycle', (
       ...fs.runtime,
       writeFile: (path, value, options) => {
         writeFile(path, value, options)
-        if (path === scheduledRetryTransitionLockPath(stateDir)) {
+        if (sameMemoryPath(path, scheduledRetryTransitionLockPath(stateDir))) {
           transitionLock = JSON.parse(String(value))
         }
       }
@@ -464,13 +499,16 @@ test('source retry skips when a legacy process claims the lock during preparatio
     runtime: {
       ...fs.runtime,
       mkdir: (path, options) => {
-        if (path === legacyPath && !injected) {
+        if (sameMemoryPath(path, legacyPath) && !injected) {
           injected = true
-          fs.files.set(legacyPath, JSON.stringify({
-            pid: 999,
-            startedAt: '2026-07-29T00:00:00.000Z',
-            token: 'legacy-process'
-          }))
+          fs.files.set(
+            legacyPath,
+            JSON.stringify({
+              pid: 999,
+              startedAt: '2026-07-29T00:00:00.000Z',
+              token: 'legacy-process'
+            })
+          )
           throw codeError('EEXIST', path)
         }
         mkdir(path, options)
@@ -521,15 +559,21 @@ test('scheduled retries isolate concurrent sources instead of dropping the secon
 
 test('independent source retry processes share the legacy fence without serializing', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'tokenboard-scheduled-retry-independent-'))
-  const files = new Map()
-  const directories = new Set()
+  const files = memoryFileMap()
+  const directories = memoryPathSet()
   const tasklist = () => ({
     status: 0,
     stdout: '"node","101"\n"node","202"\n',
     stderr: ''
   })
-  const first = memoryRuntime({}, { files, directories, pid: 101, platform: 'win32', nodeVersion: '22.15.0', runTasklist: tasklist })
-  const second = memoryRuntime({}, { files, directories, pid: 202, platform: 'win32', nodeVersion: '22.15.0', runTasklist: tasklist })
+  const first = memoryRuntime(
+    {},
+    { files, directories, pid: 101, platform: 'win32', nodeVersion: '22.15.0', runTasklist: tasklist }
+  )
+  const second = memoryRuntime(
+    {},
+    { files, directories, pid: 202, platform: 'win32', nodeVersion: '22.15.0', runTasklist: tasklist }
+  )
   let nestedResult
 
   try {
@@ -559,18 +603,21 @@ test('independent source retry processes share the legacy fence without serializ
 test('source retry reclaims a legacy fence marker left by a stopped process', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'tokenboard-scheduled-retry-stale-marker-'))
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
-  const files = new Map([
+  const files = memoryFileMap([
     [join(legacyPath, 'source-999-dead.json'), JSON.stringify({ pid: 999, token: 'dead-marker' })]
   ])
-  const directories = new Set([legacyPath])
-  const fs = memoryRuntime({}, {
-    files,
-    directories,
-    pid: 101,
-    platform: 'win32',
-    nodeVersion: '22.15.0',
-    runTasklist: () => ({ status: 0, stdout: '', stderr: '' })
-  })
+  const directories = memoryPathSet([legacyPath])
+  const fs = memoryRuntime(
+    {},
+    {
+      files,
+      directories,
+      pid: 101,
+      platform: 'win32',
+      nodeVersion: '22.15.0',
+      runTasklist: () => ({ status: 0, stdout: '', stderr: '' })
+    }
+  )
   let fenceObserved = false
 
   try {
@@ -595,22 +642,28 @@ test('source retry reclaims a legacy fence marker left by a stopped process', ()
 test('all-source retry reclaims a marker when the pid is reused by a different process', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'tokenboard-scheduled-retry-pid-reuse-'))
   const legacyPath = scheduledRetryLegacyLockPath(stateDir)
-  const files = new Map([
-    [join(legacyPath, 'source-999-reused.json'), JSON.stringify({
-      pid: 999,
-      token: 'old-process',
-      processStartIdentity: 'linux:old-start'
-    })]
+  const files = memoryFileMap([
+    [
+      join(legacyPath, 'source-999-reused.json'),
+      JSON.stringify({
+        pid: 999,
+        token: 'old-process',
+        processStartIdentity: 'linux:old-start'
+      })
+    ]
   ])
-  const directories = new Set([legacyPath])
-  const fs = memoryRuntime({}, {
-    files,
-    directories,
-    pid: 101,
-    processIdentity: 'linux:current-start',
-    readProcessStartIdentity: (pid) => pid === 999 ? 'linux:new-process' : 'linux:current-start',
-    kill: () => true
-  })
+  const directories = memoryPathSet([legacyPath])
+  const fs = memoryRuntime(
+    {},
+    {
+      files,
+      directories,
+      pid: 101,
+      processIdentity: 'linux:current-start',
+      readProcessStartIdentity: (pid) => (pid === 999 ? 'linux:new-process' : 'linux:current-start'),
+      kill: () => true
+    }
+  )
 
   try {
     const result = runScheduledRetry({
@@ -665,21 +718,22 @@ test('scheduled retry surfaces retry-state write failures and releases its retry
   let collected = false
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir: '/state',
-      source: 'all',
-      runtime: {
-        ...fs.runtime,
-        writeFile: (path, value, options) => {
-          if (path.includes('scheduled-sync-retry.json.tmp-')) throw codeError('EACCES', path)
-          writeFile(path, value, options)
+    () =>
+      runScheduledRetry({
+        stateDir: '/state',
+        source: 'all',
+        runtime: {
+          ...fs.runtime,
+          writeFile: (path, value, options) => {
+            if (path.includes('scheduled-sync-retry.json.tmp-')) throw codeError('EACCES', path)
+            writeFile(path, value, options)
+          }
+        },
+        runAttempt: () => {
+          collected = true
+          return 0
         }
-      },
-      runAttempt: () => {
-        collected = true
-        return 0
-      }
-    }),
+      }),
     /EACCES/
   )
 
@@ -694,21 +748,22 @@ test('scheduled retry reports lock-release failures without hiding a completed c
   let releaseFailed = false
 
   assert.throws(
-    () => runScheduledRetry({
-      stateDir: '/state',
-      source: 'all',
-      runtime: {
-        ...fs.runtime,
-        unlink: (path) => {
-          if (!releaseFailed && path.startsWith('/state/scheduled-sync-retry.lock.release-')) {
-            releaseFailed = true
-            throw new Error('retry lock release failed')
+    () =>
+      runScheduledRetry({
+        stateDir: '/state',
+        source: 'all',
+        runtime: {
+          ...fs.runtime,
+          unlink: (path) => {
+            if (!releaseFailed && memoryPathStartsWith(path, '/state/scheduled-sync-retry.lock.release-')) {
+              releaseFailed = true
+              throw new Error('retry lock release failed')
+            }
+            unlink(path)
           }
-          unlink(path)
-        }
-      },
-      runAttempt: () => 0
-    }),
+        },
+        runAttempt: () => 0
+      }),
     /TokenBoard scheduled retry lock release failed: retry lock release failed/
   )
 
@@ -755,17 +810,18 @@ test('sync invocation never retries a hook timeout or a non-sync mode', () => {
     { mode: 'preview', scheduled: true }
   ]) {
     assert.throws(
-      () => runSyncInvocation({
-        flags,
-        invocation: { source: 'all', env: {} },
-        stateDir: '/state',
-        runWithLock: () => {
-          throw lockTimeout()
-        },
-        runRetry: () => {
-          throw new Error('this invocation must not enter scheduled retry')
-        }
-      }),
+      () =>
+        runSyncInvocation({
+          flags,
+          invocation: { source: 'all', env: {} },
+          stateDir: '/state',
+          runWithLock: () => {
+            throw lockTimeout()
+          },
+          runRetry: () => {
+            throw new Error('this invocation must not enter scheduled retry')
+          }
+        }),
       /Timed out waiting for TokenBoard sync lock/
     )
   }
@@ -778,8 +834,8 @@ function lockTimeout() {
 }
 
 function memoryRuntime(initial = {}, options = {}) {
-  const files = options.files || new Map(Object.entries(initial))
-  const directories = options.directories || new Set()
+  const files = options.files || memoryFileMap(initial)
+  const directories = options.directories || memoryPathSet()
   const sleeps = []
   const pid = options.pid || 101
   let now = Date.parse('2026-07-29T00:00:00.000Z')
@@ -844,13 +900,14 @@ function readFile(files, directories, path) {
 }
 
 function readDirectory(files, directories, path) {
-  if (!directories.has(path)) {
-    if (files.has(path)) throw codeError('ENOTDIR', path)
+  const normalizedPath = normalizeMemoryPath(path)
+  if (!directories.has(normalizedPath)) {
+    if (files.has(normalizedPath)) throw codeError('ENOTDIR', path)
     throw codeError('ENOENT', path)
   }
-  const prefix = path.endsWith(sep) ? path : `${path}${sep}`
+  const prefix = normalizedPath.endsWith('/') ? normalizedPath : `${normalizedPath}/`
   return [...files.keys()]
-    .filter((entry) => entry.startsWith(prefix) && !entry.slice(prefix.length).includes(sep))
+    .filter((entry) => entry.startsWith(prefix) && !entry.slice(prefix.length).includes('/'))
     .map((entry) => entry.slice(prefix.length))
 }
 

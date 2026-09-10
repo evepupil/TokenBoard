@@ -1,4 +1,15 @@
-import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 
 export const scheduledLogFiles = ['daily-sync.out.log', 'daily-sync.err.log']
@@ -17,12 +28,7 @@ const defaultFileSystem = {
   writeFileSync
 }
 
-export function createScheduledLogRuntime({
-  env = process.env,
-  homeDir,
-  now = new Date(),
-  scheduled = false
-}) {
+export function createScheduledLogRuntime({ env = process.env, homeDir, now = new Date(), scheduled = false }) {
   if (!shouldManageScheduledLogs(env, scheduled)) {
     return null
   }
@@ -158,10 +164,12 @@ function isMissingFileError(error) {
 }
 
 function shouldManageScheduledLogs(env, scheduled) {
-  return scheduled ||
+  return (
+    scheduled ||
     env.TOKENBOARD_SCHEDULED_SYNC === '1' ||
     env.XPC_SERVICE_NAME === 'com.tokenboard.daily-sync' ||
     Boolean(env.INVOCATION_ID)
+  )
 }
 
 function isRotatedLogName(fileName) {

@@ -36,7 +36,7 @@ describe('daily report share route', () => {
     mockedGetDailyReportHistoryById.mockResolvedValue(reportItem() as never)
     const context = pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
 
-    const response = await GET[0](context as never, async () => undefined) as Response
+    const response = (await GET[0](context as never, async () => undefined)) as Response
     const html = await response.text()
 
     expect(mockedGetDailyReportHistoryById).toHaveBeenCalledWith({
@@ -67,7 +67,10 @@ describe('daily report share route', () => {
 
   test('returns 404 when a shared daily report id is missing', async () => {
     mockedGetDailyReportHistoryById.mockResolvedValue(null)
-    const response = await GET[0](pageContext('drr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') as never, async () => undefined) as Response
+    const response = (await GET[0](
+      pageContext('drr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') as never,
+      async () => undefined
+    )) as Response
 
     expect(response.status).toBe(404)
     expect(response.headers.get('cache-control')).toBe('no-store')
@@ -77,7 +80,10 @@ describe('daily report share route', () => {
 
   test('renders test preview report links with a user-facing schedule label', async () => {
     mockedGetDailyReportHistoryById.mockResolvedValue(reportItem({ scheduleSlot: 'test-preview' }) as never)
-    const response = await GET[0](pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never, async () => undefined) as Response
+    const response = (await GET[0](
+      pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never,
+      async () => undefined
+    )) as Response
     const html = await response.text()
 
     expect(response.status).toBe(200)
@@ -86,31 +92,61 @@ describe('daily report share route', () => {
   })
 
   test('keeps Antigravity cost-unavailable labels in shared report model rows', async () => {
-    mockedGetDailyReportHistoryById.mockResolvedValue(reportItem({
-      costUsd: 0,
-      sourceSplit: [{
-        source: 'antigravity-cli',
-        totalTokens: 300,
-        totalTokensWithoutCacheRead: 260,
-        cacheReadRate: 0.13
-      }],
-      topModels: [{
-        model: 'Gemini 3.5 Flash (Medium)',
-        totalTokens: 300,
-        totalTokensWithoutCacheRead: 260,
-        cacheReadRate: 0.13,
-        costUsd: 0
-      }]
-    }) as never)
+    mockedGetDailyReportHistoryById.mockResolvedValue(
+      reportItem({
+        costUsd: 0,
+        sourceSplit: [
+          {
+            source: 'antigravity-cli',
+            totalTokens: 300,
+            totalTokensWithoutCacheRead: 260,
+            cacheReadRate: 0.13
+          }
+        ],
+        topModels: [
+          {
+            model: 'Gemini 3.5 Flash (Medium)',
+            totalTokens: 300,
+            totalTokensWithoutCacheRead: 260,
+            cacheReadRate: 0.13,
+            costUsd: 0
+          }
+        ]
+      }) as never
+    )
 
-    const response = await GET[0](pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never, async () => undefined) as Response
+    const response = (await GET[0](
+      pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never,
+      async () => undefined
+    )) as Response
     const html = await response.text()
 
     expect(html).toContain('$0.00 (费用可用性未知)')
   })
 
+  test('does not display a cached amount when shared report details are invalid', async () => {
+    mockedGetDailyReportHistoryById.mockResolvedValue(
+      reportItem({
+        costUsd: 1.23,
+        sourceSplit: [],
+        topModels: [],
+        detailsParseError: 'Invalid daily report history source_split'
+      }) as never
+    )
+
+    const response = (await GET[0](
+      pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') as never,
+      async () => undefined
+    )) as Response
+    const html = await response.text()
+
+    expect(html).toContain('费用不可用')
+    expect(html).toContain('历史明细异常')
+    expect(html).not.toContain('$1.23')
+  })
+
   test('returns 404 for invalid report ids without touching auth or the database', async () => {
-    const response = await GET[0](pageContext('bad id') as never, async () => undefined) as Response
+    const response = (await GET[0](pageContext('bad id') as never, async () => undefined)) as Response
 
     expect(response.status).toBe(404)
     expect(response.headers.get('cache-control')).toBe('no-store')
@@ -130,7 +166,7 @@ describe('daily report share route', () => {
     mockedGetDailyReportHistoryById.mockResolvedValue(reportItem() as never)
     const context = pageContext('drr_cccccccccccccccccccccccccccccccc', 'better-auth-session_token=abc')
 
-    const response = await GET[0](context as never, async () => undefined) as Response
+    const response = (await GET[0](context as never, async () => undefined)) as Response
     const html = await response.text()
 
     expect(mockedGetDailyReportHistoryById).toHaveBeenCalledWith({
@@ -171,7 +207,7 @@ describe('daily report share route', () => {
     mockedGetDailyReportHistoryById.mockResolvedValue(null)
     const context = pageContext('drr_cccccccccccccccccccccccccccccccc', 'better-auth-session_token=abc')
 
-    const response = await GET[0](context as never, async () => undefined) as Response
+    const response = (await GET[0](context as never, async () => undefined)) as Response
     const html = await response.text()
 
     expect(response.status).toBe(404)
@@ -187,7 +223,7 @@ function pageContext(id: string, cookie?: string, env?: Record<string, unknown>)
     env: { DB: {}, ...env },
     req: {
       param: vi.fn(() => ({ id })),
-      header: vi.fn((name: string) => (name === 'cookie' ? cookie ?? null : null)),
+      header: vi.fn((name: string) => (name === 'cookie' ? (cookie ?? null) : null)),
       raw: new Request('https://tokenboard.example/reports/daily/drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', {
         headers: cookie ? { cookie } : {}
       })
@@ -198,13 +234,13 @@ function pageContext(id: string, cookie?: string, env?: Record<string, unknown>)
     status: vi.fn((status: number) => {
       statusCode = status
     }),
-    render: async (body: unknown) => (
-      new Response(await renderToString(body as never), { status: statusCode, headers })
-    )
+    render: async (body: unknown) => new Response(await renderToString(body as never), { status: statusCode, headers })
   }
 }
 
-function reportItem(overrides: Partial<ReturnType<typeof reportItemBase>> = {}) {
+function reportItem(
+  overrides: Partial<ReturnType<typeof reportItemBase>> & { detailsParseError?: string | null } = {}
+) {
   return { ...reportItemBase(), ...overrides }
 }
 

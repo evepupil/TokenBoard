@@ -8,6 +8,22 @@ import { parseSourceSplit, parseTopModels } from './parse'
 import { getPublicTotals } from './totals'
 import type { ProfileRow, PublicUsageProfile, PublicUsageProfileCore } from './types'
 
+export async function publicUsageSlugExists(db: D1Database, slug: string) {
+  const profile = await db
+    .prepare(
+      `
+        SELECT 1 as present
+        FROM profiles
+        WHERE slug = ?
+        LIMIT 1
+      `
+    )
+    .bind(slug)
+    .first<{ present: number | boolean }>()
+
+  return Boolean(profile)
+}
+
 export async function getPublicUsageProfile(
   db: D1Database,
   slug: string,

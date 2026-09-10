@@ -48,7 +48,7 @@ export function memoryRuntime(initial = {}, options = {}) {
 class MemoryFiles extends Map {
   constructor(initial = {}) {
     super()
-    const entries = initial instanceof Map ? initial.entries() : Object.entries(initial)
+    const entries = initial instanceof Map || Array.isArray(initial) ? initial : Object.entries(initial)
     for (const [path, value] of entries) this.set(path, value)
   }
 
@@ -69,8 +69,47 @@ class MemoryFiles extends Map {
   }
 }
 
-function normalizeMemoryPath(path) {
+export function memoryFileMap(initial = {}) {
+  return new MemoryFiles(initial)
+}
+
+class MemoryPaths extends Set {
+  constructor(initial = []) {
+    super()
+    for (const path of initial) this.add(path)
+  }
+
+  has(path) {
+    return super.has(normalizeMemoryPath(path))
+  }
+
+  add(path) {
+    return super.add(normalizeMemoryPath(path))
+  }
+
+  delete(path) {
+    return super.delete(normalizeMemoryPath(path))
+  }
+}
+
+export function memoryPathSet(initial = []) {
+  return new MemoryPaths(initial)
+}
+
+export function normalizeMemoryPath(path) {
   return typeof path === 'string' ? path.replaceAll('\\', '/') : path
+}
+
+export function sameMemoryPath(actual, expected) {
+  return normalizeMemoryPath(actual) === normalizeMemoryPath(expected)
+}
+
+export function memoryPathStartsWith(actual, prefix) {
+  return normalizeMemoryPath(actual).startsWith(normalizeMemoryPath(prefix))
+}
+
+export function memoryPathIncludes(actual, fragment) {
+  return normalizeMemoryPath(actual).includes(normalizeMemoryPath(fragment))
 }
 
 export function fakeProcess(pid) {

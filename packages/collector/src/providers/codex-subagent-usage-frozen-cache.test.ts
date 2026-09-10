@@ -3,19 +3,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { fingerprintCodexSessionFile } from './codex-session-attribution-cache'
-import {
-  withCodexSubagentUsageCache,
-  type CodexSubagentUsageCacheFile
-} from './codex-subagent-usage-cache'
+import { withCodexSubagentUsageCache, type CodexSubagentUsageCacheFile } from './codex-subagent-usage-cache'
 
-const usage = [{
-  usageDate: '2026-07-25',
-  inputTokens: 1,
-  outputTokens: 2,
-  cacheCreationTokens: 3,
-  cacheReadTokens: 4,
-  totalTokens: 10
-}]
+const usage = [
+  {
+    usageDate: '2026-07-25',
+    inputTokens: 1,
+    outputTokens: 2,
+    cacheCreationTokens: 3,
+    cacheReadTokens: 4,
+    totalTokens: 10
+  }
+]
 
 describe('Codex frozen subagent usage cache', () => {
   test('looks up a frozen file by its original path and copy-time fingerprint', async () => {
@@ -72,12 +71,7 @@ describe('Codex frozen subagent usage cache', () => {
         timezone: 'UTC',
         cacheFiles: frozenCacheFiles(frozen, source, sourceFingerprint),
         readChildUsageByDate: async () => usage,
-        callback: (reader) => reader.read(
-          frozen,
-          '2026-07-25T00:00:00.000Z',
-          'UTC',
-          (line) => warnings.push(line)
-        )
+        callback: (reader) => reader.read(frozen, '2026-07-25T00:00:00.000Z', 'UTC', (line) => warnings.push(line))
       })
 
       expect(result).toEqual(usage)
@@ -99,8 +93,13 @@ function frozenCacheFiles(
   source: string,
   sourceFingerprint: Awaited<ReturnType<typeof fingerprintCodexSessionFile>>
 ) {
-  return new Map<string, CodexSubagentUsageCacheFile>([[frozen, {
-    sourceFile: source,
-    sourceFingerprint
-  }]])
+  return new Map<string, CodexSubagentUsageCacheFile>([
+    [
+      frozen,
+      {
+        sourceFile: source,
+        sourceFingerprint
+      }
+    ]
+  ])
 }

@@ -1,4 +1,4 @@
-import { access, appendFile, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
+import { access, appendFile, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -31,19 +31,81 @@ describe('Codex subagent usage correction', () => {
 
     try {
       await writeJsonl(childFile, [
-        { type: 'session_meta', payload: { id: 'incomplete-child' } },
+        {
+          type: 'session_meta',
+          timestamp: '2026-05-25T00:59:00.000Z',
+          payload: { id: 'incomplete-child', timestamp: '2026-05-25T00:59:00.000Z' }
+        },
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
+      ])
+
+      const snapshots = await collectCodexUsage({
+        codexHome,
+        timezone: 'Asia/Shanghai',
+        collectedAt: '2026-05-25T01:20:00.000Z',
+        async runner(_command, args) {
+          return args.includes('session') ? inheritedSessionResult() : inheritedDailyResult()
+        }
+      })
+
+      expect(snapshots).toHaveLength(1)
+      expect(snapshots[0]).toMatchObject({
+        inputTokens: 50,
+        outputTokens: 20,
+        cacheReadTokens: 150,
+        totalTokens: 220,
+        sessionCount: 1
+      })
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  test('corrects a child session when subagent metadata omits the parent thread id', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const childFile = join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl')
+
+    try {
+      await writeJsonl(childFile, [
+        {
+          type: 'session_meta',
+          timestamp: '2026-05-25T01:00:00.000Z',
+          payload: {
+            id: 'child-thread',
+            timestamp: '2026-05-25T01:00:00.000Z',
+            source: { subagent: { kind: 'worker' } }
+          }
+        },
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
+          }
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -117,13 +179,15 @@ describe('Codex subagent usage correction', () => {
         }
       })
 
-      expect(snapshots).toMatchObject([{
-        inputTokens: 50,
-        outputTokens: 20,
-        cacheReadTokens: 150,
-        totalTokens: 220,
-        sessionCount: 1
-      }])
+      expect(snapshots).toMatchObject([
+        {
+          inputTokens: 50,
+          outputTokens: 20,
+          cacheReadTokens: 150,
+          totalTokens: 220,
+          sessionCount: 1
+        }
+      ])
     } finally {
       await Promise.all([
         rm(firstHome, { recursive: true, force: true }),
@@ -139,17 +203,21 @@ describe('Codex subagent usage correction', () => {
     const secondChild = join(secondHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl')
 
     try {
-      const firstEvent = totalUsageEvent('2026-05-25T01:10:00.000Z', {
-        inputTokens: 1200,
-        cacheReadTokens: 1050,
-        outputTokens: 70
-      }, {
-        lastUsage: {
-          inputTokens: 200,
-          cacheReadTokens: 150,
-          outputTokens: 20
+      const firstEvent = totalUsageEvent(
+        '2026-05-25T01:10:00.000Z',
+        {
+          inputTokens: 1200,
+          cacheReadTokens: 1050,
+          outputTokens: 70
+        },
+        {
+          lastUsage: {
+            inputTokens: 200,
+            cacheReadTokens: 150,
+            outputTokens: 20
+          }
         }
-      })
+      )
       await writeJsonl(firstChild, [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
         firstEvent
@@ -157,17 +225,21 @@ describe('Codex subagent usage correction', () => {
       await writeJsonl(secondChild, [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
         firstEvent,
-        totalUsageEvent('2026-05-25T01:20:00.000Z', {
-          inputTokens: 1600,
-          cacheReadTokens: 1350,
-          outputTokens: 110
-        }, {
-          lastUsage: {
-            inputTokens: 400,
-            cacheReadTokens: 300,
-            outputTokens: 40
+        totalUsageEvent(
+          '2026-05-25T01:20:00.000Z',
+          {
+            inputTokens: 1600,
+            cacheReadTokens: 1350,
+            outputTokens: 110
+          },
+          {
+            lastUsage: {
+              inputTokens: 400,
+              cacheReadTokens: 300,
+              outputTokens: 40
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -179,13 +251,15 @@ describe('Codex subagent usage correction', () => {
         }
       })
 
-      expect(snapshots).toMatchObject([{
-        inputTokens: 150,
-        outputTokens: 60,
-        cacheReadTokens: 450,
-        totalTokens: 660,
-        sessionCount: 1
-      }])
+      expect(snapshots).toMatchObject([
+        {
+          inputTokens: 150,
+          outputTokens: 60,
+          cacheReadTokens: 450,
+          totalTokens: 660,
+          sessionCount: 1
+        }
+      ])
       expect(snapshots[0].costUsd).toBeCloseTo(0.66)
     } finally {
       await rm(firstHome, { recursive: true, force: true })
@@ -221,14 +295,16 @@ describe('Codex subagent usage correction', () => {
       totalTokens: 440
     }
     const input = {
-      snapshots: [{
-        ...codexSnapshot(),
-        inputTokens: 2200,
-        outputTokens: 240,
-        cacheReadTokens: 3900,
-        totalTokens: 6340,
-        costUsd: 6.34
-      }],
+      snapshots: [
+        {
+          ...codexSnapshot(),
+          inputTokens: 2200,
+          outputTokens: 240,
+          cacheReadTokens: 3900,
+          totalTokens: 6340,
+          costUsd: 6.34
+        }
+      ],
       sessions: mergedProfileSessionResult(),
       codexHomes: [firstHome, secondHome],
       stateDir,
@@ -261,12 +337,14 @@ describe('Codex subagent usage correction', () => {
       expect(eventReads).toBe(4)
       expect(maxConcurrentEventReads).toBe(1)
       expect(second).toEqual(first)
-      expect(second).toMatchObject([{
-        inputTokens: 150,
-        outputTokens: 60,
-        cacheReadTokens: 450,
-        totalTokens: 660
-      }])
+      expect(second).toMatchObject([
+        {
+          inputTokens: 150,
+          outputTokens: 60,
+          cacheReadTokens: 450,
+          totalTokens: 660
+        }
+      ])
       const cache = await readFile(join(stateDir, 'codex-subagent-usage-cache.json'), 'utf8')
       expect(cache).not.toContain('eventKey')
     } finally {
@@ -294,17 +372,21 @@ describe('Codex subagent usage correction', () => {
           }
         },
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -332,48 +414,52 @@ describe('Codex subagent usage correction', () => {
     const childFile = join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl')
 
     try {
-      await writeJsonl(childFile, [
-        subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z')
-      ])
+      await writeJsonl(childFile, [subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z')])
       const corrected = await applyCodexSubagentUsageCorrections({
         snapshots: [{ ...codexSnapshot(), cacheCreationTokens: 100, totalTokens: 3270, costUsd: 3.27 }],
         sessions: {
-          sessions: [{
-            sessionId: '2026/05/25/rollout-child-thread',
-            lastActivity: '2026-05-25T01:10:00.000Z',
-            totalTokens: 3270,
-            costUSD: 3.27,
-            models: {
-              'gpt-5': {
-                inputTokens: 1100,
-                cacheCreationInputTokens: 100,
-                cachedInputTokens: 1950,
-                outputTokens: 120,
-                totalTokens: 3270,
-                costUSD: 3.27
+          sessions: [
+            {
+              sessionId: '2026/05/25/rollout-child-thread',
+              lastActivity: '2026-05-25T01:10:00.000Z',
+              totalTokens: 3270,
+              costUSD: 3.27,
+              models: {
+                'gpt-5': {
+                  inputTokens: 1100,
+                  cacheCreationInputTokens: 100,
+                  cachedInputTokens: 1950,
+                  outputTokens: 120,
+                  totalTokens: 3270,
+                  costUSD: 3.27
+                }
               }
             }
-          }]
+          ]
         },
         codexHomes: [codexHome],
         timezone: 'Asia/Shanghai',
-        readChildUsageByDate: async () => [{
-          usageDate: '2026-05-25',
-          inputTokens: 200,
+        readChildUsageByDate: async () => [
+          {
+            usageDate: '2026-05-25',
+            inputTokens: 200,
+            outputTokens: 20,
+            cacheCreationTokens: 30,
+            cacheReadTokens: 150,
+            totalTokens: 250
+          }
+        ]
+      })
+
+      expect(corrected).toMatchObject([
+        {
+          inputTokens: 50,
           outputTokens: 20,
           cacheCreationTokens: 30,
           cacheReadTokens: 150,
           totalTokens: 250
-        }]
-      })
-
-      expect(corrected).toMatchObject([{
-        inputTokens: 50,
-        outputTokens: 20,
-        cacheCreationTokens: 30,
-        cacheReadTokens: 150,
-        totalTokens: 250
-      }])
+        }
+      ])
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }
@@ -402,24 +488,28 @@ describe('Codex subagent usage correction', () => {
         timezone: 'Asia/Shanghai',
         readChildUsageByDate: async (filePath) => {
           reads.push(filePath)
-          return [{
-            usageDate: '2026-05-25',
-            inputTokens: 200,
-            outputTokens: 20,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 150,
-            totalTokens: 220
-          }]
+          return [
+            {
+              usageDate: '2026-05-25',
+              inputTokens: 200,
+              outputTokens: 20,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 150,
+              totalTokens: 220
+            }
+          ]
         }
       })
 
-      expect(reads).toEqual([currentChildFile])
-      expect(corrected).toMatchObject([{
-        inputTokens: 50,
-        outputTokens: 20,
-        cacheReadTokens: 150,
-        totalTokens: 220
-      }])
+      expect(reads).toEqual([await realpath(currentChildFile)])
+      expect(corrected).toMatchObject([
+        {
+          inputTokens: 50,
+          outputTokens: 20,
+          cacheReadTokens: 150,
+          totalTokens: 220
+        }
+      ])
     } finally {
       await rm(codexHome, { recursive: true, force: true })
     }
@@ -494,50 +584,56 @@ describe('Codex subagent usage correction', () => {
         async runner(_command, args) {
           return args.includes('session')
             ? {
-                sessions: [{
-                  sessionId: '2026/05/25/rollout-child-thread',
-                  lastActivity: '2026-05-25T01:10:00.000Z',
-                  totalTokens: 3270,
-                  costUSD: 3.27,
-                  models: {
-                    'gpt-5': {
-                      inputTokens: 1100,
-                      cacheCreationInputTokens: 100,
-                      cachedInputTokens: 1950,
-                      outputTokens: 120,
-                      totalTokens: 3270,
-                      costUSD: 3.27
+                sessions: [
+                  {
+                    sessionId: '2026/05/25/rollout-child-thread',
+                    lastActivity: '2026-05-25T01:10:00.000Z',
+                    totalTokens: 3270,
+                    costUSD: 3.27,
+                    models: {
+                      'gpt-5': {
+                        inputTokens: 1100,
+                        cacheCreationInputTokens: 100,
+                        cachedInputTokens: 1950,
+                        outputTokens: 120,
+                        totalTokens: 3270,
+                        costUSD: 3.27
+                      }
                     }
                   }
-                }]
+                ]
               }
             : {
-                daily: [{
-                  date: '2026-05-25',
-                  models: {
-                    'gpt-5': {
-                      inputTokens: 1100,
-                      cacheCreationInputTokens: 100,
-                      cachedInputTokens: 1950,
-                      outputTokens: 120,
-                      totalTokens: 3270
-                    }
-                  },
-                  totalTokens: 3270,
-                  costUSD: 3.27
-                }]
+                daily: [
+                  {
+                    date: '2026-05-25',
+                    models: {
+                      'gpt-5': {
+                        inputTokens: 1100,
+                        cacheCreationInputTokens: 100,
+                        cachedInputTokens: 1950,
+                        outputTokens: 120,
+                        totalTokens: 3270
+                      }
+                    },
+                    totalTokens: 3270,
+                    costUSD: 3.27
+                  }
+                ]
               }
         }
       })
 
-      expect(snapshots).toMatchObject([{
-        inputTokens: 50,
-        outputTokens: 20,
-        cacheCreationTokens: 30,
-        cacheReadTokens: 150,
-        totalTokens: 250,
-        costUsd: 0.25
-      }])
+      expect(snapshots).toMatchObject([
+        {
+          inputTokens: 50,
+          outputTokens: 20,
+          cacheCreationTokens: 30,
+          cacheReadTokens: 150,
+          totalTokens: 250,
+          costUsd: 0.25
+        }
+      ])
     } finally {
       await rm(codexHome, { recursive: true, force: true })
       await rm(stateDir, { recursive: true, force: true })
@@ -558,35 +654,40 @@ describe('Codex subagent usage correction', () => {
       readChildUsageByDate: async () => {
         await rm(lockPath, { force: true })
         await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'replacement-owner' }), { mode: 0o600 })
-        return [{
-          usageDate: '2026-05-25',
-          inputTokens: 200,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 150,
-          outputTokens: 20,
-          totalTokens: 220
-        }]
+        return [
+          {
+            usageDate: '2026-05-25',
+            inputTokens: 200,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 150,
+            outputTokens: 20,
+            totalTokens: 220
+          }
+        ]
       }
     }
 
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
-      await expect(applyCodexSubagentUsageCorrections(input))
-        .rejects.toThrow('Cursor lock ownership changed')
+      await expect(applyCodexSubagentUsageCorrections(input)).rejects.toThrow('Cursor lock ownership changed')
       await expect(access(cachePath)).rejects.toThrow()
     } finally {
       await rm(codexHome, { recursive: true, force: true })
@@ -608,31 +709,37 @@ describe('Codex subagent usage correction', () => {
       timezone: 'Asia/Shanghai',
       readChildUsageByDate: async () => {
         reads += 1
-        return [{
-          usageDate: '2026-05-25',
-          inputTokens: 200,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 150,
-          outputTokens: 20,
-          totalTokens: 220
-        }]
+        return [
+          {
+            usageDate: '2026-05-25',
+            inputTokens: 200,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 150,
+            outputTokens: 20,
+            totalTokens: 220
+          }
+        ]
       }
     }
 
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const first = await applyCodexSubagentUsageCorrections(input)
@@ -657,14 +764,16 @@ describe('Codex subagent usage correction', () => {
       timezone: 'Asia/Shanghai',
       readChildUsageByDate: async () => {
         reads += 1
-        return [{
-          usageDate: '2026-05-25',
-          inputTokens: 200,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 150,
-          outputTokens: 20,
-          totalTokens: 220
-        }]
+        return [
+          {
+            usageDate: '2026-05-25',
+            inputTokens: 200,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 150,
+            outputTokens: 20,
+            totalTokens: 220
+          }
+        ]
       }
     }
 
@@ -707,31 +816,37 @@ describe('Codex subagent usage correction', () => {
       timezone: 'Asia/Shanghai',
       readChildUsageByDate: async () => {
         reads += 1
-        return [{
-          usageDate: '2026-05-25',
-          inputTokens: 200,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 150,
-          outputTokens: 20,
-          totalTokens: 220
-        }]
+        return [
+          {
+            usageDate: '2026-05-25',
+            inputTokens: 200,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 150,
+            outputTokens: 20,
+            totalTokens: 220
+          }
+        ]
       }
     }
 
     try {
       await writeJsonl(childFile, [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
       await appendFile(childFile, `${JSON.stringify({ padding: 'x'.repeat(70 * 1024) })}\n`)
       const fixedTime = new Date('2026-05-25T01:20:00.000Z')
@@ -760,9 +875,7 @@ describe('Codex subagent usage correction', () => {
     const stderr: string[] = []
 
     try {
-      await writeJsonl(normalFile, [
-        sessionMeta('parent-thread', '2026-05-25T01:00:00.000Z')
-      ])
+      await writeJsonl(normalFile, [sessionMeta('parent-thread', '2026-05-25T01:00:00.000Z')])
       await appendFile(normalFile, '{malformed-json}\n')
 
       await collectCodexUsage({
@@ -798,24 +911,31 @@ describe('Codex subagent usage correction', () => {
       ])
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:00:00.000Z', {
-          inputTokens: 1000,
-          cacheReadTokens: 900,
-          outputTokens: 50
-        }, { lastUsage: null }),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:00:00.000Z',
+          {
+            inputTokens: 1000,
+            cacheReadTokens: 900,
+            outputTokens: 50
+          },
+          { lastUsage: null }
+        ),
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
-
       const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
@@ -850,28 +970,36 @@ describe('Codex subagent usage correction', () => {
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '26', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T23:50:00.000Z'),
-        totalUsageEvent('2026-05-25T23:55:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T23:55:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        }),
-        totalUsageEvent('2026-05-26T00:10:00.000Z', {
-          inputTokens: 1400,
-          cacheReadTokens: 1200,
-          outputTokens: 90
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        ),
+        totalUsageEvent(
+          '2026-05-26T00:10:00.000Z',
+          {
+            inputTokens: 1400,
+            cacheReadTokens: 1200,
+            outputTokens: 90
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -908,17 +1036,21 @@ describe('Codex subagent usage correction', () => {
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T16:00:00.000Z'),
-        totalUsageEvent('2026-05-25T16:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T16:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -1004,24 +1136,31 @@ describe('Codex subagent usage correction', () => {
       ])
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:00:00.000Z', {
-          inputTokens: 1000,
-          cacheReadTokens: 900,
-          outputTokens: 50
-        }, { lastUsage: null }),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:00:00.000Z',
+          {
+            inputTokens: 1000,
+            cacheReadTokens: 900,
+            outputTokens: 50
+          },
+          { lastUsage: null }
+        ),
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
-
       const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
@@ -1052,19 +1191,22 @@ describe('Codex subagent usage correction', () => {
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '04', '28', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-04-28T01:00:00.000Z'),
-        totalUsageEvent('2026-04-28T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-04-28T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
-
       const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'Asia/Shanghai',
@@ -1104,17 +1246,21 @@ describe('Codex subagent usage correction', () => {
     try {
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -1165,17 +1311,21 @@ describe('Codex subagent usage correction', () => {
       await utimes(parentFile, new Date('2026-05-24T23:50:00.000Z'), new Date('2026-05-24T23:50:00.000Z'))
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
 
       const snapshots = await collectCodexUsage({
@@ -1314,18 +1464,23 @@ describe('Codex subagent usage correction', () => {
       ])
       await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl'), [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
+      await writeContextPricingFixture(codexHome)
 
       const snapshots = await collectCodexUsage({
         codexHome,
@@ -1362,6 +1517,7 @@ describe('Codex subagent usage correction', () => {
           outputTokens: 10
         })
       ])
+      await writeContextPricingFixture(codexHome)
 
       const snapshots = await collectCodexUsage({
         codexHome,
@@ -1405,17 +1561,21 @@ describe('Codex subagent usage correction', () => {
       const childFile = join(codexHome, 'sessions', '2026', '05', '25', 'rollout-child-thread.jsonl')
       await writeJsonl(childFile, [
         subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-        totalUsageEvent('2026-05-25T01:10:00.000Z', {
-          inputTokens: 1200,
-          cacheReadTokens: 1050,
-          outputTokens: 70
-        }, {
-          lastUsage: {
-            inputTokens: 200,
-            cacheReadTokens: 150,
-            outputTokens: 20
+        totalUsageEvent(
+          '2026-05-25T01:10:00.000Z',
+          {
+            inputTokens: 1200,
+            cacheReadTokens: 1050,
+            outputTokens: 70
+          },
+          {
+            lastUsage: {
+              inputTokens: 200,
+              cacheReadTokens: 150,
+              outputTokens: 20
+            }
           }
-        })
+        )
       ])
       await appendFile(childFile, '{"type":"event_msg",\n')
 
@@ -1461,6 +1621,31 @@ function codexSnapshot(): UsageSnapshot {
   }
 }
 
+async function writeContextPricingFixture(codexHome: string) {
+  await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', 'context-pricing.jsonl'), [
+    totalUsageEvent(
+      '2026-05-25T04:00:00.000Z',
+      {
+        inputTokens: 44_000,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        totalTokens: 44_000
+      },
+      { model: 'gpt-5.4' }
+    ),
+    totalUsageEvent(
+      '2026-05-25T04:01:00.000Z',
+      {
+        inputTokens: 22_000,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        totalTokens: 22_000
+      },
+      { model: 'gpt-5.5' }
+    )
+  ])
+}
+
 function inheritedSessionResultFor(id: string) {
   const result = inheritedSessionResult()
   result.sessions[0].sessionId = `2026/05/25/rollout-${id}`
@@ -1469,78 +1654,94 @@ function inheritedSessionResultFor(id: string) {
 
 function mergedProfileSessionResult() {
   return {
-    sessions: [{
-      sessionId: '2026/05/25/rollout-child-thread',
-      lastActivity: '2026-05-25T01:20:00.000Z',
-      totalTokens: 6340,
-      costUSD: 6.34,
-      models: {
-        'gpt-5': {
-          inputTokens: 2200,
-          cachedInputTokens: 3900,
-          outputTokens: 240,
-          totalTokens: 6340,
-          costUSD: 6.34
+    sessions: [
+      {
+        sessionId: '2026/05/25/rollout-child-thread',
+        lastActivity: '2026-05-25T01:20:00.000Z',
+        totalTokens: 6340,
+        costUSD: 6.34,
+        models: {
+          'gpt-5': {
+            inputTokens: 2200,
+            cachedInputTokens: 3900,
+            outputTokens: 240,
+            totalTokens: 6340,
+            costUSD: 6.34
+          }
         }
       }
-    }]
+    ]
   }
 }
 
 function mergedProfileDailyResult() {
   return {
-    daily: [{
-      date: '2026-05-25',
-      models: {
-        'gpt-5': {
-          inputTokens: 2200,
-          cachedInputTokens: 3900,
-          outputTokens: 240,
-          totalTokens: 6340
-        }
-      },
-      totalTokens: 6340,
-      costUSD: 6.34
-    }]
+    daily: [
+      {
+        date: '2026-05-25',
+        models: {
+          'gpt-5': {
+            inputTokens: 2200,
+            cachedInputTokens: 3900,
+            outputTokens: 240,
+            totalTokens: 6340
+          }
+        },
+        totalTokens: 6340,
+        costUSD: 6.34
+      }
+    ]
   }
 }
 
 async function writeCachedChildSession(codexHome: string, id: string) {
   await writeJsonl(join(codexHome, 'sessions', '2026', '05', '25', `rollout-${id}.jsonl`), [
     subagentSessionMeta(id, 'parent-thread', '2026-05-25T01:00:00.000Z'),
-    totalUsageEvent('2026-05-25T01:10:00.000Z', {
-      inputTokens: 1200,
-      cacheReadTokens: 1050,
-      outputTokens: 70
-    }, {
-      lastUsage: {
-        inputTokens: 200,
-        cacheReadTokens: 150,
-        outputTokens: 20
+    totalUsageEvent(
+      '2026-05-25T01:10:00.000Z',
+      {
+        inputTokens: 1200,
+        cacheReadTokens: 1050,
+        outputTokens: 70
+      },
+      {
+        lastUsage: {
+          inputTokens: 200,
+          cacheReadTokens: 150,
+          outputTokens: 20
+        }
       }
-    })
+    )
   ])
 }
 
 async function writeInheritedChildSession(file: string) {
   await writeJsonl(file, [
     subagentSessionMeta('child-thread', 'parent-thread', '2026-05-25T01:00:00.000Z'),
-    totalUsageEvent('2026-05-25T01:00:00.000Z', {
-      inputTokens: 1000,
-      cacheReadTokens: 900,
-      outputTokens: 50
-    }, { lastUsage: null }),
-    totalUsageEvent('2026-05-25T01:10:00.000Z', {
-      inputTokens: 1200,
-      cacheReadTokens: 1050,
-      outputTokens: 70
-    }, {
-      lastUsage: {
-        inputTokens: 200,
-        cacheReadTokens: 150,
-        outputTokens: 20
+    totalUsageEvent(
+      '2026-05-25T01:00:00.000Z',
+      {
+        inputTokens: 1000,
+        cacheReadTokens: 900,
+        outputTokens: 50
+      },
+      { lastUsage: null }
+    ),
+    totalUsageEvent(
+      '2026-05-25T01:10:00.000Z',
+      {
+        inputTokens: 1200,
+        cacheReadTokens: 1050,
+        outputTokens: 70
+      },
+      {
+        lastUsage: {
+          inputTokens: 200,
+          cacheReadTokens: 150,
+          outputTokens: 20
+        }
       }
-    })
+    )
   ])
 }
 

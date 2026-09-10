@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readAntigravityDbUsageEvents, type AntigravityDbUsageResult } from './antigravity-history-db'
-import {
-  defaultConversationDir
-} from './antigravity-gui-environment'
-import {
-  lastSeenDbRowIndexByCascadeHash
-} from './antigravity-gui-cursor'
+import { defaultConversationDir } from './antigravity-gui-environment'
+import { lastSeenDbRowIndexByCascadeHash, unanchoredDbRowCursorHashes } from './antigravity-gui-cursor'
 import type { CollectAntigravityGuiUsageOptions } from './antigravity-gui'
 import type { AntigravityCollectionRange } from './antigravity-since'
 import type { readCursor } from './session-cursor-store'
@@ -21,10 +17,7 @@ export async function readAntigravityGuiLocalDbUsage(
 }> {
   try {
     return {
-      usage: filterDbUsageByRange(
-        await readAntigravityGuiLocalDbUsageOrThrow(options, cursor, range, timezone),
-        range
-      )
+      usage: filterDbUsageByRange(await readAntigravityGuiLocalDbUsageOrThrow(options, cursor, range, timezone), range)
     }
   } catch (error) {
     return {
@@ -40,13 +33,10 @@ function filterDbUsageByRange(
 ): AntigravityDbUsageResult {
   if (!range.sinceDate) return usage
   const events = usage.events.filter((event) => range.includesTimestamp(event.createdAt))
-  const coveredHashes = new Set(events.flatMap((event) => [
-    event.cascadeHash,
-    ...(event.cascadeHashAliases ?? [])
-  ]))
-  const cascadeIds = new Set([...usage.cascadeIds].filter((cascadeId) => (
-    coveredHashes.has(createHash('sha256').update(cascadeId).digest('hex'))
-  )))
+  const coveredHashes = new Set(events.flatMap((event) => [event.cascadeHash, ...(event.cascadeHashAliases ?? [])]))
+  const cascadeIds = new Set(
+    [...usage.cascadeIds].filter((cascadeId) => coveredHashes.has(createHash('sha256').update(cascadeId).digest('hex')))
+  )
   return { ...usage, cascadeIds, events }
 }
 
@@ -62,25 +52,43 @@ async function readAntigravityGuiLocalDbUsageOrThrow(
     historyScope: range.historyScope
   })
   if (options.readDbUsageEvents) {
-    return options.readDbUsageEvents({
+    const maxDbFiles = resolveMaxDbFiles(options.maxDbFiles, range)
+    const unanchoredCascadeHashes = unanchoredDbRowCursorHashes({
+      cursor,
+      source: options.source,
+      historyScope: range.historyScope
+    })
+    const readOptions = {
       lastSeenRowIndexByCascadeHash,
-      maxDbFiles: resolveMaxDbFiles(options.maxDbFiles, range),
+      maxDbFiles,
       sinceDate: range.sinceDate,
       timezone,
-      detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0
-    })
+      detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0,
+      requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null,
+      ...(unanchoredCascadeHashes.size > 0 ? { forceFullScanCascadeHashes: unanchoredCascadeHashes } : {})
+    }
+    return options.readDbUsageEvents(readOptions)
   }
   if (options.requestGeneratorMetadata) {
     return { cascadeIds: new Set<string>(), events: [] }
   }
+  const maxDbFiles = resolveMaxDbFiles(options.maxDbFiles, range)
+  const unanchoredCascadeHashes = unanchoredDbRowCursorHashes({
+    cursor,
+    source: options.source,
+    historyScope: range.historyScope
+  })
   return readAntigravityDbUsageEvents({
     conversationDir: options.conversationDir ?? defaultConversationDir(options.source),
     lastSeenRowIndexByCascadeHash,
-    maxDbFiles: resolveMaxDbFiles(options.maxDbFiles, range),
+    maxDbFiles,
     scanState: cursor.antigravityDbFileScan,
     sinceDate: range.sinceDate,
     timezone,
-    detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0
+    detectRowCursorReset: lastSeenRowIndexByCascadeHash.size > 0,
+    requireCompleteDirectoryScan: range.fullHistory || maxDbFiles === null,
+    sourceLabel: 'Antigravity GUI',
+    forceFullScanCascadeHashes: unanchoredCascadeHashes.size > 0 ? unanchoredCascadeHashes : undefined
   })
 }
 

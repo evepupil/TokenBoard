@@ -33,7 +33,9 @@ export function DailyReportHistoryCard(props: {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {props.reportHistory.map((item) => <DailyReportHistoryRow item={item} />)}
+                {props.reportHistory.map((item) => (
+                  <DailyReportHistoryRow item={item} />
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -60,10 +62,10 @@ function DailyReportShareSettings(props: { enabled: boolean }) {
         日报分享
       </label>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <span class="text-xs text-[var(--app-muted)]">
-          {props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}
-        </span>
-        <Button type="submit" data-submitting-label="正在保存...">保存分享设置</Button>
+        <span class="text-xs text-[var(--app-muted)]">{props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}</span>
+        <Button type="submit" data-submitting-label="正在保存...">
+          保存分享设置
+        </Button>
       </div>
     </form>
   )
@@ -77,11 +79,9 @@ function DailyReportHistoryRow(props: { item: DailyReportHistoryItem }) {
         <div class="text-xs text-[var(--app-muted)]">{scheduleSlotLabel(props.item.scheduleSlot)}</div>
       </TableCell>
       <TableCell class="font-bold tabular-nums">{formatInteger(props.item.totalTokens)}</TableCell>
-      <TableCell class="font-bold tabular-nums">
-        {formatInteger(props.item.totalTokensWithoutCacheRead)}
-      </TableCell>
+      <TableCell class="font-bold tabular-nums">{formatInteger(props.item.totalTokensWithoutCacheRead)}</TableCell>
       <TableCell class="font-bold tabular-nums">{formatPercentRate(props.item.cacheReadRate ?? 0)}</TableCell>
-      <TableCell class="font-bold tabular-nums">{formatCostWithAvailability(props.item.costUsd, props.item.sourceSplit)}</TableCell>
+      <TableCell class="font-bold tabular-nums">{formatHistoryCost(props.item)}</TableCell>
       <TableCell class="font-bold tabular-nums">{formatInteger(props.item.sessionCount)}</TableCell>
       <TableCell class="rounded-r-xl text-xs text-[var(--app-muted)]">
         <div>{props.item.generatedAt}</div>
@@ -122,11 +122,7 @@ function ReportShareAction(props: { item: DailyReportHistoryItem }) {
 
 function HistoryDetails(props: { item: DailyReportHistoryItem }) {
   if (props.item.detailsParseError) {
-    return (
-      <p class="app-danger-text mt-2 text-xs font-bold">
-        历史明细格式异常，请重新生成日报。
-      </p>
-    )
+    return <p class="app-danger-text mt-2 text-xs font-bold">历史明细格式异常，费用不可用，请重新生成日报。</p>
   }
 
   return (
@@ -135,19 +131,27 @@ function HistoryDetails(props: { item: DailyReportHistoryItem }) {
       <div class="mt-2 grid gap-2">
         <HistoryList
           title="主要来源"
-          items={props.item.sourceSplit.map((source) => (
-            `${formatSource(source.source)}: ${formatInteger(source.totalTokensWithoutCacheRead)} / ${formatInteger(source.totalTokens)} tokens, ${formatPercentRate(source.cacheReadRate ?? 0)}`
-          ))}
+          items={props.item.sourceSplit.map(
+            (source) =>
+              `${formatSource(source.source)}: ${formatInteger(source.totalTokensWithoutCacheRead)} / ${formatInteger(source.totalTokens)} tokens, ${formatPercentRate(source.cacheReadRate ?? 0)}`
+          )}
         />
         <HistoryList
           title="主要模型"
-          items={props.item.topModels.map((model) => (
-            `${model.model}: ${formatInteger(model.totalTokensWithoutCacheRead)} / ${formatInteger(model.totalTokens)} tokens, ${formatModelCostWithAvailability(model.costUsd, model.sourceSplit, props.item.sourceSplit)}`
-          ))}
+          items={props.item.topModels.map(
+            (model) =>
+              `${model.model}: ${formatInteger(model.totalTokensWithoutCacheRead)} / ${formatInteger(model.totalTokens)} tokens, ${formatModelCostWithAvailability(model.costUsd, model.sourceSplit, props.item.sourceSplit)}`
+          )}
         />
       </div>
     </details>
   )
+}
+
+function formatHistoryCost(item: DailyReportHistoryItem) {
+  return item.detailsParseError
+    ? '费用不可用（历史明细异常）'
+    : formatCostWithAvailability(item.costUsd, item.sourceSplit)
 }
 
 function HistoryList(props: { title: string; items: string[] }) {
@@ -156,7 +160,9 @@ function HistoryList(props: { title: string; items: string[] }) {
       <p class="font-bold text-[var(--app-muted)]">{props.title}</p>
       {props.items.length > 0 ? (
         <ul class="mt-1 space-y-1">
-          {props.items.map((item) => <li class="break-words">{item}</li>)}
+          {props.items.map((item) => (
+            <li class="break-words">{item}</li>
+          ))}
         </ul>
       ) : (
         <p class="mt-1 text-[var(--app-muted)]">暂无数据</p>

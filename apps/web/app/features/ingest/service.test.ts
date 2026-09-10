@@ -81,25 +81,21 @@ describe('ingest service', () => {
       'gpt-5'
     ])
     const tokenUpdate = bound.find((entry) => entry.sql.includes('UPDATE upload_tokens'))
-    expect(tokenUpdate?.values).toEqual(['2026-05-22T09:00:00.000Z', 'hash:legacy-upload-token'])
+    expect(tokenUpdate?.values).toEqual([
+      '2026-05-22T09:00:00.000Z',
+      'hash:legacy-upload-token',
+      '2026-05-22T09:00:00.000Z'
+    ])
     expect(bound.some((entry) => entry.sql.includes('UPDATE devices'))).toBe(false)
   })
 
   test('checks existing hashes against legacy device rows for old upload tokens', async () => {
     const { db, bound } = createRecordingDb()
 
-    await checkExistingSnapshots(db, legacyUser, [
-      { source: 'codex', usageDate: '2026-05-22', model: 'gpt-5' }
-    ])
+    await checkExistingSnapshots(db, legacyUser, [{ source: 'codex', usageDate: '2026-05-22', model: 'gpt-5' }])
 
     expect(bound[0].sql).toContain('FROM daily_usage')
     expect(bound[0].sql).toContain('device_id = ?')
-    expect(bound[0].values.slice(0, 5)).toEqual([
-      'user_legacy',
-      'legacy',
-      'codex',
-      '2026-05-22',
-      'gpt-5'
-    ])
+    expect(bound[0].values.slice(0, 5)).toEqual(['user_legacy', 'legacy', 'codex', '2026-05-22', 'gpt-5'])
   })
 })

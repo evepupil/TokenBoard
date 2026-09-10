@@ -1,5 +1,6 @@
 import type { UsageSource } from '@tokenboard/usage-core'
 import { cacheReadRateFromTotals } from '../../../lib/usage-metrics'
+import { billableCostSql } from '../../../lib/usage-cost'
 import {
   dailyUsageScopeSql,
   normalizeDeviceFilter,
@@ -9,17 +10,9 @@ import {
   usageTableForDeviceFilter
 } from '../deduped-daily-usage'
 import { eachIsoDate, roundMetric } from './shared'
-import type {
-  UsageDetails,
-  UsageDetailsDailyRow,
-  UsageDetailsInput,
-  UsageDetailsModelRow
-} from './types'
+import type { UsageDetails, UsageDetailsDailyRow, UsageDetailsInput, UsageDetailsModelRow } from './types'
 
-export async function getUsageDetails(
-  db: D1Database,
-  input: UsageDetailsInput
-): Promise<UsageDetails> {
+export async function getUsageDetails(db: D1Database, input: UsageDetailsInput): Promise<UsageDetails> {
   const deviceId = normalizeDeviceFilter(input.deviceId)
   const usageTable = usageTableForDeviceFilter(deviceId)
   const dedupedUsageFilter = usageDetailsDedupedFilter(deviceId)
@@ -34,7 +27,7 @@ export async function getUsageDetails(
           source,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
           COALESCE(SUM(${tokensWithoutCacheReadSql()}), 0) as totalTokensWithoutCacheRead,
-          COALESCE(SUM(cost_usd), 0) as costUsd,
+          COALESCE(SUM(${billableCostSql()}), 0) as costUsd,
           COALESCE(SUM(session_count), 0) as sessionCount
         FROM ${usageTable}
         WHERE user_id = ?
@@ -153,7 +146,7 @@ function modelRowsSql(usageWith: string, usageTable: string) {
       COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
       COALESCE(SUM(total_tokens), 0) as totalTokens,
       COALESCE(SUM(${tokensWithoutCacheReadSql()}), 0) as totalTokensWithoutCacheRead,
-      COALESCE(SUM(cost_usd), 0) as costUsd,
+      COALESCE(SUM(${billableCostSql()}), 0) as costUsd,
       COALESCE(SUM(session_count), 0) as sessionCount
     FROM ${usageTable}
     WHERE user_id = ?

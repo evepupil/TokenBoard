@@ -36,11 +36,11 @@ describe('notification report queries', () => {
     expect(report).toMatchObject({
       displayName: 'Example',
       reportDate: '2026-06-02',
-      totalTokens: 2050,
-      totalTokensWithoutCacheRead: 1800,
-      cacheReadRate: 250 / 2050,
+      totalTokens: 2350,
+      totalTokensWithoutCacheRead: 2060,
+      cacheReadRate: 290 / 2350,
       costUsd: 3.15,
-      sessionCount: 7,
+      sessionCount: 8,
       sourceSplit: [
         {
           source: 'codex',
@@ -53,16 +53,22 @@ describe('notification report queries', () => {
           totalTokens: 600,
           totalTokensWithoutCacheRead: 550,
           cacheReadRate: 50 / 600
+        },
+        {
+          source: 'antigravity-cli',
+          totalTokens: 300,
+          totalTokensWithoutCacheRead: 260,
+          cacheReadRate: 40 / 300
         }
       ],
       topModels: [
         {
           model: 'gpt-5',
-          totalTokens: 1000,
-          totalTokensWithoutCacheRead: 900,
-          cacheReadRate: 100 / 1000,
+          totalTokens: 1300,
+          totalTokensWithoutCacheRead: 1160,
+          cacheReadRate: 140 / 1300,
           costUsd: 1.25,
-          sourceSplit: [{ source: 'codex' }]
+          sourceSplit: [{ source: 'antigravity-cli' }, { source: 'codex' }]
         },
         {
           model: 'claude-sonnet-4-5',
@@ -86,7 +92,9 @@ describe('notification report queries', () => {
 })
 
 function createSummarySchema(dbPath: string) {
-  runSql(dbPath, `
+  runSql(
+    dbPath,
+    `
     CREATE TABLE daily_usage_summary (
       user_id TEXT NOT NULL,
       usage_date TEXT NOT NULL,
@@ -104,7 +112,8 @@ function createSummarySchema(dbPath: string) {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, usage_date, source, model)
     );
-  `)
+  `
+  )
 }
 
 async function seedSummaryRows(db: D1Database) {
@@ -127,7 +136,8 @@ async function seedSummaryRows(db: D1Database) {
           session_count,
           updated_at
         )
-        VALUES
+          VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -175,6 +185,20 @@ async function seedSummaryRows(db: D1Database) {
       350,
       0.65,
       2,
+      '2026-06-02T10:00:00.000Z',
+      'user_1',
+      '2026-06-02',
+      'antigravity-cli',
+      'gpt-5',
+      'UTC',
+      300,
+      0,
+      0,
+      40,
+      300,
+      260,
+      7.5,
+      1,
       '2026-06-02T10:00:00.000Z'
     )
     .run()

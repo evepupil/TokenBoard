@@ -40,11 +40,7 @@ export function parseGeneratorMetadata(response: unknown, cascadeId: string) {
   return events
 }
 
-function parseGeneratorMetadataItem(
-  item: unknown,
-  cascadeHash: string,
-  index: number
-): AntigravityUsageEvent | null {
+function parseGeneratorMetadataItem(item: unknown, cascadeHash: string, index: number): AntigravityUsageEvent | null {
   if (!isRecord(item)) return null
   const chatModel = readRecord(item.chatModel)
   if (!chatModel) return null
@@ -85,23 +81,14 @@ function readToken(value: unknown, field: string, index: number) {
   const token = typeof value === 'string' && /^[0-9]+$/.test(value) ? Number(value) : value
   if (typeof token !== 'number' || !Number.isSafeInteger(token) || token < 0 || token > maxTokenValue) {
     throw new Error(
-      `Invalid Antigravity generator metadata item ${index}: ` +
-      `${field} must be a bounded nonnegative integer`
+      `Invalid Antigravity generator metadata item ${index}: ` + `${field} must be a bounded nonnegative integer`
     )
   }
   return token
 }
 
-function readModel(input: {
-  usage: Record<string, unknown>
-  chatModel: Record<string, unknown>
-  index: number
-}) {
-  const candidates = [
-    input.chatModel.responseModel,
-    input.usage.model,
-    input.chatModel.model
-  ]
+function readModel(input: { usage: Record<string, unknown>; chatModel: Record<string, unknown>; index: number }) {
+  const candidates = [input.chatModel.responseModel, input.usage.model, input.chatModel.model]
   const placeholderCandidates: string[] = []
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue
@@ -119,10 +106,7 @@ function readModel(input: {
 
 function readString(value: unknown, field: string, index: number) {
   if (typeof value !== 'string' || value.length === 0 || value.length > maxModelLength) {
-    throw new Error(
-      `Invalid Antigravity generator metadata item ${index}: ` +
-      `${field} must be a non-empty string`
-    )
+    throw new Error(`Invalid Antigravity generator metadata item ${index}: ` + `${field} must be a non-empty string`)
   }
   return value
 }
@@ -145,9 +129,7 @@ function readOptionalMetadataIdentity(value: unknown, field: string, index: numb
     (typeof value !== 'string' || value.length > maxMetadataIdentityLength) &&
     (typeof value !== 'number' || !Number.isSafeInteger(value))
   ) {
-    throw new Error(
-      `Invalid Antigravity generator metadata item ${index}: ${field} must be a bounded identifier`
-    )
+    throw new Error(`Invalid Antigravity generator metadata item ${index}: ${field} must be a bounded identifier`)
   }
   return value
 }
@@ -155,9 +137,7 @@ function readOptionalMetadataIdentity(value: unknown, field: string, index: numb
 function readStepIndices(value: unknown, index: number) {
   if (value === undefined || value === null) return null
   if (!Array.isArray(value) || value.length > maxMetadataStepIndices) {
-    throw new Error(
-      `Invalid Antigravity generator metadata item ${index}: stepIndices must be a bounded integer array`
-    )
+    throw new Error(`Invalid Antigravity generator metadata item ${index}: stepIndices must be a bounded integer array`)
   }
   return value.map((step) => {
     if (!Number.isSafeInteger(step) || step < 0) {
@@ -187,11 +167,18 @@ function isValidIsoDateTime(value: string) {
   const second = Number(match[6])
   const offsetHour = match[8] === undefined ? 0 : Number(match[8])
   const offsetMinute = match[9] === undefined ? 0 : Number(match[9])
-  return month >= 1 && month <= 12 &&
-    day >= 1 && day <= daysInMonth(year, month) &&
-    hour <= 23 && minute <= 59 && second <= 59 &&
-    offsetHour <= 23 && offsetMinute <= 59 &&
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth(year, month) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59 &&
     Number.isFinite(Date.parse(value))
+  )
 }
 
 function daysInMonth(year: number, month: number) {
@@ -218,17 +205,19 @@ function usageEventHash(input: {
   model: string
   createdAt: string
 }) {
-  return hash(JSON.stringify([
-    input.identity.responseId,
-    input.identity.executionId,
-    input.identity.stepIndices,
-    input.model,
-    input.createdAt,
-    input.tokens.inputTokens,
-    input.tokens.outputTokens,
-    input.tokens.cacheCreationTokens,
-    input.tokens.cacheReadTokens
-  ]))
+  return hash(
+    JSON.stringify([
+      input.identity.responseId,
+      input.identity.executionId,
+      input.identity.stepIndices,
+      input.model,
+      input.createdAt,
+      input.tokens.inputTokens,
+      input.tokens.outputTokens,
+      input.tokens.cacheCreationTokens,
+      input.tokens.cacheReadTokens
+    ])
+  )
 }
 
 export function hash(value: string) {

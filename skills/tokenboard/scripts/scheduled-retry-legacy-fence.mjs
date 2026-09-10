@@ -20,13 +20,20 @@ export function acquireLegacyRetryFence({ runtime, lockPath }) {
     pid: runtime.process.pid,
     token: randomBytes(16).toString('hex'),
     processStartIdentity: runtime.processStartIdentity,
-    markerPath: join(lockPath, `${legacyRetryMarkerPrefix}${runtime.process.pid}-${randomBytes(8).toString('hex')}.json`)
+    markerPath: join(
+      lockPath,
+      `${legacyRetryMarkerPrefix}${runtime.process.pid}-${randomBytes(8).toString('hex')}.json`
+    )
   }
-  runtime.writeFile(owner.markerPath, JSON.stringify({
-    pid: owner.pid,
-    token: owner.token,
-    ...(owner.processStartIdentity ? { processStartIdentity: owner.processStartIdentity } : {})
-  }), { flag: 'wx', mode: 0o600 })
+  runtime.writeFile(
+    owner.markerPath,
+    JSON.stringify({
+      pid: owner.pid,
+      token: owner.token,
+      ...(owner.processStartIdentity ? { processStartIdentity: owner.processStartIdentity } : {})
+    }),
+    { flag: 'wx', mode: 0o600 }
+  )
   activeLegacyRetryMarkers.add(owner.token)
   activeLegacyRetryLocks.set(lockPath, { owner, references: 1 })
   return owner
@@ -60,7 +67,10 @@ export function releaseLegacyRetryFence({ runtime, lockPath, transitionPath, own
       releaseOwnedLock(transitionPath, runtime, acquiredTransitionOwner)
     } catch (releaseError) {
       primaryError = primaryError
-        ? new AggregateError([primaryError, releaseError], `${errorMessage(primaryError)}; ${errorMessage(releaseError)}`)
+        ? new AggregateError(
+            [primaryError, releaseError],
+            `${errorMessage(primaryError)}; ${errorMessage(releaseError)}`
+          )
         : releaseError
     }
   }
@@ -169,7 +179,8 @@ function pruneLegacyRetryMarkers({ runtime, lockPath }) {
     entries = runtime.readdir(lockPath)
   } catch (error) {
     if (error.code === 'ENOENT') return { activeMarkers: 0, unknownEntries: [], corruptedEntries: [] }
-    if (error.code === 'ENOTDIR' || error.code === 'EISDIR') return { activeMarkers: 0, unknownEntries: [], corruptedEntries: [] }
+    if (error.code === 'ENOTDIR' || error.code === 'EISDIR')
+      return { activeMarkers: 0, unknownEntries: [], corruptedEntries: [] }
     throw error
   }
 
@@ -214,9 +225,7 @@ function throwLegacyRetryFenceCorruption(lockPath, unknownEntries, corruptedEntr
   if (corruptedEntries.length > 0) {
     details.push(`corrupted marker files ${corruptedEntries.map((entry) => JSON.stringify(entry)).join(', ')}`)
   }
-  const error = new Error(
-    `TokenBoard scheduled retry legacy fence is corrupted at ${lockPath}: ${details.join('; ')}`
-  )
+  const error = new Error(`TokenBoard scheduled retry legacy fence is corrupted at ${lockPath}: ${details.join('; ')}`)
   error.code = 'TOKENBOARD_LEGACY_RETRY_FENCE_CORRUPTED'
   throw error
 }
@@ -235,11 +244,22 @@ function readLegacyRetryMarker(runtime, markerPath) {
   }
   try {
     const marker = JSON.parse(raw)
-    if (!marker || typeof marker !== 'object' || !Number.isSafeInteger(marker.pid) || marker.pid <= 0 || typeof marker.token !== 'string' || !marker.token) {
+    if (
+      !marker ||
+      typeof marker !== 'object' ||
+      !Number.isSafeInteger(marker.pid) ||
+      marker.pid <= 0 ||
+      typeof marker.token !== 'string' ||
+      !marker.token
+    ) {
       return { status: 'invalid' }
     }
-    if (marker.processStartIdentity !== undefined &&
-      (typeof marker.processStartIdentity !== 'string' || !marker.processStartIdentity || marker.processStartIdentity.length > 256)) {
+    if (
+      marker.processStartIdentity !== undefined &&
+      (typeof marker.processStartIdentity !== 'string' ||
+        !marker.processStartIdentity ||
+        marker.processStartIdentity.length > 256)
+    ) {
       return { status: 'invalid' }
     }
     return { status: 'valid', value: marker }
@@ -251,7 +271,11 @@ function readLegacyRetryMarker(runtime, markerPath) {
 
 function isLegacyRetryMarkerActive(marker, runtime) {
   if (marker.pid === runtime.process.pid && activeLegacyRetryMarkers.has(marker.token)) {
-    if (marker.processStartIdentity && runtime.processStartIdentity && marker.processStartIdentity !== runtime.processStartIdentity) {
+    if (
+      marker.processStartIdentity &&
+      runtime.processStartIdentity &&
+      marker.processStartIdentity !== runtime.processStartIdentity
+    ) {
       return false
     }
     return true
@@ -267,12 +291,14 @@ function isLegacyRetryMarkerActive(marker, runtime) {
     if (identity.status === 'known') return identity.value === marker.processStartIdentity
     return true
   }
-  return probeProcessLiveness(marker.pid, {
-    platform: runtime.platform,
-    nodeVersion: runtime.nodeVersion,
-    kill: runtime.process.kill?.bind(runtime.process),
-    runTasklist: runtime.runTasklist
-  }) !== 'dead'
+  return (
+    probeProcessLiveness(marker.pid, {
+      platform: runtime.platform,
+      nodeVersion: runtime.nodeVersion,
+      kill: runtime.process.kill?.bind(runtime.process),
+      runTasklist: runtime.runTasklist
+    }) !== 'dead'
+  )
 }
 
 function isDirectoryPath(path, runtime) {

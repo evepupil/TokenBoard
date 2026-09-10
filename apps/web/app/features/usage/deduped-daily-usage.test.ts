@@ -34,9 +34,11 @@ describe('effectiveDailyUsageSummaryWith', () => {
   })
 
   test('rejects legacy raw SQL filter input', () => {
-    expect(() => effectiveDailyUsageSummaryWith({
-      dailyUsageFilter: 'daily_usage.user_id = ?'
-    } as never)).toThrow('Usage summary filters must be built with usageSummaryScopeSql')
+    expect(() =>
+      effectiveDailyUsageSummaryWith({
+        dailyUsageFilter: 'daily_usage.user_id = ?'
+      } as never)
+    ).toThrow('Usage summary filters must be built with usageSummaryScopeSql')
   })
 })
 

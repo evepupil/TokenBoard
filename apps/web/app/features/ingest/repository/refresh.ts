@@ -5,6 +5,7 @@ import {
   usageSummaryBackfillStateId,
   type UsageSummaryKey
 } from './types'
+import { billableCostSql } from '../../../lib/usage-cost'
 
 export function prepareSummaryRefresh(db: D1Database, key: UsageSummaryKey) {
   return db
@@ -13,15 +14,10 @@ export function prepareSummaryRefresh(db: D1Database, key: UsageSummaryKey) {
 }
 
 export function prepareUserTotalFromSummaryRefresh(db: D1Database, userId: string) {
-  return db
-    .prepare(refreshUserTotalsFromSummarySql)
-    .bind(userId, userId)
+  return db.prepare(refreshUserTotalsFromSummarySql).bind(userId, userId)
 }
 
-export async function listSummaryKeysNeedingRefresh(
-  db: D1Database,
-  records: UsageSummaryKey[]
-) {
+export async function listSummaryKeysNeedingRefresh(db: D1Database, records: UsageSummaryKey[]) {
   const keys = uniqueSummaryKeys(records)
   if (keys.length === 0) return []
   const missingOrStale: UsageSummaryKey[] = []
@@ -36,10 +32,7 @@ export async function listSummaryKeysNeedingRefresh(
   return missingOrStale
 }
 
-export async function listUserIdsNeedingTotalRefresh(
-  db: D1Database,
-  userIds: string[]
-) {
+export async function listUserIdsNeedingTotalRefresh(db: D1Database, userIds: string[]) {
   if (userIds.length === 0) return []
   const missingOrStale: string[] = []
   for (let index = 0; index < userIds.length; index += totalRefreshCheckChunkSize) {
@@ -74,7 +67,7 @@ function summaryRefreshCheckSql(keys: UsageSummaryKey[]) {
         COALESCE(SUM(daily_usage.cache_read_tokens), 0) as cache_read_tokens,
         COALESCE(SUM(daily_usage.total_tokens), 0) as total_tokens,
         COALESCE(SUM(daily_usage.total_tokens - daily_usage.cache_read_tokens), 0) as total_tokens_without_cache_read,
-        COALESCE(SUM(daily_usage.cost_usd), 0) as cost_usd,
+        COALESCE(SUM(${billableCostSql({ sourceColumn: 'daily_usage.source', costColumn: 'daily_usage.cost_usd' })}), 0) as cost_usd,
         COALESCE(SUM(daily_usage.session_count), 0) as session_count
       FROM requested_keys
       JOIN daily_usage
@@ -141,7 +134,7 @@ function totalRefreshCheckSql(userIds: string[]) {
         requested_users.user_id,
         COALESCE(SUM(daily_usage_summary.total_tokens), 0) as total_tokens,
         COALESCE(SUM(daily_usage_summary.total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
-        COALESCE(SUM(daily_usage_summary.cost_usd), 0) as cost_usd,
+        COALESCE(SUM(${billableCostSql({ sourceColumn: 'daily_usage_summary.source', costColumn: 'daily_usage_summary.cost_usd' })}), 0) as cost_usd,
         COALESCE(SUM(daily_usage_summary.session_count), 0) as session_count
       FROM requested_users
       JOIN daily_usage_summary ON daily_usage_summary.user_id = requested_users.user_id
@@ -207,7 +200,7 @@ const refreshSummarySql = `
     COALESCE(SUM(cache_read_tokens), 0),
     COALESCE(SUM(total_tokens), 0),
     COALESCE(SUM(total_tokens - cache_read_tokens), 0),
-    COALESCE(SUM(cost_usd), 0),
+    COALESCE(SUM(${billableCostSql()}), 0),
     COALESCE(SUM(session_count), 0),
     strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   FROM deduped_usage
@@ -247,7 +240,7 @@ const refreshUserTotalsFromSummarySql = `
     ?,
     COALESCE(SUM(total_tokens), 0),
     COALESCE(SUM(total_tokens_without_cache_read), 0),
-    COALESCE(SUM(cost_usd), 0),
+    COALESCE(SUM(${billableCostSql()}), 0),
     COALESCE(SUM(session_count), 0),
     strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
   FROM totals_refresh_allowed

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { isIP } from 'node:net'
 import { resolve } from 'node:path'
 
 const CONFIG_FILE = process.env.TOKENBOARD_WRANGLER_CONFIG?.trim() || 'wrangler.production.jsonc'
@@ -7,11 +8,15 @@ const DAILY_REPORT_HISTORY_DAYS_MAX = 31
 const USAGE_SUMMARY_BACKFILL_LIMIT_MAX = 500
 const WEBHOOK_LOG_RETENTION_DAYS_MAX = 365
 const WEBHOOK_CRON_BATCH_SIZE_MAX = 5
+const MODEL_PRICING_SYNC_INTERVAL_HOURS_MAX = 168
+const DEFAULT_MODEL_PRICING_SOURCE_URL = 'https://models.dev/api.json'
 
 const configPath = resolve(CONFIG_FILE)
 
 if (!existsSync(configPath)) {
-  fail(`Production deploy requires ${CONFIG_FILE}. Copy ${EXAMPLE_FILE} and fill the route, BETTER_AUTH_URL, and D1 database_id.`)
+  fail(
+    `Production deploy requires ${CONFIG_FILE}. Copy ${EXAMPLE_FILE} and fill the route, BETTER_AUTH_URL, and D1 database_id.`
+  )
 }
 
 const content = readFileSync(configPath, 'utf8')
@@ -26,7 +31,9 @@ if (config.workers_dev !== false) {
 }
 
 validateProductionAuthUrl(readRequiredString(config.vars?.BETTER_AUTH_URL, 'vars.BETTER_AUTH_URL'))
-validateCollectorRepoUrl(readRequiredString(config.vars?.TOKENBOARD_COLLECTOR_REPO_URL, 'vars.TOKENBOARD_COLLECTOR_REPO_URL'))
+validateCollectorRepoUrl(
+  readRequiredString(config.vars?.TOKENBOARD_COLLECTOR_REPO_URL, 'vars.TOKENBOARD_COLLECTOR_REPO_URL')
+)
 validateCollectorRepoRef(readRequiredString(config.vars?.TOKENBOARD_COLLECTOR_REF, 'vars.TOKENBOARD_COLLECTOR_REF'))
 validateProductionRoute(readRequiredString(firstRoute(config).pattern, 'routes[0].pattern'))
 validateProductionDatabaseId(readRequiredString(d1Database(config).database_id, 'd1_databases[DB].database_id'))
@@ -42,10 +49,7 @@ validateOptionalIntegerString(
   1,
   USAGE_SUMMARY_BACKFILL_LIMIT_MAX
 )
-validateOptionalBooleanString(
-  config.vars?.TOKENBOARD_USAGE_SUMMARY_STRICT,
-  'vars.TOKENBOARD_USAGE_SUMMARY_STRICT'
-)
+validateOptionalBooleanString(config.vars?.TOKENBOARD_USAGE_SUMMARY_STRICT, 'vars.TOKENBOARD_USAGE_SUMMARY_STRICT')
 validateOptionalIntegerString(
   config.vars?.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS,
   'vars.TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS',
@@ -58,6 +62,17 @@ validateOptionalIntegerString(
   1,
   WEBHOOK_CRON_BATCH_SIZE_MAX
 )
+validateOptionalBooleanString(
+  config.vars?.TOKENBOARD_MODEL_PRICING_SYNC_ENABLED,
+  'vars.TOKENBOARD_MODEL_PRICING_SYNC_ENABLED'
+)
+validateOptionalIntegerString(
+  config.vars?.TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS,
+  'vars.TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS',
+  1,
+  MODEL_PRICING_SYNC_INTERVAL_HOURS_MAX
+)
+validateModelPricingSourceUrl(config.vars?.TOKENBOARD_MODEL_PRICING_SOURCE_URL ?? DEFAULT_MODEL_PRICING_SOURCE_URL)
 validateRequiredCronTrigger(config)
 validateWorkerFirstAssetRoutes(config)
 
@@ -205,8 +220,15 @@ function validateProductionAuthUrl(value) {
   if (url.protocol !== 'https:') {
     fail(`${CONFIG_FILE} BETTER_AUTH_URL must use https.`)
   }
-  if (isLocalHostname(url.hostname)) {
-    fail(`${CONFIG_FILE} BETTER_AUTH_URL must not point to localhost.`)
+  if (
+    hasExplicitDefaultHttpsPort(value) ||
+    url.port ||
+    url.username ||
+    url.password ||
+    isUnsafeProductionHostname(url.hostname) ||
+    !isValidHostname(url.hostname)
+  ) {
+    fail(`${CONFIG_FILE} BETTER_AUTH_URL must use a public hostname without credentials or an explicit port.`)
   }
   if (url.pathname !== '/' || url.search || url.hash) {
     fail(`${CONFIG_FILE} BETTER_AUTH_URL must be an origin without path, query, or hash.`)
@@ -235,9 +257,35 @@ function validateCollectorRepoRef(value) {
   }
 }
 
+function validateModelPricingSourceUrl(value) {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    fail(`${CONFIG_FILE} vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json.`)
+  }
+  if (
+    hasExplicitDefaultHttpsPort(value) ||
+    url.protocol !== 'https:' ||
+    url.hostname !== 'models.dev' ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/api.json' ||
+    url.search ||
+    url.hash
+  ) {
+    fail(`${CONFIG_FILE} vars.TOKENBOARD_MODEL_PRICING_SOURCE_URL must be https://models.dev/api.json.`)
+  }
+}
+
+function hasExplicitDefaultHttpsPort(value) {
+  return /^https:\/\/(?:[^/?#@]*@)?(?:\[[^\]]+\]|[^/?#:]+):0*443(?:[/?#]|$)/i.test(value)
+}
+
 function validateProductionRoute(value) {
   const hostname = extractProductionRouteHostname(value)
-  if (isLocalHostname(hostname) || !hostname.includes('.')) {
+  if (isUnsafeProductionHostname(hostname) || !hostname.includes('.')) {
     fail(`${CONFIG_FILE} route pattern must be a production custom domain host.`)
   }
 }
@@ -257,12 +305,41 @@ function validateRequiredCronTrigger(config) {
 
 function validateWorkerFirstAssetRoutes(config) {
   if (config.assets?.binding !== 'ASSETS' || config.assets?.run_worker_first !== true) {
-    fail(`${CONFIG_FILE} assets.binding must be ASSETS and assets.run_worker_first must be true so dynamic JSON, SVG, CSV, and static asset fallback routes are served correctly.`)
+    fail(
+      `${CONFIG_FILE} assets.binding must be ASSETS and assets.run_worker_first must be true so dynamic JSON, SVG, CSV, and static asset fallback routes are served correctly.`
+    )
   }
 }
 
 function isLocalHostname(value) {
   return ['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(value.toLowerCase())
+}
+
+function isUnsafeProductionHostname(value) {
+  const hostname = value
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '')
+  if (
+    !hostname ||
+    isLocalHostname(hostname) ||
+    hostname.endsWith('.local') ||
+    isIP(hostname) !== 0 ||
+    hostname.includes(':')
+  ) {
+    return true
+  }
+
+  // WHATWG URL parsing accepts abbreviated, hexadecimal, and octal IPv4
+  // spellings (for example 127.1 and 0x7f.0.0.1). Reject them after parsing
+  // as well, otherwise a route that looks like a hostname can resolve to a
+  // private or loopback address in production.
+  try {
+    const parsedHostname = new URL(`https://${hostname}`).hostname.replace(/^\[|\]$/g, '')
+    return isIP(parsedHostname) !== 0
+  } catch {
+    return false
+  }
 }
 
 function extractProductionRouteHostname(value) {

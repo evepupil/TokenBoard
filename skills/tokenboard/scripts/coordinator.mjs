@@ -1,8 +1,18 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { acquireLock, releaseLock, waitForLock } from './coordinator-lock.mjs'
 import { acknowledgeSignalSource, appendSignal, drainSignalSources, readSignalSources } from './coordinator-signal.mjs'
 import { errorMessage } from './error-message.mjs'
+import { currentProcessStartIdentity } from './process-liveness.mjs'
 
 const defaultLockTimeoutMs = 60_000
 const defaultLockTimeoutRetryDelayMs = 60_000
@@ -64,10 +74,10 @@ export function coordinatedSync(trigger, options) {
   try {
     completed = runCoordinator(trigger, runtime, result)
   } catch (error) {
-    const failedResult = error instanceof SuccessfulSyncCheckpointError ||
-      error instanceof CompletedSyncPostProcessError
-      ? error.completedResult
-      : result
+    const failedResult =
+      error instanceof SuccessfulSyncCheckpointError || error instanceof CompletedSyncPostProcessError
+        ? error.completedResult
+        : result
     completed = { ...failedResult, error: errorMessage(error) }
     if (error instanceof SuccessfulSyncCheckpointError) {
       hasCheckpointError = true
@@ -109,9 +119,10 @@ function runCoordinator(trigger, runtime, result) {
     writeSuccessfulSyncCheckpoint(completed, runtime)
     return scheduleDeferredFollowUps(trigger, runtime, completed)
   } catch (error) {
-    coordinatorError = completedResult && !(error instanceof SuccessfulSyncCheckpointError)
-      ? new CompletedSyncPostProcessError(error, completedResult)
-      : error
+    coordinatorError =
+      completedResult && !(error instanceof SuccessfulSyncCheckpointError)
+        ? new CompletedSyncPostProcessError(error, completedResult)
+        : error
     throw coordinatorError
   } finally {
     if (lock.acquired) {
@@ -282,7 +293,40 @@ function buildRuntime(options = {}) {
   if (typeof options.executeSync !== 'function') {
     throw new Error('coordinatedSync requires executeSync')
   }
-  const hasCustomFileOps = Boolean(options.readFile || options.writeFile || options.unlink || options.exists || options.rename || options.link)
+  const processValue = options.process || process
+  const platform = options.platform || process.platform
+  const nodeVersion = options.nodeVersion || process.versions.node
+  const readProcessStartIdentity = options.readProcessStartIdentity
+  const runProcessIdentity = options.runProcessIdentity
+  const configuredProcessStartIdentity =
+    typeof options.processStartIdentity === 'string' && options.processStartIdentity
+      ? options.processStartIdentity
+      : undefined
+  let processStartIdentity
+  const getProcessStartIdentity = () => {
+    if (processStartIdentity) return processStartIdentity
+    processStartIdentity =
+      configuredProcessStartIdentity ||
+      (processValue === process || readProcessStartIdentity || runProcessIdentity
+        ? currentProcessStartIdentity({
+            pid: processValue.pid,
+            platform,
+            nodeVersion,
+            readFile: options.readFile,
+            readProcessStartIdentity,
+            runProcessIdentity,
+            ...(processValue === process
+              ? {}
+              : {
+                  kill: processValue.kill?.bind(processValue)
+                })
+          })
+        : undefined)
+    return processStartIdentity
+  }
+  const hasCustomFileOps = Boolean(
+    options.readFile || options.writeFile || options.unlink || options.exists || options.rename || options.link
+  )
   return {
     stateDir: readStateDir(options),
     executeSync: options.executeSync,
@@ -293,11 +337,15 @@ function buildRuntime(options = {}) {
     trailingProcess: options.trailingProcess === true,
     version: options.version || 'unknown',
     now: options.now || Date.now,
-    nodeVersion: options.nodeVersion || process.versions.node,
-    platform: options.platform || process.platform,
+    nodeVersion,
+    platform,
     runTasklist: options.runTasklist,
     sleep: options.sleep || sleepSync,
-    process: options.process || process,
+    process: processValue,
+    processStartIdentity: configuredProcessStartIdentity,
+    getProcessStartIdentity,
+    readProcessStartIdentity,
+    runProcessIdentity,
     scheduleTrailing: options.scheduleTrailing || (() => false),
     mkdir: options.mkdir || mkdirSync,
     readFile: options.readFile || ((path) => readFileSync(path, 'utf8')),
@@ -354,8 +402,10 @@ function cooldownRemainingMs(runtime) {
 }
 
 function scheduleTrailingSources(trigger, sources, runtime, remainingMs) {
-  return sources.reduce((scheduled, source) =>
-    runtime.scheduleTrailing({ ...trigger, source }, remainingMs) || scheduled, false)
+  return sources.reduce(
+    (scheduled, source) => runtime.scheduleTrailing({ ...trigger, source }, remainingMs) || scheduled,
+    false
+  )
 }
 
 function lockTimeoutRetryDelayMs(runtime) {
@@ -377,10 +427,7 @@ function scheduleDeferredFollowUps(trigger, runtime, result) {
 function writeSuccessfulSyncCheckpoint(result, runtime) {
   if (deriveStatus(result) !== 'success') return
   try {
-    runtime.writeFile(
-      join(runtime.stateDir, 'last-success.json'),
-      new Date(runtime.now()).toISOString()
-    )
+    runtime.writeFile(join(runtime.stateDir, 'last-success.json'), new Date(runtime.now()).toISOString())
   } catch (error) {
     throw new SuccessfulSyncCheckpointError(error, result)
   }
@@ -477,7 +524,9 @@ function deriveStatus(result) {
   return hasCycleError ? 'error' : 'success'
 }
 
-function numberOrDefault(value, fallback) { return typeof value === 'number' && Number.isFinite(value) ? value : fallback }
+function numberOrDefault(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
 
 function positiveIntegerOrDefault(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback

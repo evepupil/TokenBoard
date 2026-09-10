@@ -4,23 +4,46 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { collectCodexUsage } from './codex'
-import {
-  createEmptyCodexHome,
-  fileExists,
-  platformCommand,
-  tokenCountEvent,
-  writeJsonl
-} from './codex-test-helpers'
-import {
-  subagentSessionMeta,
-  totalUsageEvent
-} from './codex-subagent-usage-test-helpers'
+import { createEmptyCodexHome, fileExists, platformCommand, tokenCountEvent, writeJsonl } from './codex-test-helpers'
+import { subagentSessionMeta, totalUsageEvent } from './codex-subagent-usage-test-helpers'
 
 afterEach(() => {
   vi.unstubAllEnvs()
 })
 
 describe('collectCodexUsage scoped scans', () => {
+  test('splits context-priced usage from a non-context canonical model in full scans', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const sessionPath = join(codexHome, 'sessions', '2026', '05', '09', 'mixed.jsonl')
+    vi.stubEnv('TOKENBOARD_SINCE', 'all')
+
+    try {
+      await writeJsonl(sessionPath, [
+        { type: 'turn_context', payload: { model: 'deepseek-v4-flash' } },
+        tokenCountEvent('2026-05-09T04:24:07.234Z', 20, 'gpt-5.6-sol')
+      ])
+
+      const snapshots = await collectCodexUsage({
+        codexHome,
+        timezone: 'UTC',
+        collectedAt: '2026-05-09T10:00:00.000Z',
+        runner: async (_command, args) =>
+          args.includes('session') ? mixedModelSessionResult() : mixedModelDailyResult()
+      })
+
+      expect(snapshots).toEqual([
+        expect.objectContaining({ model: 'deepseek-v4-flash', totalTokens: 0, costUsd: 0 }),
+        expect.objectContaining({
+          model: 'gpt-5.6-sol',
+          totalTokens: 20,
+          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+        })
+      ])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   test('allows explicit full codex scan in batches', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const codexHome = await mkdtemp(join(tmpdir(), 'tokenboard-codex-home-'))
@@ -213,10 +236,12 @@ describe('collectCodexUsage scoped scans', () => {
           const homes = String(options?.env?.CODEX_HOME).split(',')
           scopedHomes.add(homes.join(','))
           expect(homes).toHaveLength(2)
-          await expect(readFile(join(homes[0], 'sessions', '2026', '04', '20', 'first.jsonl'), 'utf8'))
-            .resolves.toContain('2026-04-20')
-          await expect(readFile(join(homes[1], 'sessions', '2026', '05', '09', 'second.jsonl'), 'utf8'))
-            .resolves.toContain('2026-05-09')
+          await expect(
+            readFile(join(homes[0], 'sessions', '2026', '04', '20', 'first.jsonl'), 'utf8')
+          ).resolves.toContain('2026-04-20')
+          await expect(
+            readFile(join(homes[1], 'sessions', '2026', '05', '09', 'second.jsonl'), 'utf8')
+          ).resolves.toContain('2026-05-09')
           return args.includes('session') ? sessionResult('first') : dailyResult()
         }
       })
@@ -232,6 +257,72 @@ describe('collectCodexUsage scoped scans', () => {
 })
 
 describe('collectCodexUsage scoped since scans', () => {
+  test('maps historical subagent model names to ccusage canonical session models', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const sessionPath = join(codexHome, 'sessions', '2026', '07', '18', 'session.jsonl')
+
+    try {
+      await writeJsonl(sessionPath, [
+        { type: 'session_meta', id: 'session' },
+        { type: 'turn_context', payload: { model: 'gpt-5.5' } },
+        tokenCountEvent('2026-07-18T00:00:00.000Z', 10, 'gpt-5.5')
+      ])
+
+      const snapshots = await collectCodexUsage({
+        codexHome,
+        since: '20260718',
+        timezone: 'UTC',
+        runner: async (_command, args) =>
+          args.includes('daily')
+            ? {
+                daily: [
+                  {
+                    date: '2026-07-18',
+                    modelBreakdowns: [
+                      {
+                        modelName: 'gpt-5.6-terra',
+                        inputTokens: 10,
+                        outputTokens: 0,
+                        totalTokens: 10
+                      }
+                    ],
+                    totalTokens: 10
+                  }
+                ]
+              }
+            : {
+                sessions: [
+                  {
+                    directory: '2026/07/18',
+                    sessionFile: 'session',
+                    lastActivity: '2026-07-18T00:00:00.000Z',
+                    modelBreakdowns: [
+                      {
+                        modelName: 'gpt-5.6-terra',
+                        inputTokens: 10,
+                        outputTokens: 0,
+                        totalTokens: 10
+                      }
+                    ]
+                  }
+                ]
+              }
+      })
+
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          usageDate: '2026-07-18',
+          model: 'gpt-5.6-terra',
+          inputTokens: 10,
+          totalTokens: 10,
+          costUsd: expect.closeTo((10 * 2) / 1_000_000, 14)
+        })
+      ])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   test('uses since and the selected package manager for frozen bounded reports', async () => {
     const calls: Array<{ command: string; args: string[] }> = []
     const codexHome = await createEmptyCodexHome()
@@ -258,15 +349,15 @@ describe('collectCodexUsage scoped since scans', () => {
     expect(calls).toEqual([
       {
         command: '/opt/bin/bunx',
-        args: ['ccusage@20.0.19', 'codex', 'daily', '--json', '--offline', '--single-thread', '--since', '20260509']
+        args: ['ccusage@20.0.20', 'codex', 'daily', '--json', '--offline', '--single-thread', '--since', '20260509']
       },
       {
         command: '/opt/bin/bunx',
-        args: ['ccusage@20.0.19', 'codex', 'session', '--json', '--offline', '--single-thread', '--since', '20260509']
+        args: ['ccusage@20.0.20', 'codex', 'session', '--json', '--offline', '--single-thread', '--since', '20260509']
       },
       {
         command: '/opt/bin/bunx',
-        args: ['ccusage@20.0.19', 'codex', 'session', '--json', '--offline', '--single-thread']
+        args: ['ccusage@20.0.20', 'codex', 'session', '--json', '--offline', '--single-thread']
       }
     ])
   })
@@ -417,10 +508,7 @@ async function seedFullScanSessions(codexHome: string) {
   ])
 }
 
-function createFullScanRunner(
-  calls: Array<{ command: string; args: string[] }>,
-  scopedHomes: Set<string>
-) {
+function createFullScanRunner(calls: Array<{ command: string; args: string[] }>, scopedHomes: Set<string>) {
   return async (command: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
     calls.push({ command, args })
     scopedHomes.add(String(options?.env?.CODEX_HOME))
@@ -429,18 +517,13 @@ function createFullScanRunner(
 }
 
 function twoBatchCodexCalls() {
-  return [
-    codexCall('daily'),
-    codexCall('session'),
-    codexCall('daily'),
-    codexCall('session')
-  ]
+  return [codexCall('daily'), codexCall('session'), codexCall('daily'), codexCall('session')]
 }
 
 function codexCall(report: 'daily' | 'session') {
   return {
     command: platformCommand('npx'),
-    args: ['ccusage@20.0.19', 'codex', report, '--json', '--offline', '--single-thread']
+    args: ['ccusage@20.0.20', 'codex', report, '--json', '--offline', '--single-thread', '--timezone', 'Asia/Shanghai']
   }
 }
 
@@ -489,6 +572,36 @@ function dailyResult() {
         },
         totalTokens: 10,
         costUSD: 0.01
+      }
+    ]
+  }
+}
+
+function mixedModelSessionResult() {
+  return {
+    sessions: [
+      {
+        directory: '2026/05/09',
+        sessionFile: 'mixed',
+        lastActivity: '2026-05-09T04:24:07.234Z',
+        models: {
+          'deepseek-v4-flash': { inputTokens: 20, outputTokens: 0, totalTokens: 20 }
+        }
+      }
+    ]
+  }
+}
+
+function mixedModelDailyResult() {
+  return {
+    daily: [
+      {
+        date: '2026-05-09',
+        models: {
+          'deepseek-v4-flash': { inputTokens: 20, outputTokens: 0, totalTokens: 20 }
+        },
+        totalTokens: 20,
+        costUSD: (20 * 5) / 1_000_000
       }
     ]
   }

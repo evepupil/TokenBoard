@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { errorMessage } from '../error-message'
 
@@ -43,7 +44,7 @@ export async function querySqliteJsonRows(
   if (options.runQuery) {
     return parseSqliteJsonRows(await options.runQuery(dbFile, sql), dbFile, options.label)
   }
-  if (!options.forceExternalSqlite && await loadNodeSqlite()) {
+  if (!options.forceExternalSqlite && (await loadNodeSqlite())) {
     return queryWithNodeSqlite(dbFile, sql, options)
   }
   return queryWithSqliteBinary(dbFile, sql, options)
@@ -70,12 +71,10 @@ async function queryWithNodeSqlite(
     const rows = database.prepare(sql).all()
     return rows.map((row) => normalizeNodeSqliteRow(row, dbFile, options.label))
   } catch (error) {
-    if (isMissingFileError(error)) {
+    if (await isMissingDatabaseError(error, dbFile)) {
       throw new Error(`${options.label} database not found: ${dbFile}`)
     }
-    throw new Error(
-      `Failed to read ${options.label} SQLite data from ${dbFile}: ${errorMessage(error)}`
-    )
+    throw new Error(`Failed to read ${options.label} SQLite data from ${dbFile}: ${errorMessage(error)}`)
   } finally {
     try {
       database?.close()
@@ -115,24 +114,30 @@ async function queryWithSqliteBinary(
   const sqliteBin = resolveSqliteBin(options.sqliteBin)
   let stdout: string
   try {
-    stdout = (await execFileAsync(sqliteBin, ['-readonly', '-json', '-batch', dbFile, sql], {
-      maxBuffer: maxSqliteOutputBytes,
-      timeout: options.timeoutMs ?? defaultTimeoutMs,
-      killSignal: 'SIGKILL'
-    })).stdout
+    stdout = (
+      await execFileAsync(sqliteBin, ['-readonly', '-json', '-batch', dbFile, sql], {
+        maxBuffer: maxSqliteOutputBytes,
+        timeout: options.timeoutMs ?? defaultTimeoutMs,
+        killSignal: 'SIGKILL'
+      })
+    ).stdout
   } catch (error) {
     if (isMissingBinaryError(error)) {
       throw new Error(`${options.label} SQLite reader unavailable: ${sqliteBin} not found`)
     }
-    throw new Error(
-      `Failed to read ${options.label} SQLite data from ${dbFile}: ${errorMessage(error)}`
-    )
+    if (await isMissingDatabaseError(error, dbFile)) {
+      throw new Error(`${options.label} database not found: ${dbFile}`)
+    }
+    throw new Error(`Failed to read ${options.label} SQLite data from ${dbFile}: ${errorMessage(error)}`)
   }
   return parseSqliteJsonRows(stdout, dbFile, options.label)
 }
 
 type NodeSqliteModule = {
-  DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => {
+  DatabaseSync: new (
+    path: string,
+    options?: { readOnly?: boolean }
+  ) => {
     prepare: (sql: string) => { all: () => unknown[] }
     close: () => void
   }
@@ -179,10 +184,7 @@ export function parseSqliteJsonRows(stdout: string, dbFile: string, label: strin
  * file at checkpoint, so watching the main file alone misses usage written
  * since the last checkpoint.
  */
-export async function sqliteDatabaseMtimeMs(
-  dbFile: string,
-  statFile: (path: string) => Promise<{ mtimeMs: number }>
-) {
+export async function sqliteDatabaseMtimeMs(dbFile: string, statFile: (path: string) => Promise<{ mtimeMs: number }>) {
   const main = await statFile(dbFile)
   let latest = main.mtimeMs
   for (const sidecar of [`${dbFile}-wal`, `${dbFile}-shm`]) {
@@ -198,6 +200,26 @@ export async function sqliteDatabaseMtimeMs(
 
 export function isMissingFileError(error: unknown) {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+async function isMissingDatabaseError(error: unknown, dbFile: string) {
+  if (isMissingFileError(error)) return true
+  if (!isSqliteOpenError(error)) return false
+  try {
+    await stat(dbFile)
+    return false
+  } catch (statError) {
+    return isMissingFileError(statError)
+  }
+}
+
+function isSqliteOpenError(error: unknown) {
+  if (!(error instanceof Error)) return false
+  const code = 'code' in error ? error.code : undefined
+  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : ''
+  return (
+    (code === 'ERR_SQLITE_ERROR' || code === 1) && /unable to open database file/i.test(`${error.message}\n${stderr}`)
+  )
 }
 
 function isMissingBinaryError(error: unknown) {

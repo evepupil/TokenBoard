@@ -16,15 +16,19 @@ describe('daily report history', () => {
     ['7', 7],
     ['31', 31]
   ])('reads a configured retention value', (value, expected) => {
-    expect(dailyReportHistoryRetentionDays({
-      TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: value
-    })).toBe(expected)
+    expect(
+      dailyReportHistoryRetentionDays({
+        TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: value
+      })
+    ).toBe(expected)
   })
 
   test.each(['', '0', '32', 'abc', '7.5'])('rejects invalid retention value %s', (value) => {
-    expect(() => dailyReportHistoryRetentionDays({
-      TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: value
-    })).toThrow('TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31')
+    expect(() =>
+      dailyReportHistoryRetentionDays({
+        TOKENBOARD_DAILY_REPORT_HISTORY_DAYS: value
+      })
+    ).toThrow('TOKENBOARD_DAILY_REPORT_HISTORY_DAYS must be an integer from 1 to 31')
   })
 
   test('calculates the retention cutoff date including the current day', () => {
@@ -130,7 +134,6 @@ describe('daily report history', () => {
     expect(statements[0]).toContain('DELETE FROM daily_report_history WHERE user_id = ? AND report_date < ?')
     expect(bindings[0]).toEqual(['user_1', '2026-04-23'])
   })
-
 })
 
 function sampleReport(): DailyTokenReport {
@@ -186,11 +189,7 @@ function historyRow() {
   }
 }
 
-function statementDb(input: {
-  statements?: string[]
-  bindings?: unknown[][]
-  rows?: Array<Record<string, unknown>>
-}) {
+function statementDb(input: { statements?: string[]; bindings?: unknown[][]; rows?: Array<Record<string, unknown>> }) {
   return {
     prepare(sql: string) {
       input.statements?.push(sql)

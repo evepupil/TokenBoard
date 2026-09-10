@@ -2,6 +2,15 @@
 
 ## Active Goal Contract (Reset 2026-07-21)
 
+### Current Worktree Summary (2026-09-10)
+
+- 当前分支为 `feat/model-pricing-maintenance`，工作树保留此前所有 staged、unstaged 和两个未跟踪回归测试文件。
+- 运行时代码、迁移和直接支持测试已完成当前候选门禁；本轮新增 usage-core 严格日历日期校验、公共工具回归，
+  并统一使用根级 Prettier 配置和 `format`/`format:check` 脚本。
+- 提交与推送在当前门禁再次通过后分批执行；不进行 reset、clean、生产部署或上游分支写入。
+
+历史候选记录保留在下方折叠段中，仅用于审计，不作为当前候选的验证证据。
+
 ### Objective
 
 完成 `fix/post-merge-reliability-followups` 相对基线
@@ -473,7 +482,7 @@ Vitest `79` 文件、`576` 用例，以及基线 `git diff --check`。
 
 ## T07 Local Client And One-Month Data Verification
 
-状态：进行中（2026-07-30 路径身份修复后重新验收）
+状态：已完成（2026-09-05 当前候选复核；Codex 超大行失败边界已显式保留）
 
 2026-07-30 重新打开说明：本轮未提交的 notifier coordination、signal recovery、Codex 子代理
 计量兼容和诊断聚合代码均在此前 T07 运行态证据之后变更。历史 preview、补偿同步、锁释放和服务端
@@ -754,9 +763,42 @@ trailing 与 run-log 锁均自然释放。现有 scheduled log 还不记录每�
 Antigravity CLI、普通 Antigravity、IDE 和 LaunchAgent 的历史运行证据；当前验收不再依赖旧 preview
 或旧补偿同步结果。其后运行时代码已变更，当前 T07 必须按本节开头的前置条件重新完成。
 
+2026-09-05 当前候选验收：在 T08 所需的本机质量门禁已通过后，使用一次性隔离 `TOKENBOARD_STATE_DIR`
+完成近 30 天只读 preview；所有 preview 均未上传且未修改正式 cursor、config 或 device-link。
+Claude Code 退出码为 `0`，生成 `43` 个快照，覆盖 `2026-08-07` 至 `2026-09-05`，stderr 为空；
+Antigravity CLI 以 `--since all` 建立临时 SQLite canonical baseline，退出码为 `0`，生成 `25`
+个快照，覆盖 `2026-06-02` 至 `2026-07-02`，stderr 为空；普通 Antigravity 和 Antigravity IDE
+均退出码为 `0`、快照数为 `0` 且无 source diagnostic，表示当前窗口无可采集候选。
+Codex 在显式批准已核验 archive 符号链接目标后运行约 `179` 秒，因发现包含 usage/subagent
+metadata 的超大 JSONL 行按资源上界 fail-closed，退出码为 `1`，没有写入可确认 snapshot；stderr
+保留了超大 child/context 行的数量和最大字节数诊断，没有降级为空成功。正式目录的
+`sync.lock`、`collector-run.lock` 和 `trailing.lock` 均不存在，dispatcher 进程数为 `0`，
+LaunchAgent 当前已加载；Codex 失败对应的 `notify.signal.d/codex.json` 与
+`notify.signal.recovery.codex.json` 仍保留，作为待重试证据而非孤儿锁。`last-run.json` 的
+当前状态为 `error`，仅对应该 Codex deferred failure；日志尾部同时保留成功和错误分类，未输出
+凭证、路径或原始 usage。
+
+对上述成功 preview 的初始 `/api/v1/ingest/check` 只发送 `68` 个 snapshot key/hash，HTTP `200`，
+missing `0`、changed `2`（均为 Claude Code）；使用现有配对 profile 对 Claude Code 执行最小
+`--since 20260621` 补偿，结果为 `2 upserted/41 skipped`。重新 preview 后再次只读对账为
+`68/68` 存在、missing `0`、changed `0`、duplicate `0`。补偿后正式锁、dispatcher 和 queue
+状态再次检查，未出现新增残留锁；既有 Codex recovery signal 未被删除。
+
+2026-09-05 跨平台 OpenCode 入口探针：在 Linux nvm Node `v24.14.0` 与 Windows Git Bash Node
+`v24.14.0` 的临时候选包中，使用便携 SQLite 执行 `src/cli.ts preview --source opencode --since all`，
+两端均退出码 `0`，各生成 `1` 个快照、日期 `2026-05-26`、总 token `56554`、费用 `0.0023113`，
+stderr 为空，业务摘要一致；输出均未包含夹具中的 prompt、completion 或本地 path 字段。远程候选包、
+SQLite 工具、夹具和本地临时目录均已通过 Node `fs.rm` 精确清理并复核不存在。
+
+当前候选复核门禁：`pnpm test` 为 usage-core `13`、Web `687`、collector `920` 通过且 `3` 个
+既有平台场景跳过；`pnpm typecheck`、`node --test skills/tokenboard/scripts/*.test.mjs`
+（`527` 项）、`pnpm build`、`pnpm audit --audit-level=high`、全部 migration 顺序应用、critical
+schema、`PRAGMA foreign_key_check` 和 `git diff --check HEAD` 均通过。本段只记录 T02-T07 当前
+候选证据，不改变 T08/T09/T10 的发布和审查边界。
+
 ## T08 Full Quality Security And Documentation Gate
 
-状态：已完成（2026-07-31 当前候选）
+状态：已完成（2026-09-07 当前候选本地门禁、人工复核与外部只读复核已完成）
 
 2026-07-31 重新打开说明：2026-07-30 门禁之后，`coordinator-signal.mjs` 增加了对旧版
 Codex signal 文件名及其 drain 文件的兼容读取，并补充直接回归测试。该运行时代码和直接支持
@@ -808,6 +850,13 @@ CodeRabbit `0.7.1` 对当前未提交 37 个文件（包括两项直接支持的
 其先前关于 POSIX 字面反斜杠的建议已由本次平台限定修复和回归覆盖。该记录只覆盖当前未提交差异，
 不替代 T09 要求的整个候选独立只读审查。用户禁止 `codex-security` 插件，OMP 按指示跳过且不计为
 审查通过。
+
+2026-09-07 当前工作树增量门禁：dispatch worker marker 补充 `identityProbeStartedAt`，模型价格
+同步路由调整为先验证配置和 bearer token、再执行 IP 限流，并新增对应回归。修改后重新执行
+`pnpm test`（usage-core `13`、Web `688`、collector `939`，另有 `3` 个既有平台场景跳过）、
+`pnpm typecheck`、`pnpm build`、`node --test skills/tokenboard/scripts/*.test.mjs`（`529/529`）、
+`pnpm audit --audit-level=high` 和 `git diff --check HEAD`，全部退出码为 `0`；审计无已知高危漏洞。
+该记录只更新本地门禁证据，不构成私人 Cloudflare 部署或发布完成。
 
 2026-07-30 历史候选门禁：Codex 子代理的 additive cache counter 兼容与安全 oversized-row
 诊断聚合已完成定向及完整 workspace/skill 回归、typecheck、build、audit、migration/schema 契约、
@@ -1315,7 +1364,7 @@ skill script `402`；`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level
 
 ## T09 Independent Read-Only Review
 
-状态：已完成（2026-07-31 当前候选）
+状态：已完成（2026-09-07 当前工作树最终复核）
 
 内容：差异冻结后进行独立 reviewer 复核。
 
@@ -1411,9 +1460,22 @@ critical schema 和 `PRAGMA foreign_key_check` 均通过后，使用同一私有
 或自动 CI/CD。T09 的代码 finding 已闭环，T10 的私人部署与运行态验证已完成，剩余仅为最终敏感信息扫描、
 原子提交、推送和中文 PR 收尾。
 
+2026-08-16 当前候选状态校正：上条记录仅覆盖当时冻结候选；此后 collector、model pricing、skill 和直接
+支持测试继续发生变更，不能继承旧的 T09/T10 完成结论。当前 CodeRabbit `0.7.3` 对未提交候选完成复核，
+发现的 Codex 子代理路径读取问题已修复并补充回归；台账状态漂移也已在本条修正。T09 仍需基于当前差异
+取得有效的最终只读复核收据，OMP 按用户指示跳过且不计为通过；T10 的私人部署证据仅作为历史记录保留，
+当前提交、推送和 PR 仍未完成。
+
+2026-09-07 当前工作树最终复核：Claude Code `2.1.260` 使用默认配置和只读 plan 模式完成当前差异
+审阅，输出 `NO_ACTIONABLE_FINDINGS`；OMP `18.1.5` 同样输出 `NO_ACTIONABLE_FINDINGS`。两者均重点
+核对 dispatch worker 的身份探测时间、PID 复用、锁竞态、模型价格同步的认证/限流顺序及相关测试，
+未发现可复现的 P0-P2 行为或安全问题。复核指出的 Windows UNC、短缓存 TTL 等内容均明确属于既定
+设计边界或低概率取舍，不构成 confirmed finding；已确认的 marker 和认证限流问题已修复并完成上述
+门禁。T09 当前候选验收完成；T10 私人部署、提交、推送和 PR 仍按发布流程单独进行。
+
 ## T10 Private Cloudflare Deployment Commit And PR
 
-状态（当前候选）：已完成（2026-07-31）
+状态（当前候选）：进行中
 
 内容：仅在 T01 至 T09 完成后，对用户私人 Cloudflare 执行 guarded deploy，随后提交、
 推送并建立或更新中文 PR。
@@ -1487,12 +1549,318 @@ DST 边界提前删除历史。新增回归后，当前 `pnpm test` 通过 usage
 迁移，因此 2026-07-31 已验证的私人 Cloudflare 部署和 D1 证据仍适用于当前候选；未向 upstream、Workers
 Builds 或 GitHub Actions 部署。
 
+<details>
+<summary>历史候选过程记录（2026-08-17 至 2026-09-08，保留审计原文）</summary>
+
+## 2026-08-17 Current Candidate Revalidation
+
+本节记录当前 dirty worktree 的新证据，覆盖范围仅为本次命令实际验证的内容，不继承更早候选的部署、
+数据对账或外部审查结论。
+
+- 本机门禁重新通过：`pnpm test` 为 usage-core `9/9`、Web `647/647`、collector `766` 通过且
+  `3` 个既有平台场景跳过；`pnpm typecheck`、`pnpm build`、
+  `node --test skills/tokenboard/scripts/*.test.mjs`（`482/482`）、
+  `pnpm audit --audit-level=high` 和 `git diff --check HEAD` 均通过。凭证形态扫描无命中。
+- 官方 `https://models.dev/api.json` 实时探针返回 `186` 个 provider、`6617` 个 model，其中
+  `6198` 个包含数值 input/output 价格，最新 `sourceUpdatedAt` 为 `2026-08-16`。当前实现保留
+  provider 分层价格对象，Codex `gpt-5.6` 与 `gpt-5.6-sol` 使用独立费用键。
+- Claude Code `2.1.233` 对当前全量候选完成只读审查，结论为 `NO_ACTIONABLE_FINDINGS`；未调用
+  `ultrareview`，也未修改文件。OMP `17.3.5` 使用默认 `newapi-chat-completions/grok-4.6` 对
+  model-pricing/Codex 与 hooks/费用消费者分别完成只读定向审查，两次均返回
+  `NO_ACTIONABLE_FINDINGS`。一次覆盖整个大 diff 的 OMP 调用运行超过 23 分钟无输出后停止，
+  不计为通过证据；CodeRabbit 本轮未取得完成收据。
+- Node `v24.19.0`、npm `12.0.2`、pnpm `10.21.0`、Codex `0.147.0`、Claude/OMP 版本均已核验；
+  当前 v24.19.0 路径下的 Codex code-mode host 存在且为可执行 Mach-O。此前要求移除的全局包均不在
+  nvm 全局安装中，确认为空的旧 scoped 目录已用非递归 `rmdir` 清理。
+- 私人 Cloudflare 仅使用忽略的私有 Wrangler 配置完成部署。Wrangler
+  `4.123.0` dry-run、D1 Time Travel 信息、远程迁移（无待迁移）、critical schema/FK 查询均通过；
+  已记录本次 Worker 版本标识但不写入本台账，未操作 upstream、Workers Builds 或 GitHub Actions。
+  部署后 health、公开/兼容价格 API 均返回 `200`，ETag 条件请求返回 `304`，
+  未登录详情/设备页返回 `302`，匿名 ingest-check 返回 `401`；DeepSeek 过滤、OpenAI
+  `gpt-5.6-sol` 的 `1,050,000` context window 与 272K tiers 均可见。
+- 私人 D1 旧的 `model_pricing_sync_state` 运行态记录曾显示过期 lease；本次重新认证后的只读查询确认
+  当前状态已为成功，`locked_until` 和 `lock_token` 均为空。本轮没有本地 sync secret，因此没有绕过鉴权
+  直接改写 D1 或覆盖现有 secret；价格代次与下一次 Cron 的刷新仍按服务端配置运行。
+- TokenBoard 本机 status 显示配置、设备身份、四个时段、notify/Codex/Claude hooks 和本地
+  Antigravity 历史均存在；macOS LaunchAgent plist 存在但当前未加载，本轮未擅自改变调度生命周期。
+- 2026-08-17 复现并修复 Codex 新版 `last_token_usage` 总量不一致：当 `cached_input_tokens`、
+  `cache_write_input_tokens` 与 `total_tokens` 的组合低于可证明的输入下限时，旧 hook 解析会触发
+  `cacheReadTokens must not exceed totalTokens` 并使 Codex 增量同步失败。新增共享的 Codex 总量归一化
+  规则，已接入 session JSONL、ccusage 日报、子代理 JSONL 和 context-pricing 路径；新增缓存独立、
+  缓存包含及显式总量过低回归。修复后 collector 通过 `71` 个文件、`770` 条用例（`3` 个既有平台
+  场景跳过），并重新通过完整 workspace 测试、类型检查、构建、skill 脚本测试 `482/482`、高危审计
+  和 `git diff --check HEAD`。该修复没有执行上传、补偿同步、部署、提交或推送。
+
+- 2026-08-17 T07 当前候选运行态与对账闭环：先以一次性 `TOKENBOARD_STATE_DIR` 运行 skill 的
+  `--mode preview`，再按来源拆分处理完整性前置。Claude Code preview 退出 `0`，生成 `26` 个快照，
+  覆盖 `2026-07-18` 至 `2026-08-16`，stderr 为空；Antigravity CLI 使用 `--since all` 建立完整
+  SQLite baseline，退出 `0`，生成 `25` 个快照，覆盖 `2026-06-02` 至 `2026-07-02`，stderr 为空；
+  Codex 近月 preview 退出 `0`，生成 `81` 个快照，覆盖 `2026-07-18` 至 `2026-08-17`，诊断仅为
+  有界 oversized 行、短暂 stale cache 写入和 child correction 超出 session 行的显式保护信息，
+  没有 source failure。一次未拆分的全来源 preview 曾明确报告 Codex scope 在复制前后超过 `4 GiB`
+  字节上限，以及 Antigravity CLI 缺少完整 baseline；该失败未写入 cursor，随后拆分重试成功。
+
+- 本轮只发送 snapshot key/hash 的 `/api/v1/ingest/check` 初始结果为本地 `132` 个唯一 key、服务端
+  已有 `128` 个，缺失 `4` 个 Codex 当日 key、hash 不同 `27` 个；未输出 usage 内容。保留现有配对和
+  正式状态，分来源补偿覆盖各来源完整历史，分别为 Claude `6 upserted/20 skipped`、Antigravity CLI
+  `1 upserted/24 skipped`、Codex `8 upserted/106 skipped`，合计 `15` 个 upserted；该数字不等同于初始
+  `4` 个 missing 或 `27` 个 changed，因为完整历史还包含此前未在 check 中缺失的 key。随后使用同一批
+  `132` 个隔离 preview 快照执行幂等补偿上传，结果为 `18 upserted/114 skipped`，其中 upserted 可能
+  包含前次补偿已写入的 key，skipped 表示服务端已有或无需变更。两次补偿合并后覆盖全部 `132` 个 key；
+  最终 check 返回 HTTP `200`，`132/132` key 存在且 `0` missing、`0` changed、
+  `0` duplicate。正式 `sync.lock`、`collector-run.lock`、`trailing.lock`、dispatcher、queue signal 和
+  recovery journal 均不存在，`last-run.json` 状态为 `success`；本轮所有临时 state/preview 目录已用
+  精确 Node `fs.rm` 清理。该记录仅表示 2026-08-17 当时完成了 T07 本机近月采集、补偿和服务端 hash 对账；
+  其后 collector 改动使这份历史结果不再是当前验收证据，当前 T07 仍为 pending，不改变 T08/T09 的既有结论，
+  也不代表远端价格 Cron 已刷新。
+
+- 2026-08-17 后续门禁与交叉复核：在上述候选基础上重新执行完整门禁，`pnpm test` 通过 usage-core
+  `9/9`、Web `648/648`、collector `770/773`（3 个既有平台场景跳过）；skill 脚本测试通过 `483/483`；
+  `pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=high`（无已知漏洞）和 `git diff --check HEAD`
+  均通过。两项本轮可靠性修复已由定向测试覆盖：hooks 错误日志上限与诊断保留为 `62/62`，model-pricing
+  失败退避、force 重试和 SQLite 状态为 `50/50`。这些修复不改变既有凭据、上传或部署状态。
+- OMP `17.3.5` 使用默认已配置渠道的 `grok-4.6` 完成两次只读定向复核：model-pricing/D1 复核和
+  Codex context pricing、子代理、费用消费者及 hooks 复核均返回 `NO_ACTIONABLE_FINDINGS`。一次宽范围
+  复核输出含有无法由当前调用链复现的假设，已按证据规则丢弃，不计为 finding 或通过。Claude Code
+  `2.1.233` 随后仅通过临时环境将模型覆盖为网关已公布的 `grok-4.6`，关闭非必要标题请求并保持只读
+  plan 模式；它准确读取了 13 个 untracked 文件及全部 tracked 改动，返回 `NO_ACTIONABLE_FINDINGS`。
+  用户默认 `settings.json` 未被改变，顶层模型及四个默认模型仍为原有的 `deepseek-v4-flash`；临时
+  覆盖探针返回 `OK`（退出码 `0`）。随后用默认配置再次探针同样退出 `0` 返回 `OK`，网关模型列表包含
+  `deepseek-v4-flash`，直接 `/v1/messages` 返回 HTTP `200` 且响应模型字段一致；CLI 偶发的
+  `unrecognized_model` 为非致命诊断噪声。本次复核未启用 `ultrareview`，也未输出凭证。
+- 私人 Cloudflare 当前候选部署预检随后停止：私有配置校验、部署 dry-run 和远程 migration list 均通过，
+  但 D1 Time Travel restore point 请求返回 Cloudflare `Authentication error [10000]`。当前 OAuth
+  token 虽有 D1 写权限，仍未取得可验证的 restore point；因此没有执行 migration、Worker deploy、远端
+  数据写入或回滚操作，也没有修改 Wrangler 登录配置。
+
+### 2026-08-17 T10 Reauthentication And Private Deployment
+
+- 重新执行 `wrangler login` 后，`wrangler whoami` 确认 OAuth 会话和 D1 写权限恢复。随后使用忽略的
+  私有 Wrangler 配置成功取得新的 D1 Time Travel 信息；恢复点标识不写入本台账。
+- 私有部署前置全部通过：生产配置检查、Worker dry-run、远程 migration list（无待迁移）、critical schema
+  查询和 `git diff --check HEAD`。使用仓库现有部署 helper 完成构建、D1 migration、schema gate 和 Worker
+  发布，未触碰 upstream、Workers Builds、GitHub Actions 或自动 CI/CD。
+- 部署后匿名 HTTP 边界通过：health、首页、公开价格接口和 `/api/v1/model-pricing` 返回 `200`；ETag
+  条件请求返回 `304`；DeepSeek provider 过滤只返回 DeepSeek 模型；未登录详情/设备页返回 `302`；
+  `POST /api/v1/ingest/check` 返回 `401`。隔离浏览器打开公开首页及其 CSS、JS、logo 均为 `200`，控制台
+  无错误；当前浏览器无登录态，因此本条不声称认证后页面、复制控件或真实 collector ingest 已在本次部署后复验。
+- 私人 D1 `model_pricing_sync_state` 当前为 `success`，`model_count=6198`，`last_success_at=2026-08-16T16:16:13.237Z`、
+  `last_source_updated_at=2026-08-16`、`last_error` 为空且存在 active generation。该状态证明远端价格同步代次
+  可读，不等同于本次发布后已等待下一次 Cron；没有本地 sync secret，因此未绕过鉴权手动改写 D1。
+- 用户完成 GitHub OAuth 后，当前登录会话的 dashboard、`/dashboard/details`、`/settings/devices`、设备详情
+  弹窗和 `/settings/install` 均成功渲染；详情页显示近 30 天用量和费用，设备页显示 7 台设备，设备详情请求
+  返回 `200` 并加载安装、凭证和最近操作，安装页显示安装提示词生成按钮及 6 个复制按钮。该会话的浏览器
+  控制台无错误，未读取或导出 Cookie、账号凭据、设备 ID、upload token 或剪贴板内容。
+
+### 2026-08-17 Private Profile Ingest And Cross-Platform Runtime Probe
+
+- 为完成 T10 的真实 client ingest 验收，本轮从本机已保存的非 active server profile 读取 endpoint 和
+  凭证，仅通过子进程环境注入目标，不切换 active profile、不改上游 profile、不输出凭证，也不复用正式
+  cursor。使用一次性 state directory 执行真实同步后，Claude Code 成功 `28` 个 upsert，Antigravity CLI
+  成功 `1` 个 upsert、`24` 个 unchanged skip；临时目录已在每次运行结束后精确清理。
+- 本机 Codex 的 `archived_sessions` 是指向真实目录的 root symlink。首次未配置批准根的私有同步按设计显式
+  失败并报告 symlink 边界；随后只对本机真实目标设置一次性批准根，最近一天窗口同步成功 `7` 个 upsert。
+  使用批准根的全历史尝试持续扫描大量 oversized context/child JSONL，未进入可确认的终态，已停止且不把
+  中间输出计为成功；该性能边界保留为后续优化事项，不影响有界窗口的真实上传证据。
+- 已通过配置锁把同一个已验证的本机 Codex archive 目标写入私人 server profile 的
+  `codexSymlinkRoots`，不改变 active server；配置文件权限仍为 `0600`。后续切换到该 profile 的同步会
+  按显式根目录校验读取符号链接，越界或缺失目标仍会失败，不会退化为无界跟随。
+- Linux 远端主机（已脱敏）使用登录 shell 验证 nvm 运行时：Node `v24.14.0`、npm `11.18.0`、pnpm
+  `10.21.0`；Windows 远端主机（已脱敏）验证 Node `v24.14.0`、npm `11.18.0`、pnpm `10.13.1`。
+  Windows 主机的 pnpm 与仓库声明的 `10.21.0` 存在环境漂移；本轮仅做运行时探针，未复制仓库、安装依赖或
+  执行测试，因此该版本差异不构成仓库兼容性证据。该批次与部署文档中的早期完整测试批次及后续 Corepack
+  版本探针分开，不能替代两台主机上的当前候选完整测试。两台主机均未留下临时文件。
+- 本机正式 `sync.lock` 和 `collector-run.lock` 均已释放；`trailing.lock` 对应仍存活的 notifier 冷却进程，
+  最近 `last-run.json` 为成功，不属于孤儿锁，未强制终止。`status.mjs` 仍能读取配置、设备身份、四个
+  计划时段和 hooks，敏感字段未输出。
+
+### 2026-08-17 Codex Context-Pricing Scan Optimization
+
+- context-pricing 扫描现在复用 ccusage 已生成的 `canonicalModelsByFile`：明确归因到非上下文定价模型的
+  session 文件直接跳过 JSONL 解析；未归因、上下文定价模型或映射不明确的文件仍按原路径完整解析，费用匹配、
+  archive/session 去重和 fail-closed 错误语义不变。
+- 新增 malformed non-context 文件回归，确认已完成可靠归因的非计价文件不会阻塞上下文费用修正。本轮
+  `packages/collector` 定向测试为 `772` 通过、`3` 个既有平台场景跳过，collector typecheck 通过；随后完整
+  workspace 测试为 usage-core `9/9`、Web `648/648`、collector `772` 通过且 `3` 个既有平台场景跳过，
+  `pnpm typecheck`、`pnpm build`、skill 脚本测试 `483/483`、`pnpm audit --audit-level=high` 和全量
+  `git diff --check` 均通过。本地定向代码复核和完整门禁未发现新的代码 P1/P2；CodeRabbit 的外部复核状态
+  单独记录，不能由本地结果推定为通过。Claude/OMP 仍按既定边界不作为本轮通过证据。
+
+## 2026-08-19 Review Finding Closure
+
+- 修复 Codex mixed-model 预扫描对 `codex-auto-review` 使用空时间戳的问题，并新增回归；修复生成 hook 与
+  `notify.mjs` dispatch worker marker 的 process-start identity 校验，覆盖 PID 复用；cleanup guard 在主锁
+  删除成功后保留删除结果并进行一次有界重试，覆盖临时清理失败。
+- 当前验证：workspace 测试为 usage-core `9/9`、Web `654/654`、collector `777` 通过且 `3` 个既有平台
+  场景跳过；skill 脚本测试 `487/487`；`pnpm typecheck`、`pnpm build`、
+  `node --test skills/tokenboard/scripts/*.test.mjs` 和 `git diff --check HEAD` 均通过。本轮未重新运行
+  `pnpm audit`，不将其写作本轮验证证据。
+- 新增回归覆盖初始非上下文模型没有 token 行、随后切换到上下文定价模型的 JSONL session，保持非混合
+  历史上下文事件的 fail-closed 过滤。
+- 本轮第一次执行 CodeRabbit `0.7.3` 的 `coderabbit review --agent --uncommitted --include-untracked`，服务端返回
+  `rate_limit`（免费额度已用尽，约 41 分钟后重置），没有 `review_completed` 或 `findings: 0` 收据，因此不计为
+  当前候选的外部最终复核。此前可读取的内网地址 finding 已完成脱敏；Claude/OMP 未作为本轮通过证据，未进行
+  部署、提交或推送。
+- 随后同日一次同命令复审取得 `review_completed` 收据并返回一条代码级 `major` race 建议和一条 T07 台账建议；
+  代码 finding 已修复并补回归，T07 台账保持 pending。之后同日复审返回两条 `minor` 文档建议，分别澄清本目录的
+  多模态行保留条件和历史审查台账的 CodeRabbit 归因；两条建议均已修正。各次结果均不替代真实部署、外部渠道或
+  合并验收。
+
+## 2026-08-20 Current Review Follow-up
+
+- CodeRabbit `0.7.3` 对当前未提交候选取得完整 `review_completed` 收据；一条响应超限取消路径的 `major` finding
+  已通过保留主 size error 并补回归修复，测试顺序、有限数值断言、非法 query 拆分及严格 UTF-8 路径均已修正或核验。
+- 后续完整复审指出私人 Worker UUID 不应写入台账，以及两次补偿的作用域和重叠关系不清；两项文档建议均已修正。
+- 最后一次复审触发免费额度 `rate_limit`，没有新的 `review_completed` 收据，不计为最终外部通过。当前本地门禁和
+  迁移检查已重新通过；未执行部署、提交或推送。
+
 ## Final Acceptance
 
-- `T01` 至 `T10` 的状态全部为“已完成”，且每项验收结果来自当前 worktree、当前私人 Cloudflare 环境和
-  已推送的 PR #22。
-- 不存在已确认但未修复的行为、安全、迁移、兼容性、性能或数据正确性问题。
-- 当前分支通过全量质量门禁、安全扫描和两套独立复核；不可用的外部审查明确标为未覆盖。
-- 私人 Cloudflare 的真实部署、D1 migration 和现有 collector 数据上传已验证；失败时有已验证
-  的 restore point/Worker version 回滚路径。
-- 最终差异边界干净，最新提交 `103dec9` 已推送，中文 PR #22 具备完整执行与回滚说明且不含秘密。
+当前候选的 T07 本机近月采集、补偿和服务端 hash 对账已于 2026-09-05 完成；Codex 超大行按资源上界
+fail-closed 的可复现边界和保留的 recovery signal 已在 T07 当前候选验收段明确记录。此前 pending 说明仅
+适用于更早的候选快照。本条补充完成私人 profile 的真实 client ingest 和跨平台运行时探针；本轮
+context-pricing、hook lock 修复后的本机质量 gate 已重新通过。T09 的历史
+Claude/OMP 只读复核不覆盖本轮新增精确 diff；CodeRabbit 首次调用受限流，随后取得完成收据的复审先后报告一条代码级
+`major` race、一条 T07 台账建议和两条 `minor` 文档建议，均已修正；本轮 2026-08-20 复审的代码与文档建议也已修正，
+最后一次复审再次受免费额度限流，没有新的完成收据。
+该复审不替代当前候选的真实部署或合并验收。T10 私人 Worker 的部署、
+迁移、schema、匿名边界、价格 API 及认证后页面 gate 均早于随后记录的 context-pricing、collector 和 hook lock
+改动，因此不覆盖当前新增 diff；当前候选尚未重新部署验证。当前本机
+collector 的 active profile 仍不是该私人 Worker；本轮通过一次性环境注入私人 profile 完成了真实来源上传，
+没有改变 active profile。原子提交、推送和中文 PR 仍未执行。
+工作树继续保留 staged、unstaged 和 untracked 改动，不得把本节证据写成“PR 已提交”或“上游已合并”。
+
+- 当前差异边界保持 dirty；未执行 reset、clean、commit 或 push。
+- CodeRabbit 的第一次调用受服务限流；随后已取得完成收据的复审先后报告一条代码级 `major` race、一条 T07 台账建议
+ 以及两条 `minor` 文档建议。代码 finding 和文档建议均已修复并补回归；历史复审当时的 T07 pending 状态已由
+ 2026-09-05 当前候选验收取代；2026-08-20 的复审
+  建议也已修正，最后一次复审再次受免费额度限流，没有新的完成收据。本次修复后已重新执行本地门禁：workspace
+  测试为 usage-core `9/9`、Web `656/656`、collector `780` 通过且 `3` 个既有平台场景跳过，skill 脚本测试
+  `491/491`，`pnpm typecheck`、`pnpm build` 和 `git diff --check HEAD` 均通过；真实部署和合并验收仍未覆盖。Claude/OMP 的历史结果不
+  覆盖本轮新增 diff，仍按未覆盖面记录。
+- 私人 D1 曾观察到过期 `running` lease；后续只读查询已确认当前状态为 `success`，`locked_until` 和
+  `lock_token` 为空且存在 active generation。该历史观察不再作为当前阻塞项；本机未加载 LaunchAgent
+  仍是未改变的调度生命周期边界。
+- Codex 全历史索引的完整终态仍未取得，远端价格 Cron 的下一次刷新也未在本轮等待；这两项不能被有界
+  上传或当前 D1 成功状态替代。最终提交、推送和 PR 仍须单独执行并保留发布边界。
+
+## 2026-09-05 Current Candidate Review Loop
+
+本节覆盖此前台账记录之后的当前 dirty worktree，不继承旧候选的测试计数、部署或外部复核结果。
+
+- 完整 `pnpm test` 退出码为 `0`：usage-core `13/13`、Web `687/687`、collector `935` 通过，另有
+  `3` 个既有平台场景按设计跳过。`pnpm typecheck`、`pnpm build`、
+  `node --test skills/tokenboard/scripts/*.test.mjs`（`528/528`）、
+  `pnpm audit --audit-level=high`（`No known vulnerabilities found`）和 `git diff --check HEAD` 均通过。
+- 复核发现并修复了 5 个确定性问题：Codex session-tail 哈希短读、Pi 模型名空白、Pi `cacheWrite1h`
+  费用回退、非 Claude/Codex 来源错误接受 `--until`、以及 Codex hook acknowledgement 重复挂载。
+  每项均有定向回归，collector 定向回归 `80/80` 通过；修复后完整 workspace 门禁已重新执行。
+- CodeRabbit `0.7.6` 分目录复核均取得 `review_completed`：`packages/collector`（修复前 1 条 short-read
+  finding，修复后 `findings: 0`）、`apps/web` `0`、`packages/usage-core` `0`、`skills/tokenboard` `0`、
+  `docs`（3 条证据记录建议，修正后 `0`）。全仓调用因 `287` 个文件超过免费上限 `150` 返回
+  `too_many_files`，没有结果，未将其当作通过；分目录结果覆盖了所有运行时代码目录。
+- docs 复核记录已明确 dirty-worktree 私人部署只能作为验证证据，不是 release artifact；T08 手工审计记录补齐
+  `Created`/`Last updated`，并追加当前候选门禁和 finding 闭环说明。
+- 本轮没有使用 `codex-security`，没有提交、推送、部署、重启、reset、clean 或删除用户已有工作树内容。
+  当前候选仍未重新执行私人 Cloudflare 部署、Windows/Linux 全量测试或合并验收；T09 的 Claude/OMP 结果不覆盖
+  本轮新增精确 diff，OMP 是否运行也不改变该边界。
+
+## 2026-09-06 Current Candidate Cross-Platform And External Review Closure
+
+本节只记录当前 dirty worktree 的新增验证，不回写或替代更早候选的部署、上传和合并证据。
+
+- 本机重新执行 `pnpm test`，usage-core 为 `13/13`、Web 为 `688/688`、collector 为 `937` 通过，另有
+  `3` 个既有平台场景按设计跳过；`pnpm typecheck`、`pnpm build`、`pnpm audit --audit-level=high`（无已知漏洞）、
+  `node --test skills/tokenboard/scripts/*.test.mjs`（`528/528`）和 `git diff --check HEAD` 均通过。
+- Windows 与 Linux 远程候选均使用 Node `v24.14.0` 完成真实测试。Linux 首次失败原因是临时测试目录中的
+  SQLite 二进制未加入 `PATH`，未涉及源码失败；补充该临时路径后复测为 `81` 个文件、`937` 个测试通过，`3` 个
+  既有平台场景跳过。Windows Git Bash 全量测试此前已退出 `0`；本轮只删除本次测试目录，不触碰已有 checkout。
+- OMP `18.1.5` 使用默认模型完成当前工作树只读复核，最终输出为 `NO_ACTIONABLE_FINDINGS`。Claude Code `2.1.260`
+  完成当前工作树只读复核，未确认 P0/P1；报告中的性能、诊断和可维护性建议未能形成当前调用链可确定复现的
+  P0-P2 缺陷，因此没有扩大本原子任务的业务改动范围。
+- 随后仅针对本节新增文档和属性差异的 OMP 窄审查返回空输出，未计为通过；Claude 对同一新增差异完成只读复核并
+  返回 `NO_ACTIONABLE_FINDINGS`。此前完整代码候选的 OMP 结果仍按其实际覆盖范围记录，不与空输出混同。
+- 为避免 Windows `core.autocrlf` 或临时归档再次把 `.mjs` 等源码转换为 CRLF，新增 `.gitattributes` 中 JS/TS/JSON/SQL
+  等源码扩展名的显式 `eol=lf` 规则；现有 `.bat`、`.cmd`、`.ps1` 的 CRLF 规则保持不变。
+- 本轮在本机、Windows 和 Linux 创建的精确临时目录均已删除并复核不存在；没有留下 reviewer、测试或 SQLite
+  临时进程。当前工作树的 staged、unstaged 和 untracked 改动仍原样保留，未执行 reset、clean、commit、push、
+  私人 Cloudflare 部署或生产迁移，因此 T10 发布闭环仍需单独进行。
+
+## 2026-09-06 Current Candidate Review Follow-up
+
+本节只记录本轮在上述 dirty worktree 上新增的两项可靠性修复和实时复核结果；不覆盖此前远程 checkout、部署或
+历史外部审查证据。
+
+- Antigravity SQLite bounded metadata scan 不再用普通 `scanLimit` 截断
+  `forceFullScanCascadeHashes`。强制修复项全部进入本轮 metadata scan，普通候选仍由原有 scan limit 和
+  `maxDbFiles` 控制；新增回归覆盖 20 个强制 cascade 超过 16 项普通扫描上限的场景。
+- pending snapshot group retry 新增有界 `pendingSnapshotRetryCursor`。当首批上传持续失败时，后续运行会
+  从下一组继续轮换，不再永久饿死排序靠后的 pending group；空集合、旧 cursor、limit=0 和字段长度均保持
+  兼容/有界。新增连续两批轮换回归。
+- 两项回归在修复前均确定失败，修复后 collector 定向测试为 `939` 通过、`3` 个既有平台场景跳过，collector
+  typecheck 通过。随后完整 `pnpm test` 为 usage-core `13/13`、Web `688/688`、collector `939` 通过且
+  `3` 个既有平台场景跳过；`pnpm typecheck`、`pnpm build`、skill scripts `528/528`、
+  `pnpm audit --audit-level=high`（无已知漏洞）及 `git diff --check HEAD` 均通过。
+- OMP `18.1.5` 的第二次全量复核正确读取当前 194 个 dirty 文件并给出无可复现 P0-P3 的报告；其随后一次
+  全量复核和一次窄复核产生与当前代码/测试冲突的泛化建议，已逐条核对后丢弃，不计为 finding。Claude Code
+  `2.1.260` 本轮全量和窄复核均未产生终稿；全量会话无输出后中止，bare 模式明确返回未登录，故 Claude 本轮
+  不计为通过。此前台账中较早的 Claude/OMP 结果不覆盖本轮新增两项代码差异。
+- 两台远程主机的 checkout 分别为 Linux `7dbab072`、Windows `c3351e75`，与本机候选 `d25e5ea6` 不同；
+  本轮未把旧 checkout 的历史测试结果冒充当前候选的跨平台证据，也未修改远端文件或留下临时目录。
+
+## 2026-09-07 Warm Hook Reporting Revalidation
+
+本轮 CodeRabbit 分目录复核发现 `warm-hooks --source all` 的结果列表曾包含
+`antigravity-cli`，但实际 warm 流程只处理 Claude Code 和 Codex；这会把未执行的来源报告为已 warm。
+现已将 warm 来源集合收敛为 `claude-code`、`codex`，并新增输出回归，确认命令输出只报告实际处理的来源，
+同时保留正常 sync 的 hook cursor warming 行为。
+
+- 修复后 `pnpm test` 退出码为 `0`：usage-core `13`、Web `688`、collector `939`，另有 `3` 个既有平台
+  场景按设计跳过；`pnpm typecheck`、`pnpm build`、skill scripts `529/529`、
+  `pnpm audit --audit-level=high`、D1 migration/schema/FK 契约和 `git diff --check HEAD` 均通过。
+- CodeRabbit `0.7.6` 对 `packages`、`apps`、`skills`、`docs` 分目录均取得 `review_completed` 且
+  `findings: 0`。全仓调用因当前 `195` 个文件超过免费上限 `150` 被拒绝，不计为通过。
+- OMP 以当前源码片段完成窄审查并返回 `NO_ACTIONABLE_FINDINGS`。Claude 的全量和窄范围调用均未在约
+  12 分钟内产生最终收据，已停止并明确记为未覆盖；不把空输出当作通过。
+- 本轮未部署、提交、推送、重启、reset、clean 或删除既有工作树内容；T10 私人 Cloudflare 发布、原子
+  提交、推送和中文 PR 仍需单独执行，远程旧 checkout 测试结果不替代当前候选的跨平台验收。
+
+## 2026-09-08 Current Candidate Verification Closure
+
+本节只记录本轮对当前工作树的实时验证，不继承更早候选的测试、部署或外部审查结论。
+
+- 顶层 `pnpm test` 退出码为 `0`：usage-core `13/13`、Web `689/689`、collector `944` 通过，另有
+  `3` 个既有平台场景按设计跳过。`pnpm typecheck`、`pnpm build`、
+  `node --test skills/tokenboard/scripts/*.test.mjs`（`543/543`）、
+  `pnpm audit --audit-level=high`（`No known vulnerabilities found`）和 `git diff --check HEAD`
+  均退出码为 `0`。
+- 本轮关键回归定向验证通过：Codex 与 Antigravity history DB 为 `61/61`，Web model-pricing、migration
+  和 schema 契约为 `63/63`。两组测试覆盖 Codex context-pricing reconciliation 有界重试、混合模型恢复，
+  以及 Antigravity SQLite 游标锚点部分持久化和重建检测。
+- Claude Code `2.1.260` 使用用户默认配置、只读 plan 模式完成当前工作树全量审查，最终收据为
+  `NO_ACTIONABLE_FINDINGS`；未限制时间或 token 预算，未启用 `ultrareview`，未修改配置、源码或 Git
+  状态。其报告中列出的候选路径均已回到当前调用链和回归测试核对，没有确认的 P0-P2 缺陷。
+- 本轮没有新增 OMP 或 CodeRabbit 完成收据；按既定规则不把空输出、限流或历史结果当作通过证据。OMP
+  仍按用户指示跳过，CodeRabbit 的可用性不影响本轮 Claude 和本地门禁结论。
+- 当前工作树仍保留既有 staged、unstaged 和两个 untracked 直接支持测试文件；本轮没有执行 `reset`、
+  `clean`、提交、推送、部署、远程迁移或生产生命周期操作。T10 的私人 Cloudflare 发布、原子提交、
+  推送和中文 PR 仍是独立发布步骤，不能由本轮本地验证替代。
+
+</details>
+
+## 2026-09-10 Current Candidate Cleanup And Review Closure
+
+本节记录当前 dirty worktree 的收尾状态，不把更早候选的部署或外部渠道证据回写为当前候选结果。
+
+- 本轮只删除了两个有明确生成物归因且被 `.gitignore` 排除的目录：`apps/web/dist` 和
+  `node_modules/.vite`。没有删除源码、测试、迁移、文档或用户已有的 staged、unstaged 和 untracked
+  改动；两个直接支持测试文件 `packages/collector/src/iso-calendar-date.test.ts` 和
+  `packages/collector/src/providers/codex-session-scope-root-race.test.ts` 继续保留。
+- 当前候选完整门禁已通过：usage-core `31/31`、Web `693/693`、collector `946` 通过，另有 `3` 个
+  既有平台场景按设计跳过；skill 脚本 `544/544`；`pnpm typecheck`、`pnpm build`、`pnpm format:check`、
+  `git diff --check HEAD` 均通过。构建生成的 `apps/web/dist` 已在门禁后再次精确清理，避免把产物留在工作树。
+- Claude Code 和 OMP 均使用默认模型完成当前候选的最终只读复核，均返回 `NO_ACTIONABLE_FINDINGS`；
+  未发现可复现的 P0-P2 缺陷。该结果只覆盖当前复核时的本地差异，不等于私人 Cloudflare 部署、提交、
+  推送或上游合并完成。
+- 当前文档已同步模型价格目录的公开/兼容接口、分页与 ETag、Cron 与 D1 锁、手动同步认证和按解析 token
+  的限流边界。当前分支仍保持 dirty；未执行 `reset`、`clean`、提交、推送、部署或生产迁移。

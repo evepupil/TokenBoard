@@ -1,6 +1,6 @@
 import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { describe, expect, test } from 'vitest'
-import { decompressZstdFrames, isZstdBuffer, scanZstdFrames } from './zstd-frames'
+import { decompressZstdFrame, decompressZstdFrames, isZstdBuffer, scanZstdFrames } from './zstd-frames'
 
 // DSH writes frames with a content checksum.
 const checksumOptions = { params: { [constants.ZSTD_c_checksumFlag]: 1 } }
@@ -21,13 +21,31 @@ describe('zstd frames', () => {
   })
 
   test('decodes frames written with a content checksum', () => {
-    const stream = Buffer.concat([
-      frame('a\n', checksumOptions),
-      frame('b\n', checksumOptions)
-    ])
+    const stream = Buffer.concat([frame('a\n', checksumOptions), frame('b\n', checksumOptions)])
 
     expect(scanZstdFrames(stream)).toHaveLength(2)
     expect(decompressZstdFrames(stream).toString()).toBe('a\nb\n')
+  })
+
+  test('enforces a per-frame decompressed output limit', () => {
+    const stream = frame('0123456789')
+    const [range] = scanZstdFrames(stream)
+
+    expect(() => decompressZstdFrame(stream, range, { maxOutputLength: 5 })).toThrow(/larger than 5 bytes/)
+  })
+
+  test('accepts the currently unused frame-header bit', () => {
+    const stream = frame('unused-bit\n')
+    stream[4] |= 0x10
+
+    expect(decompressZstdFrames(stream).toString()).toBe('unused-bit\n')
+  })
+
+  test('rejects the reserved frame-header bit', () => {
+    const stream = frame('reserved-bit\n')
+    stream[4] |= 0x08
+
+    expect(() => scanZstdFrames(stream)).toThrow('reserved frame-header bit')
   })
 
   test('keeps complete frames when the last one is torn mid-append', () => {

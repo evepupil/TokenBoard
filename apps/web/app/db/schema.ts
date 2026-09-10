@@ -1,13 +1,29 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import {
-  accounts, auditLogs, deviceInstallations, devices, pairingCodes, profiles,
-  sessions, uploadTokens, users, verifications
+  accounts,
+  auditLogs,
+  deviceInstallations,
+  devices,
+  pairingCodes,
+  profiles,
+  sessions,
+  uploadTokens,
+  users,
+  verifications
 } from './schema-identity'
 
 export {
-  accounts, auditLogs, deviceInstallations, devices, pairingCodes, profiles,
-  sessions, uploadTokens, users, verifications
+  accounts,
+  auditLogs,
+  deviceInstallations,
+  devices,
+  pairingCodes,
+  profiles,
+  sessions,
+  uploadTokens,
+  users,
+  verifications
 } from './schema-identity'
 
 export const dailyUsage = sqliteTable(
@@ -195,15 +211,117 @@ export const dailyReportHistory = sqliteTable(
   ]
 )
 
-export const apiRateLimits = sqliteTable('api_rate_limits', {
-  key: text('key').notNull().primaryKey(),
-  count: integer('count').notNull().default(0),
-  resetAt: text('reset_at').notNull(),
+export const apiRateLimits = sqliteTable(
+  'api_rate_limits',
+  {
+    key: text('key').notNull().primaryKey(),
+    count: integer('count').notNull().default(0),
+    resetAt: text('reset_at').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (table) => [index('api_rate_limits_reset_idx').on(table.resetAt)]
+)
+
+export const modelPricing = sqliteTable(
+  'model_pricing',
+  {
+    provider: text('provider').notNull(),
+    modelId: text('model_id').notNull(),
+    displayName: text('display_name').notNull(),
+    inputCostPerMillion: real('input_cost_per_million').notNull(),
+    outputCostPerMillion: real('output_cost_per_million').notNull(),
+    cacheReadCostPerMillion: real('cache_read_cost_per_million'),
+    cacheWriteCostPerMillion: real('cache_write_cost_per_million'),
+    contextWindow: integer('context_window').notNull(),
+    maxInputTokens: integer('max_input_tokens'),
+    maxOutputTokens: integer('max_output_tokens'),
+    releaseDate: text('release_date'),
+    sourceUpdatedAt: text('source_updated_at'),
+    officialDocsUrl: text('official_docs_url').notNull(),
+    sourceUrl: text('source_url').notNull(),
+    pricingJson: text('pricing_json').notNull(),
+    isDeprecated: integer('is_deprecated', { mode: 'boolean' }).notNull().default(false),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    syncGeneration: text('sync_generation').notNull(),
+    fetchedAt: text('fetched_at').notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.modelId] }),
+    index('model_pricing_active_idx').on(table.isActive, table.provider, table.modelId),
+    index('model_pricing_active_generation_idx').on(
+      table.isActive,
+      table.syncGeneration,
+      table.provider,
+      table.modelId
+    ),
+    index('model_pricing_source_updated_idx').on(table.sourceUpdatedAt)
+  ]
+)
+
+export const modelPricingSyncState = sqliteTable('model_pricing_sync_state', {
+  id: text('id').primaryKey(),
+  sourceUrl: text('source_url').notNull(),
+  status: text('status').notNull(),
+  lockToken: text('lock_token'),
+  lockedUntil: text('locked_until'),
+  lastStartedAt: text('last_started_at').notNull(),
+  lastSuccessAt: text('last_success_at'),
+  lastFailureAt: text('last_failure_at'),
+  lastSourceUpdatedAt: text('last_source_updated_at'),
+  modelCount: integer('model_count').notNull().default(0),
+  activeGeneration: text('active_generation'),
+  lastError: text('last_error'),
   updatedAt: text('updated_at').notNull()
-}, (table) => [index('api_rate_limits_reset_idx').on(table.resetAt)])
+})
+
+export const modelPricingStaging = sqliteTable(
+  'model_pricing_staging',
+  {
+    generationId: text('generation_id').notNull(),
+    provider: text('provider').notNull(),
+    modelId: text('model_id').notNull(),
+    displayName: text('display_name').notNull(),
+    inputCostPerMillion: real('input_cost_per_million').notNull(),
+    outputCostPerMillion: real('output_cost_per_million').notNull(),
+    cacheReadCostPerMillion: real('cache_read_cost_per_million'),
+    cacheWriteCostPerMillion: real('cache_write_cost_per_million'),
+    contextWindow: integer('context_window').notNull(),
+    maxInputTokens: integer('max_input_tokens'),
+    maxOutputTokens: integer('max_output_tokens'),
+    releaseDate: text('release_date'),
+    sourceUpdatedAt: text('source_updated_at'),
+    officialDocsUrl: text('official_docs_url').notNull(),
+    sourceUrl: text('source_url').notNull(),
+    pricingJson: text('pricing_json').notNull(),
+    isDeprecated: integer('is_deprecated', { mode: 'boolean' }).notNull().default(false),
+    fetchedAt: text('fetched_at').notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.generationId, table.provider, table.modelId] }),
+    index('model_pricing_staging_generation_idx').on(table.generationId)
+  ]
+)
 
 export const schema = {
-  users, sessions, accounts, verifications, profiles, uploadTokens, pairingCodes, devices, deviceInstallations, auditLogs,
-  dailyUsage, dailyUsageSummary, userUsageTotals, usageSummaryBackfillState,
-  webhookSubscriptions, webhookDeliveryLogs, dailyReportHistory, apiRateLimits
+  users,
+  sessions,
+  accounts,
+  verifications,
+  profiles,
+  uploadTokens,
+  pairingCodes,
+  devices,
+  deviceInstallations,
+  auditLogs,
+  dailyUsage,
+  dailyUsageSummary,
+  userUsageTotals,
+  usageSummaryBackfillState,
+  webhookSubscriptions,
+  webhookDeliveryLogs,
+  dailyReportHistory,
+  apiRateLimits,
+  modelPricing,
+  modelPricingSyncState,
+  modelPricingStaging
 }

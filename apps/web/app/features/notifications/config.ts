@@ -110,20 +110,12 @@ export function publicLeaderboardUrl(env: Pick<WebhookEnv, 'BETTER_AUTH_URL'>) {
 }
 
 const providerHostRules: Record<WebhookProvider, (url: URL) => boolean> = {
-  wecom: (url) => (
-    url.host === 'qyapi.weixin.qq.com' &&
-    url.pathname === '/cgi-bin/webhook/send' &&
-    hasQueryToken(url, 'key')
-  ),
-  dingtalk: (url) => (
-    url.host === 'oapi.dingtalk.com' &&
-    url.pathname === '/robot/send' &&
-    hasQueryToken(url, 'access_token')
-  ),
-  feishu: (url) => (
-    ['open.feishu.cn', 'open.larksuite.com'].includes(url.host) &&
-    hasPathToken(url, '/open-apis/bot/v2/hook/')
-  )
+  wecom: (url) =>
+    url.host === 'qyapi.weixin.qq.com' && url.pathname === '/cgi-bin/webhook/send' && hasQueryToken(url, 'key'),
+  dingtalk: (url) =>
+    url.host === 'oapi.dingtalk.com' && url.pathname === '/robot/send' && hasQueryToken(url, 'access_token'),
+  feishu: (url) =>
+    ['open.feishu.cn', 'open.larksuite.com'].includes(url.host) && hasPathToken(url, '/open-apis/bot/v2/hook/')
 }
 
 function hasQueryToken(url: URL, name: string) {

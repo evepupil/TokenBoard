@@ -2,10 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'vitest'
-import {
-  isSkippedOversizedSessionJsonlLine,
-  readSessionJsonlLines
-} from './session-jsonl-line-reader'
+import { isSkippedOversizedSessionJsonlLine, readSessionJsonlLines } from './session-jsonl-line-reader'
 
 describe('readSessionJsonlLines', () => {
   test('preserves LF, CRLF, and CR JSONL separators', async () => {
@@ -25,11 +22,7 @@ describe('readSessionJsonlLines', () => {
         lines.push(line)
       }
 
-      expect(lines).toEqual([
-        '{"type":"session_meta"}',
-        '{"type":"summary"}',
-        '{"type":"progress"}'
-      ])
+      expect(lines).toEqual(['{"type":"session_meta"}', '{"type":"summary"}', '{"type":"progress"}'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -86,9 +79,7 @@ describe('readSessionJsonlLines', () => {
 
       expect(lines).toHaveLength(2)
       expect(isSkippedOversizedSessionJsonlLine(lines[0])).toBe(true)
-      expect(isSkippedOversizedSessionJsonlLine(lines[0]) && lines[0].byteLength).toBe(
-        Buffer.byteLength(oversized)
-      )
+      expect(isSkippedOversizedSessionJsonlLine(lines[0]) && lines[0].byteLength).toBe(Buffer.byteLength(oversized))
       expect(lines[1]).toBe(later)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -573,10 +564,13 @@ describe('readSessionJsonlLines', () => {
 
     try {
       await mkdir(dirname(filePath), { recursive: true })
-      await writeFile(filePath, `${JSON.stringify({
-        type: 'response_item',
-        payload: { text: 'x'.repeat(65) }
-      })}\n`)
+      await writeFile(
+        filePath,
+        `${JSON.stringify({
+          type: 'response_item',
+          payload: { text: 'x'.repeat(65) }
+        })}\n`
+      )
 
       await expect(async () => {
         for await (const _line of readSessionJsonlLines({
@@ -598,10 +592,13 @@ describe('readSessionJsonlLines', () => {
 
     try {
       await mkdir(dirname(filePath), { recursive: true })
-      await writeFile(filePath, `${JSON.stringify({
-        type: 'unknown_record',
-        payload: { text: 'x'.repeat(512) }
-      })}\n`)
+      await writeFile(
+        filePath,
+        `${JSON.stringify({
+          type: 'unknown_record',
+          payload: { text: 'x'.repeat(512) }
+        })}\n`
+      )
 
       await expect(async () => {
         for await (const _line of readSessionJsonlLines({

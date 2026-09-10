@@ -42,7 +42,14 @@ describe('UsageDetailsPanel', () => {
               cacheReadRate: 3456 / 123456,
               costUsd: 42.31,
               sessionCount: 12,
-              sourceSplit: [{ source: 'codex', totalTokens: 123456, totalTokensWithoutCacheRead: 120000, cacheReadRate: 3456 / 123456 }],
+              sourceSplit: [
+                {
+                  source: 'codex',
+                  totalTokens: 123456,
+                  totalTokensWithoutCacheRead: 120000,
+                  cacheReadRate: 3456 / 123456
+                }
+              ],
               modelRows: []
             }
           ],
@@ -190,37 +197,43 @@ describe('UsageDetailsPanel', () => {
               cacheReadRate: 0.1,
               costUsd: 0,
               sessionCount: 2,
-              sourceSplit: [{ source: 'antigravity-ide', totalTokens: 1000, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.1 }],
-              modelRows: [{
-                usageDate: '2026-06-10',
-                source: 'antigravity-ide',
-                model: 'Gemini 3.5 Flash',
-                inputTokens: 500,
-                outputTokens: 400,
-                cacheCreationTokens: 0,
-                cacheReadTokens: 100,
-                totalTokens: 1000,
-                totalTokensWithoutCacheRead: 900,
-                cacheReadRate: 0.1,
-                costUsd: 0,
-                sessionCount: 2
-              }]
+              sourceSplit: [
+                { source: 'antigravity-ide', totalTokens: 1000, totalTokensWithoutCacheRead: 900, cacheReadRate: 0.1 }
+              ],
+              modelRows: [
+                {
+                  usageDate: '2026-06-10',
+                  source: 'antigravity-ide',
+                  model: 'Gemini 3.5 Flash',
+                  inputTokens: 500,
+                  outputTokens: 400,
+                  cacheCreationTokens: 0,
+                  cacheReadTokens: 100,
+                  totalTokens: 1000,
+                  totalTokensWithoutCacheRead: 900,
+                  cacheReadRate: 0.1,
+                  costUsd: 0,
+                  sessionCount: 2
+                }
+              ]
             }
           ],
-          modelRows: [{
-            usageDate: '2026-06-10',
-            source: 'antigravity-ide',
-            model: 'Gemini 3.5 Flash',
-            inputTokens: 500,
-            outputTokens: 400,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 100,
-            totalTokens: 1000,
-            totalTokensWithoutCacheRead: 900,
-            cacheReadRate: 0.1,
-            costUsd: 0,
-            sessionCount: 2
-          }]
+          modelRows: [
+            {
+              usageDate: '2026-06-10',
+              source: 'antigravity-ide',
+              model: 'Gemini 3.5 Flash',
+              inputTokens: 500,
+              outputTokens: 400,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 100,
+              totalTokens: 1000,
+              totalTokensWithoutCacheRead: 900,
+              cacheReadRate: 0.1,
+              costUsd: 0,
+              sessionCount: 2
+            }
+          ]
         }}
       />
     )

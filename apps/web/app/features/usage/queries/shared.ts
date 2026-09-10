@@ -21,7 +21,5 @@ export function summaryRangeBindings(
   startDate: string,
   endDate: string
 ) {
-  return summaryStrict
-    ? [userId, startDate, endDate]
-    : [userId, startDate, endDate, userId, startDate, endDate]
+  return summaryStrict ? [userId, startDate, endDate] : [userId, startDate, endDate, userId, startDate, endDate]
 }

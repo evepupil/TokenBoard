@@ -5,11 +5,7 @@ import { Input, Label } from '../../components/ui/input'
 import { CreateSubscriptionForm } from './create-subscription-form'
 import { DailyReportHistoryCard } from './report-history-card'
 import type { DailyReportHistoryItem } from './report-history-item'
-import {
-  ScheduleTimeFields,
-  ScheduleWeekdayFields,
-  scheduleRuleLabel
-} from './schedule-fields'
+import { ScheduleTimeFields, ScheduleWeekdayFields, scheduleRuleLabel } from './schedule-fields'
 import type { WebhookSubscriptionSummary } from './schema'
 
 export function NotificationsPage(props: {
@@ -80,8 +76,12 @@ function NotificationFlash(props: {
         </p>
       ) : null}
       {props.saved ? <p class="app-flash-success p-3 text-sm">通知设置已保存。</p> : null}
-      {props.tested ? <p class="app-flash-success p-3 text-sm">测试预览通知已发送，内容使用当前配置和今日统计。</p> : null}
-      {props.testFailed ? <p class="app-flash-error p-3 text-sm">测试预览通知发送失败，请检查 webhook 配置和最近错误。</p> : null}
+      {props.tested ? (
+        <p class="app-flash-success p-3 text-sm">测试预览通知已发送，内容使用当前配置和今日统计。</p>
+      ) : null}
+      {props.testFailed ? (
+        <p class="app-flash-error p-3 text-sm">测试预览通知发送失败，请检查 webhook 配置和最近错误。</p>
+      ) : null}
       {props.formErrorMessage ? <p class="app-flash-error p-3 text-sm">{props.formErrorMessage}</p> : null}
     </>
   )
@@ -112,11 +112,19 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
     <article class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
-          <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">{providerLabel(props.subscription.provider)}</p>
+          <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">
+            {providerLabel(props.subscription.provider)}
+          </p>
           <h2 class="mt-1 break-words text-lg font-black">{props.subscription.name}</h2>
           <p class="mt-1 break-all text-sm text-[var(--app-muted)]">{props.subscription.webhookUrlMasked}</p>
         </div>
-        <span class={props.subscription.enabled ? 'app-status-pill app-status-pill-ok' : 'app-status-pill app-status-pill-warning'}>
+        <span
+          class={
+            props.subscription.enabled
+              ? 'app-status-pill app-status-pill-ok'
+              : 'app-status-pill app-status-pill-warning'
+          }
+        >
           {props.subscription.enabled ? '已启用' : '已停用'}
         </span>
       </div>
@@ -190,25 +198,44 @@ function Meta(props: { label: string; value: string }) {
 function SubscriptionActions(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap md:col-span-2">
-      <Button class="w-full sm:w-auto" type="submit" name="action" value="update" data-submitting-label="正在保存...">保存</Button>
-      <SubscriptionAction action="test" submittingLabel="正在发送...">测试发送</SubscriptionAction>
+      <Button class="w-full sm:w-auto" type="submit" name="action" value="update" data-submitting-label="正在保存...">
+        保存
+      </Button>
+      <SubscriptionAction action="test" submittingLabel="正在发送...">
+        测试发送
+      </SubscriptionAction>
       <SubscriptionAction
         action={props.subscription.enabled ? 'disable' : 'enable'}
         submittingLabel={props.subscription.enabled ? '正在停用...' : '正在启用...'}
       >
         {props.subscription.enabled ? '停用' : '启用'}
       </SubscriptionAction>
-      <SubscriptionAction action="delete" confirm="确认删除这个 Webhook 通知配置？" submittingLabel="正在删除..." variant="danger">删除</SubscriptionAction>
+      <SubscriptionAction
+        action="delete"
+        confirm="确认删除这个 Webhook 通知配置？"
+        submittingLabel="正在删除..."
+        variant="danger"
+      >
+        删除
+      </SubscriptionAction>
     </div>
   )
 }
 
-function SubscriptionAction(props: { action: string; children: string; confirm?: string; submittingLabel?: string; variant?: 'danger' }) {
+function SubscriptionAction(props: {
+  action: string
+  children: string
+  confirm?: string
+  submittingLabel?: string
+  variant?: 'danger'
+}) {
   return (
     <button
-      class={`min-h-11 rounded-xl border px-4 py-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${props.variant === 'danger'
-        ? 'app-danger-action'
-        : 'border-[var(--app-border)] text-[var(--app-text)] hover:border-lime-300'}`}
+      class={`min-h-11 rounded-xl border px-4 py-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${
+        props.variant === 'danger'
+          ? 'app-danger-action'
+          : 'border-[var(--app-border)] text-[var(--app-text)] hover:border-lime-300'
+      }`}
       type="submit"
       name="action"
       value={props.action}

@@ -35,10 +35,7 @@ export type ScanOptions = {
  *
  * A missing root yields nothing: the tool simply is not installed.
  */
-export async function* scanSessionFiles(
-  rootDir: string,
-  options: ScanOptions
-): AsyncGenerator<ScannedSessionFile> {
+export async function* scanSessionFiles(rootDir: string, options: ScanOptions): AsyncGenerator<ScannedSessionFile> {
   yield* scanDirectory(rootDir, options, 0)
 }
 
@@ -127,6 +124,5 @@ export async function* readSessionLines(filePath: string): AsyncGenerator<string
 function isIgnorableScanError(error: unknown) {
   if (!(error instanceof Error) || !('code' in error)) return false
   // ENOENT: removed mid-scan. EACCES/EPERM: not ours to read. ENOTDIR: raced.
-  return error.code === 'ENOENT' || error.code === 'EACCES' ||
-    error.code === 'EPERM' || error.code === 'ENOTDIR'
+  return error.code === 'ENOENT' || error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'ENOTDIR'
 }

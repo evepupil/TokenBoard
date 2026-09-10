@@ -11,14 +11,11 @@ describe('selectAntigravityFileScanIds', () => {
     markFile(state, 'known-stale', { checkedSequence: 1, mtimeMs: 1 })
     markFile(state, 'known-hot', { checkedSequence: 9, mtimeMs: 100 })
 
-    const selected = selectAntigravityFileScanIds([
-      'known-stale',
-      'known-hot',
-      'unseen-1',
-      'unseen-2',
-      'unseen-3',
-      'unseen-4'
-    ], state, 4)
+    const selected = selectAntigravityFileScanIds(
+      ['known-stale', 'known-hot', 'unseen-1', 'unseen-2', 'unseen-3', 'unseen-4'],
+      state,
+      4
+    )
 
     expect(selected.filter((id) => id.startsWith('unseen-'))).toHaveLength(2)
     expect(selected).toEqual(expect.arrayContaining(['known-stale', 'known-hot']))
@@ -39,12 +36,7 @@ describe('selectAntigravityFileScanIds', () => {
       4
     )
 
-    expect(selected).toEqual(expect.arrayContaining([
-      'known-1',
-      'known-2',
-      'known-5',
-      'known-6'
-    ]))
+    expect(selected).toEqual(expect.arrayContaining(['known-1', 'known-2', 'known-5', 'known-6']))
   })
 })
 
@@ -52,14 +44,15 @@ function scanState(): AntigravityFileScanState {
   return { nextSequence: 10, files: {} }
 }
 
-function markFile(
-  state: AntigravityFileScanState,
-  id: string,
-  input: { checkedSequence: number; mtimeMs: number }
-) {
-  markAntigravityFileScanned(state, id, {
-    mtimeMs: input.mtimeMs,
-    size: 1,
-    hasDatabaseFile: true
-  }, input.checkedSequence)
+function markFile(state: AntigravityFileScanState, id: string, input: { checkedSequence: number; mtimeMs: number }) {
+  markAntigravityFileScanned(
+    state,
+    id,
+    {
+      mtimeMs: input.mtimeMs,
+      size: 1,
+      hasDatabaseFile: true
+    },
+    input.checkedSequence
+  )
 }

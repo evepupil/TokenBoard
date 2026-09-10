@@ -70,7 +70,9 @@ function assertWebhookBusinessResponse(text: string) {
     }
     const code = firstCode(data.errcode, data.errorcode, data.code, data.StatusCode, data.statusCode)
     if (code !== null && code.value !== 0) {
-      throw new Error(`Webhook returned application code ${code.raw}: ${firstString(data.errmsg, data.msg, data.StatusMessage, data.statusMessage, data.message) ?? 'unknown error'}`)
+      throw new Error(
+        `Webhook returned application code ${code.raw}: ${firstString(data.errmsg, data.msg, data.StatusMessage, data.statusMessage, data.message) ?? 'unknown error'}`
+      )
     }
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -147,7 +149,10 @@ async function readBoundedResponseText(response: Response) {
 }
 
 class WebhookHttpError extends Error {
-  constructor(readonly status: number, body: string) {
+  constructor(
+    readonly status: number,
+    body: string
+  ) {
     super(`Webhook returned ${status}${body ? `: ${body}` : ''}`)
   }
 }

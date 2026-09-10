@@ -1,13 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import {
-  linkSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from 'node:fs'
+import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { probeProcessLiveness } from './process-liveness.mjs'
 
@@ -101,8 +93,7 @@ function removeCredentialsLock(lockPath, identity, owner) {
     if (error?.code === 'ENOENT') return
     throw error
   }
-  if (!sameLockIdentity(quarantinePath, identity) ||
-      (owner && !sameLockOwner(quarantinePath, owner))) {
+  if (!sameLockIdentity(quarantinePath, identity) || (owner && !sameLockOwner(quarantinePath, owner))) {
     restoreCredentialsLock(lockPath, quarantinePath)
     return
   }
@@ -114,7 +105,9 @@ export function restoreCredentialsLock(lockPath, quarantinePath) {
     linkSync(quarantinePath, lockPath)
   } catch (error) {
     if (isFileExistsError(error)) {
-      throw new Error('TokenBoard replacement credentials lock could not be restored because another owner exists', { cause: error })
+      throw new Error('TokenBoard replacement credentials lock could not be restored because another owner exists', {
+        cause: error
+      })
     }
     throw new Error('TokenBoard replacement credentials lock could not be restored', { cause: error })
   }

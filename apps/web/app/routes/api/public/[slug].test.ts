@@ -23,14 +23,14 @@ describe('public usage route', () => {
   test('serves JSON for .json and extensionless public URLs', async () => {
     mockedGetPublicUsageJson.mockResolvedValue({ slug: 'eve-tokenboard' } as never)
 
-    const jsonResponse = await GET[0](
+    const jsonResponse = (await GET[0](
       contextFor('eve-tokenboard.json', 'https://tokenboard.example/api/public/eve-tokenboard.json') as never,
       async () => undefined
-    ) as Response
-    const extensionlessResponse = await GET[0](
+    )) as Response
+    const extensionlessResponse = (await GET[0](
       contextFor('eve-tokenboard', 'https://tokenboard.example/api/public/eve-tokenboard') as never,
       async () => undefined
-    ) as Response
+    )) as Response
 
     expect(jsonResponse.headers.get('content-type')).toContain('application/json')
     expect(extensionlessResponse.headers.get('content-type')).toContain('application/json')
@@ -43,10 +43,10 @@ describe('public usage route', () => {
   test('serves SVG for .svg public URLs', async () => {
     mockedGetPublicUsageCard.mockResolvedValue('<svg />')
 
-    const response = await GET[0](
+    const response = (await GET[0](
       contextFor('eve-tokenboard.svg', 'https://tokenboard.example/api/public/eve-tokenboard.svg') as never,
       async () => undefined
-    ) as Response
+    )) as Response
 
     expect(response.headers.get('content-type')).toBe('image/svg+xml; charset=utf-8')
     expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
@@ -61,10 +61,10 @@ describe('public usage route', () => {
   })
 
   test('rejects unsupported public URL extensions', async () => {
-    const response = await GET[0](
+    const response = (await GET[0](
       contextFor('eve-tokenboard.txt', 'https://tokenboard.example/api/public/eve-tokenboard.txt') as never,
       async () => undefined
-    ) as Response
+    )) as Response
 
     expect(response.status).toBe(404)
     expect(await response.json()).toEqual({
@@ -88,11 +88,7 @@ function contextFor(slug: string, url: string) {
       param: vi.fn(() => ({ slug })),
       url
     },
-    json: (body: unknown, status = 200, headers?: Record<string, string>) => (
-      Response.json(body, { status, headers })
-    ),
-    body: (body: BodyInit, status = 200, headers?: Record<string, string>) => (
-      new Response(body, { status, headers })
-    )
+    json: (body: unknown, status = 200, headers?: Record<string, string>) => Response.json(body, { status, headers }),
+    body: (body: BodyInit, status = 200, headers?: Record<string, string>) => new Response(body, { status, headers })
   }
 }

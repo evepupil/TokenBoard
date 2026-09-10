@@ -42,13 +42,8 @@ export function statementChanged(result: D1Result<unknown> | undefined) {
 }
 
 export async function snapshotHash(snapshot: UsageSnapshot) {
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(snapshotHashPayload(snapshot))
-  )
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshotHashPayload(snapshot)))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export function uniqueSummaryKeys(records: UsageSummaryKey[]) {
@@ -81,7 +76,5 @@ function assertBatchSucceeded(results: D1Result<unknown>[]) {
   if (failedIndex < 0) return
 
   const error = batchResults[failedIndex]?.error
-  throw new Error(
-    `D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`
-  )
+  throw new Error(`D1 batch statement ${failedIndex + 1} failed${error ? `: ${error}` : ''}`)
 }

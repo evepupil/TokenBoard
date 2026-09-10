@@ -61,7 +61,7 @@ export type AntigravityCascadeFileSystem = {
 }
 
 const nodeCascadeFileSystem: AntigravityCascadeFileSystem = {
-  listFiles: async function * (path: string) {
+  listFiles: async function* (path: string) {
     const dir = await opendir(path)
     try {
       while (true) {
@@ -76,10 +76,7 @@ const nodeCascadeFileSystem: AntigravityCascadeFileSystem = {
   stat
 }
 
-export async function listAntigravityCascadeIds(input: {
-  source: AntigravityGuiSource
-  conversationDir?: string
-}) {
+export async function listAntigravityCascadeIds(input: { source: AntigravityGuiSource; conversationDir?: string }) {
   return (await listAntigravityCascades(input)).map((cascade) => cascade.id)
 }
 
@@ -176,16 +173,17 @@ function directoryCandidateLimit(limit: number) {
   return Math.max(64, limit * 20)
 }
 
-function markScanEntry(
-  state: AntigravityFileScanState,
-  cascade: AntigravityCascadeRef,
-  checkedSequence: number
-) {
-  markAntigravityFileScanned(state, cascade.id, {
-    mtimeMs: cascade.mtimeMs,
-    size: cascade.size,
-    hasDatabaseFile: cascade.hasDatabaseFile === true
-  }, checkedSequence)
+function markScanEntry(state: AntigravityFileScanState, cascade: AntigravityCascadeRef, checkedSequence: number) {
+  markAntigravityFileScanned(
+    state,
+    cascade.id,
+    {
+      mtimeMs: cascade.mtimeMs,
+      size: cascade.size,
+      hasDatabaseFile: cascade.hasDatabaseFile === true
+    },
+    checkedSequence
+  )
 }
 
 function cachedCascadeRef(state: AntigravityFileScanState, id: string): AntigravityCascadeRef | null {
@@ -229,7 +227,7 @@ export async function createAntigravityLanguageServerClient(input: {
   overrideIdeVersion?: string
   port?: number
 }): Promise<AntigravityLanguageServerClient> {
-  const port = input.port ?? await allocatePort()
+  const port = input.port ?? (await allocatePort())
   const csrfToken = randomBytes(16).toString('hex')
   const server = spawnLanguageServer({ ...input, port, csrfToken })
   try {
@@ -251,18 +249,28 @@ function spawnLanguageServer(input: {
   port: number
   csrfToken: string
 }) {
-  const languageServerPath = input.languageServerPath ?? process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER ?? defaultLanguageServerPath
+  const languageServerPath =
+    input.languageServerPath ?? process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER ?? defaultLanguageServerPath
   const args = [
     '--standalone',
-    '--override_ide_name', input.source,
-    '--subclient_type', input.source === 'antigravity-ide' ? 'ide' : 'hub',
-    '--override_ide_version', input.overrideIdeVersion ?? '0.0.0',
-    '--override_user_agent_name', input.source,
-    '--https_server_port', String(input.port),
-    '--csrf_token', input.csrfToken,
-    '--app_data_dir', input.source,
-    '--api_server_url', apiServerUrl,
-    '--cloud_code_endpoint', cloudCodeEndpoint,
+    '--override_ide_name',
+    input.source,
+    '--subclient_type',
+    input.source === 'antigravity-ide' ? 'ide' : 'hub',
+    '--override_ide_version',
+    input.overrideIdeVersion ?? '0.0.0',
+    '--override_user_agent_name',
+    input.source,
+    '--https_server_port',
+    String(input.port),
+    '--csrf_token',
+    input.csrfToken,
+    '--app_data_dir',
+    input.source,
+    '--api_server_url',
+    apiServerUrl,
+    '--cloud_code_endpoint',
+    cloudCodeEndpoint,
     '--enable_sidecars',
     '--headless'
   ]
@@ -278,7 +286,10 @@ export function waitForReady(
     let settled = false
     let probing = false
     let probeTimer: ReturnType<typeof setTimeout> | undefined
-    const timer = setTimeout(() => rejectStartup(`Timed out starting Antigravity language server on port ${port}`), readReadyTimeoutMs())
+    const timer = setTimeout(
+      () => rejectStartup(`Timed out starting Antigravity language server on port ${port}`),
+      readReadyTimeoutMs()
+    )
     const onError = (error: Error) => {
       finish(() => reject(error))
     }
@@ -373,7 +384,9 @@ function drainOutput(server: LanguageServerProcess) {
   server.stderr.resume()
 }
 
-export function requestGeneratorMetadata(input: AntigravityGeneratorMetadataRequest & { port: number; csrfToken: string }) {
+export function requestGeneratorMetadata(
+  input: AntigravityGeneratorMetadataRequest & { port: number; csrfToken: string }
+) {
   const body = JSON.stringify({ cascadeId: input.cascadeId })
   return new Promise<unknown>((resolve, reject) => {
     let settled = false
@@ -387,54 +400,57 @@ export function requestGeneratorMetadata(input: AntigravityGeneratorMetadataRequ
       settled = true
       resolve(value)
     }
-    const req = request({
-      hostname: '127.0.0.1',
-      port: input.port,
-      path: '/exa.language_server_pb.LanguageServerService/GetCascadeTrajectoryGeneratorMetadata',
-      method: 'POST',
-      rejectUnauthorized: false,
-      timeout: requestTimeoutMs,
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'Connect-Protocol-Version': '1',
-        'X-Codeium-Csrf-Token': input.csrfToken
-      }
-    }, (res) => {
-      const responseError = (error: unknown) => {
-        rejectOnce(new Error(formatMetadataRequestTransportError(input.source, error)))
-      }
-      res.once('error', responseError)
-      res.once('aborted', () => responseError(new Error('response aborted')))
-      if (res.statusCode !== 200) {
-        rejectOnce(new Error(formatMetadataRequestHttpError(input.source, res.statusCode)))
-        res.destroy()
-        return
-      }
-      const chunks: Buffer[] = []
-      let receivedBytes = 0
-      res.on('data', (chunk) => {
-        if (settled) return
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-        receivedBytes += buffer.byteLength
-        if (receivedBytes > maxMetadataResponseBytes) {
-          chunks.length = 0
-          rejectOnce(new Error(formatMetadataResponseLimitError(input.source)))
+    const req = request(
+      {
+        hostname: '127.0.0.1',
+        port: input.port,
+        path: '/exa.language_server_pb.LanguageServerService/GetCascadeTrajectoryGeneratorMetadata',
+        method: 'POST',
+        rejectUnauthorized: false,
+        timeout: requestTimeoutMs,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+          'Connect-Protocol-Version': '1',
+          'X-Codeium-Csrf-Token': input.csrfToken
+        }
+      },
+      (res) => {
+        const responseError = (error: unknown) => {
+          rejectOnce(new Error(formatMetadataRequestTransportError(input.source, error)))
+        }
+        res.once('error', responseError)
+        res.once('aborted', () => responseError(new Error('response aborted')))
+        if (res.statusCode !== 200) {
+          rejectOnce(new Error(formatMetadataRequestHttpError(input.source, res.statusCode)))
           res.destroy()
           return
         }
-        chunks.push(buffer)
-      })
-      res.on('end', () => {
-        if (settled) return
-        const text = Buffer.concat(chunks).toString('utf8')
-        try {
-          resolveOnce(JSON.parse(text))
-        } catch {
-          rejectOnce(new Error(`Antigravity metadata request returned invalid JSON for ${input.source}`))
-        }
-      })
-    })
+        const chunks: Buffer[] = []
+        let receivedBytes = 0
+        res.on('data', (chunk) => {
+          if (settled) return
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          receivedBytes += buffer.byteLength
+          if (receivedBytes > maxMetadataResponseBytes) {
+            chunks.length = 0
+            rejectOnce(new Error(formatMetadataResponseLimitError(input.source)))
+            res.destroy()
+            return
+          }
+          chunks.push(buffer)
+        })
+        res.on('end', () => {
+          if (settled) return
+          const text = Buffer.concat(chunks).toString('utf8')
+          try {
+            resolveOnce(JSON.parse(text))
+          } catch {
+            rejectOnce(new Error(`Antigravity metadata request returned invalid JSON for ${input.source}`))
+          }
+        })
+      }
+    )
     req.on('timeout', () => {
       rejectOnce(new Error(`Antigravity metadata request timed out for ${input.source}`))
       req.destroy()
@@ -520,7 +536,7 @@ async function cascadeRef(
   ])
   const existingRefs = refs.filter((ref): ref is AntigravityCascadeRef => Boolean(ref))
   if (existingRefs.length === 0) return null
-  const latest = existingRefs.reduce((selected, ref) => ref.mtimeMs > selected.mtimeMs ? ref : selected)
+  const latest = existingRefs.reduce((selected, ref) => (ref.mtimeMs > selected.mtimeMs ? ref : selected))
   return { ...latest, hasDatabaseFile: Boolean(refs[1]) }
 }
 

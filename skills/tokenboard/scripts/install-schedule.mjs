@@ -25,7 +25,9 @@ const scriptPath = fileURLToPath(new URL('./sync.mjs', import.meta.url))
 export function installSchedule(options = {}) {
   const env = options.env || process.env
   const flags = options.flags || parseArgs(options.argv || process.argv.slice(2))
-  const scheduleTimes = parseScheduleTimes(flags['schedule-times'] || env.TOKENBOARD_SCHEDULE_TIMES || dailyScheduleTimes.join(','))
+  const scheduleTimes = parseScheduleTimes(
+    flags['schedule-times'] || env.TOKENBOARD_SCHEDULE_TIMES || dailyScheduleTimes.join(',')
+  )
   const runtime = {
     platform: options.platform || env.TOKENBOARD_INSTALL_SCHEDULE_TEST_PLATFORM || platform(),
     nodePath: options.nodePath || process.execPath,
@@ -34,7 +36,9 @@ export function installSchedule(options = {}) {
     configDir: options.configDir || configDir(),
     env,
     spawn: options.spawn || spawnSync,
-    getUid: options.getUid || (() => Number.parseInt(env.TOKENBOARD_INSTALL_SCHEDULE_TEST_UID || process.getuid?.() || 0, 10)),
+    getUid:
+      options.getUid ||
+      (() => Number.parseInt(env.TOKENBOARD_INSTALL_SCHEDULE_TEST_UID || process.getuid?.() || 0, 10)),
     readConfig: options.readConfig || readConfig,
     mkdir: options.mkdir || mkdirSync,
     writeFile: options.writeFile || writeFileSync,
@@ -61,14 +65,17 @@ function installWindows(runtime, scheduleTimes) {
   const config = runtime.readConfig()
   const wrapperPath = join(runtime.configDir, windowsWrapperName)
   runtime.mkdir(runtime.configDir, { recursive: true })
-  runtime.writeFile(wrapperPath, buildWindowsTaskScript({
-    nodePath: runtime.nodePath,
-    scriptPath: runtime.scriptPath,
-    packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
-    pathEnv: runtime.env.PATH || 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
-    homeDir: runtime.homeDir,
-    configDir: runtime.configDir
-  }))
+  runtime.writeFile(
+    wrapperPath,
+    buildWindowsTaskScript({
+      nodePath: runtime.nodePath,
+      scriptPath: runtime.scriptPath,
+      packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
+      pathEnv: runtime.env.PATH || 'C:\\Windows\\System32;C:\\Program Files\\nodejs',
+      homeDir: runtime.homeDir,
+      configDir: runtime.configDir
+    })
+  )
   for (const task of buildWindowsTaskDefinitions({
     nodePath: runtime.nodePath,
     scriptPath: runtime.scriptPath,
@@ -87,9 +94,7 @@ function installWindows(runtime, scheduleTimes) {
 
 export function buildWindowsStaleTaskCleanupArgs(scheduleTimes) {
   const currentTaskNames = new Set(scheduleTimes.map(windowsTaskName))
-  const currentList = [...currentTaskNames]
-    .map((taskName) => `'${taskName}'`)
-    .join(',')
+  const currentList = [...currentTaskNames].map((taskName) => `'${taskName}'`).join(',')
   const command = [
     `$current = @(${currentList})`,
     `Get-ScheduledTask -TaskPath '\\' | Where-Object { (($_.TaskName -like 'TokenBoardDailySync*') -or ($_.Actions | Where-Object { $_.Execute -like '*node*' -and $_.Arguments -like '*TokenBoard*skills*tokenboard*scripts*sync.mjs*' })) -and $current -notcontains $_.TaskName } | Unregister-ScheduledTask -Confirm:$false`
@@ -106,16 +111,19 @@ function installMac(runtime, scheduleTimes) {
   runtime.mkdir(agentDir, { recursive: true })
   runtime.mkdir(logDir, { recursive: true })
   const plistPath = join(agentDir, `${launchAgentLabel}.plist`)
-  runtime.writeFile(plistPath, buildMacLaunchAgentPlist({
-    nodePath: runtime.nodePath,
-    scriptPath: runtime.scriptPath,
-    packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
-    pathEnv: runtime.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-    homeDir: runtime.homeDir,
-    configDir: runtime.configDir,
-    logDir,
-    scheduleTimes
-  }))
+  runtime.writeFile(
+    plistPath,
+    buildMacLaunchAgentPlist({
+      nodePath: runtime.nodePath,
+      scriptPath: runtime.scriptPath,
+      packageManager: config.packageManager || runtime.env.TOKENBOARD_PACKAGE_MANAGER || 'pnpm',
+      pathEnv: runtime.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+      homeDir: runtime.homeDir,
+      configDir: runtime.configDir,
+      logDir,
+      scheduleTimes
+    })
+  )
 
   const userDomain = `gui/${runtime.getUid()}`
   runOrThrow(runtime, 'launchctl', ['bootout', userDomain, plistPath], { allowFailure: true })

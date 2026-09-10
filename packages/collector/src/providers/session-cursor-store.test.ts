@@ -14,17 +14,21 @@ describe('session cursor store concurrency', () => {
     let refreshCount = 0
     let settled = false
     try {
-      const operation = withCursorLock(cursorPath, async () => {
-        callbackStarted.resolve()
-        await delay(30)
-      }, {
-        heartbeatIntervalMs: 1,
-        refreshCursorLock: async () => {
-          refreshCount += 1
-          heartbeatStarted.resolve()
-          await releaseHeartbeat.promise
+      const operation = withCursorLock(
+        cursorPath,
+        async () => {
+          callbackStarted.resolve()
+          await delay(30)
+        },
+        {
+          heartbeatIntervalMs: 1,
+          refreshCursorLock: async () => {
+            refreshCount += 1
+            heartbeatStarted.resolve()
+            await releaseHeartbeat.promise
+          }
         }
-      }).finally(() => {
+      ).finally(() => {
         settled = true
       })
 
@@ -52,16 +56,20 @@ describe('session cursor store concurrency', () => {
     const failHeartbeat = deferred<void>()
     const heartbeatError = new Error('heartbeat failed')
     try {
-      const operation = withCursorLock(cursorPath, async () => {
-        await heartbeatStarted.promise
-      }, {
-        heartbeatIntervalMs: 1,
-        refreshCursorLock: async () => {
-          heartbeatStarted.resolve()
-          await failHeartbeat.promise
-          throw heartbeatError
+      const operation = withCursorLock(
+        cursorPath,
+        async () => {
+          await heartbeatStarted.promise
+        },
+        {
+          heartbeatIntervalMs: 1,
+          refreshCursorLock: async () => {
+            heartbeatStarted.resolve()
+            await failHeartbeat.promise
+            throw heartbeatError
+          }
         }
-      })
+      )
 
       await heartbeatStarted.promise
       failHeartbeat.resolve()
@@ -80,17 +88,21 @@ describe('session cursor store concurrency', () => {
     const failHeartbeat = deferred<void>()
     const callbackError = new Error('callback failed')
     try {
-      const operation = withCursorLock(cursorPath, async () => {
-        await heartbeatStarted.promise
-        throw callbackError
-      }, {
-        heartbeatIntervalMs: 1,
-        refreshCursorLock: async () => {
-          heartbeatStarted.resolve()
-          await failHeartbeat.promise
-          throw new Error('heartbeat failed')
+      const operation = withCursorLock(
+        cursorPath,
+        async () => {
+          await heartbeatStarted.promise
+          throw callbackError
+        },
+        {
+          heartbeatIntervalMs: 1,
+          refreshCursorLock: async () => {
+            heartbeatStarted.resolve()
+            await failHeartbeat.promise
+            throw new Error('heartbeat failed')
+          }
         }
-      })
+      )
 
       await heartbeatStarted.promise
       failHeartbeat.resolve()
@@ -109,15 +121,19 @@ describe('session cursor store concurrency', () => {
     const finishCallback = deferred<void>()
     const heartbeatError = new Error('heartbeat failed early')
     try {
-      const operation = withCursorLock(cursorPath, async () => {
-        await finishCallback.promise
-      }, {
-        heartbeatIntervalMs: 1,
-        refreshCursorLock: async () => {
-          heartbeatFailed.resolve()
-          throw heartbeatError
+      const operation = withCursorLock(
+        cursorPath,
+        async () => {
+          await finishCallback.promise
+        },
+        {
+          heartbeatIntervalMs: 1,
+          refreshCursorLock: async () => {
+            heartbeatFailed.resolve()
+            throw heartbeatError
+          }
         }
-      })
+      )
 
       await heartbeatFailed.promise
       finishCallback.resolve()
@@ -133,21 +149,23 @@ describe('session cursor store concurrency', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-lock-'))
     const cursorPath = join(root, 'codex-cursor.json')
     try {
-      await Promise.all(Array.from({ length: 12 }, async (_, index) => {
-        await withCursorLock(cursorPath, async () => {
-          const cursor = await readCursor(cursorPath, 'codex')
-          await new Promise((resolve) => setTimeout(resolve, 5))
-          cursor.files[`session-${index}`] = {
-            size: index,
-            mtimeMs: index,
-            sha256: String(index),
-            snapshots: [],
-            missingCost: false,
-            updatedAt: '2026-07-12T00:00:00.000Z'
-          }
-          await writeCursor(cursorPath, cursor)
+      await Promise.all(
+        Array.from({ length: 12 }, async (_, index) => {
+          await withCursorLock(cursorPath, async () => {
+            const cursor = await readCursor(cursorPath, 'codex')
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            cursor.files[`session-${index}`] = {
+              size: index,
+              mtimeMs: index,
+              sha256: String(index),
+              snapshots: [],
+              missingCost: false,
+              updatedAt: '2026-07-12T00:00:00.000Z'
+            }
+            await writeCursor(cursorPath, cursor)
+          })
         })
-      }))
+      )
 
       const cursor = await readCursor(cursorPath, 'codex')
       expect(Object.keys(cursor.files)).toHaveLength(12)
@@ -161,14 +179,16 @@ describe('session cursor store concurrency', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-lock-error-'))
     const cursorPath = join(root, 'codex-cursor.json')
     try {
-      await expect(withCursorLock(cursorPath, async () => {
-        await writeCursor(`${cursorPath}.lock`, {
-          version: 1,
-          source: 'codex',
-          files: {}
+      await expect(
+        withCursorLock(cursorPath, async () => {
+          await writeCursor(`${cursorPath}.lock`, {
+            version: 1,
+            source: 'codex',
+            files: {}
+          })
+          throw new Error('callback failed')
         })
-        throw new Error('callback failed')
-      })).rejects.toThrow('callback failed')
+      ).rejects.toThrow('callback failed')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -178,10 +198,12 @@ describe('session cursor store concurrency', () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-lock-fence-'))
     const cursorPath = join(root, 'codex-cursor.json')
     try {
-      await expect(withCursorLock(cursorPath, async () => {
-        await writeRawFile(`${cursorPath}.lock`, JSON.stringify({ pid: process.pid, token: 'replacement' }))
-        await writeCursor(cursorPath, { version: 1, source: 'codex', files: {} })
-      })).rejects.toThrow('Cursor lock ownership changed before write')
+      await expect(
+        withCursorLock(cursorPath, async () => {
+          await writeRawFile(`${cursorPath}.lock`, JSON.stringify({ pid: process.pid, token: 'replacement' }))
+          await writeCursor(cursorPath, { version: 1, source: 'codex', files: {} })
+        })
+      ).rejects.toThrow('Cursor lock ownership changed before write')
       await expect(readFile(cursorPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
       await rm(root, { recursive: true, force: true })

@@ -72,15 +72,19 @@ describe('runCollectorCli Antigravity source', () => {
     )
 
     expect(result).toBe(0)
-    expect(acknowledgements).toEqual([{
-      source: 'antigravity-cli',
-      groups: [[
-        antigravitySnapshot.source,
-        antigravitySnapshot.usageDate,
-        antigravitySnapshot.timezone,
-        antigravitySnapshot.model
-      ].join('\0')]
-    }])
+    expect(acknowledgements).toEqual([
+      {
+        source: 'antigravity-cli',
+        groups: [
+          [
+            antigravitySnapshot.source,
+            antigravitySnapshot.usageDate,
+            antigravitySnapshot.timezone,
+            antigravitySnapshot.model
+          ].join('\0')
+        ]
+      }
+    ])
   })
 
   test('previews the standalone Antigravity source', async () => {
@@ -226,7 +230,9 @@ describe('runCollectorCli Antigravity source', () => {
           throw new Error('Antigravity conversations directory not found: /state/antigravity-cli/conversations')
         },
         collectAntigravityUsage: async () => {
-          throw new Error('Antigravity conversations directory not found: /Users/test/.gemini/antigravity/conversations')
+          throw new Error(
+            'Antigravity conversations directory not found: /Users/test/.gemini/antigravity/conversations'
+          )
         },
         collectAntigravityIdeUsage: async () => {
           throw new Error('No Antigravity conversations found in /Users/test/.gemini/antigravity-ide/conversations')
@@ -425,9 +431,7 @@ describe('runCollectorCli Antigravity source', () => {
     )
 
     expect(result).toBe(1)
-    expect(stderr).toEqual([
-      'Antigravity collection: source=antigravity status=failed category=sqlite-read-failed'
-    ])
+    expect(stderr).toEqual(['Antigravity collection: source=antigravity status=failed category=sqlite-read-failed'])
     expect(stderr.join('\n')).not.toContain('/Users/private')
     expect(stderr.join('\n')).not.toContain('RAW_SQLITE_OUTPUT')
   })
@@ -674,7 +678,9 @@ describe('runCollectorCli Antigravity source', () => {
       deps({
         stderr: (line) => stderr.push(line),
         collectAntigravityUsage: async () => {
-          throw new Error('Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer')
+          throw new Error(
+            'Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer'
+          )
         }
       })
     )
@@ -714,7 +720,14 @@ describe('runCollectorCli Antigravity source', () => {
     },
     {
       label: 'bounded SQLite scans that require a full baseline',
-      message: 'Antigravity CLI requires --since all before a bounded scan can complete an incomplete SQLite directory scan',
+      message:
+        'Antigravity CLI requires --since all before a bounded scan can complete an incomplete SQLite directory scan',
+      category: 'sqlite-full-baseline-required'
+    },
+    {
+      label: 'SQLite metadata cursor resets that require a full baseline',
+      message:
+        'Antigravity SQLite metadata cursor reset detected for /Users/private/conversations/session.db; rerun with --since all',
       category: 'sqlite-full-baseline-required'
     },
     {
@@ -723,8 +736,14 @@ describe('runCollectorCli Antigravity source', () => {
       category: 'sqlite-directory-incomplete'
     },
     {
+      label: 'incomplete GUI full-history SQLite scans',
+      message: 'Antigravity GUI --since all requires a complete SQLite directory scan',
+      category: 'sqlite-directory-incomplete'
+    },
+    {
       label: 'unstable SQLite directories during full-history reads',
-      message: 'Antigravity CLI full history scan could not read every enumerated SQLite database; retry after the conversations directory is stable',
+      message:
+        'Antigravity CLI full history scan could not read every enumerated SQLite database; retry after the conversations directory is stable',
       category: 'sqlite-directory-incomplete'
     }
   ])('classifies $label as $category', async ({ message, category }) => {
@@ -745,9 +764,7 @@ describe('runCollectorCli Antigravity source', () => {
     )
 
     expect(result).toBe(1)
-    expect(stderr).toEqual([
-      `Antigravity collection: source=antigravity status=failed category=${category}`
-    ])
+    expect(stderr).toEqual([`Antigravity collection: source=antigravity status=failed category=${category}`])
   })
 
   test.each([
@@ -799,51 +816,58 @@ describe('runCollectorCli Antigravity source', () => {
 
   test.each([
     {
-      message: 'Antigravity language server collection failed after DB history was collected: Antigravity metadata response exceeded the 8388608-byte limit for antigravity',
+      message:
+        'Antigravity language server collection failed after DB history was collected: Antigravity metadata response exceeded the 8388608-byte limit for antigravity',
       category: 'metadata-limit-exceeded'
     },
     {
-      message: 'Antigravity language server collection failed after DB history was collected: Antigravity generator metadata response exceeded the 8192-item limit',
+      message:
+        'Antigravity language server collection failed after DB history was collected: Antigravity generator metadata response exceeded the 8192-item limit',
       category: 'metadata-limit-exceeded'
     },
     {
-      message: 'Antigravity language server collection failed after DB history was collected: Antigravity language server metadata exceeded the 32768 usage-event limit',
+      message:
+        'Antigravity language server collection failed after DB history was collected: Antigravity language server metadata exceeded the 32768 usage-event limit',
       category: 'metadata-limit-exceeded'
     },
     {
-      message: 'Antigravity language server collection failed after DB history was collected: Antigravity metadata request returned invalid JSON for antigravity: Unexpected token',
+      message:
+        'Antigravity language server collection failed after DB history was collected: Antigravity metadata request returned invalid JSON for antigravity: Unexpected token',
       category: 'invalid-metadata'
     }
-  ])('uploads partial DB snapshots then fails default all mode for fatal metadata failures: $category', async ({ message, category }) => {
-    const stderr: string[] = []
-    const uploaded: UsageSnapshot[][] = []
-    const snapshot = { ...antigravitySnapshot, source: 'antigravity' as const }
+  ])(
+    'uploads partial DB snapshots then fails default all mode for fatal metadata failures: $category',
+    async ({ message, category }) => {
+      const stderr: string[] = []
+      const uploaded: UsageSnapshot[][] = []
+      const snapshot = { ...antigravitySnapshot, source: 'antigravity' as const }
 
-    const result = await runCollectorCli(
-      ['sync', '--source', 'all'],
-      {
-        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
-        TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token'
-      },
-      deps({
-        stderr: (line) => stderr.push(line),
-        uploadSnapshots: async (_config, snapshots) => {
-          uploaded.push(snapshots)
-          return { upserted: snapshots.length, skipped: 0 }
+      const result = await runCollectorCli(
+        ['sync', '--source', 'all'],
+        {
+          TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+          TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token'
         },
-        collectAntigravityUsage: async () => {
-          throw new AntigravityPartialUsageError(message, [snapshot], undefined, true)
-        }
-      })
-    )
+        deps({
+          stderr: (line) => stderr.push(line),
+          uploadSnapshots: async (_config, snapshots) => {
+            uploaded.push(snapshots)
+            return { upserted: snapshots.length, skipped: 0 }
+          },
+          collectAntigravityUsage: async () => {
+            throw new AntigravityPartialUsageError(message, [snapshot], undefined, true)
+          }
+        })
+      )
 
-    expect(result).toBe(1)
-    expect(uploaded).toEqual([[snapshot]])
-    expect(stderr).toEqual([
-      `Antigravity collection: source=antigravity status=partial category=${category}`,
-      `One or more sources failed: antigravity: status=partial category=${category}`
-    ])
-  })
+      expect(result).toBe(1)
+      expect(uploaded).toEqual([[snapshot]])
+      expect(stderr).toEqual([
+        `Antigravity collection: source=antigravity status=partial category=${category}`,
+        `One or more sources failed: antigravity: status=partial category=${category}`
+      ])
+    }
+  )
 
   test('fails default all mode when an installed Antigravity source has a real parse error', async () => {
     const stderr: string[] = []
@@ -860,7 +884,9 @@ describe('runCollectorCli Antigravity source', () => {
         collectClaudeCodeUsage: async () => [],
         collectCodexUsage: async () => [],
         collectAntigravityUsage: async () => {
-          throw new Error('Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer')
+          throw new Error(
+            'Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer'
+          )
         },
         uploadSnapshots: async (_config, snapshots) => {
           uploaded.push(snapshots)
@@ -890,7 +916,9 @@ describe('runCollectorCli Antigravity source', () => {
       deps({
         stderr: (line) => stderr.push(line),
         collectAntigravityUsage: async () => {
-          throw new Error('Failed to read Antigravity metadata from /Users/test/.gemini/antigravity/conversations/cascade.pb: ENOENT')
+          throw new Error(
+            'Failed to read Antigravity metadata from /Users/test/.gemini/antigravity/conversations/cascade.pb: ENOENT'
+          )
         }
       })
     )
@@ -941,45 +969,48 @@ describe('runCollectorCli Antigravity source', () => {
     expect(acknowledged).toEqual(collected)
   })
 
-  test.each(['20260708', '2026-07-08', 'all'])('passes an explicit since value of %s to every collector', async (since) => {
-    const seen: Array<{ source: string; since: string | undefined }> = []
+  test.each(['20260708', '2026-07-08', 'all'])(
+    'passes an explicit since value of %s to every collector',
+    async (since) => {
+      const seen: Array<{ source: string; since: string | undefined }> = []
 
-    const result = await runCollectorCli(
-      ['preview', '--source', 'all', '--since', since],
-      { TOKENBOARD_STATE_DIR: '/state' },
-      deps({
-        collectClaudeCodeUsage: async (options) => {
-          seen.push({ source: 'claude-code', since: options?.since })
-          return []
-        },
-        collectCodexUsage: async (options) => {
-          seen.push({ source: 'codex', since: options?.since })
-          return []
-        },
-        collectAntigravityCliUsage: async (options) => {
-          seen.push({ source: 'antigravity-cli', since: options?.since })
-          return []
-        },
-        collectAntigravityUsage: async (options) => {
-          seen.push({ source: 'antigravity', since: options?.since })
-          return []
-        },
-        collectAntigravityIdeUsage: async (options) => {
-          seen.push({ source: 'antigravity-ide', since: options?.since })
-          return []
-        }
-      })
-    )
+      const result = await runCollectorCli(
+        ['preview', '--source', 'all', '--since', since],
+        { TOKENBOARD_STATE_DIR: '/state' },
+        deps({
+          collectClaudeCodeUsage: async (options) => {
+            seen.push({ source: 'claude-code', since: options?.since })
+            return []
+          },
+          collectCodexUsage: async (options) => {
+            seen.push({ source: 'codex', since: options?.since })
+            return []
+          },
+          collectAntigravityCliUsage: async (options) => {
+            seen.push({ source: 'antigravity-cli', since: options?.since })
+            return []
+          },
+          collectAntigravityUsage: async (options) => {
+            seen.push({ source: 'antigravity', since: options?.since })
+            return []
+          },
+          collectAntigravityIdeUsage: async (options) => {
+            seen.push({ source: 'antigravity-ide', since: options?.since })
+            return []
+          }
+        })
+      )
 
-    expect(result).toBe(0)
-    expect(seen).toEqual([
-      { source: 'claude-code', since },
-      { source: 'codex', since },
-      { source: 'antigravity-cli', since },
-      { source: 'antigravity', since },
-      { source: 'antigravity-ide', since }
-    ])
-  })
+      expect(result).toBe(0)
+      expect(seen).toEqual([
+        { source: 'claude-code', since },
+        { source: 'codex', since },
+        { source: 'antigravity-cli', since },
+        { source: 'antigravity', since },
+        { source: 'antigravity-ide', since }
+      ])
+    }
+  )
 
   test('uses the default since window when the primary environment value is empty', async () => {
     const seen: Array<{ source: string; since: string | undefined }> = []
@@ -1125,7 +1156,9 @@ describe('runCollectorCli Antigravity source', () => {
         collectCodexUsage: async () => [],
         collectAntigravityUsage: async () => {
           calls.push('antigravity')
-          throw new Error('Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer')
+          throw new Error(
+            'Invalid Antigravity generator metadata item 3: inputTokens must be a bounded nonnegative integer'
+          )
         },
         collectAntigravityIdeUsage: async () => {
           calls.push('antigravity-ide')

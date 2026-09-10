@@ -16,33 +16,50 @@ describe('pairing code hash index migration', () => {
         runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
       }
 
-      expect(runSqlite(dbPath, `
+      expect(
+        runSqlite(
+          dbPath,
+          `
         SELECT COUNT(*)
         FROM sqlite_master
         WHERE type = 'index'
           AND name = 'pairing_codes_code_hash_idx';
-      `).stdout.trim()).toBe('1')
+      `
+        ).stdout.trim()
+      ).toBe('1')
 
       const migration = readFileSync(join(migrationsDir, '0029_drop_redundant_pairing_code_hash_index.sql'), 'utf8')
       expect(runSqlite(dbPath, migration).status).toBe(0)
-      expect(runSqlite(dbPath, `
+      expect(
+        runSqlite(
+          dbPath,
+          `
         SELECT COUNT(*)
         FROM sqlite_master
         WHERE type = 'index'
           AND name = 'pairing_codes_code_hash_idx';
-      `).stdout.trim()).toBe('0')
+      `
+        ).stdout.trim()
+      ).toBe('0')
 
-      runSqlite(dbPath, `
+      runSqlite(
+        dbPath,
+        `
         INSERT INTO users (id, email, email_verified, name, created_at, updated_at)
         VALUES ('pairing-index-user', 'pairing-index@example.test', 1, 'Pairing Index User', '2026-07-18T00:00:00.000Z', '2026-07-18T00:00:00.000Z');
 
         INSERT INTO pairing_codes (id, user_id, code_hash, pairing_type, expires_at, created_at)
         VALUES ('pairing-index-first', 'pairing-index-user', 'pairing-index-hash', 'new_device', '2026-07-19T00:00:00.000Z', '2026-07-18T00:00:00.000Z');
-      `)
-      const duplicate = runSqlite(dbPath, `
+      `
+      )
+      const duplicate = runSqlite(
+        dbPath,
+        `
         INSERT INTO pairing_codes (id, user_id, code_hash, pairing_type, expires_at, created_at)
         VALUES ('pairing-index-second', 'pairing-index-user', 'pairing-index-hash', 'new_device', '2026-07-19T00:00:00.000Z', '2026-07-18T00:00:00.000Z');
-      `, false)
+      `,
+        false
+      )
       expect(duplicate.status).not.toBe(0)
       expect(duplicate.stderr).toContain('UNIQUE constraint failed: pairing_codes.code_hash')
     } finally {

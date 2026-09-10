@@ -19,35 +19,39 @@ describe('Codex subagent usage diagnostics', () => {
     })
 
     try {
-      await Promise.all(childNames.map(async (name) => {
-        const filePath = join(codexHome, 'sessions', '2026', '05', '25', `${name}.jsonl`)
-        await writeJsonl(filePath, [
-          subagentSessionMeta(name, 'parent-thread', '2026-05-25T01:00:00.000Z'),
-          totalUsageEvent('2026-05-25T01:10:00.000Z', {
-            inputTokens: 100,
-            cacheReadTokens: 0,
-            outputTokens: 10,
-            totalTokens: 110
-          })
-        ])
-        await appendFile(filePath, `${oversized}\n`)
-      }))
+      await Promise.all(
+        childNames.map(async (name) => {
+          const filePath = join(codexHome, 'sessions', '2026', '05', '25', `${name}.jsonl`)
+          await writeJsonl(filePath, [
+            subagentSessionMeta(name, 'parent-thread', '2026-05-25T01:00:00.000Z'),
+            totalUsageEvent('2026-05-25T01:10:00.000Z', {
+              inputTokens: 100,
+              cacheReadTokens: 0,
+              outputTokens: 10,
+              totalTokens: 110
+            })
+          ])
+          await appendFile(filePath, `${oversized}\n`)
+        })
+      )
 
       const corrected = await applyCodexSubagentUsageCorrections({
-        snapshots: [{
-          source: 'codex',
-          usageDate: '2026-05-25',
-          timezone: 'UTC',
-          model: 'gpt-5',
-          inputTokens: 400,
-          outputTokens: 40,
-          cacheCreationTokens: 0,
-          cacheReadTokens: 0,
-          totalTokens: 440,
-          costUsd: 0,
-          sessionCount: 2,
-          collectedAt: '2026-05-25T02:00:00.000Z'
-        }],
+        snapshots: [
+          {
+            source: 'codex',
+            usageDate: '2026-05-25',
+            timezone: 'UTC',
+            model: 'gpt-5',
+            inputTokens: 400,
+            outputTokens: 40,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            totalTokens: 440,
+            costUsd: 0,
+            sessionCount: 2,
+            collectedAt: '2026-05-25T02:00:00.000Z'
+          }
+        ],
         sessions: {
           sessions: childNames.map((name) => ({
             directory: '2026/05/25',
@@ -71,11 +75,13 @@ describe('Codex subagent usage diagnostics', () => {
         stderr: (line) => warnings.push(line)
       })
 
-      expect(corrected).toEqual([expect.objectContaining({
-        inputTokens: 200,
-        outputTokens: 20,
-        totalTokens: 220
-      })])
+      expect(corrected).toEqual([
+        expect.objectContaining({
+          inputTokens: 200,
+          outputTokens: 20,
+          totalTokens: 220
+        })
+      ])
       expect(warnings).toEqual([
         `Skipped 2 oversized Codex child session JSONL rows without usage or subagent metadata across 2 scans (largest ${Buffer.byteLength(oversized)} bytes)`
       ])

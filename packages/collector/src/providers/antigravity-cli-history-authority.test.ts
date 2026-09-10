@@ -27,13 +27,15 @@ describe('Antigravity CLI history authority', () => {
   test('propagates unavailable SQLite history', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-history-unavailable-'))
     try {
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        readDbUsageEvents: async () => {
-          throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
-        }
-      })).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          readDbUsageEvents: async () => {
+            throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
+          }
+        })
+      ).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -46,9 +48,7 @@ describe('Antigravity CLI history authority', () => {
       const readDbUsageEvents = async () => ({
         cascadeIds: historyAvailable ? new Set(['cascade-a']) : new Set<string>(),
         events: historyAvailable ? [historyEvent(12, 4)] : [],
-        lastReadRowIndexByCascade: historyAvailable
-          ? new Map([['cascade-a', 1]])
-          : new Map<string, number>()
+        lastReadRowIndexByCascade: historyAvailable ? new Map([['cascade-a', 1]]) : new Map<string, number>()
       })
 
       const beforeHistory = await collectAntigravityCliUsage({
@@ -87,26 +87,30 @@ describe('Antigravity CLI history authority', () => {
       const before = await readFile(cursorPath, 'utf8')
       let reads = 0
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: '20260701',
-        readDbUsageEvents: async () => {
-          reads += 1
-          return emptyDbUsage()
-        }
-      })).rejects.toThrow('requires --since all')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: '20260701',
+          readDbUsageEvents: async () => {
+            reads += 1
+            return emptyDbUsage()
+          }
+        })
+      ).rejects.toThrow('requires --since all')
       expect(reads).toBe(0)
       expect(await readFile(cursorPath, 'utf8')).toBe(before)
 
-      await expect(collectAntigravityCliUsage({
-        stateDir: root,
-        timezone: 'UTC',
-        since: 'all',
-        readDbUsageEvents: async () => {
-          throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
-        }
-      })).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
+      await expect(
+        collectAntigravityCliUsage({
+          stateDir: root,
+          timezone: 'UTC',
+          since: 'all',
+          readDbUsageEvents: async () => {
+            throw new Error('Antigravity SQLite reader unavailable: sqlite3 not found')
+          }
+        })
+      ).rejects.toThrow('Antigravity SQLite reader unavailable: sqlite3 not found')
       expect(await readFile(cursorPath, 'utf8')).toBe(before)
 
       const snapshots = await collectAntigravityCliUsage({
@@ -127,28 +131,30 @@ describe('Antigravity CLI history authority', () => {
         files: Record<string, unknown>
       }
 
-      expect(snapshots).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          model: 'Gemini 3.5 Flash (Medium)',
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          sessionCount: 0
-        }),
-        expect.objectContaining({
-          model: 'gemini-3-flash-a',
-          inputTokens: 12,
-          outputTokens: 4,
-          totalTokens: 16,
-          sessionCount: 1
-        })
-      ]))
+      expect(snapshots).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: 'Gemini 3.5 Flash (Medium)',
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            sessionCount: 0
+          }),
+          expect.objectContaining({
+            model: 'gemini-3-flash-a',
+            inputTokens: 12,
+            outputTokens: 4,
+            totalTokens: 16,
+            sessionCount: 1
+          })
+        ])
+      )
       expect(migrated.antigravityCliMeteringVersion).toBe(3)
-      expect(Object.keys(migrated.files).some((key) => (
-        key.startsWith('aggregate\0') ||
-        key.startsWith('statusline-') ||
-        key.startsWith('event\0')
-      ))).toBe(false)
+      expect(
+        Object.keys(migrated.files).some(
+          (key) => key.startsWith('aggregate\0') || key.startsWith('statusline-') || key.startsWith('event\0')
+        )
+      ).toBe(false)
 
       const correction = snapshots.find((snapshot) => snapshot.model === 'Gemini 3.5 Flash (Medium)')
       const history = snapshots.find((snapshot) => snapshot.model === 'gemini-3-flash-a')
@@ -163,11 +169,13 @@ describe('Antigravity CLI history authority', () => {
       const afterHistoryAcknowledgement = JSON.parse(await readFile(cursorPath, 'utf8')) as {
         files: Record<string, { pendingUpload?: boolean; snapshots: Array<{ model: string }> }>
       }
-      expect(Object.values(afterHistoryAcknowledgement.files).some((entry) => (
-        entry.pendingUpload === true && entry.snapshots.some((snapshot) => (
-          snapshot.model === 'Gemini 3.5 Flash (Medium)'
-        ))
-      ))).toBe(true)
+      expect(
+        Object.values(afterHistoryAcknowledgement.files).some(
+          (entry) =>
+            entry.pendingUpload === true &&
+            entry.snapshots.some((snapshot) => snapshot.model === 'Gemini 3.5 Flash (Medium)')
+        )
+      ).toBe(true)
 
       await clearPendingUploadCursors({
         stateDir: root,
@@ -220,10 +228,17 @@ describe('Antigravity CLI history authority', () => {
     const cursorPath = join(root, 'antigravity-cli-cursor.json')
     const oldCreatedAt = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString()
     try {
-      await writeFile(cursorPath, `${JSON.stringify({
-        ...legacyCursor(),
-        antigravityHistoryAliasMtimes: legacyAliases(64_000)
-      }, null, 2)}\n`)
+      await writeFile(
+        cursorPath,
+        `${JSON.stringify(
+          {
+            ...legacyCursor(),
+            antigravityHistoryAliasMtimes: legacyAliases(64_000)
+          },
+          null,
+          2
+        )}\n`
+      )
 
       const snapshots = await collectAntigravityCliUsage({
         stateDir: root,
@@ -245,19 +260,21 @@ describe('Antigravity CLI history authority', () => {
       }
 
       expect(migrated.antigravityHistoryAliasMtimes).toBeUndefined()
-      expect(Object.keys(migrated.files)).toHaveLength(1)
-      expect(Object.keys(migrated.files)[0]).toMatch(/^db-row\0antigravity-cli\0[a-f0-9]{64}$/)
+      const persistedKeys = Object.keys(migrated.files)
+      expect(persistedKeys).toHaveLength(2)
+      expect(persistedKeys).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/^db-row\0antigravity-cli\0[a-f0-9]{64}$/),
+          expect.stringMatching(/^aggregate\0[a-f0-9]{64}$/)
+        ])
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   }, 15_000)
 })
 
-function historyEvent(
-  inputTokens: number,
-  outputTokens: number,
-  createdAt = '2026-07-20T10:00:00.000Z'
-) {
+function historyEvent(inputTokens: number, outputTokens: number, createdAt = '2026-07-20T10:00:00.000Z') {
   return {
     cascadeHash: conversationHash,
     eventHash,
@@ -271,10 +288,9 @@ function historyEvent(
 }
 
 function legacyAliases(count: number) {
-  return Object.fromEntries(Array.from({ length: count }, (_, index) => [
-    index.toString(16).padStart(64, '0'),
-    [index]
-  ]))
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [index.toString(16).padStart(64, '0'), [index]])
+  )
 }
 
 function legacyCursor(model = 'Gemini 3.5 Flash (Medium)') {

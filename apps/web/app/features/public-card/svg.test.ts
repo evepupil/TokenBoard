@@ -30,7 +30,9 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('width="100%"')
     expect(svg).toContain('height="auto"')
     expect(svg).toContain('color-scheme="dark"')
-    expect(svg).toContain('style="display:block;width:100%;height:auto;max-width:520px;color-scheme:dark;-webkit-force-dark:none"')
+    expect(svg).toContain(
+      'style="display:block;width:100%;height:auto;max-width:520px;color-scheme:dark;-webkit-force-dark:none"'
+    )
     expect(svg).toContain('#161a13')
     expect(svg).toContain('url(#glow)')
   })
@@ -58,7 +60,9 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('color-scheme="only light"')
     expect(svg).toContain('width="100%"')
     expect(svg).toContain('height="auto"')
-    expect(svg).toContain('style="display:block;width:100%;height:auto;max-width:520px;color-scheme:only light;-webkit-force-dark:none"')
+    expect(svg).toContain(
+      'style="display:block;width:100%;height:auto;max-width:520px;color-scheme:only light;-webkit-force-dark:none"'
+    )
     expect(svg).toContain('#fffef8')
     expect(svg).toContain('fill="#365314"')
     expect(svg).not.toContain('fill="url(#glow)"')
@@ -94,14 +98,17 @@ describe('public card svg renderer', () => {
   })
 
   test('marks cost metrics when a source reports no cost', () => {
-    const svg = renderUsageCardSvg({
-      ...input,
-      totalCostAvailable: false,
-      monthCostAvailable: false,
-      todayCostAvailable: true
-    }, {
-      metrics: ['totalCost', 'monthCost', 'todayCost']
-    })
+    const svg = renderUsageCardSvg(
+      {
+        ...input,
+        totalCostAvailable: false,
+        monthCostAvailable: false,
+        todayCostAvailable: true
+      },
+      {
+        metrics: ['totalCost', 'monthCost', 'todayCost']
+      }
+    )
 
     expect(svg).toContain('总额度*')
     expect(svg).toContain('本月额度*')
@@ -110,25 +117,31 @@ describe('public card svg renderer', () => {
   })
 
   test('does not add unavailable-cost notes when no cost metric is visible', () => {
-    const svg = renderUsageCardSvg({
-      ...input,
-      totalCostAvailable: false
-    }, {
-      metrics: ['totalTokens', 'monthTokens']
-    })
+    const svg = renderUsageCardSvg(
+      {
+        ...input,
+        totalCostAvailable: false
+      },
+      {
+        metrics: ['totalTokens', 'monthTokens']
+      }
+    )
 
     expect(svg).not.toContain('部分来源费用不可用')
     expect(svg).not.toContain('总 token*')
   })
 
   test('does not add unavailable-cost notes for metrics truncated by the layout', () => {
-    const svg = renderUsageCardSvg({
-      ...input,
-      todayCostAvailable: false
-    }, {
-      layout: 'wide',
-      metrics: ['totalTokens', 'monthTokens', 'todayTokens', 'todayCost']
-    })
+    const svg = renderUsageCardSvg(
+      {
+        ...input,
+        todayCostAvailable: false
+      },
+      {
+        layout: 'wide',
+        metrics: ['totalTokens', 'monthTokens', 'todayTokens', 'todayCost']
+      }
+    )
 
     expect(svg).not.toContain('今日额度')
     expect(svg).not.toContain('部分来源费用不可用')
