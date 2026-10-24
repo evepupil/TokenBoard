@@ -16,7 +16,12 @@ import { assertPublicUsageVisible } from './features/public-card/service'
 import { pruneDeviceRetention } from './features/device/retention'
 import { usageSummaryStrictMode } from './features/usage/deduped-daily-usage'
 import type { Bindings } from './lib/db'
-import { pruneExpiredRateLimits } from './lib/rate-limit'
+import {
+  clientIpRateLimitSubject,
+  enforceRateLimit,
+  pruneExpiredRateLimits,
+  readRateLimitPolicies
+} from './lib/rate-limit'
 import { securityHeaders } from './lib/security-headers'
 
 const app = createApp()
@@ -67,8 +72,18 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
         waitUntil: ctx.waitUntil.bind(ctx)
       })
     }
+    // Paths that fail to parse (a bad extension, malformed encoding) throw before any D1 read,
+    // so they stay free; the ceiling belongs exactly where the slug lookup starts reading.
     const route = parsePublicUsagePath(url.pathname)
     if (!route) return null
+
+    // This entrypoint answers before the HonoX route does, so the ceiling has to live here as
+    // well; capping only the route would guard a path the worker never reaches. The 404 and
+    // private answers are `no-store` and never cached, so every anonymous probe reaches D1.
+    await enforceRateLimit(env.DB, {
+      policy: readRateLimitPolicies.publicCardRead,
+      subject: clientIpRateLimitSubject(request.headers)
+    })
 
     const summaryStrict = usageSummaryStrictMode(env)
     const cache = publicApiCache()
