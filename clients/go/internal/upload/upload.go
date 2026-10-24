@@ -6,6 +6,7 @@ package upload
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 const (
@@ -535,15 +537,25 @@ func writeBackoff(stateDir string, state BackoffState) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d", backoffFileName, os.Getpid()))
+	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d-%s", backoffFileName, os.Getpid(), randomHexSuffix()))
 	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
+	if err := renameatomic.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// randomHexSuffix keeps two writers' temp files apart even when a pid is
+// recycled, matching the TS backoff writer's `${pid}-${hex}` temp name.
+func randomHexSuffix() string {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // Summarize truncates an error message to 200 characters with an ellipsis,

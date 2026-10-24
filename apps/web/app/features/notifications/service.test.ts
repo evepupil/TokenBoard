@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
+import { maxWebhookSubscriptionsPerUser } from './config'
 import { encryptSecret } from './crypto'
 import {
   createWebhookSubscription,
@@ -45,8 +46,11 @@ describe('notification service', () => {
         statements.push(sql)
         return {
           bind(...values: unknown[]) {
-            bindings.push(values)
+            if (sql.includes('INSERT INTO webhook_subscriptions')) bindings.push(values)
             return {
+              async first() {
+                return { count: 0 }
+              },
               async run() {
                 return {}
               }
@@ -76,7 +80,7 @@ describe('notification service', () => {
       now: new Date('2026-04-29T00:00:00.000Z')
     })
 
-    expect(statements[0]).toContain('INSERT INTO webhook_subscriptions')
+    expect(statements.some((sql) => sql.includes('INSERT INTO webhook_subscriptions'))).toBe(true)
     expect(bindings[0][4]).not.toContain('abcdef')
     expect(bindings[0][5]).toBe('qyapi.weixin.qq.com')
     expect(bindings[0][6]).toBe('qyapi.weixin.qq.com/...')
@@ -88,11 +92,14 @@ describe('notification service', () => {
   test('creates a subscription using the next same-day schedule time', async () => {
     const bindings: unknown[][] = []
     const db = {
-      prepare() {
+      prepare(sql: string) {
         return {
           bind(...values: unknown[]) {
-            bindings.push(values)
+            if (sql.includes('INSERT INTO webhook_subscriptions')) bindings.push(values)
             return {
+              async first() {
+                return { count: 0 }
+              },
               async run() {
                 return {}
               }
@@ -123,6 +130,46 @@ describe('notification service', () => {
     })
 
     expect(bindings[0][14]).toBe('2026-04-29T10:00:00.000Z')
+  })
+
+  test('rejects a subscription beyond the per-user cap before writing', async () => {
+    const statements: string[] = []
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql)
+        return {
+          bind() {
+            return {
+              async first() {
+                return { count: maxWebhookSubscriptionsPerUser }
+              },
+              async run() {
+                throw new Error('must not insert past the cap')
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    await expect(
+      createWebhookSubscription({
+        env: { DB: db, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+        userId: 'user_1',
+        form: {
+          name: '日报',
+          provider: 'wecom',
+          webhookUrl: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abcdef',
+          timezone: 'UTC',
+          scheduleTimeLocal: '09:30',
+          scheduleTimesLocal: ['09:30'],
+          scheduleWeekdays: [0, 1, 2, 3, 4, 5, 6],
+          sendEmptyReport: false,
+          enabled: true
+        }
+      })
+    ).rejects.toThrow('Too many webhook subscriptions')
+    expect(statements.some((sql) => sql.includes('INSERT INTO webhook_subscriptions'))).toBe(false)
   })
 
   test('rejects unsupported webhook hosts before storing secrets', async () => {

@@ -169,6 +169,9 @@ describe('Wrangler deploy config', () => {
   // closes that gap, and it must sit between the apply and the Worker publish.
   test('manual production deploy re-lists migrations after applying and before publishing', () => {
     const deployScript = readPackageFile('scripts/deploy.mjs')
+    // Whitespace-normalized: the listing call is a multi-line argument array, and the assertion
+    // is about which command runs and where, not how the line breaks.
+    const compactScript = deployScript.replace(/\s+/g, ' ')
     const applyIndex = deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
     const verifyIndex = deployScript.indexOf('assertNoPendingMigrations(configPath)')
     const publishIndex = deployScript.indexOf("runPnpm(['exec', 'wrangler', 'deploy', '--config', configPath])")
@@ -176,7 +179,7 @@ describe('Wrangler deploy config', () => {
     expect(applyIndex).toBeGreaterThan(-1)
     expect(verifyIndex).toBeGreaterThan(applyIndex)
     expect(publishIndex).toBeGreaterThan(verifyIndex)
-    expect(deployScript).toContain("'d1', 'migrations', 'list', 'DB', '--remote', '--config', configPath")
+    expect(compactScript).toContain("'d1', 'migrations', 'list', 'DB', '--remote', '--config', configPath")
     expect(deployScript).toContain('No migrations to apply')
   })
 

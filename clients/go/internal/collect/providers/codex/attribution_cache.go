@@ -34,12 +34,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf16"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/mtime"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionfile"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
@@ -883,7 +883,7 @@ func writeAttributionCache(
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := renameAttributionCacheAtomic(tempPath, cachePath); err != nil {
+	if err := renameatomic.Rename(tempPath, cachePath); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
@@ -898,34 +898,6 @@ func attributionSortedEntries(entries map[string]CacheEntry) []attributionRetain
 	}
 	attributionSortNewestFirst(items)
 	return items
-}
-
-// attributionRenameDelays are the TS rename-atomic retry delays: a concurrent
-// opener on Windows (OneDrive, Defender, a backup tool) holds the destination
-// just long enough for rename to fail with EPERM/EBUSY.
-var attributionRenameDelays = []time.Duration{50 * time.Millisecond, 150 * time.Millisecond, 400 * time.Millisecond}
-
-func renameAttributionCacheAtomic(tempPath, destinationPath string) error {
-	err := os.Rename(tempPath, destinationPath)
-	if !attributionRenameBusy(err) {
-		return err
-	}
-	for _, delay := range attributionRenameDelays {
-		time.Sleep(delay)
-		retryErr := os.Rename(tempPath, destinationPath)
-		if retryErr == nil {
-			return nil
-		}
-		if !attributionRenameBusy(retryErr) {
-			return retryErr
-		}
-		err = retryErr
-	}
-	return err
-}
-
-func attributionRenameBusy(err error) bool {
-	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EBUSY)
 }
 
 // assertAttributionCacheLockOwnership is the TS assertCursorWriteOwnership:

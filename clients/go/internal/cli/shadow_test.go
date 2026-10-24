@@ -575,3 +575,21 @@ func TestShadowStillReportsOneSidedRowsOnTodaysDate(t *testing.T) {
 		t.Errorf("onlyInGo = %+v, want the row reported", report.OnlyInGo)
 	}
 }
+
+// The TS preview's stdout is buffered to parse it, so the buffer itself is the
+// only bound on a child that prints something other than the snapshot array.
+// Past the cap the write fails and the run fails closed instead of growing
+// until the process runs out of memory.
+func TestLimitedBufferRefusesOutputPastTheCap(t *testing.T) {
+	var buffer limitedBuffer
+	buffer.limit = 8
+	if _, err := buffer.Write([]byte("12345678")); err != nil {
+		t.Fatalf("write within the cap: %v", err)
+	}
+	if _, err := buffer.Write([]byte("9")); err == nil {
+		t.Fatal("write past the cap succeeded")
+	}
+	if got := buffer.String(); got != "12345678" {
+		t.Errorf("buffer = %q, want the accepted bytes only", got)
+	}
+}

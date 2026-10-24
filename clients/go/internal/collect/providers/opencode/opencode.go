@@ -137,7 +137,14 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 
 	snapshots := make([]contract.Snapshot, 0, len(aggregates))
 	for _, row := range aggregates {
-		snapshots = append(snapshots, toSnapshot(row, timezone, collectedAt))
+		snapshot := toSnapshot(row, timezone, collectedAt)
+		// TS ends `toSnapshot` in `usageSnapshotSchema.parse`; this is the same gate.
+		// A row beyond the contract must fail the source here, not surface later as a
+		// server-side batch rejection that pauses uploads for every source.
+		if err := snapshot.Validate(); err != nil {
+			return nil, fmt.Errorf("%s %s %s: %w", source, row.usageDate, row.model, err)
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 	return sessioncursor.MergeSnapshots(snapshots), nil
 }
@@ -219,6 +226,11 @@ func readCount(value any) float64 {
 	parsed, ok := sessionusage.ReadFiniteNumber(value)
 	if !ok || parsed <= 0 {
 		return 0
+	}
+	// Same clamp as sessionusage.ReadTokenCount: `int64(x)` for x past int64 wraps,
+	// and a wrapped count folds instead of failing validation.
+	if parsed > float64(contract.MaxSnapshotTokens) {
+		return float64(contract.MaxSnapshotTokens + 1)
 	}
 	return float64(int64(parsed))
 }

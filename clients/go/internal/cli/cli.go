@@ -224,7 +224,15 @@ func syncLocked(
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	// The TS collector prints per-phase durations next to the upload result,
+	// and the skill's notify forwards them into the coordinator run record.
+	// Go's providers fold cursor scanning and the ccusage calls into one
+	// collection, so the phases it can attribute honestly are collect, upload
+	// and cursorAck; the names travel as-is and are additive.
+	timings := map[string]int64{}
+	phaseStarted := time.Now()
 	outcome, abortErr := collectAll(ctx, options, env, stateDir, cursorScope, stderr)
+	timings["collect"] = elapsedMillis(phaseStarted)
 	if abortErr != nil {
 		fmt.Fprintln(stderr, abortErr.Error())
 		return ExitFailure
@@ -242,7 +250,9 @@ func syncLocked(
 	}
 
 	config := upload.Config{Endpoint: options.Endpoint, UploadToken: options.UploadToken}
+	phaseStarted = time.Now()
 	result, uploadErr := upload.UploadSnapshots(ctx, config, outcome.snapshots, nil)
+	timings["upload"] = elapsedMillis(phaseStarted)
 	if uploadErr == nil {
 		upload.RecordSuccess(stateDir)
 	} else {
@@ -271,10 +281,12 @@ func syncLocked(
 		return classifyFailure(uploadErr, options, env)
 	}
 
+	phaseStarted = time.Now()
 	if err := acknowledgeUploadCursors(stateDir, outcome, options, cursorScope, env); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	timings["cursorAck"] = elapsedMillis(phaseStarted)
 	// The high-water mark claims a full scan covered everything up to the run's
 	// start; only the runs that actually did (unbounded, not hook mode) may
 	// advance it.
@@ -284,13 +296,27 @@ func syncLocked(
 		return ExitFailure
 	}
 
-	payload, _ := json.MarshalIndent(map[string]any{"upserted": result.Upserted, "skipped": result.Skipped}, "", "  ")
+	payload, _ := json.MarshalIndent(map[string]any{
+		"upserted": result.Upserted,
+		"skipped":  result.Skipped,
+		"timings":  timings,
+	}, "", "  ")
 	fmt.Fprintln(stdout, string(payload))
 	if shouldFailForSourceErrors {
 		fmt.Fprintf(stderr, "One or more sources failed: %s\n", formatSourceFailures(outcome.failures))
 		return ExitFailure
 	}
 	return ExitOK
+}
+
+// elapsedMillis reports a phase duration the way the TS phase timings do:
+// rounded to whole milliseconds and never negative.
+func elapsedMillis(start time.Time) int64 {
+	elapsed := time.Since(start).Milliseconds()
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 // classifyFailure applies the exit-code contract: only a non-hook sync run

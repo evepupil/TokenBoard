@@ -181,3 +181,75 @@ func TestRepoValidation(t *testing.T) {
 		}
 	}
 }
+
+// The tag lookup refuses to cross hosts, and the asset download carries the
+// tarball and the checksums — the two things that vouch for each other. A
+// cross-host redirect there would let a host the release page never named
+// supply both, so it is refused the same way.
+func TestDownloadRefusesACrossHostRedirect(t *testing.T) {
+	var foreignHits int
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		foreignHits++
+		_, _ = w.Write([]byte("evil"))
+	}))
+	defer foreign.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, foreign.URL+"/payload", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	_, err := Download(nil, Asset{Name: "checksums.txt", URL: origin.URL + "/checksums.txt"})
+	if err == nil || !strings.Contains(err.Error(), "not the release host") {
+		t.Fatalf("err = %v, want a cross-host refusal", err)
+	}
+	if foreignHits != 0 {
+		t.Fatalf("the foreign host was contacted %d times", foreignHits)
+	}
+}
+
+// A chain of exactly maxRedirects hops is still followed: the bound counts
+// redirects, so refusing one hop early would make the documented budget a lie.
+func TestDownloadFollowsExactlyTheRedirectBudget(t *testing.T) {
+	hops := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hops < maxRedirects {
+			hops++
+			http.Redirect(w, r, fmt.Sprintf("/hop/%d", hops), http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("abc123  tokenboard_darwin_arm64.tar.gz\n"))
+	}))
+	defer server.Close()
+
+	data, err := Download(nil, Asset{Name: "checksums.txt", URL: server.URL + "/checksums.txt"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if !strings.Contains(string(data), "abc123") {
+		t.Fatalf("data = %q", data)
+	}
+	if hops != maxRedirects {
+		t.Errorf("hops = %d, want %d", hops, maxRedirects)
+	}
+}
+
+// A same-host redirect (the release page naming its own asset path) still works.
+func TestDownloadFollowsASameHostRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/checksums.txt" {
+			http.Redirect(w, r, "/actual-checksums.txt", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("abc123  tokenboard_darwin_arm64.tar.gz\n"))
+	}))
+	defer server.Close()
+
+	data, err := Download(nil, Asset{Name: "checksums.txt", URL: server.URL + "/checksums.txt"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if !strings.Contains(string(data), "abc123") {
+		t.Fatalf("data = %q", data)
+	}
+}

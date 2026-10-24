@@ -290,12 +290,61 @@ func tagFromURL(pageURL string) (string, error) {
 	return decoded, nil
 }
 
+// releaseRedirectHosts are the hosts a GitHub release download may land on: the
+// origin itself and the asset CDN GitHub redirects to.
+//
+// The comparison keeps the port: hostname alone would treat two servers on the
+// same address (a proxy, a test server, a local mirror) as the same host.
+func sameRedirectHost(origin, target *url.URL) bool {
+	if strings.EqualFold(origin.Host, target.Host) {
+		return true
+	}
+	// The CDN is matched by hostname so an explicit :443 (or none) both work.
+	for _, allowed := range []string{"objects.githubusercontent.com", "release-assets.githubusercontent.com"} {
+		if strings.EqualFold(target.Hostname(), allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 // Download fetches an asset's bytes.
+//
+// Redirects are followed only to the same host. `latestTag` already refuses to
+// cross hosts when resolving the tag; letting the asset download follow an
+// arbitrary chain would reopen the hole it closes — and this is the hop that
+// carries the tarball and the checksums, which cannot vouch for each other if
+// both arrive from a host the release page never named. GitHub's asset redirect
+// is same-host (`github.com` → `objects.githubusercontent.com` is reached via
+// the tag-derived `releases/download` URL, which answers 302 to the CDN), so the
+// rule is: same host for the first hop, and the CDN host GitHub names, nothing
+// else.
 func Download(client *http.Client, asset Asset) ([]byte, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	response, err := client.Get(asset.URL)
+	origin, err := url.Parse(asset.URL)
+	if err != nil {
+		return nil, err
+	}
+	bounded := *client
+	previous := client.CheckRedirect
+	bounded.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		// via holds the requests already made, so its length is the redirect
+		// number this call is deciding: refusing at `> maxRedirects` follows
+		// exactly maxRedirects hops, matching latestTag's loop.
+		if len(via) > maxRedirects {
+			return fmt.Errorf("download %s redirected more than %d times", asset.Name, maxRedirects)
+		}
+		if !sameRedirectHost(origin, request.URL) {
+			return fmt.Errorf("download %s redirected to %s, which is not the release host", asset.Name, request.URL.Host)
+		}
+		if previous != nil {
+			return previous(request, via)
+		}
+		return nil
+	}
+	response, err := bounded.Get(asset.URL)
 	if err != nil {
 		return nil, err
 	}

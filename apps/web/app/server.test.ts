@@ -1120,6 +1120,12 @@ function createDb(
         boundValues.push(values)
         return {
           first: vi.fn(async () => {
+            // The read-side rate limit reads and increments a counter row on every request.
+            // Without an answer here the increment falls back to "over the ceiling" and every
+            // request 429s, so this stub reports a fresh, far-from-limit counter.
+            if (sql.includes('api_rate_limits')) {
+              return { count: 1, resetAt: '2099-01-01T00:00:00.000Z' }
+            }
             if (sql.includes('FROM profiles')) {
               if (!(options.profileExists ?? options.publicProfile)) return null
               return {

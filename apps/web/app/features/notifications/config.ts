@@ -23,6 +23,11 @@ export const defaultWebhookCronBatchSize = 5
 // the env var to trade throughput for catch-up speed.
 export const maxWebhookCronBatchSize = 50
 
+// Every subscription a user creates is a standing cron delivery target with its own history
+// rows, so an uncapped account can crowd the shared cron batch and grow D1 without limit. The
+// settings UI manages one subscription at a time; a legitimate account stays far below this.
+export const maxWebhookSubscriptionsPerUser = 20
+
 // The variable name and the reason a key is rejected are operator diagnostics, not user-facing
 // copy. This Worker hosts many accounts, and any signed-in user can POST to the notifications
 // settings route, so whatever message the error carries is readable by them: naming

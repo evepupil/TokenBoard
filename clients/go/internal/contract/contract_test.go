@@ -262,7 +262,10 @@ func TestIsValidIsoDate(t *testing.T) {
 
 func TestIsValidTimezone(t *testing.T) {
 	valid := []string{"Asia/Shanghai", "UTC", "Etc/GMT+5", "America/New_York"}
-	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai "}
+	// `posixrules` is a real tzdata file that Go's loader resolves; Intl — and
+	// therefore the server's validation — has no such zone. Accepting it collects
+	// fine and then fails every upload, so it is rejected here like `local`.
+	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai ", "posixrules", "Local", "factory"}
 	for _, value := range valid {
 		if !IsValidTimezone(value) {
 			t.Errorf("%q should be valid", value)

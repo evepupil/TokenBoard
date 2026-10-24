@@ -3,11 +3,13 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // platformSignalZero probes existence via tasklist: signal 0 is unreliable
@@ -31,14 +33,27 @@ func platformProcessStartIdentity(int) (string, error) {
 	return "", errors.New("identity unsupported on windows")
 }
 
+// tasklistTimeout bounds the probe. Without it a `tasklist` that blocks — EDR
+// interference, a policy prompt, a loaded machine — hangs the caller forever,
+// and the caller is the stale-lock check: the lock's own timeout would stop
+// protecting anything because this path never returns. TS bounds the same probe
+// at 2 s; a timeout here means "liveness unknown", which the caller treats the
+// same way as an unanswered probe.
+const tasklistTimeout = 2 * time.Second
+
 func tasklistOutput(pid int) (string, error) {
 	systemRoot := "C:\\Windows"
 	if root := strings.TrimSpace(osGetenv("SystemRoot")); root != "" {
 		systemRoot = root
 	}
 	tasklist := systemRoot + "\\System32\\tasklist.exe"
-	cmd := exec.Command(tasklist, "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	ctx, cancel := context.WithTimeout(context.Background(), tasklistTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tasklist, "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 	cmd.SysProcAttr = hideWindow()
+	// A killed child leaves its pipes open until the OS reaps it; WaitDelay keeps
+	// Output from blocking on them after the deadline.
+	cmd.WaitDelay = tasklistTimeout
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

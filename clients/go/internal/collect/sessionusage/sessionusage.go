@@ -6,6 +6,8 @@ package sessionusage
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -120,7 +122,14 @@ func (a *Aggregate) Add(event Event) {
 
 // Snapshots returns the folded rows sorted by (date, model), in the same
 // collation the TS aggregate uses — localeCompare, not byte order.
-func (a *Aggregate) Snapshots() []contract.Snapshot {
+//
+// Every folded row is checked against the snapshot contract before it is
+// returned. TS gets this from `usageSnapshotSchema.parse` inside its aggregate;
+// without it here, one corrupted row (a huge count, a sum past int64, a
+// negative cost) leaves the collector intact, the server rejects the whole
+// upload batch, and the upload failure is non-transient — pausing uploads for
+// every source on the machine, not just the one with the bad row.
+func (a *Aggregate) Snapshots() ([]contract.Snapshot, error) {
 	rows := make([]*aggregateRow, 0, len(a.rows))
 	for _, row := range a.rows {
 		rows = append(rows, row)
@@ -137,7 +146,7 @@ func (a *Aggregate) Snapshots() []contract.Snapshot {
 		if a.costAvailable {
 			costUSD = row.costUSD
 		}
-		snapshots = append(snapshots, contract.Snapshot{
+		snapshot := contract.Snapshot{
 			Source:        a.source,
 			UsageDate:     row.usageDate,
 			Timezone:      a.timezoneName,
@@ -150,17 +159,30 @@ func (a *Aggregate) Snapshots() []contract.Snapshot {
 			CostUSD:       costUSD,
 			SessionCount:  int64(len(row.sessions)),
 			CollectedAt:   a.collectedAt,
-		})
+		}
+		if err := snapshot.Validate(); err != nil {
+			return nil, fmt.Errorf("%s %s %s: %w", a.source, row.usageDate, row.model, err)
+		}
+		snapshots = append(snapshots, snapshot)
 	}
-	return snapshots
+	return snapshots, nil
 }
 
 // ReadTokenCount is a non-negative integer count, tolerating string-encoded
-// numbers.
+// numbers. TS keeps an oversized count as a float (`Math.trunc`) and lets the
+// schema reject the row at validation; Go cannot keep it — `int64(x)` for x past
+// int64 range is undefined and wraps on amd64, usually to a negative that folds
+// cleanly and poisons the whole upload batch. So a finite count beyond the
+// contract's bound is clamped one past it: the folded row then fails the
+// snapshot's own Validate — which fails that one source, the same blast radius
+// TS has — instead of uploading a wrapped number.
 func ReadTokenCount(value any) int64 {
 	parsed, ok := ReadFiniteNumber(value)
 	if !ok || parsed <= 0 {
 		return 0
+	}
+	if parsed > float64(contract.MaxSnapshotTokens) {
+		return contract.MaxSnapshotTokens + 1
 	}
 	return int64(parsed)
 }
@@ -169,9 +191,12 @@ func ReadTokenCount(value any) int64 {
 func ReadFiniteNumber(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, false
+		}
 		return typed, true
 	case json.Number:
-		if parsed, err := typed.Float64(); err == nil {
+		if parsed, err := typed.Float64(); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
 			return parsed, true
 		}
 	case string:
@@ -179,7 +204,7 @@ func ReadFiniteNumber(value any) (float64, bool) {
 		if trimmed == "" {
 			return 0, false
 		}
-		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
 			return parsed, true
 		}
 	}

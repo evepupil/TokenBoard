@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // CacheSchemaVersion is the model pricing cache format version.
@@ -732,7 +734,7 @@ func writeJSONAtomically(path string, value any, mode os.FileMode) error {
 	if err := os.WriteFile(tmp, append(payload, '\n'), mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

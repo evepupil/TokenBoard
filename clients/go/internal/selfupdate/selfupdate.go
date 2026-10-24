@@ -13,6 +13,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,11 +29,9 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
 
-// maxBinaryBytes bounds the executable inside the tarball.
+// maxBinaryBytes bounds the executable inside the tarball. The tarball itself
+// is bounded by release.Download's maxDownloadBytes.
 const maxBinaryBytes = 128 * 1024 * 1024
-
-// maxTarballBytes bounds the downloaded tarball.
-const maxTarballBytes = 128 * 1024 * 1024
 
 // binaryName is the executable the tarball ships.
 func binaryName(goos string) string {
@@ -351,6 +350,9 @@ func writeExecutable(path string, data []byte) error {
 // the same contract; production code never assigns it.
 var verifyStaged = verifyExecutable
 
+// versionProbeTimeout bounds the staged binary's version check.
+const versionProbeTimeout = 10 * time.Second
+
 // verifyExecutable runs the staged binary's version check. A binary that
 // cannot answer is not installed: swapping it in would break the next
 // scheduled sync with no way to notice.
@@ -359,7 +361,16 @@ var verifyStaged = verifyExecutable
 // substring test would accept "1.2.30" for "1.2.3", and the staged binary is
 // the only thing standing between a truncated download and a broken install.
 func verifyExecutable(path, want string) error {
-	output, err := exec.Command(path, "version").Output()
+	// A freshly staged binary can block on first run — Gatekeeper quarantine,
+	// antivirus scanning, a broken loader — and an unbounded wait here hangs
+	// self-update entirely (the `--scheduled` exit-zero fallback never runs
+	// because the error branch is never reached). The probe gets a bound, the
+	// same way ccusage's version probe does.
+	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
+	cmd.WaitDelay = versionProbeTimeout
+	output, err := cmd.Output()
 	if err != nil {
 		return err
 	}

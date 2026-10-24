@@ -86,7 +86,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 	if scannedFiles == 0 {
 		return nil, errors.New("No " + label + " sessions found: " + root)
 	}
-	return aggregate.Snapshots(), nil
+	return aggregate.Snapshots()
 }
 
 // readUsageEvents yields one usage event per usage-carrying entry.

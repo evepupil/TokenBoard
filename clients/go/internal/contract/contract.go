@@ -280,36 +280,6 @@ func IsValidIsoDate(value string) bool {
 	return t.Year() == year && t.Month() == time.Month(month) && t.Day() == day
 }
 
-// MinUploadIsoDate is the fixed history floor (AI tools did not exist before
-// 2023); MaxUploadIsoDate allows one day of headroom for UTC+14 collectors.
-const MinUploadIsoDate = "2023-01-01"
-
-func MaxUploadIsoDate(now time.Time) string {
-	return now.UTC().Add(24 * time.Hour).Format("2006-01-02")
-}
-
-// UploadIsoDateIssue classifies why a date is outside the accepted window.
-type UploadIsoDateIssue string
-
-const (
-	IssueInvalid            UploadIsoDateIssue = "invalid"
-	IssueTooFarFuture       UploadIsoDateIssue = "too-far-future"
-	IssueBeforeHistoryWindw UploadIsoDateIssue = "before-history-window"
-)
-
-func UploadIsoDateIssueFor(value string, now time.Time) UploadIsoDateIssue {
-	if !IsValidIsoDate(value) {
-		return IssueInvalid
-	}
-	if value > MaxUploadIsoDate(now) {
-		return IssueTooFarFuture
-	}
-	if value < MinUploadIsoDate {
-		return IssueBeforeHistoryWindw
-	}
-	return ""
-}
-
 var (
 	timezoneMu    sync.RWMutex
 	timezoneValid = map[string]bool{}
@@ -320,6 +290,17 @@ var (
 // — ±HH, ±HHMM, ±HH:MM. Exactly what ECMA-402's TimeZoneOffsetString allows
 // for hours 00-23 and minutes 00-59.
 var offsetZonePattern = regexp.MustCompile(`^[+-](\d{2})(?::?(\d{2}))?$`)
+
+// goOnlyZoneNames are zone names Go's loader resolves but Intl rejects. `local`
+// is the unnamed system zone and `factory` is tzdata's placeholder; `posixrules`
+// ships with tzdata as a real file and loads fine, while Intl has no such zone —
+// so accepting it here would collect successfully and then fail every upload,
+// because the server validates with Intl.
+var goOnlyZoneNames = map[string]bool{
+	"local":      true,
+	"factory":    true,
+	"posixrules": true,
+}
 
 // LoadLocation resolves a timezone name the way the TS side's Intl.DateTimeFormat
 // does: an IANA name through the zone database, or an offset identifier as a
@@ -365,7 +346,7 @@ func IsValidTimezone(value string) bool {
 	// case-insensitive filesystems LoadLocation("factory") would otherwise
 	// resolve.
 	cacheKey := strings.ToLower(timezone)
-	if cacheKey == "local" || cacheKey == "factory" {
+	if goOnlyZoneNames[cacheKey] {
 		return false
 	}
 	timezoneMu.RLock()

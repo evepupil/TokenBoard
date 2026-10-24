@@ -225,6 +225,19 @@ func TestSyncUploadsAndReportsCounts(t *testing.T) {
 	if _, ok := result["upserted"]; !ok {
 		t.Errorf("result lacks upserted: %v", result)
 	}
+	// The TS collector prints per-phase timings next to the upload result and
+	// the skill's notify forwards them into the coordinator run record; a Go
+	// sync that printed none would silently lose the phase attribution once
+	// the client switch happens.
+	timings, ok := result["timings"].(map[string]any)
+	if !ok {
+		t.Fatalf("result lacks timings: %v", result)
+	}
+	for _, phase := range []string{"collect", "upload", "cursorAck"} {
+		if value, ok := timings[phase].(float64); !ok || value < 0 {
+			t.Errorf("timings[%s] = %v, want a non-negative number", phase, timings[phase])
+		}
+	}
 }
 
 func TestSyncDeepSeekHarnessUploadsAndReportsCounts(t *testing.T) {

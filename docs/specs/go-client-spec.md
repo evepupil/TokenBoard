@@ -57,7 +57,7 @@ clients/go/
 
 1. **snapshotHashPayload 字节级一致**：SHA-256 输入是键序固定、无空格的规范化 JSON。Go 侧**手工拼键序**，禁止依赖 `encoding/json` 的 map 序列化。金样本覆盖：全字段/缺字段/costUnavailable 来源/unicode 模型名。
 2. **cursor JSON v1 双向兼容**：TS 写 → Go 读 → Go 写 → TS 读，内容零差异（含 sha256+mtime+size+offset+pendingUpload、codexHookProfileHash、commit 前校验、缺失文件清理）。这是 per-source 灰度的前提。
-3. **usage-core 全部校验语义**：cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝——这是已知且唯一的时区接受集偏差，方向为拒绝而非静默算错。
+3. **usage-core 全部校验语义**：cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝。**时区接受集偏差不止一种（2026-10-24 实测双向对照）**：Intl 接受而 Go 拒绝——`US/Pacific-New`、`SystemV/EST5`、`SystemV/YST9YDT`、`Canada/East-Saskatchewan`（方向安全：拒绝而非算错）；Go 接受而 Intl 拒绝——`posixrules`（tzdata 里真实存在的一个文件；方向危险：会采集成功、却因服务端用 Intl 校验而永久 400，5 次后进入 24h 上传暂停）。`local`/`factory`/`posixrules` 已列入 `goOnlyZoneNames` 显式拒绝，并有表驱动测试；新增此类名称须同时补测试与本节。
 4. **env 契约不变**：`TOKENBOARD_ENDPOINT/UPLOAD_TOKEN/TIMEZONE/SOURCE/SINCE/UNTIL/HOOK_MODE/STATE_DIR/FAIL_ON_SOURCE_ERROR/CCUSAGE_CONFIG/CODEX_SYMLINK_ROOTS_JSON/…` 与 TS 逐一同名同义；`transientSyncExitCode=75` 保留。
 5. **stderr 行为契约**：skill 脚本按行解析 stderr（脱敏、进度、跳过形态），Go 输出格式对齐。
 6. **providers 语义陷阱清单**（平移时逐条带 fixture 测试）：Pi cacheWrite+cacheWrite1h 双档与 entry-id 去重；Grok 面值入账+cachedRead 拆 fresh；DSH 多帧 zstd+尾帧截断容忍+seq 去重；OpenCode SQL 投影+只读打开；Antigravity 原文不落盘+bounded 扫描+cursor 上限；Codex 混合模型对账+重试消息前缀耦合+symlink 策略；costUnavailable fail-closed。
@@ -142,6 +142,8 @@ clients/go/
   - Go 侧捆绑二进制是 spec §4 的第一层，TS 没有；非 hook 获取失败仍回退 package runner 以保持 skill 安装兼容。
   - bundled 静态配置在 Go 侧是嵌入文件，运行时落盘到 `<stateDir>/ccusage.bundled.json`；TS 从 checkout 读 `ccusage.json`。
   - Windows 的 dev/ino 由 `identity_windows.go` 给出平台回退，不与 Node 的 stat 逐位对齐。
+  - **sync stdout 的 `timings` 键名不同**：TS 记录 `cursorScan`/`ccusageDaily`/`ccusageSession`/`upload`/`cursorAck`，Go 的 provider 把扫描与 ccusage 合并成一次采集，只能诚实归因 `collect`/`upload`/`cursorAck`（`internal/cli` 的 `elapsedMillis`）。skill 的 `parseSyncTimings` 接受任意合法键名，run record 只会少掉更细的拆分，不会丢整块计时。
+  - **cursor 锁的心跳失败被静默忽略**：TS `withCursorLock` 在回调成功时把心跳失败抛给调用方；Go 的 `refreshMtime` 只在锁仍属于自己时刷新，失败即放弃（见 `internal/state` 注释）。后果是锁被 stale sweep 抢走后，Go 不会在写入前断言所有权（TS 有 `assertCursorWriteOwnership`）。心跳每 5s、stale 窗口 30s，触发需要连续 6 次 Chtimes 失败，属已知、可接受的偏差。
 - M4 出口（hook 离线行为）：`TestHookModeNeverDownloadsCcusage`（无二进制时 hook 失败且 runner 不运行）、`TestResolveHookModeFailsClosedWithoutABinary`、`TestResolvePrefersTheBundledBinaryOverPATH`、`TestDownloadVerifiesIntegrityAndInstallsTheBinary` 覆盖获取层；`TestHookModeUsesChangedFilesToNarrowReconciliation` 等 6 条覆盖 hook 对账语义。
 - **M4 影子 diff 口径（2026-10-17 实测，commit 92b6493）**：同一 Claude home fixture（两个模型、cache 读写、跨小时），`TOKENBOARD_CCUSAGE_BIN` 指向 `packages/collector/node_modules/.bin/ccusage`（20.0.33），分别跑 TS `tsx src/cli.ts preview --source claude-code` 与 Go `tokenboard preview --source claude-code`：
   - range 模式：snapshot 数组除 `collectedAt`（墙钟）外逐字段、逐序一致；未定价诊断行一致。

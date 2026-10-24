@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // Port of prepareDynamicCcusageConfig: the ccusage config ccusage is pointed at
@@ -191,7 +193,7 @@ func materializeBundledConfig(path string) error {
 	if err := os.WriteFile(tmp, bundledConfig, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

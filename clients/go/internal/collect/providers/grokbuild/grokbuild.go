@@ -90,7 +90,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 	if scannedFiles == 0 {
 		return nil, errors.New("No " + label + " sessions found: " + strings.Join(roots, ", "))
 	}
-	return aggregate.Snapshots(), nil
+	return aggregate.Snapshots()
 }
 
 // readUsageEvents yields one usage event per completed turn.

@@ -25,8 +25,23 @@ export const writeRateLimitPolicies = {
   ingestCheckIp: { id: 'ingest-check-ip', maxRequests: 300, windowSeconds: 60 },
   devicePair: { id: 'device-pair', maxRequests: 20, windowSeconds: 15 * 60 },
   pairingCode: { id: 'pairing-code', maxRequests: 30, windowSeconds: 15 * 60 },
+  // The notifications form can send a webhook test, which is an outbound request to a
+  // user-supplied URL per POST. Ordinary use is a handful of saves per session, so the ceiling
+  // is far above that while still bounding a scripted loop that would otherwise turn this form
+  // into an outbound request amplifier.
+  notificationsForm: { id: 'notifications-form', maxRequests: 60, windowSeconds: 60 },
   modelPricingSyncInvalidIp: { id: 'model-pricing-sync-invalid-ip', maxRequests: 30, windowSeconds: 15 * 60 },
   modelPricingSyncToken: { id: 'model-pricing-sync-token', maxRequests: 5, windowSeconds: 15 * 60 }
+} satisfies Record<string, RateLimitPolicy>
+
+// Read-side policies for the unauthenticated GETs. A cached public response costs
+// nothing to serve, but a cache miss — and every 404/private-slug lookup, which is
+// `no-store` by policy and so never cached — reaches D1. Without a ceiling anyone
+// can turn anonymous traffic into D1 reads; past the ceiling the counter read is
+// the only query the request makes.
+export const readRateLimitPolicies = {
+  modelPricingRead: { id: 'model-pricing-read', maxRequests: 120, windowSeconds: 60 },
+  publicCardRead: { id: 'public-card-read', maxRequests: 120, windowSeconds: 60 }
 } satisfies Record<string, RateLimitPolicy>
 
 export async function assertRateLimitAvailable(
