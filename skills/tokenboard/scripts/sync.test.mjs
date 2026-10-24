@@ -648,7 +648,6 @@ test('a binary client honors the skip-upgrade switch', () => {
       ...options,
       invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
       selfUpdate: (value) => selfUpdates.push(value),
-      binaryExists: () => true,
       log: () => {},
       warn: () => {}
     })
@@ -676,7 +675,6 @@ test('a binary client self-updates from the release source it was installed from
     },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -697,7 +695,6 @@ test('a binary client upgrades through its own self-update, not the checkout', (
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -716,7 +713,6 @@ test('a binary hook sync never upgrades at all', () => {
     flags: { hook: true },
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -724,18 +720,22 @@ test('a binary hook sync never upgrades at all', () => {
   assert.deepEqual(selfUpdates, [])
 })
 
-test('a binary client whose binary is missing does not try to self-update it', () => {
+// A missing target is the recovery case, not a skip case: `runSelfUpdate` is what calls
+// `recoverOrphanedBinary`, which restores a binary whose swap was interrupted between its two
+// renames. Returning early here made that recovery unreachable from the automatic path, so an
+// interrupted self-update left every later sync reporting "client is not installed".
+test('a binary client whose binary is missing still reaches self-update so the swap can be recovered', () => {
   const selfUpdates = []
   runPreCollectUpgrade({
     flags: {},
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => false,
     log: () => {},
     warn: () => {}
   })
 
-  assert.deepEqual(selfUpdates, [])
+  assert.equal(selfUpdates.length, 1)
+  assert.equal(selfUpdates[0].binaryPath, '/home/user/.tokenboard/bin/tokenboard')
 })
 
 test('a failed binary self-update warns instead of failing the sync', () => {
@@ -747,7 +747,6 @@ test('a failed binary self-update warns instead of failing the sync', () => {
       selfUpdate: () => {
         throw new Error('dial https://api-user:api-secret@example.invalid: timeout')
       },
-      binaryExists: () => true,
       log: () => {},
       warn: (message) => warnings.push(message)
     })
@@ -769,7 +768,6 @@ test('a git client still upgrades the checkout before collection', () => {
     selfUpdate: () => {
       throw new Error('a git client must not self-update')
     },
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -785,7 +783,6 @@ test('a git client honors the skip-upgrade switch', () => {
     invocation: { clientType: 'git', command: 'node' },
     env: {},
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -1113,6 +1110,58 @@ test('an unscheduled collector run inherits the terminal instead of capturing', 
   assert.equal(result.error, null)
   assert.equal(calls.length, 1)
   assert.equal(calls[0].options.stdio, 'inherit')
+})
+
+// The hook path is exactly the unscheduled path: notify spawns sync.mjs with `--hook` and no
+// scheduled-log environment, so `logs` is null and the child inherits the terminal. The
+// wall-clock bound the hook mode advertises has to apply there too — a wedged ccusage scan on
+// a hook run would otherwise hold the coordinator's sync lock forever, and no timer exists to
+// kill it. This is the branch production hook traffic actually takes.
+test('a hook run without a scheduled log is still bounded by hookTimeoutMs', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  let killed = null
+  child.kill = (signal) => {
+    killed = signal
+    child.emit('exit', null, signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    { spawn: () => child, hookTimeoutMs: 5 }
+  )
+
+  assert.equal(killed, 'SIGKILL')
+  assert.equal(result.status, 1)
+  assert.equal(result.error.code, 'ETIMEDOUT')
+})
+
+// A run that finishes inside the bound must clear the timer, or the parent's event loop stays
+// alive for the full timeout after every successful hook.
+test('a hook run that finishes in time is not killed and reports its exit code', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  const killed = []
+  child.kill = (signal) => {
+    killed.push(signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    {
+      spawn: () => {
+        queueMicrotask(() => child.emit('exit', 0, null))
+        return child
+      },
+      hookTimeoutMs: 50
+    }
+  )
+
+  assert.deepEqual(killed, [])
+  assert.equal(result.status, 0)
+  assert.equal(result.error, null)
 })
 
 test('an unscheduled run reports a spawn failure and a zero exit as success', async () => {

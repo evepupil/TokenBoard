@@ -23,6 +23,7 @@ import { printHelpIfRequested } from './cli-help.mjs'
 import { configDir, readConfig } from './config.mjs'
 import { errorMessage } from './error-message.mjs'
 import { readSince } from './sync-options.mjs'
+import { redactUrlCredentials } from './redact-credentials.mjs'
 
 // The sources `tokenboard shadow` can compare with data on a normal machine.
 // The two Antigravity GUI sources need a language server and are outside the
@@ -212,7 +213,11 @@ export function classifyShadowRun({ source, status, stdout, stderr }) {
   }
   record.status = 'error'
   record.exitCode = status
-  record.message = lastLine(message)
+  // The message lands in the log and is echoed to the terminal by `--summary`. The Go client
+  // redacts its own output, but this harness is the point where both clients' stderr converges,
+  // and it must not depend on either side having done it — a provider error can echo
+  // `tb_upload_…` or `https://user:token@host/…`.
+  record.message = redactUrlCredentials(lastLine(message))
   // A run that could not take the collector lock was racing a sync on this
   // machine. The comparison is meaningless in that state — the async side may
   // be rewriting cursors while both scans read — and calling it a failure
@@ -415,11 +420,30 @@ function run() {
     return 1
   }
   const sources = typeof flags.source === 'string' ? [flags.source] : dualRunSources
-  const since = typeof flags.since === 'string' ? flags.since : defaultDualRunSince({ config: stored })
+  const since =
+    typeof flags.since === 'string' ? flags.since : defaultDualRunSince({ config: stored, env: process.env })
   const until = typeof flags.until === 'string' ? flags.until : undefined
   const hook = flags.hook === true
 
+  // `--until` narrows a comparison to settled days, and only the ccusage-backed sources accept
+  // it. Silently dropping it for the others would let an operator believe the window was
+  // narrowed when the comparison actually ran unbounded — the harness would then report a diff
+  // the caller thought it had excluded. A named source that cannot honor the flag is a usage
+  // error, the same contract both clients enforce.
+  if (until && !hook && typeof flags.source === 'string' && !untilSources.has(flags.source)) {
+    console.error(
+      `--until is only supported for ${[...untilSources].join(' and ')}; ${flags.source} has no date window`
+    )
+    return 1
+  }
+
   const records = []
+  if (until && !hook && typeof flags.source !== 'string') {
+    const skipped = dualRunSources.filter((source) => !untilSources.has(source))
+    console.log(
+      `note: --until applies only to ${[...untilSources].join(' and ')}; it is ignored for ${skipped.join(', ')}`
+    )
+  }
   for (const source of sources) {
     const invocation = buildShadowInvocation({ config, source, since, until, hook })
     const result = spawnSync(invocation.command, invocation.args, {

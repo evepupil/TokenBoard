@@ -236,7 +236,7 @@ test('env overrides config; invalid config value throws the existing range error
 - [ ] **Step 6: 本机生效**（合并后执行，不属于代码任务）：
 
 ```bash
-node -e "const {mergeConfig}=await import('/Users/mison/.tokenboard/TokenBoard/skills/tokenboard/scripts/config.mjs'); /* mergeConfig({notifyCooldownMs:1800000}) 具体调用以 config.mjs 导出为准 */"
+node -e "const {mergeConfig}=await import('<HOME>/.tokenboard/TokenBoard/skills/tokenboard/scripts/config.mjs'); /* mergeConfig({notifyCooldownMs:1800000}) 具体调用以 config.mjs 导出为准 */"
 ```
 
 并验证 `node skills/tokenboard/scripts/status.mjs` 仍正常。

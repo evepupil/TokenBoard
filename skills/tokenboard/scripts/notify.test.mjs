@@ -182,6 +182,26 @@ test('notify passes the coordinator lock token to its child sync', () => {
   assert.equal(invocation.options.env.TOKENBOARD_STATE_DIR, '/state')
 })
 
+// The hook child's whole stdout/stderr are captured to build the failure message, and Node's
+// default maxBuffer (1 MiB) is smaller than a diagnostic-heavy run prints. An ENOBUFS kill
+// mid-run would be indistinguishable from a real sync failure and would repeat deterministically
+// on every retry of the same hook event — so the capture needs the explicit headroom every
+// other spawn in the skill sets.
+test('notify bounds the hook child capture with an explicit maxBuffer', () => {
+  let options
+  executeTokenBoardSync('codex', {
+    syncScriptPath: '/repo/sync.mjs',
+    env: {},
+    lockToken: 'coordinator-token',
+    spawn: (command, args, opts) => {
+      options = opts
+      return { status: 0 }
+    }
+  })
+
+  assert.equal(options.maxBuffer, 64 * 1024 * 1024)
+})
+
 test('notify carries the sync phase timings back to the coordinator', () => {
   const result = executeTokenBoardSync('claude-code', {
     syncScriptPath: '/repo/sync.mjs',

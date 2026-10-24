@@ -78,7 +78,8 @@ function runCli() {
   if (
     printHelpIfRequested(
       process.argv.slice(2),
-      'Usage: rotate-token.mjs --upload-token TOKEN --device-id ID --installation-id ID [--endpoint URL | --server-origin ORIGIN] [--install-claim CLAIM]'
+      'Usage: rotate-token.mjs [--upload-token TOKEN] --device-id ID --installation-id ID [--endpoint URL | --server-origin ORIGIN] [--install-claim CLAIM]\n' +
+        'The token may also come from TOKENBOARD_UPLOAD_TOKEN, which keeps it out of the process table and shell history.'
     )
   ) {
     return
@@ -88,11 +89,19 @@ function runCli() {
       throw new Error(`TokenBoard config not found: ${configPath()}`)
     }
     const flags = parseArgs(process.argv.slice(2))
+    // A rotated upload token is long-lived and authorizes uploads as this device. Passing it
+    // as `--upload-token` writes it into the process table (`/proc/<pid>/cmdline` is readable
+    // by every local user for the process lifetime on Linux) and into shell history. The
+    // environment channel is the fallback, mirroring how setup.mjs takes its pairing code.
+    const uploadToken = flags['upload-token'] || process.env.TOKENBOARD_UPLOAD_TOKEN
+    if (typeof uploadToken !== 'string' || uploadToken.trim() === '') {
+      throw new Error('Missing --upload-token or TOKENBOARD_UPLOAD_TOKEN')
+    }
     withCredentialsLock(configDir(), () => {
       applyRotatedToken({
         currentConfig: readConfig(),
         serverOrigin: readServerOrigin(flags),
-        uploadToken: requiredFlag(flags, 'upload-token'),
+        uploadToken: uploadToken.trim(),
         deviceId: requiredFlag(flags, 'device-id'),
         installationId: requiredFlag(flags, 'installation-id'),
         installClaim: flags['install-claim'] ? String(flags['install-claim']) : null,

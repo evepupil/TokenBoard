@@ -12,9 +12,10 @@ import {
   readConfig,
   readPackageManager
 } from './config.mjs'
-import { printHelpIfRequested } from './cli-help.mjs'
+import { hasHelpFlag, printHelpIfRequested } from './cli-help.mjs'
 import { defaultReleaseRepo, installClientBinary } from './client-binary.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
+import { assertSupportedNodeVersion } from './node-version.mjs'
 import { recoverOrphanedBackup, runArchiveFallback, selectAvailableBackupPath } from './upgrade-archive.mjs'
 import {
   buildCloneSteps,
@@ -507,5 +508,20 @@ function runCli() {
 }
 
 if (isMainModule(import.meta.url)) {
+  // The manual and automatic upgrade paths download over Node `fetch` — a release tarball for
+  // `--to-binary`, and a ZIP archive fallback for a checkout upgrade. Both trust TLS hostname
+  // validation for the origin before the checksums are compared, so an unsupported Node (with
+  // the hostname-verification bypass) makes a hostile host able to serve matching checksums.
+  // sync.mjs's preflight covers automatic upgrades; a manual `upgrade.mjs` is a fifth TLS
+  // entrypoint and needs the same bound. `--help` stays a pure read on any runtime, matching
+  // the CLI contract.
+  if (!hasHelpFlag(process.argv.slice(2))) {
+    try {
+      assertSupportedNodeVersion(process.versions.node)
+    } catch (error) {
+      console.error(errorMessage(error))
+      process.exit(1)
+    }
+  }
   runCli()
 }

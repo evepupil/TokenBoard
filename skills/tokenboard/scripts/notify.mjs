@@ -13,6 +13,13 @@ import { coordinatedSync } from './coordinator.mjs'
 import { errorMessage } from './error-message.mjs'
 import { currentProcessStartIdentity, probeProcessLiveness, probeProcessStartIdentity } from './process-liveness.mjs'
 
+// The child's stdout/stderr are captured to build the failure message and the run log, so the
+// buffer needs the same headroom every other spawn in the skill gives it. Node's default is
+// 1 MiB; a diagnostic-heavy hook run (Codex session-level warnings on a large history) would
+// exceed it, kill the child with ENOBUFS, and make the same hook event fail deterministically
+// on every retry.
+const childOutputMaxBuffer = 64 * 1024 * 1024
+
 export const defaultNotifyCooldownMs = 15 * 60_000
 const minNotifyCooldownMs = 60_000
 // Two hours. A hook-triggered ccusage scan costs 4.6-7.6 GB of resident memory,
@@ -77,6 +84,7 @@ export function executeTokenBoardSync(source, options = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
       windowsHide: true,
+      maxBuffer: childOutputMaxBuffer,
       env: {
         ...(options.env || process.env),
         TOKENBOARD_COORDINATOR_LOCK_HELD: '1',

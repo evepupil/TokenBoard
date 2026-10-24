@@ -251,7 +251,6 @@ export function runPreCollectUpgrade({
   env = process.env,
   upgrade = runUpgrade,
   selfUpdate = runSelfUpdate,
-  binaryExists = existsSync,
   log = createUpgradeLogger(logs),
   warn = (message) => console.error(message)
 } = {}) {
@@ -260,7 +259,15 @@ export function runPreCollectUpgrade({
     // the binary too: an automatic self-update rewrites the executable itself,
     // which is harder to undo than a checkout `git checkout` can revert.
     // `shouldRunUpgrade` also covers `--hook`, so a hook still never upgrades.
-    if (!shouldRunUpgrade({ flags, env }) || !binaryExists(invocation.command)) {
+    //
+    // A missing binary must still reach `selfUpdate`: that is where
+    // `recoverOrphanedBinary` restores a swap interrupted between its two
+    // renames. Skipping the call because the target is missing is exactly the
+    // case the recovery exists for — without it the machine reports "client is
+    // not installed" on every run with no automatic way back. When there is
+    // nothing to recover, `runSelfUpdate` throws and the failure stays a
+    // warning, as with any other failed update.
+    if (!shouldRunUpgrade({ flags, env })) {
       return
     }
     try {
@@ -339,16 +346,40 @@ export async function runCollectorProcess(invocation, logs, options = {}) {
   if (!logs) {
     // Interactive mode keeps the child on the real terminal, but the process must still be
     // awaited: spawn returns a ChildProcess, not a result, and the caller reads `status`.
+    //
+    // The hook timeout applies here too. A hook run is exactly this branch — notify spawns
+    // sync.mjs with `--hook` and no scheduled-log environment — so bounding only the logged
+    // branch left the production hook path unbounded, and a wedged scan there holds the
+    // coordinator's sync lock with nothing to kill it.
     const child = spawnChild(invocation.command, invocation.args, {
       cwd: invocation.cwd,
       env: invocation.env,
       stdio: 'inherit',
       shell: invocation.shell
     })
-    return await new Promise((resolve) => {
-      child.once('error', (error) => resolve({ status: 1, error }))
-      child.once('exit', (code, signal) => resolve({ status: code ?? (signal ? 1 : 0), error: null }))
+    let timedOut = false
+    let timer
+    if (options.hookTimeoutMs) {
+      timer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, options.hookTimeoutMs)
+    }
+    const outcome = await new Promise((resolve) => {
+      child.once('error', (error) => resolve({ error }))
+      child.once('exit', (code, signal) => resolve({ code, signal }))
     })
+    clearTimeout(timer)
+    if (outcome.error) return { status: 1, error: outcome.error }
+    if (timedOut) {
+      return {
+        status: 1,
+        error: Object.assign(new Error(`collector run exceeded the ${options.hookTimeoutMs} ms hook timeout`), {
+          code: 'ETIMEDOUT'
+        })
+      }
+    }
+    return { status: outcome.code ?? (outcome.signal ? 1 : 0), error: null }
   }
 
   const child = spawnChild(invocation.command, invocation.args, {

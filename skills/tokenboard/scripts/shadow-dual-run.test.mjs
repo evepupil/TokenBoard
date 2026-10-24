@@ -465,3 +465,30 @@ test('the dual-run log path follows the config directory and the log override', 
     '/tmp/moved.jsonl'
   )
 })
+
+// The harness is where both clients' stderr converges into a log line and a terminal echo.
+// It must not assume either side redacted: a provider or ccusage error can carry
+// `tb_upload_…` or `https://user:token@host/…`.
+test('classifyShadowRun redacts credentials from an error message before logging it', () => {
+  const record = classifyShadowRun({
+    source: 'codex',
+    status: 1,
+    stdout: '',
+    stderr: 'upload failed: POST https://ci-user:ci-token@example.invalid/ingest rejected tb_upload_abcdef123456'
+  })
+
+  assert.equal(record.status, 'error')
+  assert.match(record.message, /https:\/\/example\.invalid\/ingest/)
+  assert.doesNotMatch(record.message, /ci-token/)
+  assert.doesNotMatch(record.message, /tb_upload_abcdef123456/)
+})
+
+// A named `--until` that the source cannot honor must not be dropped quietly: the operator
+// asked for a settled-day window and would otherwise read an unbounded comparison as that
+// window. (An `all` run keeps passing --until to the two sources that accept it, which the
+// invocation test above pins down.)
+test('buildShadowInvocation still drops --until for sources that do not accept it', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC' }
+  assert.equal(buildShadowInvocation({ config, source: 'pi', until: '2026-10-20' }).args.includes('--until'), false)
+  assert.equal(buildShadowInvocation({ config, source: 'codex', until: '2026-10-20' }).args.includes('--until'), true)
+})

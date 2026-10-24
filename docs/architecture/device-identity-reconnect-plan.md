@@ -78,7 +78,7 @@ pairing、reconnect、token rotate/revoke、installation/device revoke 均已接
 
 示例：
 
-- `Mison iMac`
+- `<device>`
 - `GZ016518DC`
 - `Ubuntu server`
 

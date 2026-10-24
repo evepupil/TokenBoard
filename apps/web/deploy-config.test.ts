@@ -163,6 +163,23 @@ describe('Wrangler deploy config', () => {
     expect(routeCheckScript).toContain('CLOUDFLARE_API_TOKEN')
   })
 
+  // A declined "About to apply N migration(s)" prompt makes `migrations apply` exit 0 with
+  // nothing applied, and a pure-data migration leaves every schema gate green — so the deploy
+  // would publish a Worker against an unmigrated database. The re-list after apply is what
+  // closes that gap, and it must sit between the apply and the Worker publish.
+  test('manual production deploy re-lists migrations after applying and before publishing', () => {
+    const deployScript = readPackageFile('scripts/deploy.mjs')
+    const applyIndex = deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
+    const verifyIndex = deployScript.indexOf('assertNoPendingMigrations(configPath)')
+    const publishIndex = deployScript.indexOf("runPnpm(['exec', 'wrangler', 'deploy', '--config', configPath])")
+
+    expect(applyIndex).toBeGreaterThan(-1)
+    expect(verifyIndex).toBeGreaterThan(applyIndex)
+    expect(publishIndex).toBeGreaterThan(verifyIndex)
+    expect(deployScript).toContain("'d1', 'migrations', 'list', 'DB', '--remote', '--config', configPath")
+    expect(deployScript).toContain('No migrations to apply')
+  })
+
   test('critical production schema check covers device identity and legacy upload tokens', () => {
     const schemaCheckPath = resolve(packageDir, 'db/verify-critical-schema.sql')
 
@@ -915,7 +932,8 @@ describe('Wrangler deploy config', () => {
     try {
       for (const [name, message] of [
         ['BETTER_AUTH_SECRET', 'vars.BETTER_AUTH_SECRET'],
-        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY']
+        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY'],
+        ['GITHUB_CLIENT_SECRET', 'vars.GITHUB_CLIENT_SECRET']
       ]) {
         const outputFile = join(tempDir, `wrangler.production.${name}.jsonc`)
         const content = filledProductionExample().replace(
@@ -963,7 +981,17 @@ describe('Wrangler deploy config', () => {
         resolve(packageDir, 'wrangler.production.example.jsonc'),
         join(tempDir, 'wrangler.production.example.jsonc')
       )
-      writeFileSync(pnpmStub, 'process.exit(0)\n')
+      // The deploy re-lists migrations after applying them and treats an unreadable listing as
+      // pending (fail-closed), so the stub has to answer the `migrations list` call with the
+      // same clean-state line wrangler prints; every other command still exits 0 silently.
+      writeFileSync(
+        pnpmStub,
+        [
+          'const argv = process.argv.slice(2)',
+          "if (argv.includes('migrations') && argv.includes('list')) console.log('✅ No migrations to apply!')",
+          'process.exit(0)'
+        ].join('\n') + '\n'
+      )
 
       const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
         cwd: tempDir,
