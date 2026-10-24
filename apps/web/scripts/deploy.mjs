@@ -100,7 +100,16 @@ function runNode(args, extraEnv) {
 
 function pnpmInvocation(args) {
   const packageManagerCli = process.env.TOKENBOARD_PNPM_CLI?.trim() || process.env.npm_execpath?.trim()
-  if (packageManagerCli) return { command: process.execPath, args: [packageManagerCli, ...args] }
+  if (packageManagerCli) {
+    // npm_execpath is not always a JS file: pnpm's standalone install points it
+    // at an executable (the packed binary), and feeding that to Node dies on
+    // its first byte with a SyntaxError. Only JS entry points go through Node;
+    // anything else is spawned as the executable it is.
+    if (/\.[cm]?js$/i.test(packageManagerCli)) {
+      return { command: process.execPath, args: [packageManagerCli, ...args] }
+    }
+    return { command: packageManagerCli, args }
+  }
   return { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args }
 }
 

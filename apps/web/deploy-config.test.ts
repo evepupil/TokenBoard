@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -1037,6 +1038,59 @@ describe('Wrangler deploy config', () => {
       expect(generated).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "12"')
       expect(generated).toContain('"database_id": "11111111-1111-4111-8111-111111111111"')
       expect(result.stderr).toBe('')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  // pnpm's standalone install sets `npm_execpath` to an executable binary, not a JS file.
+  // Wrapping that in `node` dies on its first byte, which is what a real deploy hit. The
+  // distinction has to be by file type, so this stub is a shell script: an executable that
+  // Node cannot parse.
+  test('deploy spawns an executable npm_execpath directly instead of feeding it to Node', () => {
+    if (process.platform === 'win32') return
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-pnpm-bin-'))
+    const scriptDir = join(tempDir, 'scripts')
+
+    try {
+      mkdirSync(scriptDir)
+      copyFileSync(resolve(packageDir, 'scripts/deploy.mjs'), join(scriptDir, 'deploy.mjs'))
+      copyFileSync(
+        resolve(packageDir, 'scripts/write-production-config.mjs'),
+        join(scriptDir, 'write-production-config.mjs')
+      )
+      copyFileSync(
+        resolve(packageDir, 'wrangler.production.example.jsonc'),
+        join(tempDir, 'wrangler.production.example.jsonc')
+      )
+      writeFileSync(join(scriptDir, 'check-production-config.mjs'), 'process.exit(0)\n')
+      writeFileSync(join(scriptDir, 'check-production-route.mjs'), 'process.exit(0)\n')
+
+      const shellStub = join(tempDir, 'pnpm-executable')
+      writeFileSync(
+        shellStub,
+        ['#!/bin/sh', 'case "$*" in *"migrations list"*) echo "✅ No migrations to apply!" ;; esac', 'exit 0', ''].join(
+          '\n'
+        )
+      )
+      chmodSync(shellStub, 0o755)
+
+      const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
+        cwd: tempDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_PNPM_CLI: shellStub,
+          TOKENBOARD_WORKER_ROUTE: 'tokenboard.example.com',
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_COLLECTOR_REPO_URL: 'https://github.com/MisonL/TokenBoard.git',
+          TOKENBOARD_COLLECTOR_REF: 'master',
+          D1_DATABASE_ID: '11111111-1111-4111-8111-111111111111'
+        }
+      })
+
+      expect(result.status, result.stderr || result.stdout).toBe(0)
+      expect(result.stderr).not.toContain('SyntaxError')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
