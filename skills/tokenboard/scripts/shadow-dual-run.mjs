@@ -25,6 +25,26 @@ import { errorMessage } from './error-message.mjs'
 import { readSince } from './sync-options.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
+// The ccusage tool family collects through the pinned ccusage runtime too. A
+// machine normally has none of these tools installed, so the honest result is
+// "empty" for both sides — which still catches a wrong subcommand name:
+// ccusage exits 2 on an unknown command, failing the Go source instead of
+// reporting an uninstalled tool.
+const ccusageToolSources = [
+  'amp',
+  'droid',
+  'codebuff',
+  'hermes',
+  'goose',
+  'kilo',
+  'copilot',
+  'gemini-cli',
+  'kimi',
+  'qwen',
+  'openclaw',
+  'zcode'
+]
+
 // The sources `tokenboard shadow` can compare with data on a normal machine.
 // The two Antigravity GUI sources need a language server and are outside the
 // dual run for the same reason they are outside CI.
@@ -35,7 +55,8 @@ export const dualRunSources = [
   'deepseek-harness',
   'opencode',
   'pi',
-  'antigravity-cli'
+  'antigravity-cli',
+  ...ccusageToolSources
 ]
 
 // defaultDualRunSince is sync's own default window, so a dual run compares
@@ -48,12 +69,15 @@ export function defaultDualRunSince({ config = {}, env = {}, now = new Date() } 
 
 // Sources whose collector shells out to ccusage. A comparison of these is only
 // meaningful when both sides run the same ccusage binary, so the harness pins
-// it the way CI does.
-const ccusageSources = new Set(['claude-code', 'codex'])
+// it the way CI does. The tool family belongs here too: without the pin the
+// Go side could resolve (and download) a different copy than the one the
+// TypeScript side reaches through node_modules.
+const ccusageSources = new Set(['claude-code', 'codex', ...ccusageToolSources])
 
-// `--until` is only accepted for the two ccusage-backed sources; passing it to
-// any other one is a usage error on both clients, not a silently ignored flag.
-const untilSources = ccusageSources
+// `--until` is accepted only for the two sources with a date window. The tool
+// family is ccusage-backed but takes no window on either side, so passing the
+// flag there is a usage error rather than a silently ignored one.
+const untilSources = new Set(['claude-code', 'codex'])
 
 export const usage = `Usage: shadow-dual-run.mjs [--client PATH] [--since YYYYMMDD] [--until YYYY-MM-DD] [--hook] [--log PATH] [--source NAME]
 

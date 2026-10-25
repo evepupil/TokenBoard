@@ -410,3 +410,33 @@ type DateFilterError struct {
 func (e *DateFilterError) Error() string {
 	return "Invalid " + e.Field + ": " + e.Value + ". Expected YYYYMMDD or YYYY-MM-DD."
 }
+
+// AssertValidDateFilterRange ports iso-calendar-date.ts
+// assertValidDateFilterRange: validate a --since/--until pair and reject a
+// reversed window. An empty bound or an explicit "all" means "no bound" and
+// is never forwarded to ccusage.
+func AssertValidDateFilterRange(since, until, sinceField, untilField string) (string, string, error) {
+	normalizedSince := ""
+	trimmedSince := strings.TrimSpace(since)
+	if since != "" && trimmedSince != "all" {
+		value, err := AssertValidDateFilter(since, sinceField, true)
+		if err != nil {
+			return "", "", err
+		}
+		normalizedSince = value
+	}
+	normalizedUntil := ""
+	if until != "" {
+		value, err := AssertValidDateFilter(until, untilField, false)
+		if err != nil {
+			return "", "", err
+		}
+		normalizedUntil = value
+	}
+	if normalizedSince != "" && normalizedUntil != "" &&
+		strings.ReplaceAll(normalizedSince, "-", "") > strings.ReplaceAll(normalizedUntil, "-", "") {
+		return "", "", fmt.Errorf(
+			"Invalid %s/%s: since date must not be after until date.", sinceField, untilField)
+	}
+	return normalizedSince, normalizedUntil, nil
+}

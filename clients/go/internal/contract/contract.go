@@ -36,6 +36,22 @@ const (
 	SourcePi              Source = "pi"
 	SourceGrokBuild       Source = "grok-build"
 	SourceDeepSeekHarness Source = "deepseek-harness"
+
+	// The ccusage tool family: each is collected by running the same pinned
+	// ccusage runtime with the tool's own subcommand. They carry the same
+	// report shape, so one parameterised provider serves all twelve.
+	SourceAmp       Source = "amp"
+	SourceDroid     Source = "droid"
+	SourceCodebuff  Source = "codebuff"
+	SourceHermes    Source = "hermes"
+	SourceGoose     Source = "goose"
+	SourceKilo      Source = "kilo"
+	SourceCopilot   Source = "copilot"
+	SourceGeminiCLI Source = "gemini-cli"
+	SourceKimi      Source = "kimi"
+	SourceQwen      Source = "qwen"
+	SourceOpenclaw  Source = "openclaw"
+	SourceZcode     Source = "zcode"
 )
 
 // Correction marks snapshots whose cost was re-derived from request-level
@@ -49,6 +65,47 @@ var usageSources = map[Source]bool{
 	SourceClaudeCode: true, SourceCodex: true,
 	SourceAntigravityCLI: true, SourceAntigravity: true, SourceAntigravityIDE: true,
 	SourceOpenCode: true, SourcePi: true, SourceGrokBuild: true, SourceDeepSeekHarness: true,
+	SourceAmp: true, SourceDroid: true, SourceCodebuff: true, SourceHermes: true,
+	SourceGoose: true, SourceKilo: true, SourceCopilot: true, SourceGeminiCLI: true,
+	SourceKimi: true, SourceQwen: true, SourceOpenclaw: true, SourceZcode: true,
+}
+
+// ccusageToolCommandNames maps each ccusage-tool source to the subcommand the
+// pinned runtime answers. Every source is its own subcommand except
+// gemini-cli, which runs `gemini` — ccusage has no `gemini-cli` command and
+// exits 2 on it, which would fail the whole source instead of reporting an
+// uninstalled tool as empty.
+var ccusageToolCommandNames = map[Source]string{
+	SourceAmp:       "amp",
+	SourceDroid:     "droid",
+	SourceCodebuff:  "codebuff",
+	SourceHermes:    "hermes",
+	SourceGoose:     "goose",
+	SourceKilo:      "kilo",
+	SourceCopilot:   "copilot",
+	SourceGeminiCLI: "gemini",
+	SourceKimi:      "kimi",
+	SourceQwen:      "qwen",
+	SourceOpenclaw:  "openclaw",
+	SourceZcode:     "zcode",
+}
+
+// CcusageToolCommand returns the ccusage subcommand for a ccusage-tool source.
+// ok is false for every other source.
+func CcusageToolCommand(source Source) (string, bool) {
+	command, ok := ccusageToolCommandNames[source]
+	return command, ok
+}
+
+// CcusageToolSources returns the ccusage tool family in canonical order.
+func CcusageToolSources() []Source {
+	out := make([]Source, 0, len(ccusageToolCommandNames))
+	for _, source := range allSources {
+		if _, ok := ccusageToolCommandNames[source]; ok {
+			out = append(out, source)
+		}
+	}
+	return out
 }
 
 // costUnavailableSources cannot report a cost: the collector uploads
@@ -95,6 +152,8 @@ var allSources = []Source{
 	SourceClaudeCode, SourceCodex,
 	SourceAntigravityCLI, SourceAntigravity, SourceAntigravityIDE,
 	SourceOpenCode, SourcePi, SourceGrokBuild, SourceDeepSeekHarness,
+	SourceAmp, SourceDroid, SourceCodebuff, SourceHermes, SourceGoose, SourceKilo,
+	SourceCopilot, SourceGeminiCLI, SourceKimi, SourceQwen, SourceOpenclaw, SourceZcode,
 }
 
 // AllSources returns the usage sources in their canonical order.

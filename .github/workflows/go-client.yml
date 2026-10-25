@@ -216,7 +216,13 @@ jobs:
           TOKENBOARD_CCUSAGE_BIN: ${{ github.workspace }}/packages/collector/node_modules/.bin/ccusage
         run: |
           set -euo pipefail
-          for source in grok-build pi deepseek-harness opencode claude-code codex; do
+          # The ccusage tool family is included deliberately: the runner has
+          # none of these tools installed, so both sides must agree on an
+          # empty result. A wrong subcommand name is what this catches —
+          # ccusage exits 2 on an unknown command, which fails the Go source
+          # while the TS side reports "not installed", so the run diverges.
+          for source in grok-build pi deepseek-harness opencode claude-code codex \
+            amp droid codebuff hermes goose kilo copilot gemini-cli kimi qwen openclaw zcode; do
             echo "::group::shadow $source"
             "$RUNNER_TEMP/tokenboard" shadow --source "$source"
             echo "::endgroup::"

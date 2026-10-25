@@ -57,10 +57,12 @@ clients/go/
 
 1. **snapshotHashPayload 字节级一致**：SHA-256 输入是键序固定、无空格的规范化 JSON。Go 侧**手工拼键序**，禁止依赖 `encoding/json` 的 map 序列化。金样本覆盖：全字段/缺字段/costUnavailable 来源/unicode 模型名。
 2. **cursor JSON v1 双向兼容**：TS 写 → Go 读 → Go 写 → TS 读，内容零差异（含 sha256+mtime+size+offset+pendingUpload、codexHookProfileHash、commit 前校验、缺失文件清理）。这是 per-source 灰度的前提。
-3. **usage-core 全部校验语义**：cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝。**时区接受集偏差不止一种（2026-10-24 实测双向对照）**：Intl 接受而 Go 拒绝——`US/Pacific-New`、`SystemV/EST5`、`SystemV/YST9YDT`、`Canada/East-Saskatchewan`（方向安全：拒绝而非算错）；Go 接受而 Intl 拒绝——`posixrules`（tzdata 里真实存在的一个文件；方向危险：会采集成功、却因服务端用 Intl 校验而永久 400，5 次后进入 24h 上传暂停）。`local`/`factory`/`posixrules` 已列入 `goOnlyZoneNames` 显式拒绝，并有表驱动测试；新增此类名称须同时补测试与本节。
+3. **usage-core 全部校验语义**：来源枚举（`usageSources`，当前 21 个，含 12 个 ccusage 工具来源）、cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝。**时区接受集偏差不止一种（2026-10-24 实测双向对照）**：Intl 接受而 Go 拒绝——`US/Pacific-New`、`SystemV/EST5`、`SystemV/YST9YDT`、`Canada/East-Saskatchewan`（方向安全：拒绝而非算错）；Go 接受而 Intl 拒绝——`posixrules`（tzdata 里真实存在的一个文件；方向危险：会采集成功、却因服务端用 Intl 校验而永久 400，5 次后进入 24h 上传暂停）。`local`/`factory`/`posixrules` 已列入 `goOnlyZoneNames` 显式拒绝，并有表驱动测试；新增此类名称须同时补测试与本节。
 4. **env 契约不变**：`TOKENBOARD_ENDPOINT/UPLOAD_TOKEN/TIMEZONE/SOURCE/SINCE/UNTIL/HOOK_MODE/STATE_DIR/FAIL_ON_SOURCE_ERROR/CCUSAGE_CONFIG/CODEX_SYMLINK_ROOTS_JSON/…` 与 TS 逐一同名同义；`transientSyncExitCode=75` 保留。
 5. **stderr 行为契约**：skill 脚本按行解析 stderr（脱敏、进度、跳过形态），Go 输出格式对齐。
-6. **providers 语义陷阱清单**（平移时逐条带 fixture 测试）：Pi cacheWrite+cacheWrite1h 双档与 entry-id 去重；Grok 面值入账+cachedRead 拆 fresh；DSH 多帧 zstd+尾帧截断容忍+seq 去重；OpenCode SQL 投影+只读打开；Antigravity 原文不落盘+bounded 扫描+cursor 上限；Codex 混合模型对账+重试消息前缀耦合+symlink 策略；costUnavailable fail-closed。
+6. **providers 语义陷阱清单**（平移时逐条带 fixture 测试）：Pi cacheWrite+cacheWrite1h 双档与 entry-id 去重；Grok 面值入账+cachedRead 拆 fresh；DSH 多帧 zstd+尾帧截断容忍+seq 去重；OpenCode SQL 投影+只读打开；Antigravity 原文不落盘+bounded 扫描+cursor 上限；Codex 混合模型对账+重试消息前缀耦合+symlink 策略；costUnavailable fail-closed；ccusage 工具族子命令映射（gemini-cli→`gemini`）与「空 daily 报告短路、不跑 session」两侧同口径。
+
+**来源枚举 parity 的专项测试（2026-10-25，随 PR #25 的 12 个工具来源补齐）**：金样本只覆盖 hash payload、不覆盖来源集合，所以 `contract_test.go` 的 `TestUsageSourcesMatchUsageCore` 用硬编码的 21 项声明序列断言 `AllSources()` 的顺序与内容——两侧任何一边加来源都会先红。CI 的 `shadow` job 同步把 12 个工具源加入逐源循环：干净 HOME 下两侧都应报空 match，子命令名一旦漂移（如误传 `gemini-cli`，ccusage 会 exit 2），Go 侧整源失败而 TS 侧报空，diff 即失败。
 
 ## 4. ccusage 集成（三层，fail-closed）
 
@@ -181,6 +183,15 @@ clients/go/
 - 与 TS 的已知边界：
   - `codexFileStat.ctimeMs` 由反射取平台字段（Linux `Ctim`、Darwin `Ctimespec`、Windows 无），Windows 上退化为 mtime，change detection 弱于 Node。
   - Go 侧 context pricing 的规则来源是 `DefaultRules()` + 动态目录，与 TS 的内联常量表同源但表体由 `BuildCodexContextPricingRules` 生成，影子 diff 已逐模型核对（`gpt-5.6-sol` 重定价两侧一致）。
+
+**ccusage 工具族移植（2026-10-25，关闭 PR #25 合并后的 parity 缺口）**：
+
+- 背景：上游 PR #25 把 12 个 ccusage 工具来源（amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode）加进了 TS 侧，Go 契约层仍停在 9 个来源——`--source amp` 报 `Invalid source`，`--source all` 静默漏采这 12 个（不在 `AllSources()` 里，连 skip 提示都没有）。spec §1 的等价性要求因此被破坏，而金样本生成器只覆盖 hash payload，CI 钉不住。
+- 契约层：`contract` 新增 12 个 `Source` 常量、`usageSources` 集合、`ccusageToolCommandNames` 映射、`CcusageToolCommand`/`CcusageToolSources`，并把 `allSources` 扩到 21 项（顺序与 usage-core 的 `usageSources` 逐位一致）。`TestUsageSourcesMatchUsageCore` 硬编码同一份 21 项序列，两侧任一改动先红。
+- Provider：`internal/collect/providers/ccusagetool` 单个参数化实现服务 12 个来源，`init()` 逐个 `collect.Register`。行为对齐 TS：`<tool> daily --json` → `<tool> session --json`，`gemini-cli` 走 `gemini` 子命令，空 daily 报告直接返回空结果、不发起 session 调用；不做动态定价 prepare（TS 同样不做），ambient `TOKENBOARD_CCUSAGE_CONFIG` 仍经 package runner 传给 ccusage。
+- 共享层：`sessionusage.AssertValidDateFilterRange` 从 claudecode 的私有实现上提，claudecode 与 ccusagetool 共用一份；`ccusage.HasDailyRows` 是 `hasDailyRows` 的移植，刻意比 normalize 的行提取严格（只认 `daily` 数组），否则「工具未安装」会退化成多跑一次 session。
+- 验证：`ccusagetool_test.go` 9 条覆盖 TS 的 7 条用例（参数向量、gemini 映射、since/until 透传、空报告短路、非工具源拒绝）外加反向窗口拒绝与「12 个来源都已注册」；`go test ./... -race` 全绿，`GOOS=windows go vet ./...` 干净。CI `shadow` job 与 `shadow-dual-run.mjs` 的源列表都补上这 12 个。
+- 证据边界：本机未安装这 12 个工具，双跑只能得到 `empty`（两侧一致的空结果）——它能抓住子命令名漂移，但**不构成有数据的等价性验证**。真实数据验证要等某台机器装了其中之一。
 
 **M6 状态（GoReleaser / self-update / skill 改造，2026-10-18）**：
 

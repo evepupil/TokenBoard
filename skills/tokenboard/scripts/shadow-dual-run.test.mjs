@@ -308,12 +308,42 @@ test('every comparable source is one the client accepts', () => {
     'deepseek-harness',
     'opencode',
     'pi',
-    'antigravity-cli'
+    'antigravity-cli',
+    // The ccusage tool family, in usage-core's declaration order.
+    'amp',
+    'droid',
+    'codebuff',
+    'hermes',
+    'goose',
+    'kilo',
+    'copilot',
+    'gemini-cli',
+    'kimi',
+    'qwen',
+    'openclaw',
+    'zcode'
   ])
   assert.equal(
     readFileSync(new URL('./shadow-dual-run.mjs', import.meta.url), 'utf8').includes('antigravity-ide'),
     false
   )
+})
+
+// The tool family collects through ccusage, so the harness has to pin the
+// binary for it too. Without the pin the Go side resolves ccusage its own way
+// (bundled copy, then PATH, then a download) while the TypeScript child uses
+// the checkout's node_modules copy — a difference that shows up as a diff
+// rather than as the configuration bug it is.
+test('buildShadowInvocation pins the ccusage binary for the tool sources', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC', ccusageBin: '/bin/ccusage' }
+  for (const source of ['amp', 'gemini-cli', 'zcode', 'claude-code']) {
+    const invocation = buildShadowInvocation({ config, source })
+    assert.equal(invocation.env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage', `${source} must run the pinned ccusage`)
+  }
+  // A file-backed source never touches ccusage; injecting the variable would
+  // make the environment look like a difference between the two runs.
+  const pi = buildShadowInvocation({ config, source: 'pi' })
+  assert.equal(pi.env.TOKENBOARD_CCUSAGE_BIN, undefined)
 })
 
 // The dual run's default comparison is a full preview, but production runs the

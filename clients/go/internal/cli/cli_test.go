@@ -104,7 +104,9 @@ func TestNoArgsShowsUsageOnStderr(t *testing.T) {
 }
 
 func TestInvalidSourceIsUsageError(t *testing.T) {
-	code, _, stderr := run(t, nil, "preview", "--source", "kimi")
+	// A literal that cannot become a source name; "kimi" joined the closed
+	// set with the ccusage tool family.
+	code, _, stderr := run(t, nil, "preview", "--source", "not-a-source")
 	if code != ExitUsage || !strings.Contains(stderr, "Invalid source") {
 		t.Errorf("code=%d stderr=%q", code, stderr)
 	}
@@ -131,12 +133,17 @@ func TestPreviewUnimplementedConcreteSourceFailsFast(t *testing.T) {
 func TestPreviewAllSourcesWithNoSessionsPrintsEmptyArray(t *testing.T) {
 	// Every provider home is pointed at an empty temp directory: a developer
 	// machine that has real sessions would otherwise be read by the all-source
-	// run and this would stop being a test of the empty case. Claude Code and
-	// Codex have no local directory to point at (ccusage owns the scan), so
-	// their providers are stubbed instead of running a real ccusage over the
-	// machine's home.
+	// run and this would stop being a test of the empty case. Claude Code,
+	// Codex and the ccusage tool family have no local directory to point at
+	// (ccusage owns those scans), so their providers are stubbed instead of
+	// running a real ccusage over the machine's home — the tools now include
+	// widely used ones (amp, kimi, zcode) that a developer machine may well
+	// have data for.
 	stubSource(t, contract.SourceClaudeCode, stubProvider{})
 	stubSource(t, contract.SourceCodex, stubProvider{})
+	for _, source := range contract.CcusageToolSources() {
+		stubSource(t, source, stubProvider{})
+	}
 	code, stdout, _ := run(t, map[string]string{
 		"TOKENBOARD_TIMEZONE":     "UTC",
 		"TOKENBOARD_GROK_HOME":    t.TempDir(),

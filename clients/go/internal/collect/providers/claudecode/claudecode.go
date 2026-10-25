@@ -349,7 +349,7 @@ func buildRangeArgs(since, until string, env func(string) string) ([]string, err
 	if until == "" {
 		until = env("TOKENBOARD_UNTIL")
 	}
-	normalizedSince, normalizedUntil, err := assertValidDateFilterRange(since, until,
+	normalizedSince, normalizedUntil, err := sessionusage.AssertValidDateFilterRange(since, until,
 		"Claude since date", "Claude until date")
 	if err != nil {
 		return nil, err
@@ -362,34 +362,6 @@ func buildRangeArgs(since, until string, env func(string) string) ([]string, err
 		args = append(args, "--until", normalizedUntil)
 	}
 	return args, nil
-}
-
-// assertValidDateFilterRange ports iso-calendar-date.ts: an explicit "all"
-// means "no lower bound" and is never forwarded to ccusage.
-func assertValidDateFilterRange(since, until, sinceField, untilField string) (string, string, error) {
-	normalizedSince := ""
-	trimmedSince := strings.TrimSpace(since)
-	if since != "" && trimmedSince != "all" {
-		value, err := sessionusage.AssertValidDateFilter(since, sinceField, true)
-		if err != nil {
-			return "", "", err
-		}
-		normalizedSince = value
-	}
-	normalizedUntil := ""
-	if until != "" {
-		value, err := sessionusage.AssertValidDateFilter(until, untilField, false)
-		if err != nil {
-			return "", "", err
-		}
-		normalizedUntil = value
-	}
-	if normalizedSince != "" && normalizedUntil != "" &&
-		strings.ReplaceAll(normalizedSince, "-", "") > strings.ReplaceAll(normalizedUntil, "-", "") {
-		return "", "", fmt.Errorf(
-			"Invalid %s/%s: since date must not be after until date.", sinceField, untilField)
-	}
-	return normalizedSince, normalizedUntil, nil
 }
 
 func readCcusageTimeoutMs(env func(string) string) int {
