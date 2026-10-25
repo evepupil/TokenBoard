@@ -128,6 +128,20 @@ func TestPreviewUnimplementedConcreteSourceFailsFast(t *testing.T) {
 	}
 }
 
+// Every source the contract declares must have a registered provider, because
+// the failure mode without one is silent: an all-source run skips a source
+// with no provider as "not implemented in this client yet" and still exits 0.
+// That is exactly how the twelve ccusage tool sources drifted out of this
+// client after upstream PR #25 added them TS-side — adding a source to
+// contract without a provider must fail here, not ship.
+func TestEveryContractSourceHasAProvider(t *testing.T) {
+	for _, source := range contract.AllSources() {
+		if _, ok := collect.Lookup(source); !ok {
+			t.Errorf("source %q has no registered provider", source)
+		}
+	}
+}
+
 // An all-source preview over a home with no sessions prints an empty array:
 // every missing store is skipped as unavailable, not reported as a failure.
 func TestPreviewAllSourcesWithNoSessionsPrintsEmptyArray(t *testing.T) {
