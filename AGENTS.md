@@ -197,6 +197,17 @@ ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo�
 - `--until` 只对 `claude-code` 和 `codex` 生效，工具类来源传 `--until` 是用法错误（两侧 CLI 一致 fail-fast）。
 - Go 侧 `contract.CcusageToolCommand`/`CcusageToolSources` 与 TS 的 `ccusageToolCommandNames`/`ccusageToolSources` 是同一契约；`TestUsageSourcesMatchUsageCore` 与 CI shadow 的 12 源循环钉住漂移。
 
+### 新增 usage 来源的检查单
+
+来源枚举有四处独立副本，任何一处漏改都是静默漂移（新来源能采集但漏比较、漏互斥或前端显示原始 slug）：
+
+1. `packages/usage-core/src/schema.ts` 的 `usageSources`（唯一权威）与 `ccusageToolSources`（若属工具族）。
+2. `skills/tokenboard/scripts/usage-sources.mjs` 的镜像。skill 脚本从 git checkout 直接跑、没有构建步骤，无法 import `@tokenboard/usage-core`，所以这份镜像必须手工同步；`usage-sources.test.mjs` 会解析 usage-core 的声明并在漂移时报错。定时重试的互斥锁集合与 `shadow-dual-run.mjs` 的可比源清单都由它派生，漏一处的后果是并发重试重复采集。
+3. `clients/go/internal/contract/contract.go` 的 `Source` 常量、closed set 与 `allSources`，同时补 `contract_test.go` 里硬编码的 `usageCoreSources`。
+4. 采集侧：TS 在 `providers/` 加 provider 并在 `cli.ts` 的 `collectAllSnapshots` 注册；Go 在 `providers/` 加包并加进 `collect/providers/providers.go` 的 blank import（漏这一步 `--source all` 会静默跳过并 exit 0，`TestEveryContractSourceHasAProvider` 专门守这条）。
+
+另外别忘：`apps/web/app/features/usage/source-format.ts` 的展示名（漏了会显示原始 slug）；费用不可用来源必须由 `costUnavailableSources` 派生而不是硬编码。
+
 ## 数据模型规范
 
 所有上传数据必须先标准化为统一 usage snapshot。后端只接收标准格式，不在 API route 中写来源特定解析逻辑。
@@ -503,6 +514,7 @@ skills/tokenboard/
     install-schedule.mjs
     coordinator.mjs
     client-binary.mjs
+    usage-sources.mjs
     antigravity-hook.mjs
     antigravity-statusline.mjs
     uninstall.mjs
