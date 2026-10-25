@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -304,11 +304,11 @@ test('every comparable source is one the client accepts', () => {
   assert.deepEqual(dualRunSources, [
     'claude-code',
     'codex',
-    'grok-build',
-    'deepseek-harness',
+    'antigravity-cli',
     'opencode',
     'pi',
-    'antigravity-cli',
+    'grok-build',
+    'deepseek-harness',
     // The ccusage tool family, in usage-core's declaration order.
     'amp',
     'droid',
@@ -323,10 +323,12 @@ test('every comparable source is one the client accepts', () => {
     'openclaw',
     'zcode'
   ])
-  assert.equal(
-    readFileSync(new URL('./shadow-dual-run.mjs', import.meta.url), 'utf8').includes('antigravity-ide'),
-    false
-  )
+  // The two GUI sources need a language server, so they stay out of the dual
+  // run. Asserted on the list rather than on the file text: the module names
+  // them to exclude them, which is not the same as comparing them.
+  for (const source of ['antigravity', 'antigravity-ide']) {
+    assert.equal(dualRunSources.includes(source), false, `${source} must stay out of the dual run`)
+  }
 })
 
 // The tool family collects through ccusage, so the harness has to pin the

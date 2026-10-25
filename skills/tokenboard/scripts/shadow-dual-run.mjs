@@ -24,40 +24,21 @@ import { configDir, readConfig } from './config.mjs'
 import { errorMessage } from './error-message.mjs'
 import { readSince } from './sync-options.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
-
-// The ccusage tool family collects through the pinned ccusage runtime too. A
-// machine normally has none of these tools installed, so the honest result is
-// "empty" for both sides — which still catches a wrong subcommand name:
-// ccusage exits 2 on an unknown command, failing the Go source instead of
-// reporting an uninstalled tool.
-const ccusageToolSources = [
-  'amp',
-  'droid',
-  'codebuff',
-  'hermes',
-  'goose',
-  'kilo',
-  'copilot',
-  'gemini-cli',
-  'kimi',
-  'qwen',
-  'openclaw',
-  'zcode'
-]
+import { ccusageToolSources, usageSources } from './usage-sources.mjs'
 
 // The sources `tokenboard shadow` can compare with data on a normal machine.
 // The two Antigravity GUI sources need a language server and are outside the
-// dual run for the same reason they are outside CI.
-export const dualRunSources = [
-  'claude-code',
-  'codex',
-  'grok-build',
-  'deepseek-harness',
-  'opencode',
-  'pi',
-  'antigravity-cli',
-  ...ccusageToolSources
-]
+// dual run for the same reason they are outside CI. Everything else is derived
+// from the shared source set, so a source added there joins the comparison
+// instead of being quietly left out — the tool family was omitted that way
+// until the twelve tools were ported.
+//
+// Comparing a tool source is still worth the spawn when the tool is not
+// installed: both sides report empty, and a wrong subcommand name would make
+// ccusage exit 2, failing the Go source instead of looking like an uninstalled
+// tool.
+const dualRunExcludedSources = new Set(['antigravity', 'antigravity-ide'])
+export const dualRunSources = usageSources.filter((source) => !dualRunExcludedSources.has(source))
 
 // defaultDualRunSince is sync's own default window, so a dual run compares
 // the dataset production collects rather than the collector's "everything"
