@@ -312,6 +312,7 @@ export function createCcusagePricingOverrides(
   for (const [modelId, override] of officialAnchorOverrides(models, dynamicOverrides)) {
     dynamicOverrides[modelId] = override
   }
+  applyCaseVariantAliases(models, dynamicOverrides)
   return mergePricingOverrides(
     fallbackConfig ? readPricingOverrides(fallbackConfig) : {},
     dynamicOverrides,
@@ -364,6 +365,34 @@ function officialAnchorOverrides(
     if (override) anchors.push([rows[0]!.modelId, override])
   }
   return anchors
+}
+
+// ccusage matches an override key case-sensitively: a session model `GLM-5.3-Flash` is not priced
+// by a `glm-5.3-flash` key. The catalogue publishes both spellings for the same id, and the
+// collapse emits only the representative's, so the other spelling stays unpriced on machines whose
+// logs use it. Emit the same override under every spelling the catalogue publishes for that id.
+//
+// Aliases are only added for ids that already have an emitted override, so this cannot resurrect a
+// group the collapse dropped for disagreeing rows, and it never invents a spelling the catalogue
+// does not publish.
+function applyCaseVariantAliases(
+  models: readonly CollectorPricingModel[],
+  overrides: Record<string, CcusagePricingOverride>
+): void {
+  const spellings = new Map<string, Set<string>>()
+  for (const model of models) {
+    const key = model.modelId.trim().toLowerCase()
+    const set = spellings.get(key) ?? new Set<string>()
+    set.add(model.modelId)
+    spellings.set(key, set)
+  }
+  for (const [key, override] of Object.entries(overrides)) {
+    const set = spellings.get(key.trim().toLowerCase())
+    if (!set) continue
+    for (const spelling of set) {
+      if (!Object.hasOwn(overrides, spelling)) overrides[spelling] = override
+    }
+  }
 }
 
 // The bases ccusage may fold a key onto: drop `:tag` segments, drop the provider prefix, then

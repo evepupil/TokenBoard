@@ -169,6 +169,15 @@ vendor row for a base id that a variant key could reach is emitted under the bas
 official row qualifies; anchoring from a reseller row would re-create the ambiguity the id was left
 unresolved for, and an id with no official row keeps whatever `ccusage` would have used.
 
+Matching is also case-sensitive: a session model `GLM-5.3-Flash` is not priced by a
+`glm-5.3-flash` key. The catalogue publishes several spellings of one id, and the collapse emits
+only the representative's spelling, so the collector repeats each override under every spelling the
+catalogue publishes for that id. Aliases are only added for ids that already have an emitted
+override, so the collapse's ambiguity decision stands and no spelling the catalogue does not
+publish is invented. On the 2026-10-27 catalogue this added 43 keys; over 2026-10-21..26 the
+Claude Code total moved from 6903.42 to 6885.12 — some sessions previously fell back to
+`ccusage`'s own table (a different price), others were unpriced at $0.
+
 The catalogue cache is `TOKENBOARD_STATE_DIR/model-pricing-cache.json`, is written atomically, and
 has a 24-hour TTL. A regular or manual sync refreshes an expired cache with ETag support. Hook mode
 does not make network requests: it uses a fresh or stale last-successful cache, then the bundled

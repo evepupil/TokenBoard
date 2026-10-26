@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1247,5 +1248,82 @@ func TestOfficialVendorRowStillRepresentsAnAgreeingGroup(t *testing.T) {
 	selected := selectUnambiguousDynamicPricingModels(models)
 	if len(selected) != 1 || selected[0].Provider != "openai" {
 		t.Fatalf("collapsed representative = %+v, want the openai row", selected)
+	}
+}
+
+// ccusage matches an override key case-sensitively, and the catalogue publishes
+// several spellings of the same id. Every published spelling has to carry the
+// collapsed price, or machines whose logs use the other spelling stay unpriced.
+func TestEmitsOverrideUnderEveryCatalogueSpellingOfAModelID(t *testing.T) {
+	models := []Model{
+		testModel("glm-5.3-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("GLM-5.3-Flash", func(model *Model) {
+			model.Provider = "amd"
+			model.InputCostPerMillion = 0
+			model.OutputCostPerMillion = 0
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	lower := overrideOf(t, overrides, "glm-5.3-flash")
+	requireNumber(t, lower, "inputCostPerToken", perMillion(0.15))
+	if got := overrides["GLM-5.3-Flash"]; !reflect.DeepEqual(got, lower) {
+		t.Fatalf("GLM-5.3-Flash override = %v, want %v", got, lower)
+	}
+}
+
+// The alias set is the catalogue's own spellings, never a generated variant.
+func TestDoesNotInventACatalogueSpelling(t *testing.T) {
+	overrides := CreateCcusagePricingOverrides([]Model{
+		testModel("gpt-6", func(model *Model) {
+			model.Provider = "openai"
+			model.InputCostPerMillion = 1
+			model.OutputCostPerMillion = 2
+		}),
+	})
+
+	if _, ok := overrides["gpt-6"]; !ok {
+		t.Fatalf("gpt-6 has no override: %v", overrides)
+	}
+	if _, ok := overrides["GPT-6"]; ok {
+		t.Fatalf("GPT-6 override was invented: %v", overrides)
+	}
+}
+
+// An anchored base id is emitted under the catalogue's first spelling of that
+// id; the other published spellings have to follow it.
+func TestAliasesAnAnchoredBaseIDToTheOtherCatalogueSpellings(t *testing.T) {
+	models := []Model{
+		testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = "xiaomi"
+			model.InputCostPerMillion = 0.14
+			model.OutputCostPerMillion = 0.28
+		}),
+		testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = "reseller-a"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.25
+		}),
+		testModel("MiMo-V2.6-Flash", func(model *Model) {
+			model.Provider = "reseller-b"
+			model.InputCostPerMillion = 0.2
+			model.OutputCostPerMillion = 0.4
+		}),
+		testModel("xiaomi/mimo-v2.6-flash-uncensored", func(model *Model) {
+			model.Provider = "xiaomi"
+			model.InputCostPerMillion = 0.5
+			model.OutputCostPerMillion = 1.5
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	base := overrideOf(t, overrides, "mimo-v2.6-flash")
+	requireNumber(t, base, "inputCostPerToken", perMillion(0.14))
+	if got := overrides["MiMo-V2.6-Flash"]; !reflect.DeepEqual(got, base) {
+		t.Fatalf("MiMo-V2.6-Flash override = %v, want %v", got, base)
 	}
 }

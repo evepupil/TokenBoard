@@ -528,6 +528,49 @@ describe('model pricing catalogue client', () => {
     expect(overrides['xiaomi/mimo-v2.6-flash-uncensored']).toBeDefined()
   })
 
+  // ccusage matches an override key to the session's model name case-sensitively after
+  // folding a provider prefix and a variant suffix, so a key spelled `glm-5.3-flash` never
+  // reaches a session that reports `GLM-5.3-Flash` and the override silently loses to
+  // ccusage's builtin price. The catalogue itself publishes one id in several casings
+  // (different providers spell it differently), so every spelling an emitted key's id
+  // appears under is emitted too, carrying the price the collapse already decided.
+  test('emits an override under every catalogue spelling of the same model id', async () => {
+    const overrides = createCcusagePricingOverrides([
+      model('glm-5.3-flash', { provider: 'zai', inputCostPerMillion: 0.15, outputCostPerMillion: 0.5 }),
+      model('GLM-5.3-Flash', { provider: 'amd', inputCostPerMillion: 0, outputCostPerMillion: 0 })
+    ])
+
+    expect(overrides['glm-5.3-flash']).toMatchObject({ inputCostPerToken: 0.15 / 1_000_000 })
+    expect(overrides['GLM-5.3-Flash']).toEqual(overrides['glm-5.3-flash'])
+  })
+
+  test('does not invent a spelling the catalogue never publishes', async () => {
+    const overrides = createCcusagePricingOverrides([
+      model('gpt-6', { provider: 'openai', inputCostPerMillion: 1, outputCostPerMillion: 2 })
+    ])
+
+    expect(overrides['gpt-6']).toBeDefined()
+    expect(overrides['GPT-6']).toBeUndefined()
+  })
+
+  test('aliases an anchored base id to the other spellings the catalogue publishes', async () => {
+    // The anchor restores the official price for an unresolved base id; the alias is what
+    // makes it reach a session that spells the same id with different case.
+    const overrides = createCcusagePricingOverrides([
+      model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+      model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 }),
+      model('MiMo-V2.6-Flash', { provider: 'reseller-b', inputCostPerMillion: 0.2, outputCostPerMillion: 0.4 }),
+      model('xiaomi/mimo-v2.6-flash-uncensored', {
+        provider: 'xiaomi',
+        inputCostPerMillion: 0.5,
+        outputCostPerMillion: 1.5
+      })
+    ])
+
+    expect(overrides['mimo-v2.6-flash']).toMatchObject({ inputCostPerToken: 0.14 / 1_000_000 })
+    expect(overrides['MiMo-V2.6-Flash']).toEqual(overrides['mimo-v2.6-flash'])
+  })
+
   test('leaves a variant-only model alone when no official base row exists', async () => {
     // Without an official row there is nothing to anchor to, and inventing a price from a
     // reseller row would repeat the very ambiguity the unresolved id was protected from.

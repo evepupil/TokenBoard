@@ -405,7 +405,34 @@ func createCcusagePricingOverrides(models []Model) map[string]any {
 	for modelID, override := range officialAnchorOverrides(models, overrides) {
 		overrides[modelID] = override
 	}
+	applyCaseVariantAliases(models, overrides)
 	return overrides
+}
+
+// applyCaseVariantAliases ports applyCaseVariantAliases: ccusage matches an
+// override key case-sensitively, and the catalogue publishes several spellings
+// of the same id, so every published spelling gets the collapsed price. Only
+// ids that already have an emitted override are aliased — a group the collapse
+// dropped for disagreeing rows stays dropped, and no spelling the catalogue
+// never publishes is invented.
+func applyCaseVariantAliases(models []Model, overrides map[string]any) {
+	spellings := map[string]map[string]bool{}
+	for _, model := range models {
+		key := strings.ToLower(strings.TrimSpace(model.ModelID))
+		set := spellings[key]
+		if set == nil {
+			set = map[string]bool{}
+			spellings[key] = set
+		}
+		set[model.ModelID] = true
+	}
+	for key, override := range overrides {
+		for spelling := range spellings[strings.ToLower(strings.TrimSpace(key))] {
+			if _, exists := overrides[spelling]; !exists {
+				overrides[spelling] = override
+			}
+		}
+	}
 }
 
 // officialAnchorOverrides ports officialAnchorOverrides: ccusage matches an
