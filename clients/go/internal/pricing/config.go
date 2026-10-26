@@ -724,28 +724,21 @@ var officialVendorProviderIDs = map[string]bool{
 	"alibaba": true, "xai": true, "minimax": true, "nvidia": true, "longcat": true,
 }
 
+// pickCollapsedRepresentative ports pickCollapsedRepresentative: prefer the
+// official vendor row, then the group's first row. It walks the group the
+// agreement check compared, never the full entry list — an official vendor's
+// $0 placeholder row lives outside that group and would otherwise win the pick
+// and silently price the model as free.
 func pickCollapsedRepresentative(group []Model, entries []Model) int {
-	for index, entry := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(entry.Provider))] {
-			for candidateIndex, candidate := range group {
-				if sameModelIdentity(candidate, entry) {
-					return indexInOriginal(entries, candidateIndex, group, entry)
-				}
-			}
-			return index
+	chosen := group[0]
+	for _, candidate := range group {
+		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidate.Provider))] {
+			chosen = candidate
+			break
 		}
 	}
 	for index, entry := range entries {
-		if sameModelIdentity(entry, group[0]) {
-			return index
-		}
-	}
-	return 0
-}
-
-func indexInOriginal(entries []Model, _ int, group []Model, target Model) int {
-	for index, entry := range entries {
-		if sameModelIdentity(entry, target) {
+		if sameModelIdentity(entry, chosen) {
 			return index
 		}
 	}

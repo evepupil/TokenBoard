@@ -1119,3 +1119,57 @@ func TestPreservesBundledLongContextFieldsWhenStaticFallbackWritesMergedConfig(t
 	requireNumber(t, grok, "outputCostPerTokenAbove200kTokens", perMillion(12))
 	requireNumber(t, grok, "cacheReadInputTokenCostAbove200kTokens", perMillion(0.6))
 }
+
+// The agreement check compares only positive-priced rows, so the representative
+// must come from that same group. When an official vendor row is a $0
+// placeholder and a reseller row carries the real price, picking the
+// representative from all rows silently prices the model as free — the exact
+// failure mode the zero-row isolation exists to prevent. The TypeScript side
+// fixed this in d15b5fa; this is the Go port of that fix, pinned by the same
+// shape of test.
+func TestZeroPricedOfficialRowDoesNotRepresentAPricedGroup(t *testing.T) {
+	models := []Model{
+		testModel("step-5-preview", func(model *Model) {
+			model.Provider = "nvidia"
+			model.InputCostPerMillion = 0
+			model.OutputCostPerMillion = 0
+		}),
+		testModel("step-5-preview", func(model *Model) {
+			model.Provider = "reseller"
+			model.InputCostPerMillion = 1
+			model.OutputCostPerMillion = 2.7
+		}),
+	}
+
+	selected := selectUnambiguousDynamicPricingModels(models)
+	if len(selected) != 1 {
+		t.Fatalf("selectUnambiguousDynamicPricingModels returned %d rows, want 1", len(selected))
+	}
+	if selected[0].Provider != "reseller" {
+		t.Fatalf("collapsed representative provider = %q, want %q", selected[0].Provider, "reseller")
+	}
+	overrides := CreateCcusagePricingOverrides(models)
+	requireNumber(t, overrideOf(t, overrides, "step-5-preview"), "inputCostPerToken", perMillion(1))
+}
+
+// The official vendor row still wins when it carries the real price: the fix
+// only drops $0 placeholders from the pick, it does not stop preferring the
+// vendor.
+func TestOfficialVendorRowStillRepresentsAnAgreeingGroup(t *testing.T) {
+	models := []Model{
+		testModel("gpt", func(model *Model) {
+			model.Provider = "reseller"
+			model.InputCostPerMillion = 2
+			model.OutputCostPerMillion = 8
+		}),
+		testModel("gpt", func(model *Model) {
+			model.Provider = "openai"
+			model.InputCostPerMillion = 2
+			model.OutputCostPerMillion = 8
+		}),
+	}
+	selected := selectUnambiguousDynamicPricingModels(models)
+	if len(selected) != 1 || selected[0].Provider != "openai" {
+		t.Fatalf("collapsed representative = %+v, want the openai row", selected)
+	}
+}
