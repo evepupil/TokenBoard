@@ -429,7 +429,10 @@ func TestShadowIgnoresAmbientUntilInHookMode(t *testing.T) {
 // written session file produces, and shadow must not report it as drift.
 func liveWriteSnapshot(now time.Time) (goSnapshot, tsSnapshot contract.Snapshot) {
 	goSnapshot = shadowSnapshot()
-	goSnapshot.UsageDate = now.Format("2006-01-02")
+	// The row declares UTC, so "today" is UTC's date: formatting the local
+	// clock instead would put the row on tomorrow between 16:00 and 24:00 UTC
+	// and turn the live-write case into an unexplained diff.
+	goSnapshot.UsageDate = now.UTC().Format("2006-01-02")
 	goSnapshot.Timezone = "UTC"
 	goSnapshot.InputTokens = 1000
 	goSnapshot.OutputTokens = 10
