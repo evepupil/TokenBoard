@@ -164,8 +164,9 @@ The catalogue cache is `TOKENBOARD_STATE_DIR/model-pricing-cache.json`, is writt
 has a 24-hour TTL. A regular or manual sync refreshes an expired cache with ETag support. Hook mode
 does not make network requests: it uses a fresh or stale last-successful cache, then the bundled
 static config. A failed refresh never blocks token collection. Diagnostics identify the selected
-source and refresh failure; a model without reliable input/output pricing keeps the existing
-collector result and emits a warning instead of being silently treated as free.
+source and refresh failure. A model with no TokenBoard override is not by itself a problem —
+`ccusage` prices it from its own builtin catalogue — so the warning is emitted only for a model
+that came back with real usage and zero cost, which is what an unpriced model actually looks like.
 
 The catalogue is intentionally not joined into historical usage aggregation. An ingested `costUsd`
 is the price that applied when the collector measured that day, not a live view of the catalogue, so

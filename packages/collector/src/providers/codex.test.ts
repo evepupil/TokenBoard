@@ -140,6 +140,76 @@ describe('collectCodexUsage', () => {
     }
   })
 
+  // The warning must track the cost that actually shipped, not the override set: ccusage prices
+  // from its own catalogue, so an unpriced-by-TokenBoard model normally still has a real cost.
+  test('stays quiet about models ccusage priced itself', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    try {
+      await collectCodexUsage({
+        codexHome,
+        timezone: 'UTC',
+        env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+        stderr: (line) => stderr.push(line),
+        async runner(_command, args) {
+          if (args.includes('session')) return { data: [] }
+          return {
+            data: [
+              {
+                date: '2026-04-28',
+                models: ['ccusage-priced-model'],
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+                costUSD: 0.25
+              }
+            ]
+          }
+        }
+      })
+
+      expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  test('still warns when a model came back with no cost at all', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    try {
+      await collectCodexUsage({
+        codexHome,
+        timezone: 'UTC',
+        env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+        stderr: (line) => stderr.push(line),
+        async runner(_command, args) {
+          if (args.includes('session')) return { data: [] }
+          return {
+            data: [
+              {
+                date: '2026-04-28',
+                models: ['self-hosted-alias'],
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+                costUSD: 0
+              }
+            ]
+          }
+        }
+      })
+
+      expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([
+        'TokenBoard model pricing unavailable for Codex model self-hosted-alias; preserving collected result'
+      ])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   test('keeps context pricing attribution separate for duplicate session paths across Codex homes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-duplicate-profile-pricing-'))
     const firstHome = join(root, 'first')

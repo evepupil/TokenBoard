@@ -193,6 +193,9 @@ export async function collectCodexUsage(options: CollectCodexUsageOptions = {}):
   return snapshots
 }
 
+// Same rule as the Claude side: a model outside the TokenBoard override set is still priced by
+// ccusage's builtin catalogue, so only a zero-cost snapshot with real usage signals a model
+// nothing could price.
 function reportUnpricedCodexSnapshots(
   snapshots: readonly UsageSnapshot[],
   coveredModelIds: ReadonlySet<string>,
@@ -201,6 +204,7 @@ function reportUnpricedCodexSnapshots(
   const models = new Set(
     snapshots
       .filter((snapshot) => snapshot.source === 'codex' && snapshot.totalTokens > 0)
+      .filter((snapshot) => !(snapshot.costUsd > 0))
       .map((snapshot) => snapshot.model)
       .filter((model) => !coveredModelIds.has(model))
   )

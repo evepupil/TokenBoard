@@ -398,6 +398,62 @@ describe('collectClaudeCodeUsage', () => {
       expect(args).toContain(bundledConfigPath)
     }
   })
+
+  // ccusage prices models from its own builtin catalogue, so a model missing from the
+  // TokenBoard override set still arrives with a real cost. Warning about it buried the
+  // log: on one machine 43-44 models per run, all priced, 1666 lines in a rotated stderr.
+  // The warning only carries information when the cost actually came back as zero.
+  test('stays quiet about models ccusage priced itself', async () => {
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+
+    await collectClaudeCodeUsage({
+      env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+      stderr: (line) => stderr.push(line),
+      async runner(_command, args) {
+        if (args.includes('session')) return { data: [] }
+        return {
+          data: [
+            {
+              date: '2026-04-28',
+              breakdown: {
+                'ccusage-priced-model': { inputTokens: 10, outputTokens: 2, costUSD: 0.25 }
+              }
+            }
+          ]
+        }
+      }
+    })
+
+    expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([])
+  })
+
+  test('still warns when a model came back with no cost at all', async () => {
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+
+    await collectClaudeCodeUsage({
+      env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+      stderr: (line) => stderr.push(line),
+      async runner(_command, args) {
+        if (args.includes('session')) return { data: [] }
+        return {
+          data: [
+            {
+              date: '2026-04-28',
+              breakdown: {
+                'self-hosted-alias': { inputTokens: 10, outputTokens: 2, costUSD: 0 }
+              }
+            }
+          ]
+        }
+      }
+    })
+
+    expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([
+      'TokenBoard model pricing unavailable for Claude Code model self-hosted-alias; preserving ccusage result'
+    ])
+  })
 })
 
 function platformCommand(command: string) {
