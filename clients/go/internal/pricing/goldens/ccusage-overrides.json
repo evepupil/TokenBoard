@@ -1,0 +1,334 @@
+{
+  "catalogue": {
+    "models": [
+      {
+        "cacheReadCostPerMillion": 0.03,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.15,
+        "maxInputTokens": null,
+        "modelId": "glm-5.3-flash",
+        "outputCostPerMillion": 0.5,
+        "pricing": {},
+        "provider": "zai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0,
+        "maxInputTokens": null,
+        "modelId": "GLM-5.3-Flash",
+        "outputCostPerMillion": 0,
+        "pricing": {},
+        "provider": "amd"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.14,
+        "maxInputTokens": null,
+        "modelId": "mimo-v2.6-flash",
+        "outputCostPerMillion": 0.28,
+        "pricing": {},
+        "provider": "xiaomi"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.12,
+        "maxInputTokens": null,
+        "modelId": "mimo-v2.6-flash",
+        "outputCostPerMillion": 0.25,
+        "pricing": {},
+        "provider": "reseller-a"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.2,
+        "maxInputTokens": null,
+        "modelId": "MiMo-V2.6-Flash",
+        "outputCostPerMillion": 0.4,
+        "pricing": {},
+        "provider": "reseller-b"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.5,
+        "maxInputTokens": null,
+        "modelId": "xiaomi/mimo-v2.6-flash-uncensored",
+        "outputCostPerMillion": 1.5,
+        "pricing": {},
+        "provider": "xiaomi"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0,
+        "maxInputTokens": null,
+        "modelId": "step-5-preview",
+        "outputCostPerMillion": 0,
+        "pricing": {},
+        "provider": "nvidia"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 1,
+        "maxInputTokens": null,
+        "modelId": "step-5-preview",
+        "outputCostPerMillion": 2.7,
+        "pricing": {},
+        "provider": "stepfun-ai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 1,
+        "maxInputTokens": null,
+        "modelId": "gpt-6",
+        "outputCostPerMillion": 2,
+        "pricing": {},
+        "provider": "reseller"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 1,
+        "maxInputTokens": null,
+        "modelId": "gpt-6",
+        "outputCostPerMillion": 2,
+        "pricing": {},
+        "provider": "openai"
+      },
+      {
+        "cacheReadCostPerMillion": 1.5,
+        "cacheWriteCostPerMillion": 18.75,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 15,
+        "maxInputTokens": null,
+        "modelId": "claude-opus-4-6",
+        "outputCostPerMillion": 75,
+        "pricing": {
+          "tiers": [
+            {
+              "cache_read": 1.5,
+              "cache_write": 18.75,
+              "input": 15,
+              "output": 75,
+              "tier": {
+                "size": 200000,
+                "type": "context"
+              }
+            }
+          ]
+        },
+        "provider": "anthropic"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 400000,
+        "inputCostPerMillion": 1.25,
+        "maxInputTokens": null,
+        "modelId": "gpt-5.5-sol",
+        "outputCostPerMillion": 10,
+        "pricing": {
+          "tiers": [
+            {
+              "input": 1.25,
+              "output": 10,
+              "tier": {
+                "size": 200000,
+                "type": "context"
+              }
+            },
+            {
+              "input": 2.5,
+              "output": 15,
+              "tier": {
+                "size": 272000,
+                "type": "context"
+              }
+            }
+          ]
+        },
+        "provider": "openai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 1000000,
+        "inputCostPerMillion": 0.15,
+        "maxInputTokens": null,
+        "modelId": "deepseek-flash",
+        "outputCostPerMillion": 0.6,
+        "pricing": {},
+        "provider": "deepseek"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 500000,
+        "inputCostPerMillion": 2,
+        "maxInputTokens": null,
+        "modelId": "grok-4.5",
+        "outputCostPerMillion": 6,
+        "pricing": {
+          "fastMultiplier": 2,
+          "tiers": [
+            {
+              "cache_read": 0.3,
+              "input": 2,
+              "output": 6,
+              "tier": {
+                "size": 200000,
+                "type": "context"
+              }
+            }
+          ]
+        },
+        "provider": "xai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0,
+        "maxInputTokens": null,
+        "modelId": "free-model",
+        "outputCostPerMillion": 0,
+        "pricing": {},
+        "provider": "local"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0,
+        "maxInputTokens": null,
+        "modelId": "free-model",
+        "outputCostPerMillion": 0,
+        "pricing": {},
+        "provider": "local-2"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.3,
+        "maxInputTokens": null,
+        "modelId": "módel/中文-模型",
+        "outputCostPerMillion": 0.9,
+        "pricing": {},
+        "provider": "local"
+      }
+    ],
+    "nextCursor": null
+  },
+  "fallback": {
+    "defaults": {
+      "pricingOverrides": {
+        "deepseek-flash": {
+          "inputCostPerTokenAbove200kTokens": 3e-7,
+          "outputCostPerTokenAbove200kTokens": 0.0000012
+        },
+        "gpt-5.5-sol": {
+          "inputCostPerTokenAbove200kTokens": 0.000009,
+          "outputCostPerTokenAbove200kTokens": 0.00009
+        }
+      }
+    }
+  },
+  "overrides": {
+    "GLM-5.3-Flash": {
+      "cacheReadInputTokenCost": 3e-8,
+      "inputCostPerToken": 1.5e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 5e-7
+    },
+    "MiMo-V2.6-Flash": {
+      "inputCostPerToken": 1.4e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 2.8e-7
+    },
+    "claude-opus-4-6": {
+      "cacheCreationInputTokenCost": 0.00001875,
+      "cacheCreationInputTokenCostAbove200kTokens": 0.00001875,
+      "cacheReadInputTokenCost": 0.0000015,
+      "cacheReadInputTokenCostAbove200kTokens": 0.0000015,
+      "inputCostPerToken": 0.000015,
+      "inputCostPerTokenAbove200kTokens": 0.000015,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.000075,
+      "outputCostPerTokenAbove200kTokens": 0.000075
+    },
+    "deepseek-flash": {
+      "inputCostPerToken": 1.5e-7,
+      "inputCostPerTokenAbove200kTokens": 3e-7,
+      "maxInputTokens": 1000000,
+      "outputCostPerToken": 6e-7,
+      "outputCostPerTokenAbove200kTokens": 0.0000012
+    },
+    "free-model": {
+      "inputCostPerToken": 0,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0
+    },
+    "glm-5.3-flash": {
+      "cacheReadInputTokenCost": 3e-8,
+      "inputCostPerToken": 1.5e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 5e-7
+    },
+    "gpt-5.5-sol": {
+      "inputCostPerToken": 0.00000125,
+      "maxInputTokens": 400000,
+      "outputCostPerToken": 0.00001
+    },
+    "gpt-6": {
+      "inputCostPerToken": 0.000001,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.000002
+    },
+    "grok-4.5": {
+      "cacheReadInputTokenCostAbove200kTokens": 3e-7,
+      "fastMultiplier": 2,
+      "inputCostPerToken": 0.000002,
+      "inputCostPerTokenAbove200kTokens": 0.000002,
+      "maxInputTokens": 500000,
+      "outputCostPerToken": 0.000006,
+      "outputCostPerTokenAbove200kTokens": 0.000006
+    },
+    "mimo-v2.6-flash": {
+      "inputCostPerToken": 1.4e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 2.8e-7
+    },
+    "módel/中文-模型": {
+      "inputCostPerToken": 3e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 9.000000000000001e-7
+    },
+    "step-5-preview": {
+      "inputCostPerToken": 0.000001,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.0000027
+    },
+    "xiaomi/mimo-v2.6-flash-uncensored": {
+      "inputCostPerToken": 5e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.0000015
+    }
+  }
+}
