@@ -160,6 +160,15 @@ guessing which row applies. Agreeing rows collapse to one representative — pre
 official vendor's row for its spec metadata — and zero-priced rows never join a group that has a
 real price, so an official vendor's $0 placeholder cannot silently price a model as free.
 
+`ccusage` does not match an override key to a session's model name exactly: it folds a provider
+prefix and a fine-tune variant suffix first, so a `xiaomi/mimo-v2.6-flash-uncensored` key can price
+a plain `mimo-v2.6-flash` day. An unresolved id has no key of its own, so such a folding key is the
+only candidate left and it wins — one machine billed 3.6x the official rate for `mimo-v2.6-flash`
+this way while its reseller rows disagreed. Because an exact key beats a folding one, the official
+vendor row for a base id that a variant key could reach is emitted under the base id itself. Only an
+official row qualifies; anchoring from a reseller row would re-create the ambiguity the id was left
+unresolved for, and an id with no official row keeps whatever `ccusage` would have used.
+
 The catalogue cache is `TOKENBOARD_STATE_DIR/model-pricing-cache.json`, is written atomically, and
 has a 24-hour TTL. A regular or manual sync refreshes an expired cache with ETag support. Hook mode
 does not make network requests: it uses a fresh or stale last-successful cache, then the bundled

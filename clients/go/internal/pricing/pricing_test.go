@@ -973,6 +973,82 @@ func TestDoesNotMergePricesFromDifferentProvidersForSameModelID(t *testing.T) {
 	// provider-collision. PreparedConfig has no rules field; see the file comment.
 }
 
+// ccusage resolves an override key against the observed model name by folding
+// provider prefixes and variant suffixes, so `xiaomi/mimo-v2.6-flash-uncensored`
+// can price a plain `mimo-v2.6-flash` day. When the base id is unresolved (its
+// reseller rows disagree) that folding key is the only one left and it wins —
+// one machine billed 3.6x the official rate this way. An exact key beats a
+// folding one, so the official vendor row anchors the base id.
+func TestAnchorsBaseModelToOfficialPriceWhenOnlyAVariantKeyWouldPriceIt(t *testing.T) {
+	base := func(provider string, inputCostPerMillion float64) Model {
+		return testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = provider
+			model.InputCostPerMillion = inputCostPerMillion
+			model.OutputCostPerMillion = 0.28
+		})
+	}
+	variant := testModel("xiaomi/mimo-v2.6-flash-uncensored", func(model *Model) {
+		model.Provider = "xiaomi"
+		model.InputCostPerMillion = 0.5
+		model.OutputCostPerMillion = 1.5
+	})
+
+	// The bare id stays unresolved on its own: the two rows disagree.
+	if selected := selectUnambiguousDynamicPricingModels([]Model{
+		base("xiaomi", 0.14),
+		base("reseller-a", 0.12),
+	}); len(selected) != 0 {
+		t.Fatalf("selectUnambiguousDynamicPricingModels returned %d rows, want 0", len(selected))
+	}
+
+	overrides := CreateCcusagePricingOverrides([]Model{base("xiaomi", 0.14), base("reseller-a", 0.12), variant})
+
+	requireNumber(t, overrideOf(t, overrides, "mimo-v2.6-flash"), "inputCostPerToken", perMillion(0.14))
+	overrideOf(t, overrides, "xiaomi/mimo-v2.6-flash-uncensored")
+}
+
+// Without an official row there is nothing to anchor to. Falling back to a
+// reseller row would re-introduce the ambiguity the unresolved id was dropped
+// for, and would launder an arbitrary reseller price into an authoritative one.
+func TestLeavesVariantOnlyModelAloneWhenNoOfficialBaseRowExists(t *testing.T) {
+	base := func(provider string, inputCostPerMillion float64) Model {
+		return testModel("deepseek-v4.1-flash", func(model *Model) {
+			model.Provider = provider
+			model.InputCostPerMillion = inputCostPerMillion
+			model.OutputCostPerMillion = 0.12
+		})
+	}
+	variant := testModel("deepseek/deepseek-v4.1-flash-uncensored", func(model *Model) {
+		model.Provider = "deepseek"
+		model.InputCostPerMillion = 0.33
+		model.OutputCostPerMillion = 1.32
+	})
+
+	overrides := CreateCcusagePricingOverrides([]Model{base("reseller-a", 0.03), base("reseller-b", 0.672), variant})
+
+	if _, ok := overrides["deepseek-v4.1-flash"]; ok {
+		t.Fatalf("deepseek-v4.1-flash should not be anchored without an official row")
+	}
+}
+
+func TestFoldToBaseModelIDStripsOnlyTheObservedFolding(t *testing.T) {
+	cases := map[string]string{
+		"mimo-v2.6-flash":                        "mimo-v2.6-flash",
+		"xiaomi/mimo-v2.6-flash":                 "mimo-v2.6-flash",
+		"xiaomi/mimo-v2.6-flash-uncensored":      "mimo-v2.6-flash",
+		"z-ai/glm-5.3-flash-abliterated":         "glm-5.3-flash",
+		"xiaomi/mimo-v2.6-flash-uncensored:free": "mimo-v2.6-flash",
+		// -free and :tag are not folding suffixes on their own: the base keeps them.
+		"deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free",
+		"kimi-k3:fast":             "kimi-k3",
+	}
+	for input, want := range cases {
+		if got := foldToBaseModelID(input); got != want {
+			t.Errorf("foldToBaseModelID(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestTreatsBundledConfigAsBaselineSoDynamicPricesOverrideIt(t *testing.T) {
 	stateDir := t.TempDir()
 	explicitPath := filepath.Join(stateDir, "explicit.json")

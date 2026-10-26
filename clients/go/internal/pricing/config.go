@@ -402,7 +402,87 @@ func createCcusagePricingOverrides(models []Model) map[string]any {
 			overrides[model.ModelID] = override
 		}
 	}
+	for modelID, override := range officialAnchorOverrides(models, overrides) {
+		overrides[modelID] = override
+	}
 	return overrides
+}
+
+// officialAnchorOverrides ports officialAnchorOverrides: ccusage matches an
+// override key to the observed model name by folding provider prefixes and
+// variant suffixes, so `xiaomi/mimo-v2.6-flash-uncensored` can price a plain
+// `mimo-v2.6-flash` day. When the base id is unresolved its reseller rows
+// disagree and that folding key is the only one left, so it wins — one machine
+// billed 3.6x the official rate for mimo-v2.6-flash this way. An exact key beats
+// a folding one, so the official vendor row is emitted as the base id's own key.
+//
+// Only an official row qualifies: falling back to a reseller row would
+// re-introduce the ambiguity the unresolved id was dropped for.
+func officialAnchorOverrides(models []Model, emitted map[string]any) map[string]any {
+	foldBases := map[string]bool{}
+	for _, model := range models {
+		if base := foldToBaseModelID(model.ModelID); base != strings.ToLower(strings.TrimSpace(model.ModelID)) {
+			foldBases[base] = true
+		}
+	}
+	if len(foldBases) == 0 {
+		return nil
+	}
+
+	haveExact := map[string]bool{}
+	for key := range emitted {
+		haveExact[strings.ToLower(strings.TrimSpace(key))] = true
+	}
+
+	rowsByID := map[string][]Model{}
+	order := []string{}
+	for _, model := range models {
+		id := strings.ToLower(strings.TrimSpace(model.ModelID))
+		if !foldBases[id] || haveExact[id] {
+			continue
+		}
+		if _, ok := rowsByID[id]; !ok {
+			order = append(order, id)
+		}
+		rowsByID[id] = append(rowsByID[id], model)
+	}
+
+	anchors := map[string]any{}
+	for _, id := range order {
+		rows := rowsByID[id]
+		var official *Model
+		for index := range rows {
+			row := &rows[index]
+			if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(row.Provider))] && priceRowIsPositive(*row) {
+				official = row
+				break
+			}
+		}
+		if official == nil {
+			continue
+		}
+		if override := toCcusagePricingOverride(*official); override != nil {
+			anchors[rows[0].ModelID] = override
+		}
+	}
+	return anchors
+}
+
+// foldToBaseModelID ports foldToBaseModelId: the bases ccusage may fold a key
+// onto — drop `:tag` segments, drop the provider prefix, then drop a fine-tune
+// variant suffix. Deliberately narrow: only the folding case observed on real
+// data, because over-folding would anchor ids ccusage never conflates.
+func foldToBaseModelID(modelID string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(modelID))
+	segments := strings.Split(trimmed, "/")
+	base := segments[len(segments)-1]
+	if index := strings.Index(base, ":"); index >= 0 {
+		base = base[:index]
+	}
+	for _, suffix := range []string{"-uncensored", "-abliterated"} {
+		base = strings.TrimSuffix(base, suffix)
+	}
+	return base
 }
 
 // toCcusagePricingOverride converts a catalogue row to ccusage's per-token

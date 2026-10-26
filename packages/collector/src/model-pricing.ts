@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   buildCodexContextPricingRules,
   codexContextPricingRules,
+  officialVendorProviderIds,
   selectUnambiguousDynamicPricingModels,
   type CodexContextPricingRule
 } from './providers/codex-context-pricing'
@@ -308,12 +309,79 @@ export function createCcusagePricingOverrides(
     const override = toCcusagePricingOverride(model)
     if (override) dynamicOverrides[model.modelId] = override
   }
+  for (const [modelId, override] of officialAnchorOverrides(models, dynamicOverrides)) {
+    dynamicOverrides[modelId] = override
+  }
   return mergePricingOverrides(
     fallbackConfig ? readPricingOverrides(fallbackConfig) : {},
     dynamicOverrides,
     {},
     nonRepresentableContextPricingModelIds(models, dynamicOverrides)
   )
+}
+
+// ccusage matches an override key to the model name it sees in a session by folding provider
+// prefixes and variant suffixes, so a key like `xiaomi/mimo-v2.6-flash-uncensored` can price a
+// plain `mimo-v2.6-flash` day. When the base id is unresolved (its reseller rows disagree) that
+// folding key is the only one left and it wins — one machine billed 3.6x the official rate for
+// mimo-v2.6-flash this way. An exact key beats a folding one, so the official vendor row is
+// emitted as the base id's own key and restores the right rate.
+//
+// Only an official row is used. Falling back to a reseller row would re-introduce exactly the
+// ambiguity the unresolved id was dropped for, and turning that into an explicit anchor would
+// launder an arbitrary reseller price into an authoritative one.
+function officialAnchorOverrides(
+  models: readonly CollectorPricingModel[],
+  emitted: Readonly<Record<string, CcusagePricingOverride>>
+): Array<[string, CcusagePricingOverride]> {
+  const byBase = new Map<string, CollectorPricingModel[]>()
+  for (const model of models) {
+    const base = foldToBaseModelId(model.modelId)
+    if (base === model.modelId.trim().toLowerCase()) continue
+    const entries = byBase.get(base) ?? []
+    entries.push(model)
+    byBase.set(base, entries)
+  }
+  if (byBase.size === 0) return []
+
+  const haveExact = new Set(Object.keys(emitted).map((key) => key.trim().toLowerCase()))
+  const byId = new Map<string, CollectorPricingModel[]>()
+  for (const model of models) {
+    const id = model.modelId.trim().toLowerCase()
+    if (!byBase.has(id) || haveExact.has(id)) continue
+    const entries = byId.get(id) ?? []
+    entries.push(model)
+    byId.set(id, entries)
+  }
+
+  const anchors: Array<[string, CcusagePricingOverride]> = []
+  for (const [, rows] of byId) {
+    const official = rows.find(
+      (row) => officialVendorProviderIds.has(row.provider.trim().toLowerCase()) && priceRowIsPositive(row)
+    )
+    if (!official) continue
+    const override = toCcusagePricingOverride(official)
+    if (override) anchors.push([rows[0]!.modelId, override])
+  }
+  return anchors
+}
+
+// The bases ccusage may fold a key onto: drop `:tag` segments, drop the provider prefix, then
+// drop a fine-tune variant suffix. Kept deliberately narrow — only the folding case observed on
+// real data — because over-folding would anchor ids ccusage never conflates.
+const variantSuffixPattern = /-(?:uncensored|abliterated)$/
+
+export function foldToBaseModelId(modelId: string): string {
+  const withoutTags = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/:[^:/]*/g, '')
+  const segments = withoutTags.split('/')
+  return (segments[segments.length - 1] ?? withoutTags).replace(variantSuffixPattern, '')
+}
+
+function priceRowIsPositive(row: CollectorPricingModel) {
+  return row.inputCostPerMillion > 0 || row.outputCostPerMillion > 0
 }
 
 export function toCcusagePricingOverride(model: CollectorPricingModel): CcusagePricingOverride | null {

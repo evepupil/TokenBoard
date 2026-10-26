@@ -473,7 +473,7 @@ function priceRowSignature(entry: CollectorPricingModelLike) {
   ])
 }
 
-const officialVendorProviderIds = new Set([
+export const officialVendorProviderIds = new Set([
   'openai',
   'anthropic',
   'google',

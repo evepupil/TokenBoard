@@ -16,6 +16,7 @@ import {
   type CollectorPricingModel,
   type PricingFetcher
 } from './model-pricing'
+import { selectUnambiguousDynamicPricingModels } from './providers/codex-context-pricing'
 
 const tempDirectories: string[] = []
 
@@ -497,6 +498,50 @@ describe('model pricing catalogue client', () => {
     })
 
     expect(result.configPath).toBe(dynamicCcusageConfigPath(stateDir))
+  })
+
+  test('anchors a base model to its official price when only a variant key would price it', async () => {
+    // ccusage resolves an override key against the observed model name by folding provider
+    // prefixes and variant suffixes: with only `xiaomi/mimo-v2.6-flash-uncensored` present,
+    // a `mimo-v2.6-flash` day was billed at the uncensored fine-tune's rate — 3.6x the
+    // official price. An exact key always wins over a folding one, so emitting the official
+    // row as the base model's own key restores the right rate.
+    const overrides = createCcusagePricingOverrides([
+      model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+      model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 }),
+      model('xiaomi/mimo-v2.6-flash-uncensored', {
+        provider: 'xiaomi',
+        inputCostPerMillion: 0.5,
+        outputCostPerMillion: 1.5
+      })
+    ])
+
+    // The bare id stays unresolved on its own (the two rows disagree)...
+    expect(
+      selectUnambiguousDynamicPricingModels([
+        model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+        model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 })
+      ])
+    ).toHaveLength(0)
+    // ...but the official row anchors it so the variant key cannot price it.
+    expect(overrides['mimo-v2.6-flash']).toMatchObject({ inputCostPerToken: 0.14 / 1_000_000 })
+    expect(overrides['xiaomi/mimo-v2.6-flash-uncensored']).toBeDefined()
+  })
+
+  test('leaves a variant-only model alone when no official base row exists', async () => {
+    // Without an official row there is nothing to anchor to, and inventing a price from a
+    // reseller row would repeat the very ambiguity the unresolved id was protected from.
+    const overrides = createCcusagePricingOverrides([
+      model('deepseek-v4.1-flash', { provider: 'reseller-a', inputCostPerMillion: 0.03, outputCostPerMillion: 0.12 }),
+      model('deepseek-v4.1-flash', { provider: 'reseller-b', inputCostPerMillion: 0.672, outputCostPerMillion: 2.016 }),
+      model('deepseek/deepseek-v4.1-flash-uncensored', {
+        provider: 'deepseek',
+        inputCostPerMillion: 0.33,
+        outputCostPerMillion: 1.32
+      })
+    ])
+
+    expect(overrides['deepseek-v4.1-flash']).toBeUndefined()
   })
 
   test('does not merge prices from different providers for the same model id', async () => {
