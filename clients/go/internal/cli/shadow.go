@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
 const (
@@ -109,7 +110,7 @@ type shadowFieldDiff struct {
 // on the current day even when the implementations agree: the second scan
 // sees the newer bytes, and pro-rata cost allocation shifts with them. Use
 // --until <yesterday> for a stable comparison of settled days.
-func runShadow(ctx context.Context, options Options, env Env, stdout, stderr io.Writer) int {
+func runShadow(ctx context.Context, options Options, env Env, realStateDir string, stdout, stderr io.Writer) int {
 	repoDir := strings.TrimSpace(env("TOKENBOARD_COLLECTOR_DIR"))
 	if repoDir == "" {
 		fmt.Fprintln(stderr,
@@ -134,6 +135,15 @@ func runShadow(ctx context.Context, options Options, env Env, stdout, stderr io.
 		return ExitFailure
 	}
 	defer os.RemoveAll(tsStateDir)
+
+	// A temporary state directory has no pricing catalogue, so without this both
+	// sides fall back to the bundled static config and the comparison never
+	// exercises the dynamic catalogue path — the one that silently drifted from
+	// the TypeScript implementation for eleven days. Seeding the machine's cache
+	// into both directories compares what production actually prices with, and
+	// keeps the run offline: a missing or invalid cache is simply ignored by both
+	// sides, which report the static fallback on their own.
+	seedShadowPricingCache(realStateDir, []string{goStateDir, tsStateDir}, stderr)
 
 	// Shadow always compares one code path on both sides. Without --hook that
 	// is a full preview, and an inherited TOKENBOARD_HOOK_MODE would make the
@@ -392,6 +402,37 @@ func execShadowTS(ctx context.Context, input shadowTSInput) ([]contract.Snapshot
 		return nil, fmt.Errorf("preview output is not a snapshot array: %w", err)
 	}
 	return snapshots, nil
+}
+
+// seedShadowPricingCache copies the machine's pricing catalogue cache into the
+// comparison's temporary state directories. It is deliberately forgiving: the
+// cache is an optimisation, both sides validate it themselves, and a machine
+// that never synced has none — none of those may turn a comparison into a
+// failure. Only a read error other than "not there" and a failed copy are worth
+// a line, and even then the run continues on the static fallback.
+func seedShadowPricingCache(sourceDir string, targets []string, stderr io.Writer) {
+	source := filepath.Join(sourceDir, pricing.CacheFileName)
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "shadow: could not read the pricing catalogue cache (%v); both sides use static pricing\n", err)
+		}
+		return
+	}
+	for index, dir := range targets {
+		target := filepath.Join(dir, pricing.CacheFileName)
+		if err := os.WriteFile(target, raw, 0o600); err != nil {
+			// A half-seeded run would compare a dynamic side against a static
+			// one and report the difference as drift. Undo the copies instead,
+			// so both sides fall back together.
+			for _, written := range targets[:index] {
+				os.Remove(filepath.Join(written, pricing.CacheFileName))
+			}
+			fmt.Fprintf(stderr, "shadow: could not seed the pricing catalogue cache (%v); both sides use static pricing\n", err)
+			return
+		}
+	}
+	fmt.Fprintf(stderr, "shadow: using the pricing catalogue cache from %s\n", source)
 }
 
 // shadowChildEnv is the process environment with the TypeScript side's state

@@ -175,7 +175,7 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		// hooks fail with the lock timeout (observed 2026-10-21: the 18:00
 		// sync timed out behind a shadow run). A concurrent sync is safe: both
 		// sides only read the session files.
-		return runShadow(ctx, options, env, stdout, stderr)
+		return runShadow(ctx, options, env, stateDir, stdout, stderr)
 	case "sync":
 		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	default:
