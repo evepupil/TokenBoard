@@ -133,6 +133,14 @@ func TestPinsOnlyUnambiguousFallbackPricesForFreeAndSingleSourceModels(t *testin
 			"cacheReadInputTokenCost": perMillion(0.003),
 			"maxInputTokens":          1_000_000,
 		},
+		// ccusage matches keys case-sensitively and the catalogue publishes this
+		// id under both spellings, so the static fallback carries both too.
+		"longcat-2.5-preview": {
+			"inputCostPerToken":       perMillion(0.75),
+			"outputCostPerToken":      perMillion(2.95),
+			"cacheReadInputTokenCost": perMillion(0.015),
+			"maxInputTokens":          1_000_000,
+		},
 	}
 	for modelID, want := range pinned {
 		if got := numericRecord(t, overrides[modelID]); !reflect.DeepEqual(got, want) {

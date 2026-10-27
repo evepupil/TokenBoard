@@ -296,6 +296,12 @@
         "cacheReadInputTokenCost": 1.5e-8,
         "maxInputTokens": 1000000
       },
+      "longcat-2.5-preview": {
+        "inputCostPerToken": 7.5e-7,
+        "outputCostPerToken": 2.95e-6,
+        "cacheReadInputTokenCost": 1.5e-8,
+        "maxInputTokens": 1000000
+      },
       "deepseek-flash": {
         "inputCostPerToken": 1.5e-7,
         "outputCostPerToken": 6e-7,

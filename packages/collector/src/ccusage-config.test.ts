@@ -70,6 +70,10 @@ describe('ccusage pricing configuration', () => {
       maxInputTokens: 1_000_000
     })
     expect(pricing['deepseek/deepseek-flash']).toEqual(pricing['deepseek-flash'])
+    // ccusage matches keys case-sensitively and the catalogue publishes this id under both
+    // spellings, so the static fallback carries both too — otherwise an offline run that sees
+    // the lowercase name loses the pinned price.
+    expect(pricing['longcat-2.5-preview']).toEqual(pricing['LongCat-2.5-Preview'])
     for (const free of ['longcat-2.5-preview-free', 'MiniMax-M3.1-Flash-Preview', 'step-5-preview-free']) {
       expect(pricing[free]).toMatchObject({ inputCostPerToken: 0, outputCostPerToken: 0 })
     }

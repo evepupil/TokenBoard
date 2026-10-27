@@ -170,6 +170,13 @@ jobs:
           diff -u clients/go/internal/pricing/goldens/ccusage-overrides.json \
             "$RUNNER_TEMP/ccusage-overrides.json"
 
+      # The Go client embeds its own copy of the bundled ccusage config because
+      # it has no repo checkout at runtime. Only this comment-enforced rule keeps
+      # the two in step, and a drifted copy silently prices static-fallback runs
+      # differently on the two implementations.
+      - name: bundled ccusage config copies match
+        run: diff -u packages/collector/ccusage.json clients/go/internal/pricing/ccusage.json
+
   deps:
     name: ccusage contract
     runs-on: ubuntu-latest
