@@ -571,6 +571,46 @@ describe('model pricing catalogue client', () => {
     expect(overrides['MiMo-V2.6-Flash']).toEqual(overrides['mimo-v2.6-flash'])
   })
 
+  test('anchors to the alphabetically first official provider regardless of catalogue order', async () => {
+    // Two official vendors price the same id differently (an international and a
+    // domestic endpoint). The anchor must not let the order the rows arrive in
+    // decide the price: catalogue order comes from the server's `ORDER BY`, and a
+    // change there would silently move what every machine is billed.
+    const overrides = createCcusagePricingOverrides([
+      model('glm-9-flash', { provider: 'zhipuai', inputCostPerMillion: 0.12, outputCostPerMillion: 0.42 }),
+      model('glm-9-flash', { provider: 'zai', inputCostPerMillion: 0.15, outputCostPerMillion: 0.5 }),
+      model('vendor/glm-9-flash-uncensored', { provider: 'vendor', inputCostPerMillion: 5, outputCostPerMillion: 10 })
+    ])
+
+    expect(overrides['glm-9-flash']).toMatchObject({ inputCostPerToken: 0.15 / 1_000_000 })
+  })
+
+  test('collapses to the same representative whatever order the rows arrive in', async () => {
+    // Rows that agree on price but disagree on contextWindow are still one model.
+    // The representative carries its context window into maxInputTokens, so an
+    // arbitrary pick makes the value depend on the catalogue's row order.
+    const rows = [
+      model('gpt-9-chat', {
+        provider: 'zeta',
+        inputCostPerMillion: 1,
+        outputCostPerMillion: 2,
+        contextWindow: 128_000
+      }),
+      model('gpt-9-chat', {
+        provider: 'alpha',
+        inputCostPerMillion: 1,
+        outputCostPerMillion: 2,
+        contextWindow: 400_000
+      })
+    ]
+
+    const forward = createCcusagePricingOverrides(rows)['gpt-9-chat']
+    const backward = createCcusagePricingOverrides([...rows].reverse())['gpt-9-chat']
+    expect(forward).toEqual(backward)
+    // No official row, so the alphabetically first provider is the tie-break.
+    expect(forward).toMatchObject({ maxInputTokens: 400_000 })
+  })
+
   test('leaves a variant-only model alone when no official base row exists', async () => {
     // Without an official row there is nothing to anchor to, and inventing a price from a
     // reseller row would repeat the very ambiguity the unresolved id was protected from.

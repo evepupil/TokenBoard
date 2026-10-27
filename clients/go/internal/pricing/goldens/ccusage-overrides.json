@@ -232,6 +232,61 @@
         "outputCostPerMillion": 0.9,
         "pricing": {},
         "provider": "local"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.12,
+        "maxInputTokens": null,
+        "modelId": "glm-9-flash",
+        "outputCostPerMillion": 0.42,
+        "pricing": {},
+        "provider": "zhipuai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.15,
+        "maxInputTokens": null,
+        "modelId": "glm-9-flash",
+        "outputCostPerMillion": 0.5,
+        "pricing": {},
+        "provider": "zai"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 5,
+        "maxInputTokens": null,
+        "modelId": "vendor/glm-9-flash-uncensored",
+        "outputCostPerMillion": 10,
+        "pricing": {},
+        "provider": "vendor"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 128000,
+        "inputCostPerMillion": 1,
+        "maxInputTokens": null,
+        "modelId": "order-model",
+        "outputCostPerMillion": 2,
+        "pricing": {},
+        "provider": "zeta"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 400000,
+        "inputCostPerMillion": 1,
+        "maxInputTokens": null,
+        "modelId": "order-model",
+        "outputCostPerMillion": 2,
+        "pricing": {},
+        "provider": "alpha"
       }
     ],
     "nextCursor": null
@@ -291,6 +346,11 @@
       "maxInputTokens": 200000,
       "outputCostPerToken": 5e-7
     },
+    "glm-9-flash": {
+      "inputCostPerToken": 1.5e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 5e-7
+    },
     "gpt-5.5-sol": {
       "inputCostPerToken": 0.00000125,
       "maxInputTokens": 400000,
@@ -320,10 +380,20 @@
       "maxInputTokens": 200000,
       "outputCostPerToken": 9.000000000000001e-7
     },
+    "order-model": {
+      "inputCostPerToken": 0.000001,
+      "maxInputTokens": 400000,
+      "outputCostPerToken": 0.000002
+    },
     "step-5-preview": {
       "inputCostPerToken": 0.000001,
       "maxInputTokens": 200000,
       "outputCostPerToken": 0.0000027
+    },
+    "vendor/glm-9-flash-uncensored": {
+      "inputCostPerToken": 0.000005,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.00001
     },
     "xiaomi/mimo-v2.6-flash-uncensored": {
       "inputCostPerToken": 5e-7,

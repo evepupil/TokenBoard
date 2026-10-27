@@ -1327,3 +1327,84 @@ func TestAliasesAnAnchoredBaseIDToTheOtherCatalogueSpellings(t *testing.T) {
 		t.Fatalf("MiMo-V2.6-Flash override = %v, want %v", got, base)
 	}
 }
+
+// Two official vendors price one id differently (international and domestic
+// endpoints). The anchor must not let arrival order decide the price: that
+// order comes from the server's ORDER BY, and a change there would silently
+// move what every collector bills.
+func TestAnchorPicksTheAlphabeticallyFirstOfficialProvider(t *testing.T) {
+	models := []Model{
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zhipuai"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.42
+		}),
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("vendor/glm-9-flash-uncensored", func(model *Model) {
+			model.Provider = "vendor"
+			model.InputCostPerMillion = 5
+			model.OutputCostPerMillion = 10
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	requireNumber(t, overrideOf(t, overrides, "glm-9-flash"), "inputCostPerToken", perMillion(0.15))
+}
+
+// The pick must not depend on arrival order: reversing the input rows has to
+// yield the same anchor, or a server-side ORDER BY change would move prices.
+func TestAnchorPickIsIndependentOfRowOrder(t *testing.T) {
+	rows := []Model{
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zhipuai"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.42
+		}),
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("vendor/glm-9-flash-uncensored", func(model *Model) {
+			model.Provider = "vendor"
+			model.InputCostPerMillion = 5
+			model.OutputCostPerMillion = 10
+		}),
+	}
+	reversed := []Model{rows[2], rows[1], rows[0]}
+
+	forward := CreateCcusagePricingOverrides(rows)
+	backward := CreateCcusagePricingOverrides(reversed)
+	if got, want := reflect.DeepEqual(forward, backward), true; got != want {
+		t.Fatalf("override set depends on row order: %v vs %v", forward["glm-9-flash"], backward["glm-9-flash"])
+	}
+}
+
+// Rows that agree on price can still disagree on context window, and the
+// representative carries its own into maxInputTokens. The pick must not depend
+// on arrival order, which comes from the catalogue's ORDER BY.
+func TestCollapsedRepresentativeIsIndependentOfRowOrder(t *testing.T) {
+	rows := []Model{
+		testModel("gpt-9-chat", func(model *Model) {
+			model.Provider = "zeta"
+			model.ContextWindow = 128_000
+			model.MaxInputTokens = nil
+		}),
+		testModel("gpt-9-chat", func(model *Model) {
+			model.Provider = "alpha"
+			model.ContextWindow = 400_000
+			model.MaxInputTokens = nil
+		}),
+	}
+
+	forward := CreateCcusagePricingOverrides(rows)
+	backward := CreateCcusagePricingOverrides([]Model{rows[1], rows[0]})
+	if !reflect.DeepEqual(forward, backward) {
+		t.Fatalf("override depends on row order: forward=%v backward=%v", forward["gpt-9-chat"], backward["gpt-9-chat"])
+	}
+	requireNumber(t, overrideOf(t, forward, "gpt-9-chat"), "maxInputTokens", 400_000)
+}

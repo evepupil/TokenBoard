@@ -2569,13 +2569,29 @@ var officialVendorProviderIDs = map[string]bool{
 	"longcat": true,
 }
 
+// pickCollapsedRepresentative prefers the official vendor row, then the
+// alphabetically first provider. Rows that agree on price can disagree on
+// context window, and the representative carries its own into the rule, so the
+// tie-break has to be explicit: arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(models []pricing.Model, entries []int) int {
-	for _, index := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(models[index].Provider))] {
-			return index
+	candidates := make([]int, len(entries))
+	copy(candidates, entries)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftModel := models[candidates[left]]
+		rightModel := models[candidates[right]]
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(leftModel.Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(rightModel.Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
-	return entries[0]
+		leftProvider := strings.ToLower(strings.TrimSpace(leftModel.Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(rightModel.Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return leftModel.ModelID < rightModel.ModelID
+	})
+	return candidates[0]
 }
 
 // CodexSessionFingerprintMemo memoizes fingerprint computation within a single

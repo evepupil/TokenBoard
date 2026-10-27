@@ -2268,3 +2268,32 @@ func TestDynamicPricingPrefersTheOfficialVendorRowAsTheCollapsedRepresentative(t
 		t.Fatalf("selected = %+v, want the openai row", selected)
 	}
 }
+
+// Rows that agree on price can disagree on context window, and the
+// representative carries its own into the rule. The pick must not depend on
+// arrival order, which comes from the catalogue's ORDER BY.
+func TestDynamicPricingRepresentativeIsIndependentOfRowOrder(t *testing.T) {
+	zeta := pricedModel(func(model *pricing.Model) {
+		model.Provider = "zeta"
+		model.ModelID = "order-model"
+		model.ContextWindow = 128_000
+	})
+	alpha := pricedModel(func(model *pricing.Model) {
+		model.Provider = "alpha"
+		model.ModelID = "order-model"
+		model.ContextWindow = 400_000
+	})
+
+	forward := SelectUnambiguousDynamicPricingModels([]pricing.Model{zeta, alpha})
+	backward := SelectUnambiguousDynamicPricingModels([]pricing.Model{alpha, zeta})
+	if len(forward) != 1 || len(backward) != 1 {
+		t.Fatalf("selected %d/%d rows, want 1 each", len(forward), len(backward))
+	}
+	if forward[0].Provider != backward[0].Provider || forward[0].ContextWindow != backward[0].ContextWindow {
+		t.Fatalf("representative depends on row order: %s/%v vs %s/%v",
+			forward[0].Provider, forward[0].ContextWindow, backward[0].Provider, backward[0].ContextWindow)
+	}
+	if forward[0].Provider != "alpha" {
+		t.Fatalf("representative = %s, want the alphabetically first provider", forward[0].Provider)
+	}
+}

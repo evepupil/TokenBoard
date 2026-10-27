@@ -169,6 +169,16 @@ vendor row for a base id that a variant key could reach is emitted under the bas
 official row qualifies; anchoring from a reseller row would re-create the ambiguity the id was left
 unresolved for, and an id with no official row keeps whatever `ccusage` would have used.
 
+Several official vendors can price one id differently — `zai` and `zhipuai`, or `alibaba` and
+`alibaba-cn`, publish separate regional rates for the same model. The anchor picks the
+alphabetically first official provider (then model id) among its rows rather than the first match in
+arrival order. Arrival order comes from the public catalogue's `ORDER BY provider, model_id`, so
+letting it decide would make every collector's cost depend on a query in the web layer; the sort
+here keeps the choice a property of the collector contract, and CI's golden pins it on both sides.
+The collapse's representative pick follows the same rule for the same reason: rows that agree on
+price can still disagree on context window, and the representative's window becomes
+`maxInputTokens`.
+
 Matching is also case-sensitive: a session model `GLM-5.3-Flash` is not priced by a
 `glm-5.3-flash` key. The catalogue publishes several spellings of one id, and the collapse emits
 only the representative's spelling, so the collector repeats each override under every spelling the

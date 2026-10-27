@@ -489,9 +489,21 @@ export const officialVendorProviderIds = new Set([
   'longcat'
 ])
 
+// Rows that agree on price can still disagree on context window, and the
+// representative carries its own into maxInputTokens. Picking the first match
+// would make that value depend on the order rows arrive in — and that order is
+// the catalogue's `ORDER BY`, not a property of this code. Prefer an official
+// vendor, then the alphabetically first provider, so the choice is reproducible.
 function pickCollapsedRepresentative<T extends CollectorPricingModelLike>(entries: readonly T[]): T {
-  const official = entries.find((entry) => officialVendorProviderIds.has((entry.provider ?? '').trim().toLowerCase()))
-  return official ?? entries[0]
+  return [...entries].sort((left, right) => {
+    const leftOfficial = officialVendorProviderIds.has((left.provider ?? '').trim().toLowerCase())
+    const rightOfficial = officialVendorProviderIds.has((right.provider ?? '').trim().toLowerCase())
+    if (leftOfficial !== rightOfficial) return leftOfficial ? -1 : 1
+    const leftProvider = (left.provider ?? '').trim().toLowerCase()
+    const rightProvider = (right.provider ?? '').trim().toLowerCase()
+    if (leftProvider !== rightProvider) return leftProvider < rightProvider ? -1 : 1
+    return left.modelId < right.modelId ? -1 : left.modelId > right.modelId ? 1 : 0
+  })[0]!
 }
 
 export function isCodexContextPricingModel(model: string) {

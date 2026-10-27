@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -477,14 +478,7 @@ func officialAnchorOverrides(models []Model, emitted map[string]any) map[string]
 	anchors := map[string]any{}
 	for _, id := range order {
 		rows := rowsByID[id]
-		var official *Model
-		for index := range rows {
-			row := &rows[index]
-			if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(row.Provider))] && priceRowIsPositive(*row) {
-				official = row
-				break
-			}
-		}
+		official := pickAnchorOfficialRow(rows)
 		if official == nil {
 			continue
 		}
@@ -493,6 +487,34 @@ func officialAnchorOverrides(models []Model, emitted map[string]any) map[string]
 		}
 	}
 	return anchors
+}
+
+// pickAnchorOfficialRow ports pickAnchorOfficialRow: several official vendors
+// can price one id differently — an international and a domestic endpoint of
+// the same vendor is the common case. Taking the first match would make the
+// anchor depend on the order rows arrive in, and that order comes from the
+// server's ORDER BY; a change there would silently move what every collector
+// bills. Sort first so the choice is a property of this function.
+func pickAnchorOfficialRow(rows []Model) *Model {
+	officials := make([]*Model, 0, len(rows))
+	for index := range rows {
+		row := &rows[index]
+		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(row.Provider))] && priceRowIsPositive(*row) {
+			officials = append(officials, row)
+		}
+	}
+	if len(officials) == 0 {
+		return nil
+	}
+	sort.SliceStable(officials, func(left, right int) bool {
+		leftProvider := strings.ToLower(strings.TrimSpace(officials[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(officials[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return officials[left].ModelID < officials[right].ModelID
+	})
+	return officials[0]
 }
 
 // foldToBaseModelID ports foldToBaseModelId: the bases ccusage may fold a key
@@ -832,18 +854,31 @@ var officialVendorProviderIDs = map[string]bool{
 }
 
 // pickCollapsedRepresentative ports pickCollapsedRepresentative: prefer the
-// official vendor row, then the group's first row. It walks the group the
-// agreement check compared, never the full entry list — an official vendor's
-// $0 placeholder row lives outside that group and would otherwise win the pick
-// and silently price the model as free.
+// official vendor row, then the alphabetically first provider. It walks the
+// group the agreement check compared, never the full entry list — an official
+// vendor's $0 placeholder row lives outside that group and would otherwise win
+// the pick and silently price the model as free.
+//
+// The tie-break is explicit rather than "whatever came first": rows that agree
+// on price can disagree on context window, the representative carries its own
+// into maxInputTokens, and arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(group []Model, entries []Model) int {
-	chosen := group[0]
-	for _, candidate := range group {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidate.Provider))] {
-			chosen = candidate
-			break
+	candidates := make([]Model, len(group))
+	copy(candidates, group)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[left].Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[right].Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
+		leftProvider := strings.ToLower(strings.TrimSpace(candidates[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(candidates[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return candidates[left].ModelID < candidates[right].ModelID
+	})
+	chosen := candidates[0]
 	for index, entry := range entries {
 		if sameModelIdentity(entry, chosen) {
 			return index

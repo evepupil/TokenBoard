@@ -357,14 +357,32 @@ function officialAnchorOverrides(
 
   const anchors: Array<[string, CcusagePricingOverride]> = []
   for (const [, rows] of byId) {
-    const official = rows.find(
-      (row) => officialVendorProviderIds.has(row.provider.trim().toLowerCase()) && priceRowIsPositive(row)
-    )
+    const official = pickAnchorOfficialRow(rows)
     if (!official) continue
     const override = toCcusagePricingOverride(official)
     if (override) anchors.push([rows[0]!.modelId, override])
   }
   return anchors
+}
+
+// Several official vendors can price one id differently — an international and
+// a domestic endpoint of the same vendor is the common case. Picking the first
+// match would make the anchor depend on the order rows arrive in, and that order
+// comes from the server's `ORDER BY provider, model_id`; a change there would
+// silently move what every collector bills. Sort first so the choice is a
+// property of this function, not of how the catalogue happened to be serialized.
+function pickAnchorOfficialRow(rows: readonly CollectorPricingModel[]): CollectorPricingModel | null {
+  const officials = rows
+    .filter((row) => officialVendorProviderIds.has(row.provider.trim().toLowerCase()) && priceRowIsPositive(row))
+    .sort((left, right) => compareProviderThenId(left, right))
+  return officials[0] ?? null
+}
+
+function compareProviderThenId(left: CollectorPricingModel, right: CollectorPricingModel) {
+  const leftProvider = left.provider.trim().toLowerCase()
+  const rightProvider = right.provider.trim().toLowerCase()
+  if (leftProvider !== rightProvider) return leftProvider < rightProvider ? -1 : 1
+  return left.modelId < right.modelId ? -1 : left.modelId > right.modelId ? 1 : 0
 }
 
 // ccusage matches an override key case-sensitively: a session model `GLM-5.3-Flash` is not priced

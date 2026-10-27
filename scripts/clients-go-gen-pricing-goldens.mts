@@ -94,7 +94,21 @@ const models: Row[] = [
   row('local-2', 'free-model', 0, 0),
 
   // 10. Non-ASCII id, reached through a provider prefix.
-  row('local', 'módel/中文-模型', 0.3, 0.9)
+  row('local', 'módel/中文-模型', 0.3, 0.9),
+
+  // 11. Two official vendors disagree, listed in the opposite of provider order.
+  //     The anchor must pick the alphabetically first official provider, so the
+  //     catalogue's row order cannot decide what every collector bills.
+  row('zhipuai', 'glm-9-flash', 0.12, 0.42),
+  row('zai', 'glm-9-flash', 0.15, 0.5),
+  row('vendor', 'vendor/glm-9-flash-uncensored', 5, 10),
+
+  // 12. Rows agreeing on price but disagreeing on context window. The collapse
+  //     keeps one representative and its window becomes maxInputTokens, so the
+  //     pick has to be the alphabetically first provider rather than whichever
+  //     row the catalogue listed first.
+  row('zeta', 'order-model', 1, 2, { contextWindow: 128_000 }),
+  row('alpha', 'order-model', 1, 2, { contextWindow: 400_000 })
 ]
 
 const response = { models, nextCursor: null }
