@@ -15,6 +15,10 @@ import { createInterface } from 'node:readline'
  */
 export const maxScanDepth = 8
 export const maxSessionFileBytes = 256 * 1024 * 1024
+// One JSONL line. Matches the Go client's `sessionscan.maxLineBytes` so the same
+// file yields the same rows on both sides rather than one skipping what the other
+// parses. A real session line is kilobytes; this only catches a pathological one.
+export const maxSessionLineBytes = 64 * 1024 * 1024
 // A directory listing that is too large to sort in one go is rejected rather than loaded
 // whole; the sibling walkers carry the same ceiling (`session-file-walk` matches it, the
 // Antigravity scanner uses 10k). A single abnormal directory must not be able to exhaust
@@ -137,12 +141,35 @@ async function statFile(filePath: string, options: ScanOptions) {
   }
 }
 
-/** Read a session log line by line so a large file never lands in memory. */
-export async function* readSessionLines(filePath: string): AsyncGenerator<string> {
+/**
+ * Read a session log line by line so a large file never lands in memory, skipping
+ * any single line longer than `maxLineBytes` instead of materializing it.
+ *
+ * readline has no per-line ceiling: a file within `maxSessionFileBytes` (256 MiB)
+ * can hand back a 256 MiB string, which then goes into `JSON.parse` as a full
+ * object graph. The Go client caps a line at 64 MiB, so an unbounded reader is
+ * both a memory hazard and a cross-client divergence.
+ *
+ * A skipped line is reported, not silently dropped — the caller decides whether a
+ * diagnostic is enough. The rest of the file is still read, which is the same
+ * policy the claude-code/codex reader applies to an oversized assistant row.
+ */
+export async function* readSessionLinesBounded(
+  filePath: string,
+  options: { maxLineBytes?: number; onSkippedLine?: (bytes: number) => void } = {}
+): AsyncGenerator<string> {
+  const maxLineBytes = options.maxLineBytes ?? maxSessionLineBytes
   const stream = createReadStream(filePath, { encoding: 'utf8' })
   const lines = createInterface({ input: stream, crlfDelay: Infinity })
   try {
     for await (const line of lines) {
+      // Byte length, not `line.length`: a string of multi-byte characters occupies
+      // several times its code-unit count in memory, and the Go side compares bytes.
+      const bytes = Buffer.byteLength(line, 'utf8')
+      if (bytes > maxLineBytes) {
+        options.onSkippedLine?.(bytes)
+        continue
+      }
       yield line
     }
   } finally {
