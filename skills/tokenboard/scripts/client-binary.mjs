@@ -35,6 +35,10 @@ export const defaultReleaseBaseUrl = 'https://github.com'
 const maxDownloadBytes = 128 * 1024 * 1024
 const maxRedirects = 5
 const childOutputMaxBuffer = 64 * 1024 * 1024
+// A binary that cannot answer `version` must not hang the caller: the staged-file probe runs
+// inside the sync lock, so an unbounded wait there holds sync.lock until the process dies.
+// Go's selfupdate uses the same 10s bound; this is the git-side counterpart.
+const versionProbeTimeoutMs = 10_000
 
 export function binaryFileName(platform = process.platform) {
   return platform === 'win32' ? 'tokenboard.exe' : 'tokenboard'
@@ -304,7 +308,8 @@ export function verifyExecutable(path, version, { spawn = spawnSync } = {}) {
   const result = spawn(path, ['version'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    maxBuffer: childOutputMaxBuffer
+    maxBuffer: childOutputMaxBuffer,
+    timeout: versionProbeTimeoutMs
   })
   if (result.error) throw new Error(`the downloaded TokenBoard binary does not run: ${errorMessage(result.error)}`)
   if (result.status !== 0) {
@@ -497,7 +502,12 @@ export function recoverOrphanedBinary({
 // a truncated write left unrunnable.
 function runsVersion(path, spawn) {
   try {
-    const result = spawn(path, ['version'], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
+    const result = spawn(path, ['version'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      maxBuffer: childOutputMaxBuffer,
+      timeout: versionProbeTimeoutMs
+    })
     return !result.error && result.status === 0
   } catch {
     return false

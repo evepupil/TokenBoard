@@ -1353,6 +1353,11 @@ test('readHookSyncTimeoutMs parses the env override and rejects invalid values',
     () => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '0' }),
     /TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be/
   )
+  // setTimeout clamps a delay past 2^31-1 to 1ms, so an "effectively infinite" bound would
+  // kill every hook run instantly — the opposite of what the operator asked for. Refuse it
+  // at parse time rather than letting the timer silently invert the intent.
+  assert.throws(() => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483648' }), /at most 2147483647/)
+  assert.equal(readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483647' }), 2_147_483_647)
 })
 
 test('a timed-out hook run resolves with an ETIMEDOUT error for runSync to report', async () => {

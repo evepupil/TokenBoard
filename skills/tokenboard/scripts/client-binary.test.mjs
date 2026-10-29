@@ -6,7 +6,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtemp } from 'node:fs/promises'
 import {
   archiveName,
   binaryFileName,
@@ -129,6 +130,37 @@ test('verifyExecutable requires the version as a whole token', () => {
 
   const exact = () => ({ status: 0, stdout: 'tokenboard (go) 1.2.3\n', stderr: '' })
   verifyExecutable('/staged/tokenboard', '1.2.3', { spawn: exact })
+})
+
+test('version probes are bounded so a wedged binary cannot hold the sync lock', async (t) => {
+  // recoverOrphanedBinary runs inside runWithSyncLock: a staged binary that never
+  // answers `version` would hold sync.lock until the process is killed. Go's
+  // selfupdate bounds the same probe at 10s; the git path had no bound at all.
+  const dir = await mkdtemp(join(tmpdir(), 'tokenboard-probe-timeout-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const binaryPath = join(dir, 'tokenboard')
+  // A staged copy must exist for recoverOrphanedBinary to probe it at all.
+  writeFileSync(`${binaryPath}.new`, 'staged', { mode: 0o755 })
+
+  const seen = []
+  const spawn = (path, args, options) => {
+    seen.push({ path, args, timeout: options?.timeout })
+    return { status: 0, stdout: 'tokenboard (go) 1.2.3\n', stderr: '' }
+  }
+
+  verifyExecutable('/staged/tokenboard', '1.2.3', { spawn })
+  recoverOrphanedBinary({
+    binaryPath,
+    readDir: () => [],
+    rename: () => {},
+    remove: () => {},
+    spawn
+  })
+
+  assert.equal(seen.length, 2, 'both probes must run')
+  for (const call of seen) {
+    assert.equal(call.timeout, 10_000, `${call.path} probe must carry the 10s bound`)
+  }
 })
 
 test('resolveRelease refuses a redirect loop rather than walking it', async (t) => {
