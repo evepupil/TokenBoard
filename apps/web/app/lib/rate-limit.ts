@@ -41,6 +41,11 @@ export const writeRateLimitPolicies = {
 // the only query the request makes.
 export const readRateLimitPolicies = {
   modelPricingRead: { id: 'model-pricing-read', maxRequests: 120, windowSeconds: 60 },
+  // The public alias of the same catalogue. It answers from the Worker cache when it
+  // can, but only 200s are stored there: a novel `?cursor=` or a rejected limit is a
+  // guaranteed miss that reaches D1, so it needs the same ceiling as the versioned
+  // route. Separate id so the two counters do not spend each other's budget.
+  publicModelPricingRead: { id: 'public-model-pricing-read', maxRequests: 120, windowSeconds: 60 },
   publicCardRead: { id: 'public-card-read', maxRequests: 120, windowSeconds: 60 }
 } satisfies Record<string, RateLimitPolicy>
 

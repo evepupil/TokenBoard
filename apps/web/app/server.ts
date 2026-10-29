@@ -65,6 +65,14 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
   try {
     const url = new URL(request.url)
     if (url.pathname === '/api/public/model-pricing') {
+      // The Worker cache only stores 200s, so a request that misses it — a novel
+      // `?cursor=`, a rejected limit — reaches D1 every time. Without a ceiling that
+      // is an unbounded anonymous read path; `/api/v1/model-pricing` and the public
+      // card route both cap at 120/60s, and this is the same shape of endpoint.
+      await enforceRateLimit(env.DB, {
+        policy: readRateLimitPolicies.publicModelPricingRead,
+        subject: clientIpRateLimitSubject(request.headers)
+      })
       return createCachedModelPricingResponse({
         db: env.DB,
         url,

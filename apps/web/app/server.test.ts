@@ -99,6 +99,24 @@ describe('worker server', () => {
     })
   })
 
+  // The Worker cache only stores 200s, so a request that misses it — a novel `?cursor=`,
+  // a rejected limit — reaches D1 every time. The public alias needs the same ceiling the
+  // versioned route has, or anonymous traffic turns into unbounded catalogue reads.
+  test('rate-limits the public model pricing alias', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ rateLimitCount: 121 })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?cursor=bogus'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
   test('serves the versioned model-pricing alias when the legacy slug is occupied', async () => {
     mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
     const env = createEnv({ publicProfile: true, profileSlug: 'model-pricing' })
@@ -1086,6 +1104,7 @@ function createEnv(
     usageSummaryStrict?: string
     modelPricingSyncEnabled?: string
     modelPricingSyncIntervalHours?: string
+    rateLimitCount?: number
   } = {}
 ) {
   const boundValues: unknown[][] = []
@@ -1112,7 +1131,7 @@ function createEnv(
     dueSubscription: options.dueSubscription
   }
   return Object.assign(env, {
-    DB: createDb(env, boundValues, sqlStatements)
+    DB: createDb(env, boundValues, sqlStatements, options.rateLimitCount)
   })
 }
 
@@ -1128,7 +1147,8 @@ function createDb(
     summaryUpdatedAt?: string
   } = {},
   boundValues: unknown[][] = [],
-  sqlStatements: string[] = []
+  sqlStatements: string[] = [],
+  rateLimitCount?: number
 ) {
   return {
     prepare: vi.fn((sql: string) => ({
@@ -1141,7 +1161,7 @@ function createDb(
             // Without an answer here the increment falls back to "over the ceiling" and every
             // request 429s, so this stub reports a fresh, far-from-limit counter.
             if (sql.includes('api_rate_limits')) {
-              return { count: 1, resetAt: '2099-01-01T00:00:00.000Z' }
+              return { count: rateLimitCount ?? 1, resetAt: '2099-01-01T00:00:00.000Z' }
             }
             if (sql.includes('FROM profiles')) {
               if (!(options.profileExists ?? options.publicProfile)) return null
