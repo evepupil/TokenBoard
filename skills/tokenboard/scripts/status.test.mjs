@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { buildStatus, collectRecentRunSummary, readClientStatus } from './status.mjs'
@@ -674,7 +674,7 @@ test('aggregates the last 7 days of run logs by filename prefix', () => {
     now: new Date('2026-10-14T00:00:00.000Z'),
     readdir: () => Object.keys(files),
     readFile: (path) => {
-      const name = path.split('/').pop()
+      const name = basename(path)
       if (!(name in files)) throw new Error('unexpected ' + name)
       return files[name]
     }

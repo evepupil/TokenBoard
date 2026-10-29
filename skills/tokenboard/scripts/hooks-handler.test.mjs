@@ -340,7 +340,11 @@ test('notify handler leaves cooldown work to a live trailing process', async () 
       [
         'import { writeFileSync } from "node:fs"',
         `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))`,
-        'await new Promise((resolve) => setTimeout(resolve, 5000))'
+        // Outlive the whole test. Resolving a Windows start identity is a ~1.5s
+        // PowerShell spawn (2s cap), so under a loaded suite both the probe here
+        // and the handler's later read can need the child alive for many seconds;
+        // a 5s life let the fixture become a "dead" pid mid-test.
+        'await new Promise((resolve) => setTimeout(resolve, 120000))'
       ].join('\n')
     )
     await writeFile(
@@ -357,10 +361,18 @@ test('notify handler leaves cooldown work to a live trailing process', async () 
 
     await waitFor(() => existsSync(trailingLockPath))
     let processStartIdentity
-    await waitFor(() => {
-      processStartIdentity = currentProcessStartIdentity({ pid: trailingPid })
-      return Boolean(processStartIdentity)
-    })
+    // Each attempt spawns PowerShell with a 2s cap on Windows, so the default 5s
+    // budget affords barely two tries before the probe itself eats it — under a
+    // loaded suite that reads as "identity never resolved" while the child is
+    // alive. Give the probe room to retry a few times.
+    await waitFor(
+      () => {
+        processStartIdentity = currentProcessStartIdentity({ pid: trailingPid })
+        return Boolean(processStartIdentity)
+      },
+      undefined,
+      30_000
+    )
     assert.ok(processStartIdentity)
     await writeFile(
       trailingLockPath,
@@ -768,8 +780,8 @@ async function waitForText(path, expected, diagnostic) {
   }, diagnostic)
 }
 
-async function waitFor(condition, diagnostic) {
-  const deadline = Date.now() + backgroundResultTimeoutMs
+async function waitFor(condition, diagnostic, timeoutMs = backgroundResultTimeoutMs) {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (await condition()) return
     await new Promise((resolve) => setTimeout(resolve, backgroundResultRetryMs))

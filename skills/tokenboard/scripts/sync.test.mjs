@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   buildSyncInvocation,
@@ -314,17 +315,19 @@ test('a binary client invocation runs the Go binary with the same env contract',
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
   // Same subcommand surface, no node and no tsx: the binary is the collector.
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  // `join` inside the invocation is the host's, so compare separator-insensitively.
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
   assert.equal(invocation.clientType, 'binary')
   // A binary install has no checkout, so the working directory is the binary's
   // own directory — pointing it at the absent collector dir made spawn fail
   // with ENOENT on the command itself.
-  assert.equal(invocation.cwd, normalizeMemoryPath('/home/user/.tokenboard/bin'))
+  assert.equal(normalizeMemoryPath(invocation.cwd), normalizeMemoryPath('/home/user/.tokenboard/bin'))
   // The endpoint contract is identical to the git client's.
   assert.equal(invocation.env.TOKENBOARD_ENDPOINT, 'https://tokenboard.example.com/api/v1/ingest')
   assert.equal(invocation.env.TOKENBOARD_UPLOAD_TOKEN, 'test-upload-token')
@@ -414,7 +417,8 @@ test('the default client type stays git for an existing install', () => {
   })
 
   assert.equal(invocation.clientType, 'git')
-  assert.match(invocation.command, /node$/)
+  // The command is the running node itself (not the Go binary); `node.exe` on Windows.
+  assert.equal(invocation.command, process.execPath)
   assert.deepEqual(invocation.args.slice(0, 3), ['--import', 'tsx', 'src/cli.ts'])
 })
 
@@ -969,7 +973,13 @@ test('scheduled sync runs the real top-level entry without a temporal dead zone'
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1024,7 +1034,13 @@ test('a scheduled sync continues without logs when the log directory cannot be c
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1536,10 +1552,11 @@ test('perSource runs a named source on the client it maps to', () => {
       homeDir: '/home/user',
       nodePath: '/usr/local/bin/node',
       pathEnv: '/usr/bin',
+      platform: 'linux',
       fileExists: () => true
     })
 
-    assert.equal(invocation.command, expectedCommand, `perSource pi=${mapped}`)
+    assert.equal(normalizeMemoryPath(invocation.command), expectedCommand, `perSource pi=${mapped}`)
     assert.deepEqual(invocation.args.slice(-2), ['--source', 'pi'])
   }
 })
@@ -1586,10 +1603,11 @@ test('perSource runs an all-source request when the mapping agrees', () => {
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
 })
 
