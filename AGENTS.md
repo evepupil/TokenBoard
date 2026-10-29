@@ -198,6 +198,18 @@ ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo�
 - `--until` 只对 `claude-code` 和 `codex` 生效，工具类来源传 `--until` 是用法错误（两侧 CLI 一致 fail-fast）。
 - Go 侧 `contract.CcusageToolCommand`/`CcusageToolSources` 与 TS 的 `ccusageToolCommandNames`/`ccusageToolSources` 是同一契约；`TestUsageSourcesMatchUsageCore` 与 CI shadow 的 12 源循环钉住漂移。
 
+### 跨端协议不变量（2026-10-28 审查后新增）
+
+这些不变量一旦破坏就是静默计费分叉，两侧改动必须同步验证：
+
+- **ccusage 子进程环境必须剥离凭据**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.scrubCredentialEnv`）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。
+- **Codex 静态费率用运行时除法**：`internal/collect/providers/codex/context_pricing.go` 的 `codexDivisor` 是 `var` 而非 `const`——Go 对无类型常量表达式精确求值后舍入一次，JS 是 double 除法再舍入一次，`0.2/1e6` 一类字面量两边差 1 ULP，会让 `snapshotHash` 分叉、shadow 报 diff。`TestStaticRatesMatchTheJavaScriptDoubles` 钉住位模式。
+- **公开端点 `/api/public/model-pricing` 有 IP 限流**（`publicModelPricingRead` 120/60s）。Worker Cache 只存 200，所以带随机 `cursor` 的请求每次都直达 D1，不能撤掉这道闸。
+- **上传端点强制 https**，loopback（`localhost`/`127.0.0.1`/`::1`）例外（TS `endpoint.ts`，Go `cli/endpoint.go`）。上传请求一律 `redirect: 'manual'` / `CheckRedirect`（Go 同 host 异 port 会带 Authorization 转发）。
+- **上传前过滤 usageDate 越界行**（usage-core `uploadIsoDateIssue`，Go `contract.UploadIsoDateIssue`）。服务端对整批 fail-closed，一行坏日期会把同批 30 行全堵死并触发 24h 上传暂停。
+- **cursor 条目在「所有根都解析成功且未见于本次扫描」时回收**（TS `preserveMissingCursorEntries` 的 `allRootsResolved`，Go 同名参数）。pending 条目永不回收；根解析失败时全部保留。
+- **ccusage 折叠语义是双向后缀剥离**，比 `foldToBaseModelId` 宽得多；两端实现必须保持同序同次数（见 `docs/model-pricing.md` 的「Known limitation」一节）。
+
 ### 新增 usage 来源的检查单
 
 来源枚举有四处独立副本，任何一处漏改都是静默漂移（新来源能采集但漏比较、漏互斥或前端显示原始 slug）：
