@@ -220,12 +220,13 @@ export function verifyChecksum(data, name, checksums) {
   }
 }
 
-function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, quiet = false }) {
+function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, quiet = false, cwd }) {
   const result = spawn(command, args, {
     shell: platform === 'win32' && /\.(cmd|bat)$/i.test(command),
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    maxBuffer: childOutputMaxBuffer
+    maxBuffer: childOutputMaxBuffer,
+    ...(cwd ? { cwd } : {})
   })
   const stdout = String(result.stdout ?? '')
   const stderr = String(result.stderr ?? '')
@@ -244,12 +245,39 @@ function runExternal(command, args, { spawn, platform = process.platform, log = 
   return result
 }
 
+// runTarExtract unpacks one member with the platform's tar.
+//
+// The archive is always named relatively, from the archive's own directory.
+// An absolute Windows path such as `C:\...` reads as a remote host to GNU tar
+// (the tar Git for Windows puts first on PATH), which then tries to open an
+// rsh connection to a host named "C" and fails with "Cannot connect to C:
+// resolve failed" — every binary install on such a machine failed this way.
+// `--force-local` would fix GNU tar but Windows' own bsdtar rejects the flag,
+// and bsdtar accepts a forward-slash destination while GNU tar rejects a
+// backslash one, so the one shape both parsers agree on is: bare file name,
+// cwd at the archive's directory, forward-slash destination. That shape is
+// also exactly what the POSIX tars accept, so there is no platform branch
+// here and CI exercises the same code path on every OS.
+function runTarExtract({ archivePath, extractDir, name, platform = process.platform, spawn, log, quiet = false }) {
+  return runExternal('tar', ['-xzf', basename(archivePath), '-C', toTarPath(extractDir), name], {
+    spawn,
+    platform,
+    log,
+    quiet,
+    cwd: dirname(archivePath)
+  })
+}
+
+function toTarPath(value) {
+  return value.replaceAll('\\', '/')
+}
+
 // extractBinary unpacks the release tarball and returns the executable's
 // bytes. Extraction shells out to the platform's tar (present on macOS, Linux
 // and Windows 10+), the way the archive fallback already shells out to unzip.
 export function extractBinary({ archivePath, extractDir, name, platform = process.platform, spawn = spawnSync, log }) {
   mkdirSync(extractDir, { recursive: true })
-  runExternal('tar', ['-xzf', archivePath, '-C', extractDir, name], { spawn, platform, log })
+  runTarExtract({ archivePath, extractDir, name, platform, spawn, log })
   return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
 }
 
@@ -275,7 +303,7 @@ export function extractOptionalEntry({
   // tar exits non-zero when the member is absent; that is the case this
   // helper exists for, so the exit status is not treated as fatal here.
   try {
-    runExternal('tar', ['-xzf', archivePath, '-C', extractDir, name], { spawn, platform, log, quiet: true })
+    runTarExtract({ archivePath, extractDir, name, platform, spawn, log, quiet: true })
   } catch {
     return null
   }
