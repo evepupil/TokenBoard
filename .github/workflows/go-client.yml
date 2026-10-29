@@ -166,6 +166,11 @@ jobs:
       - name: skill script tests
         run: node --test skills/tokenboard/scripts/*.test.mjs
 
+      # ... and the same suite runs on a native Windows runner in its own job
+      # below. It is a separate job because the steps after this one shell out
+      # to POSIX tools (`diff`, `$RUNNER_TEMP`, `set -euo pipefail`), which the
+      # Windows runner does not provide under its default shell.
+
       - run: pnpm format:check
 
       # The Go goldens are generated from TypeScript, and both directions of
@@ -192,6 +197,32 @@ jobs:
       # differently on the two implementations.
       - name: bundled ccusage config copies match
         run: diff -u packages/collector/ccusage.json clients/go/internal/pricing/ccusage.json
+
+  # The skill suite is the only coverage for the scripts users run on their own
+  # machine, and Windows is where its fixtures fail: POSIX path assumptions,
+  # permission bits that do not exist, a preload specifier the ESM loader reads
+  # as a URL scheme, coarse directory mtime granularity. All of those passed on
+  # the Linux runner and failed only on a real Windows host, so the suite needs
+  # a native Windows run rather than more simulation.
+  #
+  # Only the skill tests run here: they need no node_modules (the worktree-free
+  # install is the point of the skill scripts), and the remaining steps of the
+  # baseline job are POSIX-shell specific.
+  skill-windows:
+    name: skill script test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+
+      # Git Bash expands the glob the way the POSIX runners do; under the
+      # default PowerShell shell the pattern reaches Node unexpanded.
+      - name: skill script tests
+        shell: bash
+        run: node --test skills/tokenboard/scripts/*.test.mjs
 
   deps:
     name: ccusage contract
