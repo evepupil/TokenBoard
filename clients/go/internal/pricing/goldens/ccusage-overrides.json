@@ -287,6 +287,39 @@
         "outputCostPerMillion": 2,
         "pricing": {},
         "provider": "alpha"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.4,
+        "maxInputTokens": null,
+        "modelId": "stacked-base",
+        "outputCostPerMillion": 1.1,
+        "pricing": {},
+        "provider": "xiaomi"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 0.9,
+        "maxInputTokens": null,
+        "modelId": "stacked-base",
+        "outputCostPerMillion": 2.2,
+        "pricing": {},
+        "provider": "vendor-y"
+      },
+      {
+        "cacheReadCostPerMillion": null,
+        "cacheWriteCostPerMillion": null,
+        "contextWindow": 200000,
+        "inputCostPerMillion": 3,
+        "maxInputTokens": null,
+        "modelId": "vendor/stacked-base-abliterated-uncensored",
+        "outputCostPerMillion": 7,
+        "pricing": {},
+        "provider": "vendor"
       }
     ],
     "nextCursor": null
@@ -385,6 +418,11 @@
       "maxInputTokens": 400000,
       "outputCostPerToken": 0.000002
     },
+    "stacked-base": {
+      "inputCostPerToken": 4.0000000000000003e-7,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.0000011
+    },
     "step-5-preview": {
       "inputCostPerToken": 0.000001,
       "maxInputTokens": 200000,
@@ -394,6 +432,11 @@
       "inputCostPerToken": 0.000005,
       "maxInputTokens": 200000,
       "outputCostPerToken": 0.00001
+    },
+    "vendor/stacked-base-abliterated-uncensored": {
+      "inputCostPerToken": 0.000003,
+      "maxInputTokens": 200000,
+      "outputCostPerToken": 0.000007
     },
     "xiaomi/mimo-v2.6-flash-uncensored": {
       "inputCostPerToken": 5e-7,

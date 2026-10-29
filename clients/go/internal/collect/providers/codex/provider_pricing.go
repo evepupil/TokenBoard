@@ -442,11 +442,19 @@ func (r *Rules) ReportUnrecoverablePendingCodexPricing(snapshots []contract.Snap
 }
 
 // reportUnpricedCodexSnapshots ports reportUnpricedCodexSnapshots.
+//
+// Only a snapshot with real usage and a zero cost is worth a line: ccusage prices
+// models from its own builtin catalogue, so a model missing from the TokenBoard
+// override set still arrives with a real cost. The TS side was fixed first
+// (bcd4004) and this port missed the filter.
 func reportUnpricedCodexSnapshots(snapshots []contract.Snapshot, covered map[string]bool, stderr func(string)) {
 	seen := map[string]bool{}
 	order := []string{}
 	for _, snapshot := range snapshots {
 		if snapshot.Source != contract.SourceCodex || snapshot.TotalTokens <= 0 {
+			continue
+		}
+		if snapshot.CostUSD > 0 {
 			continue
 		}
 		if covered[snapshot.Model] || seen[snapshot.Model] {

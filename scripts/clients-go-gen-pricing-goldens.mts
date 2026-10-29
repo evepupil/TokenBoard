@@ -108,7 +108,21 @@ const models: Row[] = [
   //     pick has to be the alphabetically first provider rather than whichever
   //     row the catalogue listed first.
   row('zeta', 'order-model', 1, 2, { contextWindow: 128_000 }),
-  row('alpha', 'order-model', 1, 2, { contextWindow: 400_000 })
+  row('alpha', 'order-model', 1, 2, { contextWindow: 400_000 }),
+
+  // 13. A base id reachable only through a *stacked* variant suffix. The TS fold
+  //     used a single non-global replace, so it stopped at `…-abliterated` while
+  //     the Go port stripped both suffixes and anchored the base. Nothing in the
+  //     live catalogue is shaped this way, which is exactly why the golden has to
+  //     carry it: a fixture built only from real rows cannot catch a divergence
+  //     the real rows never produce.
+  //
+  //     The base's rows disagree so the collapse drops it, which is what makes the
+  //     anchor the only thing that could emit `stacked-base` — and the official row
+  //     is what lets it.
+  row('xiaomi', 'stacked-base', 0.4, 1.1),
+  row('vendor-y', 'stacked-base', 0.9, 2.2),
+  row('vendor', 'vendor/stacked-base-abliterated-uncensored', 3, 7)
 ]
 
 const response = { models, nextCursor: null }

@@ -46,6 +46,17 @@ type PreparedConfig struct {
 	// config. The TS side derives the same set with
 	// `new Set(Object.keys(explicitPricingOverrides))`.
 	ExplicitOverrideModelIDs map[string]bool
+	// ContextPricingModels is the catalogue the Codex context-pricing rules may
+	// widen the static table with, and it is nil when the dynamic config could not
+	// be written.
+	//
+	// ccusage is then pointed at the bundled or explicit config, which carries no
+	// catalogue prices, so letting the rules keep pricing from the catalogue would
+	// make the two halves of one run disagree: ccusage would bill from the static
+	// file while the context rules re-priced from the catalogue. The TS side
+	// rebuilds its rules with an empty model list on the same branch, and the two
+	// clients are diffed against each other on real data, so this has to match.
+	ContextPricingModels []Model
 }
 
 // Prepare ports prepareDynamicCcusageConfig. The returned path is always a
@@ -124,6 +135,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				Overrides:                overrides,
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+				ContextPricingModels:     nil,
 			}, nil
 		}
 		return PreparedConfig{
@@ -132,6 +144,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			Overrides:                overrides,
 			CoveredModelIDs:          covered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     catalogue.Models,
 		}, nil
 	}
 
@@ -154,6 +167,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			Overrides:                overrides,
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     nil,
 		}, nil
 	}
 	stderr(fmt.Sprintf("TokenBoard model pricing: prepared ccusage config at %s", configPath))
@@ -163,6 +177,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 		Overrides:                overrides,
 		CoveredModelIDs:          covered,
 		ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+		ContextPricingModels:     catalogue.Models,
 	}, nil
 }
 

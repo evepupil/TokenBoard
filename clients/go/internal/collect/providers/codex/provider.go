@@ -133,8 +133,14 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	// explicitly. Using the static default instead would leave a model the
 	// server newly prices un-repriced, which is exactly the divergence the
 	// catalogue exists to avoid.
+	//
+	// ContextPricingModels is nil when the dynamic config could not be written and
+	// ccusage fell back to the bundled or explicit file: that file carries no
+	// catalogue prices, so widening the rules from the catalogue anyway would make
+	// the two halves of the run disagree. TS rebuilds its rules with an empty model
+	// list on the same branch.
 	rules := CompileRules(BuildCodexContextPricingRules(
-		prepared.Catalogue.Models,
+		prepared.ContextPricingModels,
 		CodexContextPricingRules,
 		pricingStderr,
 		prepared.ExplicitOverrideModelIDs,

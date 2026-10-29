@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +7,7 @@ import {
   createCcusagePricingOverrides,
   dynamicCcusageConfigPath,
   endpointOriginFromEndpoint,
+  foldToBaseModelId,
   fetchModelPricingCatalogue,
   loadModelPricingCatalogue,
   modelPricingUrl,
@@ -922,5 +923,49 @@ describe('per-process pricing catalogue memo', () => {
     expect(fetched).toBe(1)
     expect(second.configPath).toBe(first.configPath)
     expect(second.coveredModelIds.has('gpt-6-astra')).toBe(true)
+  })
+})
+
+// The Go port strips each variant suffix once, in a fixed order, so a catalogue id carrying
+// both must fold to the same base on both sides. A single non-global replace left the Go
+// side anchoring a base the TS side never saw, which only showed up on ids shaped
+// `…-abliterated-uncensored` — none exist today, but the golden cannot catch what the two
+// implementations disagree about producing.
+describe('foldToBaseModelId', () => {
+  test.each([
+    ['foo-uncensored', 'foo'],
+    ['foo-abliterated', 'foo'],
+    ['provider/foo-uncensored', 'foo'],
+    ['foo-uncensored:tag', 'foo'],
+    ['foo-uncensored-abliterated', 'foo-uncensored'],
+    ['provider/foo-abliterated-uncensored', 'foo'],
+    ['foo', 'foo'],
+    ['foo-thinking', 'foo-thinking']
+  ])('%s folds to %s', (modelId, expected) => {
+    expect(foldToBaseModelId(modelId)).toBe(expected)
+  })
+})
+
+// The generated config is a pure function of the catalogue, so an unchanged catalogue
+// produces byte-identical output. Rewriting it anyway costs a write plus a rename on every
+// hook run and makes the mtime useless as a "did the catalogue move" signal.
+describe('dynamic ccusage config writes', () => {
+  test('leaves an unchanged config untouched on the next prepare', async () => {
+    const stateDir = await tempDirectory()
+    const fetcher: PricingFetcher = async () => jsonResponse({ models: [model('gpt-6-astra')], nextCursor: null })
+    const now = new Date('2026-09-10T00:00:00.000Z')
+
+    const first = await prepareDynamicCcusageConfig({ endpoint: 'https://tokenboard.example', stateDir, now, fetcher })
+    const before = await readFile(first.configPath!, 'utf8')
+    const beforeStat = await stat(first.configPath!)
+
+    // A second prepare with the same catalogue must not rewrite the file.
+    resetModelPricingMemo()
+    const second = await prepareDynamicCcusageConfig({ endpoint: 'https://tokenboard.example', stateDir, now, fetcher })
+    const afterStat = await stat(second.configPath!)
+
+    expect(second.configPath).toBe(first.configPath)
+    expect(await readFile(second.configPath!, 'utf8')).toBe(before)
+    expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs)
   })
 })

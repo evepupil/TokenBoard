@@ -644,12 +644,12 @@ func TestCollectReportsUnpricedModelsOnce(t *testing.T) {
 		return map[string]any{"data": []any{
 			map[string]any{"date": "2026-05-22", "breakdown": map[string]any{
 				"mystery-model": map[string]any{
-					"inputTokens": 1, "outputTokens": 2, "totalTokens": 3, "costUSD": 0.01,
+					"inputTokens": 1, "outputTokens": 2, "totalTokens": 3, "costUSD": 0,
 				},
 			}},
 			map[string]any{"date": "2026-05-23", "breakdown": map[string]any{
 				"mystery-model": map[string]any{
-					"inputTokens": 1, "outputTokens": 2, "totalTokens": 3, "costUSD": 0.01,
+					"inputTokens": 1, "outputTokens": 2, "totalTokens": 3, "costUSD": 0,
 				},
 			}},
 		}}
@@ -673,6 +673,42 @@ func TestCollectReportsUnpricedModelsOnce(t *testing.T) {
 	}
 	if matches != 1 {
 		t.Errorf("unpriced diagnostics = %v", lines)
+	}
+}
+
+// ccusage prices models from its own builtin catalogue, so a model missing from the
+// TokenBoard override set still arrives with a real cost. Warning about it buried the
+// log: on one machine 43-44 models per run, all priced, 1666 lines in a rotated stderr.
+// The warning only carries information when the cost actually came back as zero.
+func TestCollectStaysQuietAboutModelsCcusagePricedItself(t *testing.T) {
+	stateDir := newStateDir(t)
+	runner := &stubRunner{responses: func(args []string) any {
+		if contains(args, "session") {
+			return map[string]any{"data": []any{}}
+		}
+		return map[string]any{"data": []any{
+			map[string]any{"date": "2026-05-22", "breakdown": map[string]any{
+				"ccusage-priced-model": map[string]any{
+					"inputTokens": 10, "outputTokens": 2, "totalTokens": 12, "costUSD": 0.25,
+				},
+			}},
+		}}
+	}}
+	lines := []string{}
+	_, err := Collect(context.Background(), Options{
+		Timezone: "UTC",
+		StateDir: stateDir,
+		Env:      testEnv(forceRunnerEnv(nil)),
+		Runner:   runner.run,
+		Stderr:   func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, "model pricing unavailable") {
+			t.Errorf("a model ccusage priced itself must not be reported as unpriced: %v", lines)
+		}
 	}
 }
 

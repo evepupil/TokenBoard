@@ -106,7 +106,7 @@ func TestSplitsMixedModelContextUsageFromANonContextDailyAttribution(t *testing.
 	if canonical.TotalTokens != 10 {
 		t.Errorf("canonical total = %d, want 10", canonical.TotalTokens)
 	}
-	wantCost := 0.001 - 20*5.0/1_000_000
+	wantCost := 0.001 - 20*4.0/1_000_000
 	if math.Abs(canonical.CostUSD-wantCost) > 1e-12 {
 		t.Errorf("canonical cost = %v, want %v", canonical.CostUSD, wantCost)
 	}
@@ -114,7 +114,7 @@ func TestSplitsMixedModelContextUsageFromANonContextDailyAttribution(t *testing.
 	if context.TotalTokens != 20 {
 		t.Errorf("context total = %d, want 20", context.TotalTokens)
 	}
-	if math.Abs(context.CostUSD-20*5.0/1_000_000) > 1e-12 {
+	if math.Abs(context.CostUSD-20*4.0/1_000_000) > 1e-12 {
 		t.Errorf("context cost = %v", context.CostUSD)
 	}
 	if context.SessionCount != 0 {
@@ -146,14 +146,14 @@ func TestComparesMixedModelInputAgainstTheCanonicalUncachedRepresentation(t *tes
 	if canonical.TotalTokens != 300 || canonical.InputTokens != 0 || canonical.CacheRead != 300 {
 		t.Errorf("canonical = %+v", canonical)
 	}
-	if math.Abs(canonical.CostUSD-0.00045) > 1e-12 {
+	if math.Abs(canonical.CostUSD-0.00056) > 1e-12 {
 		t.Errorf("canonical cost = %v, want 0.00045", canonical.CostUSD)
 	}
 	context := findSnapshot(t, result, "gpt-5.6-sol")
 	if context.TotalTokens != 200 || context.InputTokens != 100 || context.CacheRead != 100 {
 		t.Errorf("context = %+v", context)
 	}
-	if math.Abs(context.CostUSD-0.00055) > 1e-12 {
+	if math.Abs(context.CostUSD-0.00044) > 1e-12 {
 		t.Errorf("context cost = %v, want 0.00055", context.CostUSD)
 	}
 	for _, line := range lines {
@@ -180,12 +180,12 @@ func TestReconcilesWhenTheContextModelIsDearerThanTheCanonicalModel(t *testing.T
 		t.Errorf("canonical = %+v", canonical)
 	}
 	context := findSnapshot(t, result, "gpt-5.6-sol")
-	if math.Abs(context.CostUSD-0.0001) > 1e-12 {
+	if math.Abs(context.CostUSD-0.00008) > 1e-12 {
 		t.Errorf("context cost = %v, want 0.0001", context.CostUSD)
 	}
 	want := "Codex context pricing floored deepseek-v4-flash cost to 0 for 2026-05-20: " +
-		"this row's attributed context-priced share (0.0001) exceeded its canonical total (0.00001); " +
-		"0.00009 of this row's share could not be deducted"
+		"this row's attributed context-priced share (0.00008) exceeded its canonical total (0.00001); " +
+		"0.00007 of this row's share could not be deducted"
 	found := false
 	for _, line := range lines {
 		if line == want {
@@ -380,3 +380,39 @@ func TestReconciliationChangePredicatesMatchTheThrowMessages(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// ccusage prices models from its own builtin catalogue, so a model missing from the
+// TokenBoard override set still arrives with a real cost. The TS side was fixed first
+// (bcd4004) and this port missed the filter, which made the warning fire for every
+// priced model on every run.
+func TestReportUnpricedCodexSnapshotsOnlyWarnsAboutZeroCostRows(t *testing.T) {
+	priced := dailySnapshot("2026-05-22", "ccusage-priced-model", 10, 2, 0, 0, 12, 0.25)
+	unpriced := dailySnapshot("2026-05-22", "genuinely-unpriced-model", 10, 2, 0, 0, 12, 0)
+
+	lines := []string{}
+	reportUnpricedCodexSnapshots([]contract.Snapshot{priced, unpriced}, map[string]bool{}, func(line string) {
+		lines = append(lines, line)
+	})
+
+	if len(lines) != 1 {
+		t.Fatalf("diagnostics = %v, want exactly one line", lines)
+	}
+	if !strings.Contains(lines[0], "genuinely-unpriced-model") {
+		t.Errorf("diagnostic = %q, want the zero-cost model", lines[0])
+	}
+}
+
+// A model the TokenBoard catalogue covers is not unpriced either, even at zero cost:
+// the catalogue priced it and the collector already said so.
+func TestReportUnpricedCodexSnapshotsStaysQuietAboutCoveredModels(t *testing.T) {
+	covered := dailySnapshot("2026-05-22", "covered-model", 10, 2, 0, 0, 12, 0)
+
+	lines := []string{}
+	reportUnpricedCodexSnapshots([]contract.Snapshot{covered}, map[string]bool{"covered-model": true}, func(line string) {
+		lines = append(lines, line)
+	})
+
+	if len(lines) != 0 {
+		t.Fatalf("diagnostics = %v, want none", lines)
+	}
+}

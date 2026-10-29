@@ -135,16 +135,16 @@ export const codexContextPricingRules: readonly CodexContextPricingRule[] = [
     modelIds: ['gpt-5.6-sol', 'gpt-5.6'],
     threshold: 272_000,
     standard: {
-      input: 5 / 1_000_000,
-      output: 30 / 1_000_000,
-      cacheRead: 0.5 / 1_000_000,
-      cacheCreation: 6.25 / 1_000_000
+      input: 4 / 1_000_000,
+      output: 20 / 1_000_000,
+      cacheRead: 0.4 / 1_000_000,
+      cacheCreation: 5 / 1_000_000
     },
     longContext: {
-      input: 10 / 1_000_000,
-      output: 45 / 1_000_000,
-      cacheRead: 1 / 1_000_000,
-      cacheCreation: 12.5 / 1_000_000
+      input: 8 / 1_000_000,
+      output: 30 / 1_000_000,
+      cacheRead: 0.8 / 1_000_000,
+      cacheCreation: 10 / 1_000_000
     },
     fastMultiplier: 2
   },
@@ -464,13 +464,28 @@ function priceRowIsPositive(entry: CollectorPricingModelLike) {
 }
 
 function priceRowSignature(entry: CollectorPricingModelLike) {
+  // `pricing` is compared with its keys sorted, matching the Go port's json.Marshal.
+  // JSON.stringify preserves insertion order, so two rows carrying the same object in a
+  // different key order would look different here and identical there — the two clients
+  // would then disagree about whether an id is ambiguous. The catalogue is serialized by
+  // one process today so the orders happen to match, but nothing in the contract says so.
   return JSON.stringify([
     entry.inputCostPerMillion,
     entry.outputCostPerMillion,
     entry.cacheReadCostPerMillion,
     entry.cacheWriteCostPerMillion,
-    entry.pricing ?? null
+    sortJsonKeys(entry.pricing ?? null)
   ])
+}
+
+/** Recursively rebuilds a JSON value with object keys in code-point order. */
+function sortJsonKeys(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(sortJsonKeys)
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  )
+  return Object.fromEntries(entries.map(([key, entry]) => [key, sortJsonKeys(entry)]))
 }
 
 export const officialVendorProviderIds = new Set([

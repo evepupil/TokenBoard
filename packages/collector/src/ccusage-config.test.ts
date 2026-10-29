@@ -57,11 +57,14 @@ describe('ccusage pricing configuration', () => {
     const config = await readConfig()
     const pricing = config.defaults.pricingOverrides
 
+    // The official longcat row, not the nano-gpt reseller's 0.75/2.95: the catalogue now
+    // prices this id from both, and ccusage's own builtin table already charges 0.3/1.2.
+    // A bundled fallback that disagrees with both is the number an offline run bills.
     expect(pricing['LongCat-2.5-Preview']).toEqual({
-      inputCostPerToken: 0.75 / 1_000_000,
-      outputCostPerToken: 2.95 / 1_000_000,
-      cacheReadInputTokenCost: 0.015 / 1_000_000,
-      maxInputTokens: 1_000_000
+      inputCostPerToken: 0.3 / 1_000_000,
+      outputCostPerToken: 1.2 / 1_000_000,
+      cacheReadInputTokenCost: 0.006 / 1_000_000,
+      maxInputTokens: 1_048_576
     })
     expect(pricing['deepseek-flash']).toEqual({
       inputCostPerToken: 0.15 / 1_000_000,

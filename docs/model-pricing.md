@@ -196,6 +196,28 @@ source and refresh failure. A model with no TokenBoard override is not by itself
 `ccusage` prices it from its own builtin catalogue — so the warning is emitted only for a model
 that came back with real usage and zero cost, which is what an unpriced model actually looks like.
 
+The generated `ccusage.dynamic.json` is a pure function of the catalogue, so a run whose catalogue
+did not change produces byte-identical output. The writer compares before replacing and skips the
+write when the bytes already match: the file is ~450 KB, every hook run would otherwise pay a
+write plus a rename, and the mtime is otherwise useless as a "did the catalogue move" signal.
+
+### Known limitation: `ccusage` folds variant keys onto base ids
+
+`ccusage` resolves an override key against the observed model name by stripping trailing
+`-`/`.`-separated segments, in both directions. Measured against 20.0.33: a session named
+`base-model` is priced by any of `base-model-free`, `base-model:free`, `base-model-thinking`,
+`base-model-preview`, `base-model-mini`, `base-model-20250101`, `provider/base-model` or
+`base-model-x-y-z`, and a session named `base-model-extra` is priced by a plain `base` key.
+
+This means the config cannot express "this exact `-free` variant is free while its base id is
+paid": the free key also prices the base. On the 2026-10-27 catalogue 26 zero-priced variant keys
+fold onto a base id that has positive-priced rows, and five of them price a real model at $0
+(`inclusionai/ling-3.1-flash`, `liquid/lfm-2.5-2.6b`, `nvidia/nemotron-3.5-content-safety`,
+`nvidia/nemotron-3.5-super-vl`, `poolside/laguna-xs-2.1`). Dropping those keys is not a fix — the
+free variant itself then falls back to `ccusage`'s builtin price (2.8/M for `glm-4.7-flash-free`,
+which is not free) — and emitting a price for the base id would be inventing one the catalogue
+does not support. The condition is reported here rather than papered over.
+
 The catalogue is intentionally not joined into historical usage aggregation. An ingested `costUsd`
 is the price that applied when the collector measured that day, not a live view of the catalogue, so
 it survives later catalogue changes. A scheduled sync re-scans its lookback window on every run and

@@ -167,9 +167,9 @@ func TestUsesTheGPT56RequestTierAtInputTokens(t *testing.T) {
 		inputTokens float64
 		inputRate   float64
 	}{
-		{271_999, 5.0 / 1_000_000.0},
-		{272_000, 5.0 / 1_000_000.0},
-		{272_001, 10.0 / 1_000_000.0},
+		{271_999, 4.0 / 1_000_000.0},
+		{272_000, 4.0 / 1_000_000.0},
+		{272_001, 8.0 / 1_000_000.0},
 	}
 	for _, testCase := range cases {
 		t.Run(fmt.Sprintf("%d", int64(testCase.inputTokens)), func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestUsesTheLongContextTierWhenCacheCreationCrossesThe272kRequestBoundary(t 
 		InputTokens:         272_000,
 		CacheCreationTokens: 1,
 	})
-	assertPriceCloseTo(t, cost, (272_000*10+12.5)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (272_000*8+10)/1_000_000.0, 12)
 }
 
 func TestUsesTheGrokRequestTierAtInputTokens(t *testing.T) {
@@ -242,7 +242,7 @@ func TestPricesEveryComponentWithTheLongContextTierNotOnlyInputTokens(t *testing
 		CacheReadTokens:     1,
 		CacheCreationTokens: 1,
 	})
-	assertPriceCloseTo(t, cost, (272_000*10+1+12.5+45)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (272_000*8+0.8+10+30)/1_000_000.0, 12)
 }
 
 func TestPricesAdditiveCachedInputSeparatelyFromUncachedInput(t *testing.T) {
@@ -253,7 +253,7 @@ func TestPricesAdditiveCachedInputSeparatelyFromUncachedInput(t *testing.T) {
 		OutputTokens:        20,
 		CacheReadTokens:     150,
 	})
-	assertPriceCloseTo(t, cost, (50*5+150*0.5+20*30)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (50*4+150*0.4+20*20)/1_000_000.0, 12)
 }
 
 func TestAppliesTheFastAndPriorityMultiplierAndNormalizesDatedModelIDs(t *testing.T) {
@@ -767,7 +767,7 @@ func TestReconstructsCumulativeTokenRowsAndDeduplicatesOnlyIdenticalEventsAcross
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (271_999*5+30)/1_000_000.0 + 2*((272_001*10+45)/1_000_000.0),
+		CostUSD:   (271_999*4+20)/1_000_000.0 + 2*((272_001*8+30)/1_000_000.0),
 	}})
 }
 
@@ -784,7 +784,7 @@ func TestDoesNotDeduplicateEqualUsageFromDifferentSessions(t *testing.T) {
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -799,7 +799,7 @@ func TestUsesTheStableSessionIDWhenCodexEmitsAPerRecordID(t *testing.T) {
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -844,7 +844,7 @@ func TestDeduplicatesAnArchivedCopyWhenSessionMetadataHasNoIdentity(t *testing.T
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -867,7 +867,7 @@ func TestPrefersTheActiveCopyWhenActiveAndArchivedContentsDiffer(t *testing.T) {
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -884,7 +884,7 @@ func TestDeduplicatesAnArchivedCopyWhenOnlyTheActiveSessionHasAnIdentity(t *test
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -901,7 +901,7 @@ func TestDeduplicatesAnActiveCopyWhenOnlyTheArchivedSessionHasAnIdentity(t *test
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -918,7 +918,7 @@ func TestDoesNotDoubleCountWhenOnlyOneArchiveCopyExposesIdentityAfterTheOtherWas
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -939,7 +939,7 @@ func TestKeepsAnonymousSessionsWithTheSameFilenameSeparateAcrossProfiles(t *test
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -963,7 +963,7 @@ func TestKeepsSessionsWithTheSameMetadataIDSeparateAcrossProfiles(t *testing.T) 
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -994,7 +994,7 @@ func TestDeduplicatesASessionCopiedIntoASymlinkedArchiveRoot(t *testing.T) {
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1018,7 +1018,7 @@ func TestKeepsCumulativeBaselinesSeparateWhenOneSessionChangesModels(t *testing.
 	if costs[0].UsageDate != "2026-05-01" || costs[0].Model != "gpt-5.6-sol" {
 		t.Fatalf("costs[0] = %+v", costs[0])
 	}
-	assertCloseTo(t, costs[0].CostUSD, (15*5)/1_000_000.0, 14)
+	assertCloseTo(t, costs[0].CostUSD, (15*4)/1_000_000.0, 14)
 	if costs[1].UsageDate != "2026-05-01" || costs[1].Model != "gpt-5.6-terra" {
 		t.Fatalf("costs[1] = %+v", costs[1])
 	}
@@ -1038,8 +1038,8 @@ func TestKeepsCumulativeBaselinesContinuousAcrossAliasesInOneModelFamily(t *test
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{
-		{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: (10 * 5) / 1_000_000.0},
-		{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (5 * 5) / 1_000_000.0},
+		{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: (10 * 4) / 1_000_000.0},
+		{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (5 * 4) / 1_000_000.0},
 	})
 }
 
@@ -1114,7 +1114,7 @@ func TestAggregatesOversizedIrrelevantRowsAcrossContextPricingScans(t *testing.T
 		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 	want := []string{fmt.Sprintf(
 		"Skipped 2 oversized Codex context pricing JSONL rows without usage or subagent metadata across 2 scans (largest %d bytes)",
@@ -1161,7 +1161,7 @@ func TestKeepsThePrimaryOversizedTurnContextModelWhenMetadataHasAConflictingFall
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1230,7 +1230,7 @@ func TestNormalizesADatedCanonicalModelHintBeforePricing(t *testing.T) {
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1251,7 +1251,7 @@ func TestPricesContextEventsAfterAMixedModelSessionWasAttributedToANonContextMod
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1272,7 +1272,7 @@ func TestPricesOnlyTheCumulativeIncrementAfterANonContextModelSwitch(t *testing.
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1313,7 +1313,7 @@ func TestKeepsAContextEventAfterAnInitialNonContextModelHasNoTokenRow(t *testing
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1331,7 +1331,7 @@ func TestKeepsContextTokenRowsWhenTheCanonicalNonContextFileHasNoTurnContextRow(
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1358,7 +1358,7 @@ func TestKeepsContextTokenRowsWhenTheExplicitModelIsNestedInThePayloadUsageFallb
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1548,7 +1548,7 @@ func TestUsesTheFirstCumulativeOnlyChildRowAsABaseline(t *testing.T) {
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1569,7 +1569,7 @@ func TestUsesTheFirstCumulativeOnlyRowAsABaselineWhenChildMetadataOmitsTheParent
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1589,7 +1589,7 @@ func TestFiltersRawEventsByTheConfiguredTimezoneAndInclusiveDateBounds(t *testin
 		Until:     "20260502",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1843,7 +1843,7 @@ func TestAcceptsAdditiveCachedInputAndAppliesTheLongTierToFullContext(t *testing
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (200_000*10 + 100_000*1 + 1*45) / 1_000_000.0,
+		CostUSD:   (200_000*8 + 100_000*0.8 + 1*30) / 1_000_000.0,
 	}})
 }
 
@@ -1865,7 +1865,7 @@ func TestAppliesTheLongTierWhenCacheCreationCrossesTheRequestBoundary(t *testing
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (272_000*10 + 12.5) / 1_000_000.0,
+		CostUSD:   (272_000*8 + 10) / 1_000_000.0,
 	}})
 }
 
@@ -1888,7 +1888,7 @@ func TestAcceptsTheCurrentCacheWriteFieldAsCacheCreationInput(t *testing.T) {
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (10*5 + 4*0.5 + 3*6.25 + 2*30) / 1_000_000.0,
+		CostUSD:   (10*4 + 4*0.4 + 3*5 + 2*20) / 1_000_000.0,
 	}})
 }
 
@@ -1932,7 +1932,7 @@ func TestTreatsAZeroTotalAsLegacyCompatibleInsteadOfAddingCachedInputTwice(t *te
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (60*5 + 40*0.5 + 1*30) / 1_000_000.0,
+		CostUSD:   (60*4 + 40*0.4 + 1*20) / 1_000_000.0,
 	}})
 }
 
@@ -2006,7 +2006,7 @@ func TestReadsACacheReadLargerThanInputTokensAsAdditive(t *testing.T) {
 			assertCostsEqual(t, costs, []CodexContextPricingCost{{
 				UsageDate: "2026-05-01",
 				Model:     "gpt-5.6-sol",
-				CostUSD:   (100_000*10 + 200_000*1 + 1*45) / 1_000_000.0,
+				CostUSD:   (100_000*8 + 200_000*0.8 + 1*30) / 1_000_000.0,
 			}})
 		})
 	}
@@ -2295,5 +2295,73 @@ func TestDynamicPricingRepresentativeIsIndependentOfRowOrder(t *testing.T) {
 	}
 	if forward[0].Provider != "alpha" {
 		t.Fatalf("representative = %s, want the alphabetically first provider", forward[0].Provider)
+	}
+}
+
+// The static rates must be bit-identical to what the JS collector computes for the
+// same literal, or the two clients produce different costUsd for the same session
+// and snapshotHash() diverges: shadow reports a diff, and switching clients
+// re-uploads every day that used these models.
+//
+// JS computes double(0.2) / 1e6 (round the operand, then round the quotient). Go's
+// untyped constant arithmetic evaluates the same expression exactly and rounds once,
+// which lands 1 ULP lower for 0.2, 0.4, 0.8 and 1.8 — exactly the fractional rows
+// gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna carry. The expectations below are the
+// JS bit patterns.
+func TestStaticRatesMatchTheJavaScriptDoubles(t *testing.T) {
+	// Values measured from Node: DataView.setFloat64(v) for the same literal.
+	expected := map[string]map[string]uint64{
+		"gpt-5.6-sol": {
+			"standard.input":         0x3ed0c6f7a0b5ed8d, // 4 / 1e6
+			"standard.output":        0x3ef4f8b588e368f1, // 20 / 1e6
+			"standard.cacheRead":     0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"standard.cacheCreation": 0x3ed4f8b588e368f1, // 5 / 1e6
+			"long.input":             0x3ee0c6f7a0b5ed8d, // 8 / 1e6
+			"long.output":            0x3eff75104d551d69, // 30 / 1e6
+			"long.cacheRead":         0x3eaad7f29abcaf49, // 0.8 / 1e6 (const-fold gives ...af48)
+			"long.cacheCreation":     0x3ee4f8b588e368f1, // 10 / 1e6
+		},
+		"gpt-5.6-terra": {
+			"standard.input":         0x3ec0c6f7a0b5ed8d, // 2 / 1e6
+			"standard.output":        0x3ee92a737110e454, // 12 / 1e6
+			"standard.cacheRead":     0x3e8ad7f29abcaf49, // 0.2 / 1e6 (const-fold gives ...af48)
+			"standard.cacheCreation": 0x3ec4f8b588e368f1, // 2.5 / 1e6
+			"long.input":             0x3ed0c6f7a0b5ed8d, // 4 / 1e6
+			"long.output":            0x3ef2dfd694ccab3f, // 18 / 1e6
+			"long.cacheRead":         0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"long.cacheCreation":     0x3ed4f8b588e368f1, // 5 / 1e6
+		},
+		"gpt-5.6-luna": {
+			"standard.input":         0x3e8ad7f29abcaf49, // 0.2 / 1e6 (const-fold gives ...af48)
+			"standard.output":        0x3eb421f5f40d8376, // 1.2 / 1e6
+			"standard.cacheRead":     0x3e55798ee2308c3a, // 0.02 / 1e6
+			"standard.cacheCreation": 0x3e90c6f7a0b5ed8d, // 0.25 / 1e6
+			"long.input":             0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"long.output":            0x3ebe32f0ee144532, // 1.8 / 1e6 (const-fold gives ...4531)
+			"long.cacheRead":         0x3e65798ee2308c3a, // 0.04 / 1e6
+			"long.cacheCreation":     0x3ea0c6f7a0b5ed8d, // 0.5 / 1e6
+		},
+	}
+
+	for _, rule := range CodexContextPricingRules {
+		want, ok := expected[rule.ModelIDs[0]]
+		if !ok {
+			continue
+		}
+		got := map[string]float64{
+			"standard.input":         rule.Standard.Input,
+			"standard.output":        rule.Standard.Output,
+			"standard.cacheRead":     rule.Standard.CacheRead,
+			"standard.cacheCreation": rule.Standard.CacheCreation,
+			"long.input":             rule.LongContext.Input,
+			"long.output":            rule.LongContext.Output,
+			"long.cacheRead":         rule.LongContext.CacheRead,
+			"long.cacheCreation":     rule.LongContext.CacheCreation,
+		}
+		for name, wantBits := range want {
+			if bits := math.Float64bits(got[name]); bits != wantBits {
+				t.Errorf("%s %s = %016x, want %016x", rule.ModelIDs[0], name, bits, wantBits)
+			}
+		}
 	}
 }

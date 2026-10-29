@@ -730,6 +730,13 @@ func writeJSONAtomically(path string, value any, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	// The generated config is a pure function of the catalogue, so an unchanged
+	// catalogue produces byte-identical output. Rewriting it anyway costs a write plus
+	// a rename on every hook run (this file is ~450 KB) and makes the mtime useless as
+	// a "did the catalogue move" signal. Skip the write when the bytes already match.
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, append(payload, '\n')) {
+		return nil
+	}
 	tmp := fmt.Sprintf("%s.tmp-%d-%s", path, os.Getpid(), randomSuffix())
 	if err := os.WriteFile(tmp, append(payload, '\n'), mode); err != nil {
 		return err

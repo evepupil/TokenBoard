@@ -414,9 +414,13 @@ function applyCaseVariantAliases(
 }
 
 // The bases ccusage may fold a key onto: drop `:tag` segments, drop the provider prefix, then
-// drop a fine-tune variant suffix. Kept deliberately narrow — only the folding case observed on
-// real data — because over-folding would anchor ids ccusage never conflates.
-const variantSuffixPattern = /-(?:uncensored|abliterated)$/
+// drop fine-tune variant suffixes. Kept deliberately narrow — only the folding cases observed
+// on real data — because over-folding would anchor ids ccusage never conflates.
+//
+// Both suffixes are tried and each is stripped once, matching the Go port: a catalogue id
+// ending `-abliterated-uncensored` folds to the same base on both sides. (A single non-global
+// replace would leave the Go side anchoring a base the TS side never sees.)
+const variantSuffixes = ['-uncensored', '-abliterated'] as const
 
 export function foldToBaseModelId(modelId: string): string {
   const withoutTags = modelId
@@ -424,7 +428,11 @@ export function foldToBaseModelId(modelId: string): string {
     .toLowerCase()
     .replace(/:[^:/]*/g, '')
   const segments = withoutTags.split('/')
-  return (segments[segments.length - 1] ?? withoutTags).replace(variantSuffixPattern, '')
+  let base = segments[segments.length - 1] ?? withoutTags
+  for (const suffix of variantSuffixes) {
+    if (base.endsWith(suffix)) base = base.slice(0, -suffix.length)
+  }
+  return base
 }
 
 function priceRowIsPositive(row: CollectorPricingModel) {
@@ -643,13 +651,28 @@ async function writePricingCache(path: string, catalogue: ModelPricingCatalogue)
 
 async function writeJsonAtomically(path: string, value: unknown, mode = 0o600) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const payload = `${JSON.stringify(value)}\n`
+  // The generated config is a pure function of the catalogue, so an unchanged catalogue
+  // produces byte-identical output. Rewriting it anyway costs a write plus a rename on
+  // every hook run (this file is ~450 KB) and makes the mtime useless as a "did the
+  // catalogue move" signal. Skip the write when the bytes already match.
+  if (await fileHasContent(path, payload)) return
   const tempPath = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
   try {
-    await writeFile(tempPath, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode })
+    await writeFile(tempPath, payload, { encoding: 'utf8', mode })
     await renameAtomic(tempPath, path)
   } catch (error) {
     await rm(tempPath, { force: true })
     throw error
+  }
+}
+
+/** True when `path` already holds exactly `payload`. A read error means "not equal". */
+async function fileHasContent(path: string, payload: string) {
+  try {
+    return (await readFile(path, 'utf8')) === payload
+  } catch {
+    return false
   }
 }
 

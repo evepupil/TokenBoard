@@ -321,11 +321,21 @@ func packageCommandOptions(env func(string) string, stderr func(string)) ccusage
 // reportUnpriced ports reportUnpricedClaudeSnapshots: one line per model the
 // catalogue does not cover, so the operator knows the cost came from ccusage's
 // own pricing rather than TokenBoard's.
+//
+// Only a snapshot with real usage and a zero cost is worth a line. ccusage prices
+// models from its own builtin catalogue, so a model missing from the TokenBoard
+// override set still arrives with a real cost; tracking the override set instead of
+// the shipped cost made this fire on every run for 43-44 models that were all
+// priced — 1666 lines in one week of a rotated daily-sync.err.log, burying the
+// errors that matter. The TS side was fixed first (bcd4004) and this port missed it.
 func reportUnpriced(snapshots []contract.Snapshot, covered map[string]bool, stderr func(string)) {
 	seen := map[string]bool{}
 	order := []string{}
 	for _, snapshot := range snapshots {
 		if snapshot.Source != contract.SourceClaudeCode || snapshot.TotalTokens <= 0 {
+			continue
+		}
+		if snapshot.CostUSD > 0 {
 			continue
 		}
 		if covered[snapshot.Model] || seen[snapshot.Model] {

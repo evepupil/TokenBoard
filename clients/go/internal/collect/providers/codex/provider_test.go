@@ -554,7 +554,7 @@ func TestProviderPricesAnExplicitlyNamedContextRowWithoutATurnContextRecord(t *t
 	if canonical.Correction != contract.CorrectionCodexContextPricing {
 		t.Errorf("correction = %q", canonical.Correction)
 	}
-	assertCloseTo(t, canonical.CostUSD, 0.001-20*5.0/1_000_000, 12)
+	assertCloseTo(t, canonical.CostUSD, 0.001-20*4.0/1_000_000, 12)
 	if canonical.SessionCount != 1 {
 		t.Errorf("canonical session count = %d", canonical.SessionCount)
 	}
@@ -562,7 +562,7 @@ func TestProviderPricesAnExplicitlyNamedContextRowWithoutATurnContextRecord(t *t
 	if context.TotalTokens != 20 || context.SessionCount != 0 {
 		t.Errorf("context = %+v", context)
 	}
-	assertCloseTo(t, context.CostUSD, 20*5.0/1_000_000, 12)
+	assertCloseTo(t, context.CostUSD, 20*4.0/1_000_000, 12)
 }
 
 // The session file changes while ccusage is answering: the unbounded
@@ -614,7 +614,7 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 	if got.TotalTokens != 10 {
 		t.Errorf("snapshot = %+v", got)
 	}
-	assertCloseTo(t, got.CostUSD, 10*5.0/1_000_000, 12)
+	assertCloseTo(t, got.CostUSD, 10*4.0/1_000_000, 12)
 }
 
 // The first daily report does not yet carry the canonical row the context
@@ -722,7 +722,7 @@ func TestProviderDoesNotUseASessionRowDirectoryThatEscapesItsSessionRoot(t *test
 	if got.TotalTokens != 10 {
 		t.Errorf("snapshot = %+v", got)
 	}
-	assertCloseTo(t, got.CostUSD, 10*5.0/1_000_000, 12)
+	assertCloseTo(t, got.CostUSD, 10*4.0/1_000_000, 12)
 }
 
 // The bounded report runs against a frozen copy, and its window comes from the

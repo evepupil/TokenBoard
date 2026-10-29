@@ -10,11 +10,11 @@ package pricing
 //   - url.Values.Encode sorts query keys, so the URL assertions compare parsed
 //     parameters instead of the raw query strings.
 //
-// One assertion family is not portable: the TS result carries
-// contextPricingRules built by buildCodexContextPricingRules
-// (packages/collector/src/providers/codex-context-pricing.ts), which the Go
-// pricing package does not port, and PreparedConfig has no such field. Those
-// assertion sites are marked NOT PORTED.
+// The TS result carries contextPricingRules built by buildCodexContextPricingRules
+// (packages/collector/src/providers/codex-context-pricing.ts), which lives in the
+// codex provider package here. PreparedConfig therefore carries the models those
+// rules may widen the static table with (ContextPricingModels), and the assertions
+// below check that list — the codex provider turns it into the same rule set.
 
 import (
 	"bytes"
@@ -594,9 +594,15 @@ func TestFallsBackToUsableCcusageConfigWhenDynamicConfigDirectoryNotWritable(t *
 	if !result.CoveredModelIDs["gpt-6-astra"] {
 		t.Fatalf("coveredModelIds does not contain gpt-6-astra")
 	}
-	// NOT PORTED: TS asserts no context pricing rule covers gpt-6-astra
-	// (result.contextPricingRules). PreparedConfig has no rules field; see the
-	// file comment.
+	// TS asserts no context pricing rule covers gpt-6-astra
+	// (result.contextPricingRules). PreparedConfig carries the models the rules may
+	// widen the static table with rather than the rules themselves, because the
+	// rules live in the codex provider package and pricing cannot import it; an
+	// empty list is the same statement, and the codex provider turns it into the
+	// static-only rule set TS builds.
+	if len(result.ContextPricingModels) != 0 {
+		t.Fatalf("ContextPricingModels = %d rows, want none on the write-failure fallback", len(result.ContextPricingModels))
+	}
 	requireContains(t, log.text(), "dynamic ccusage config write failed")
 	requireContains(t, log.text(), "using explicit config "+explicitPath)
 }
@@ -775,9 +781,15 @@ func TestWritesCacheAtomicallyAndCreatesDynamicOverridesWithExplicitConfigPreced
 	if _, ok := gpt["inputCostPerTokenAbove200kTokens"]; ok {
 		t.Fatalf("gpt-6-astra carries a 200k override")
 	}
-	// NOT PORTED: TS also asserts result.contextPricingRules has no rule for
-	// gpt-6-astra and a grok-4.6 rule with threshold 200000. PreparedConfig has
-	// no rules field; see the file comment.
+	// TS also asserts result.contextPricingRules has no rule for gpt-6-astra and a
+	// grok-4.6 rule with threshold 200000. Those rules are built in the codex
+	// provider, which this package cannot import; what this layer decides is that
+	// the whole catalogue reaches it on a successful write, so the tier filtering
+	// happens in one place rather than two.
+	if len(result.ContextPricingModels) != len(result.Catalogue.Models) {
+		t.Fatalf("ContextPricingModels = %d rows, want the full catalogue (%d)",
+			len(result.ContextPricingModels), len(result.Catalogue.Models))
+	}
 
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
@@ -880,8 +892,8 @@ func TestDoesNotRepriceDatedModelAliasWithExplicitCcusageOverride(t *testing.T) 
 	requireNumber(t, dated, "inputCostPerToken", perMillion(77))
 	requireNumber(t, dated, "outputCostPerToken", perMillion(88))
 	alias := overrideOf(t, overrides, "gpt-5.6-sol")
-	requireNumber(t, alias, "inputCostPerToken", perMillion(5))
-	requireNumber(t, alias, "outputCostPerToken", perMillion(30))
+	requireNumber(t, alias, "inputCostPerToken", perMillion(4))
+	requireNumber(t, alias, "outputCostPerToken", perMillion(20))
 }
 
 func TestTreatsBlankStateDirectoryAsUnset(t *testing.T) {
@@ -970,8 +982,9 @@ func TestDoesNotMergePricesFromDifferentProvidersForSameModelID(t *testing.T) {
 	if result.CoveredModelIDs["provider-collision"] {
 		t.Fatalf("coveredModelIds contains provider-collision")
 	}
-	// NOT PORTED: TS also asserts no context pricing rule covers
-	// provider-collision. PreparedConfig has no rules field; see the file comment.
+	// TS also asserts no context pricing rule covers provider-collision. That
+	// decision belongs to the rule builder, which sees the same catalogue this
+	// layer hands it; the ambiguity filter is what removes the row.
 }
 
 // ccusage resolves an override key against the observed model name by folding
@@ -1042,6 +1055,11 @@ func TestFoldToBaseModelIDStripsOnlyTheObservedFolding(t *testing.T) {
 		// -free and :tag are not folding suffixes on their own: the base keeps them.
 		"deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free",
 		"kimi-k3:fast":             "kimi-k3",
+		// Both suffixes are stripped once each, in a fixed order, so a stacked id folds to
+		// the same base the TS implementation produces. The TS side used a single
+		// non-global replace, which left this side anchoring a base it never saw.
+		"foo-uncensored-abliterated":          "foo-uncensored",
+		"provider/foo-abliterated-uncensored": "foo",
 	}
 	for input, want := range cases {
 		if got := foldToBaseModelID(input); got != want {

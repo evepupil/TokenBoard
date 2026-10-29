@@ -47,7 +47,7 @@ func TestCodexScopeSplitsContextPricedUsageFromANonContextCanonicalModelInFullSc
 		}
 		return provJSON(t, `{"daily":[{"date":"2026-05-09","models":{
 			"deepseek-v4-flash":{"inputTokens":20,"outputTokens":0,"totalTokens":20}},
-			"totalTokens":20,"costUSD":0.0001}]}`), nil
+			"totalTokens":20,"costUSD":0.00008}]}`), nil
 	}}
 	snapshots, err := provCollect(t, Options{
 		CodexHome:   provHome(codexHome),
@@ -62,14 +62,15 @@ func TestCodexScopeSplitsContextPricedUsageFromANonContextCanonicalModelInFullSc
 		t.Fatalf("snapshots = %+v", snapshots)
 	}
 	canonical := provSnapshotFor(t, snapshots, "2026-05-09", "deepseek-v4-flash")
-	if canonical.TotalTokens != 0 || canonical.CostUSD != 0 {
+	if canonical.TotalTokens != 0 {
 		t.Errorf("canonical = %+v", canonical)
 	}
+	assertCloseTo(t, canonical.CostUSD, 0, 12)
 	context := provSnapshotFor(t, snapshots, "2026-05-09", "gpt-5.6-sol")
 	if context.TotalTokens != 20 {
 		t.Errorf("context = %+v", context)
 	}
-	assertCloseTo(t, context.CostUSD, 20*5.0/1_000_000, 14)
+	assertCloseTo(t, context.CostUSD, 20*4.0/1_000_000, 14)
 }
 
 // A full scan runs in batches, and every batch carries the frozen CODEX_HOME.
