@@ -217,6 +217,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
+          # The repo declares `packageManager: pnpm`, so setup-node defaults to
+          # enabling the package-manager cache — which fails on a job that never
+          # installs pnpm. This job runs the skill tests without node_modules.
+          package-manager-cache: false
 
       # Git Bash expands the glob the way the POSIX runners do; under the
       # default PowerShell shell the pattern reaches Node unexpanded.
