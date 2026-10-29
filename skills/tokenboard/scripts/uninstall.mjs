@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative, resolve, win32 as windowsPath } from 'node:path'
+import { posix, win32 as windowsPath } from 'node:path'
 import { isMainModule } from './is-main.mjs'
 import { collectorDir, configDir, configPath, parseArgs } from './config.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
@@ -125,7 +125,10 @@ function leaveDirectoryBeforeRemove(runtime, targetPath) {
 }
 
 function isInsidePath(candidatePath, targetPath, platform = process.platform) {
-  const pathApi = platform === 'win32' ? windowsPath : { relative, resolve, sep: '/' }
+  // The POSIX branch must be the POSIX implementation, not the host's: a test (or a
+  // Windows host simulating a Linux install) passes POSIX paths with `platform: 'linux'`,
+  // and the host `resolve`/`relative` would rewrite them as win32 paths and misjudge.
+  const pathApi = platform === 'win32' ? windowsPath : posix
   const resolvedTarget = pathApi.resolve(targetPath)
   const resolvedCandidate = pathApi.resolve(candidatePath)
   if (platform === 'win32' && !sameWindowsRoot(resolvedTarget, resolvedCandidate)) {
@@ -143,7 +146,7 @@ function sameWindowsRoot(leftPath, rightPath) {
 }
 
 function samePath(leftPath, rightPath, platform = process.platform) {
-  const pathApi = platform === 'win32' ? windowsPath : { resolve }
+  const pathApi = platform === 'win32' ? windowsPath : posix
   const normalize = (value) => {
     const resolved = pathApi.resolve(String(value))
     return platform === 'win32' ? resolved.toLowerCase() : resolved
@@ -211,7 +214,7 @@ function assertRemovableConfigDir(runtime) {
 // markers only because the repo really was cloned into the user's home.
 function assertRemovableCollectorDir(runtime) {
   const target = String(runtime.collectorDir)
-  const pathApi = runtime.platform === 'win32' ? windowsPath : { join, resolve }
+  const pathApi = runtime.platform === 'win32' ? windowsPath : posix
   const resolvedTarget = pathApi.resolve(target)
   const segments = resolvedTarget.split(/[\\/]+/).filter(Boolean)
   const isHome = samePath(resolvedTarget, runtime.homeDir, runtime.platform)

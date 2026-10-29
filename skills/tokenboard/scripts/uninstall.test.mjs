@@ -433,6 +433,10 @@ function createHarness() {
       deviceLinkPath: '/home/tokenboard/.tokenboard/device-link.json',
       fallbackCwd: '/home/tokenboard',
       homeDir: '/home/tokenboard',
+      // The seeded paths above are POSIX, so the guard must resolve them with the
+      // POSIX path API regardless of the host. The Windows-specific tests pass
+      // `platform: 'win32'` alongside Windows-style paths of their own.
+      platform: 'linux',
       log: () => {},
       exists: (path) => existingPaths.has(path),
       rm: (path) => {
