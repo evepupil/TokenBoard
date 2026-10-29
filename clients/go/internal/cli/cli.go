@@ -210,6 +210,12 @@ func runSync(
 		fmt.Fprintf(stderr, "Missing required config for sync: %s\n", strings.Join(missing, ", "))
 		return ExitFailure
 	}
+	// The token travels on every request; a plain-http endpoint leaks it and the
+	// usage data. Loopback stays allowed for the local dev server.
+	if err := assertSecureEndpoint(options.Endpoint); err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		return ExitFailure
+	}
 	return withRunLock(stateDir, stderr, func() int {
 		return syncLocked(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	})
@@ -296,11 +302,22 @@ func syncLocked(
 		return ExitFailure
 	}
 
-	payload, _ := json.MarshalIndent(map[string]any{
+	// Only surfaces when something was actually dropped, so a clean run's payload
+	// keeps the shape the TS collector prints.
+	if result.RejectedUsageDates > 0 {
+		fmt.Fprintf(stderr,
+			"TokenBoard upload: dropped %d snapshots whose usageDate falls outside the server's accepted window\n",
+			result.RejectedUsageDates)
+	}
+	payloadFields := map[string]any{
 		"upserted": result.Upserted,
 		"skipped":  result.Skipped,
 		"timings":  timings,
-	}, "", "  ")
+	}
+	if result.RejectedUsageDates > 0 {
+		payloadFields["rejectedUsageDates"] = result.RejectedUsageDates
+	}
+	payload, _ := json.MarshalIndent(payloadFields, "", "  ")
 	fmt.Fprintln(stdout, string(payload))
 	if shouldFailForSourceErrors {
 		fmt.Fprintf(stderr, "One or more sources failed: %s\n", formatSourceFailures(outcome.failures))
@@ -648,7 +665,7 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	switch command {
 	case "preview", "sync", "warm-hooks", "shadow":
 	default:
-		return Options{}, fmt.Errorf("Usage: %s", usageLine())
+		return Options{}, errors.New(usageLine())
 	}
 	// --hook is a boolean for `shadow` only: readFlags requires a value, and
 	// `--hook` is written bare. Pull it out first, then parse the rest

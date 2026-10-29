@@ -339,6 +339,32 @@ func IsValidIsoDate(value string) bool {
 	return t.Year() == year && t.Month() == time.Month(month) && t.Day() == day
 }
 
+// MinUploadIsoDate is the earliest calendar date the server accepts, mirroring
+// usage-core's minUploadIsoDate: a fixed floor rather than a function of the
+// clock, so a legitimate historical backfill works whenever it runs.
+const MinUploadIsoDate = "2023-01-01"
+
+// UploadIsoDateIssue mirrors usage-core uploadIsoDateIssue. It returns "" when
+// the date is acceptable, and names the violated bound otherwise.
+//
+// The caller is the upload path, not the ingestion validator: the server has the
+// authoritative check, and this one exists so a client can drop a row the server
+// would refuse before it poisons a whole batch. `now` is the caller's clock — the
+// server's is authoritative but unreachable, so an upload-side ceiling uses the
+// local clock plus the same one-day headroom the server grants.
+func UploadIsoDateIssue(value string, now time.Time) string {
+	if !IsValidIsoDate(value) {
+		return "invalid"
+	}
+	if value > now.UTC().Add(24*time.Hour).Format("2006-01-02") {
+		return "too-far-future"
+	}
+	if value < MinUploadIsoDate {
+		return "before-history-window"
+	}
+	return ""
+}
+
 var (
 	timezoneMu    sync.RWMutex
 	timezoneValid = map[string]bool{}

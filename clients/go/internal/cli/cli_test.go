@@ -91,6 +91,11 @@ func TestUnknownCommandIsUsageError(t *testing.T) {
 	if !strings.Contains(stderr, "Usage:") {
 		t.Errorf("stderr %q lacks usage", stderr)
 	}
+	// The usage line already starts with "Usage: "; wrapping it in another
+	// prefix printed "Usage: Usage: tokenboard ..." on every unknown command.
+	if strings.Contains(stderr, "Usage: Usage:") {
+		t.Errorf("stderr %q repeats the Usage prefix", stderr)
+	}
 }
 
 func TestNoArgsShowsUsageOnStderr(t *testing.T) {
