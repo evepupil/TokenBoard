@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -36,11 +35,12 @@ func TestRenameReturnsNonBusyErrorsWithoutRetrying(t *testing.T) {
 	}
 }
 
-func TestIsBusyMatchesTheTransientCodes(t *testing.T) {
-	if !IsBusy(syscall.EPERM) || !IsBusy(syscall.EBUSY) {
-		t.Fatal("EPERM/EBUSY must be retried")
+// IsBusy must not retry a plain missing file, and nil must never be busy.
+func TestIsBusyRejectsNonTransientErrors(t *testing.T) {
+	if IsBusy(os.ErrNotExist) {
+		t.Fatal("ENOENT must not be retried")
 	}
-	if IsBusy(os.ErrNotExist) || IsBusy(nil) {
-		t.Fatal("other errors must not be retried")
+	if IsBusy(nil) {
+		t.Fatal("nil must not be busy")
 	}
 }

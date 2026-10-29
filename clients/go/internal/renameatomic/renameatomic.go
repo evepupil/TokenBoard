@@ -6,9 +6,7 @@
 package renameatomic
 
 import (
-	"errors"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -35,9 +33,4 @@ func Rename(tempPath, destinationPath string) error {
 		err = retryErr
 	}
 	return err
-}
-
-// IsBusy reports whether the rename failed for a reason a retry can clear.
-func IsBusy(err error) bool {
-	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EBUSY)
 }
