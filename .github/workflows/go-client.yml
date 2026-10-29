@@ -26,6 +26,12 @@ on:
       # change to either has to re-run the gates it produces.
       - 'scripts/clients-go-gen-goldens.mjs'
       - 'scripts/clients-go-gen-pricing-goldens.mts'
+      # The release job validates this file; a change to it that never ran the
+      # dry run would be discovered at tag time instead.
+      - '.goreleaser.yaml'
+      # The skill scripts drive this client and run their own suite below.
+      - 'skills/tokenboard/scripts/**'
+      - 'skills/tokenboard/SKILL.md'
       - '.github/workflows/go-client.yml'
   pull_request:
     paths:
@@ -38,6 +44,9 @@ on:
       # change to either has to re-run the gates it produces.
       - 'scripts/clients-go-gen-goldens.mjs'
       - 'scripts/clients-go-gen-pricing-goldens.mts'
+      - '.goreleaser.yaml'
+      - 'skills/tokenboard/scripts/**'
+      - 'skills/tokenboard/SKILL.md'
       - '.github/workflows/go-client.yml'
 
 permissions:
@@ -127,11 +136,12 @@ jobs:
   # change to collector behaviour that the Go side has not ported yet would
   # otherwise land silently and move the shadow baseline underneath it.
   #
-  # Scoped to the two packages this workflow triggers on. `apps/web` has no CI
-  # of its own either, but it is not part of this baseline and adding it here
-  # would make a job that claims more than its paths cover.
+  # Scoped to the packages this workflow triggers on, plus the skill scripts that
+  # drive the client. `apps/web` has no CI of its own either, but it is not part
+  # of this baseline and adding it here would make a job that claims more than
+  # its paths cover.
   baseline-test:
-    name: collector and usage-core test
+    name: collector, usage-core and skill script test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -149,6 +159,12 @@ jobs:
       # one of them carries an explicit timeout, so a failure here is real
       # rather than the 5s default being hit under load.
       - run: pnpm --filter @tokenboard/usage-core --filter @tokenboard/collector test
+
+      # The skill scripts are what users actually run, they share the collector's
+      # cursor and backoff protocols, and until now nothing exercised them on CI:
+      # a change that only touched skills/ ran no test at all.
+      - name: skill script tests
+        run: node --test skills/tokenboard/scripts/*.test.mjs
 
       - run: pnpm format:check
 
