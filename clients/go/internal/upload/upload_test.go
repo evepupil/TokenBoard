@@ -489,6 +489,28 @@ func TestLoadBackoffRequiresBothTypedFields(t *testing.T) {
 	}
 }
 
+// A corrupted count must not wrap negative and disable the pause forever:
+// converting an out-of-range float to int is implementation-defined in Go and
+// lands on a negative value on amd64/arm64. Any value at or past the threshold
+// keeps pausing; a negative one restarts from zero like a discarded record.
+func TestLoadBackoffClampsOutOfRangeFailureCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "upload-backoff.json")
+	write := func(content string) {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"consecutiveFailures":1e30,"lastErrorSummary":"boom"}`)
+	if state := LoadBackoff(dir); state == nil || state.ConsecutiveFailures < uploadFailurePauseThreshold {
+		t.Fatalf("a huge count must stay at or above the pause threshold: %+v", state)
+	}
+	write(`{"consecutiveFailures":-7,"lastErrorSummary":"boom"}`)
+	if state := LoadBackoff(dir); state == nil || state.ConsecutiveFailures < 0 {
+		t.Fatalf("a negative count must clamp to zero: %+v", state)
+	}
+}
+
 // Summarize reduces URLs to their origin before persisting: the backoff file
 // outlives the request and a transport error may embed query parameters.
 func TestSummarizeRedactsURLs(t *testing.T) {
@@ -574,6 +596,17 @@ func TestUploadSnapshotsDropsOutOfWindowDatesBeforeSending(t *testing.T) {
 	}
 	if result.RejectedUsageDates != 2 {
 		t.Fatalf("RejectedUsageDates = %d, want 2", result.RejectedUsageDates)
+	}
+	// The TS uploader names each dropped row so the operator can find it; the
+	// count alone leaves them guessing which date was wrong.
+	if len(result.Rejected) != 2 {
+		t.Fatalf("Rejected = %+v, want both dropped rows", result.Rejected)
+	}
+	if result.Rejected[0].Issue != "before-history-window" || result.Rejected[1].Issue != "too-far-future" {
+		t.Fatalf("Rejected issues = %q, %q", result.Rejected[0].Issue, result.Rejected[1].Issue)
+	}
+	if result.Rejected[0].Snapshot.UsageDate != "2022-12-31" || result.Rejected[1].Snapshot.UsageDate != "2099-01-01" {
+		t.Fatalf("Rejected dates = %q, %q", result.Rejected[0].Snapshot.UsageDate, result.Rejected[1].Snapshot.UsageDate)
 	}
 	if len(posted) != 1 {
 		t.Fatalf("posted batches = %d, want exactly one carrying the good row", len(posted))

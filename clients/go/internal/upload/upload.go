@@ -67,6 +67,16 @@ type Result struct {
 	// RejectedUsageDates counts snapshots dropped before upload because their
 	// usageDate falls outside the server's accepted window.
 	RejectedUsageDates int
+	// Rejected names the dropped snapshots so the CLI can report which rows
+	// went missing, the way the TS uploader does.
+	Rejected []RejectedSnapshot
+}
+
+// RejectedSnapshot is one snapshot the upload path dropped because the server
+// would reject any batch containing it.
+type RejectedSnapshot struct {
+	Snapshot contract.Snapshot
+	Issue    string
 }
 
 // SnapshotHash is the dedup identity the server stores and compares:
@@ -110,9 +120,11 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 	}
 	uploadable := make([]contract.Snapshot, 0, len(snapshots))
 	rejected := 0
+	rejectedDetails := make([]RejectedSnapshot, 0)
 	for _, snapshot := range snapshots {
-		if contract.UploadIsoDateIssue(snapshot.UsageDate, now) != "" {
+		if issue := contract.UploadIsoDateIssue(snapshot.UsageDate, now); issue != "" {
 			rejected++
+			rejectedDetails = append(rejectedDetails, RejectedSnapshot{Snapshot: snapshot, Issue: issue})
 			continue
 		}
 		uploadable = append(uploadable, snapshot)
@@ -120,6 +132,7 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 
 	var result Result
 	result.RejectedUsageDates = rejected
+	result.Rejected = rejectedDetails
 	if len(uploadable) == 0 {
 		// Nothing left to send. The empty batch is not posted: unlike the no-snapshots
 		// case above, this run did have rows and the server has nothing to say about
@@ -529,8 +542,19 @@ func LoadBackoff(stateDir string) *BackoffState {
 	if json.Unmarshal(data, &raw) != nil || raw.ConsecutiveFailures == nil || raw.LastErrorSummary == nil {
 		return nil
 	}
+	// Clamp before converting: int(1e30) is implementation-defined and wraps to
+	// a negative on amd64/arm64, which would silently stop the pause from ever
+	// engaging again. Every value at or past the threshold pauses alike, so the
+	// exact count beyond it does not matter.
+	failures := *raw.ConsecutiveFailures
+	if failures < 0 || math.IsNaN(failures) {
+		failures = 0
+	}
+	if failures > uploadFailurePauseThreshold {
+		failures = uploadFailurePauseThreshold
+	}
 	return &BackoffState{
-		ConsecutiveFailures: int(*raw.ConsecutiveFailures),
+		ConsecutiveFailures: int(failures),
 		LastErrorSummary:    *raw.LastErrorSummary,
 		PausedUntil:         raw.PausedUntil,
 	}
