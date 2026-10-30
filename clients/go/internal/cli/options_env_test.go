@@ -32,7 +32,16 @@ func TestExportedEmptySourceIsRejectedLikeTS(t *testing.T) {
 // exists for. A lookup returning "" for a key is indistinguishable from unset
 // through this type, so the default must survive.
 func TestUnsetSourceTakesTheDefault(t *testing.T) {
-	options, err := parseArgs([]string{"preview"}, func(string) string { return "" })
+	// The parse resolves a timezone too, and on Windows that resolution fails
+	// closed with no zone available (no /etc/timezone, no TZ). This test is
+	// about the source default, so it supplies one; the timezone gate has its
+	// own test.
+	options, err := parseArgs([]string{"preview"}, func(key string) string {
+		if key == "TOKENBOARD_TIMEZONE" {
+			return "UTC"
+		}
+		return ""
+	})
 	if err != nil {
 		t.Fatalf("parseArgs with nothing set: %v", err)
 	}
