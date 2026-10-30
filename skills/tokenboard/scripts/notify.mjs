@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
@@ -256,6 +256,18 @@ export async function runNotifyCli(options = {}) {
   const notify = options.runNotify || runNotify
   const wait = options.waitTrailingDelay || waitTrailingDelay
   const reportError = options.error || console.error
+  // The hook handler spawns this process detached with stdio ignored, so a
+  // fatal error — a broken config, an unreadable state directory — went to a
+  // stream nobody reads and the hook simply stopped dispatching. Mirror the
+  // fatal diagnostics into the state directory; status.mjs reports the tail.
+  const stateDir = env.TOKENBOARD_STATE_DIR || readConfigDirectory()
+  const workerErrorLogPath = join(stateDir, notifyWorkerErrorLogName)
+  const reportFatalError =
+    options.reportFatalError ||
+    ((message) => {
+      reportError(message)
+      recordNotifyWorkerError(workerErrorLogPath, message)
+    })
   const runtime = options.trailingRuntime || trailingRuntime({ env })
   const claimDispatch = options.claimDispatchLock || claimDispatchLock
   const releaseDispatch = options.releaseDispatchLock || releaseDispatchLock
@@ -271,7 +283,7 @@ export async function runNotifyCli(options = {}) {
         await wait(delayMs)
         const result = notify({
           configDir: configuredDir,
-          stateDir: env.TOKENBOARD_STATE_DIR || configuredDir,
+          stateDir,
           env,
           configCooldownMs: config.notifyCooldownMs,
           configScheduleTimes: config.scheduleTimes,
@@ -288,25 +300,86 @@ export async function runNotifyCli(options = {}) {
       }
     }
   } catch (error) {
-    reportError(errorMessage(error))
+    reportFatalError(errorMessage(error))
     exitCode = 1
   } finally {
     try {
       releaseTrailingLock(trailingLockPath, runtime)
     } catch (cleanupError) {
-      reportError(`TokenBoard trailing lock cleanup failed: ${errorMessage(cleanupError)}`)
+      reportFatalError(`TokenBoard trailing lock cleanup failed: ${errorMessage(cleanupError)}`)
       exitCode = 1
     }
     if (dispatchClaimed) {
       try {
         releaseDispatch(dispatchLockPath, dispatchLockToken, { workerPath: dispatchWorkerPath })
       } catch (cleanupError) {
-        reportError(`TokenBoard dispatch lock cleanup failed: ${errorMessage(cleanupError)}`)
+        reportFatalError(`TokenBoard dispatch lock cleanup failed: ${errorMessage(cleanupError)}`)
         exitCode = 1
       }
     }
   }
   return exitCode
+}
+
+// notifyWorkerErrorLogName is where a detached notify worker's fatal
+// diagnostics land. It is separate from the generated hook handler's
+// notify-handler-errors.log: that file is written by the handler itself, this
+// one by the worker it spawned.
+export const notifyWorkerErrorLogName = 'notify-worker-errors.log'
+const notifyWorkerErrorLogMaxBytes = 64 * 1024
+
+// recordNotifyWorkerError appends one already-redacted fatal message, bounded
+// so a repeating failure cannot grow the file without limit. Diagnostics must
+// never fail the run: the exit code already reports the failure, and a
+// logging error would replace the real message with an unrelated one.
+function recordNotifyWorkerError(logPath, message) {
+  try {
+    if (typeof logPath !== 'string' || !logPath) return
+    mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 })
+    // The same redaction every other output path uses: a config or endpoint
+    // error can echo `tb_upload_…` or `https://user:token@host/…`, and this
+    // file outlives the process.
+    const entry = `${JSON.stringify({ message: redactUrlCredentials(String(message)), at: new Date().toISOString() })}\n`
+    let existing = ''
+    try {
+      existing = readFileSync(logPath, 'utf8')
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    const combined = `${existing}${entry}`
+    writeFileSync(
+      logPath,
+      combined.length > notifyWorkerErrorLogMaxBytes ? combined.slice(-notifyWorkerErrorLogMaxBytes) : combined,
+      { encoding: 'utf8', mode: 0o600 }
+    )
+  } catch {
+    // A state directory that cannot be written is exactly the failure being
+    // reported; the stderr line above already carries it.
+  }
+}
+
+// readNotifyWorkerErrors returns the recent fatal diagnostics for status.mjs.
+// Only the message and timestamp are exposed; the path itself is not.
+export function readNotifyWorkerErrors(stateDir, { readFile = (path) => readFileSync(path, 'utf8') } = {}) {
+  try {
+    const raw = readFile(join(stateDir, notifyWorkerErrorLogName))
+    const entries = []
+    for (const line of raw.split('\n')) {
+      if (!line.trim().startsWith('{')) continue
+      try {
+        const parsed = JSON.parse(line)
+        if (typeof parsed?.message === 'string') {
+          entries.push({ message: parsed.message, at: typeof parsed.at === 'string' ? parsed.at : null })
+        }
+      } catch {
+        // A torn line from an interrupted append is not an entry.
+      }
+    }
+    return entries.slice(-5)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
 }
 
 // Cooldown precedence: explicit (test injection) > env (hook hosts cannot set it reliably)
@@ -475,6 +548,8 @@ function acquireTrailingLock(lockPath, runtime) {
     runtime.ownerToken = ownerToken
     const startedAt = new Date(runtime.now()).toISOString()
     try {
+      // Mode is pinned: the lock carries the owner token, and the hook path
+      // runs from an interactive shell whose umask is normally 022.
       runtime.writeFile(
         lockPath,
         JSON.stringify({
@@ -482,7 +557,7 @@ function acquireTrailingLock(lockPath, runtime) {
           startedAt,
           token: ownerToken
         }),
-        { flag: 'wx' }
+        { flag: 'wx', mode: 0o600 }
       )
     } catch (error) {
       if (error.code !== 'EEXIST') throw error

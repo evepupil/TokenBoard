@@ -735,6 +735,25 @@ test('status surfaces an active upload pause and omits an absent one', () => {
   assert.deepEqual(paused.uploadBackoff, { pausedUntil: '2026-10-15T00:00:00.000Z', consecutiveFailures: 5 })
 })
 
+// The notify worker runs detached with stdio ignored; a fatal error there used
+// to be invisible. Status reports the recorded messages so an operator can see
+// why hooks stopped dispatching.
+test('status surfaces fatal notify-worker errors and omits an empty list', () => {
+  const base = { activeServer: 'https://tokenboard.example', timezone: 'Asia/Shanghai', source: 'all' }
+  assert.equal(
+    'notifyWorkerErrors' in buildStatus({ configPath: '/c.json', config: base, notifyWorkerErrors: [] }),
+    false
+  )
+  const reported = buildStatus({
+    configPath: '/c.json',
+    config: base,
+    notifyWorkerErrors: [{ message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }]
+  })
+  assert.deepEqual(reported.notifyWorkerErrors, [
+    { message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }
+  ])
+})
+
 // A binary install's health is not visible from clientType alone: the client
 // or the bundled ccusage can be missing or be a version the client was never
 // tested against (an install from a tag without a bundled copy leaves the

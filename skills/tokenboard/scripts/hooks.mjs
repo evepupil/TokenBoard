@@ -328,7 +328,7 @@ try {
     queueError = error;
   }
   if (queueError) {
-    appendFileSync(join(STATE_DIR, "notify.signal"), signalPayload, "utf8");
+    appendFileSync(join(STATE_DIR, "notify.signal"), signalPayload, { encoding: "utf8", mode: 0o600 });
     throw queueError;
   }
 } catch (error) {
@@ -966,7 +966,7 @@ function recordHandlerError(stage, error, sensitiveValues = []) {
       stage,
       message,
       at: new Date().toISOString(),
-    }) + "\\n", "utf8");
+    }) + "\\n", { encoding: "utf8", mode: 0o600 });
     trimHandlerErrorLog();
   } catch (diagnosticError) {
     try {
