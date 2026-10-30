@@ -583,6 +583,36 @@ func TestCursorScopeFromEndpointEdgeForms(t *testing.T) {
 	}
 }
 
+// Windows has neither /etc/timezone nor an /etc/localtime symlink, and Go
+// reports the system zone as the literal "Local" there, so the Unix
+// last-resort UTC fallback would silently shift every usageDate by the host's
+// real offset and fork the server's dedup key against a TS collector on the
+// same machine. The fallback has to fail closed instead of guessing.
+func TestFallbackTimezoneFailsClosedOnWindows(t *testing.T) {
+	name, err := fallbackTimezone("windows")
+	if err == nil {
+		t.Fatalf("fallbackTimezone(windows) = %q, want an error", name)
+	}
+	if !strings.Contains(err.Error(), "TOKENBOARD_TIMEZONE") {
+		t.Errorf("err = %q, want it to name TOKENBOARD_TIMEZONE", err)
+	}
+}
+
+// The UTC fallback stays correct where the conventional files are the whole
+// story: a Unix host with no TZ, no named Local and no system zone file is a
+// container running UTC.
+func TestFallbackTimezoneKeepsUTCOnUnix(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		name, err := fallbackTimezone(goos)
+		if err != nil {
+			t.Fatalf("fallbackTimezone(%s): %v", goos, err)
+		}
+		if name != "UTC" {
+			t.Errorf("fallbackTimezone(%s) = %q, want UTC", goos, name)
+		}
+	}
+}
+
 // systemTimezoneName resolves the conventional locations; the test only
 // asserts the shape (empty or a valid IANA name) so it holds on hosts
 // without either file.

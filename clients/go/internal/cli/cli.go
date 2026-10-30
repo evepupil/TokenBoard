@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -303,11 +304,22 @@ func syncLocked(
 	}
 
 	// Only surfaces when something was actually dropped, so a clean run's payload
-	// keeps the shape the TS collector prints.
+	// keeps the shape the TS collector prints. Each dropped row is named the way
+	// the TS uploader reports it — the count alone leaves the operator guessing
+	// which date was outside the window.
 	if result.RejectedUsageDates > 0 {
-		fmt.Fprintf(stderr,
-			"TokenBoard upload: dropped %d snapshots whose usageDate falls outside the server's accepted window\n",
-			result.RejectedUsageDates)
+		for index, rejected := range result.Rejected {
+			if index == 10 {
+				break
+			}
+			fmt.Fprintf(stderr,
+				"TokenBoard upload: dropping %s %s with usageDate %s (%s); the server rejects any batch containing it\n",
+				rejected.Snapshot.Source, rejected.Snapshot.Model, rejected.Snapshot.UsageDate, rejected.Issue)
+		}
+		if result.RejectedUsageDates > 10 {
+			fmt.Fprintf(stderr, "TokenBoard upload: %d more snapshots dropped for the same reason\n",
+				result.RejectedUsageDates-10)
+		}
 	}
 	payloadFields := map[string]any{
 		"upserted": result.Upserted,
@@ -706,9 +718,17 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	}
 	timezone := flags["timezone"]
 	if _, given := flags["timezone"]; !given {
-		timezone = localTimezone()
+		// TS resolves this with `??`, so the machine's zone is only consulted
+		// when the variable is unset — that ordering is also what keeps a
+		// Windows host working, since the fallback there fails closed.
 		if value, ok := lookup("TOKENBOARD_TIMEZONE"); ok {
 			timezone = value
+		} else {
+			detected, err := localTimezone()
+			if err != nil {
+				return Options{}, err
+			}
+			timezone = detected
 		}
 	}
 	if err := assertValidTimezone(timezone); err != nil {
@@ -864,23 +884,37 @@ func firstNonEmpty(values ...string) string {
 // has no name, so the conventional system locations are consulted directly
 // before giving up — a silent UTC fallback would shift usageDate and fork the
 // server's dedup key against a TS collector on the same machine.
-func localTimezone() string {
+func localTimezone() (string, error) {
 	if name := strings.TrimSpace(os.Getenv("TZ")); name != "" {
-		return name // validated by assertValidTimezone, like the TS path
+		return name, nil // validated by assertValidTimezone, like the TS path
 	}
 	if name := time.Local.String(); name != "" && name != "Local" && contract.IsValidTimezone(name) {
-		return name
+		return name, nil
 	}
 	if name := systemTimezoneName(); name != "" {
-		return name
+		return name, nil
 	}
-	return "UTC"
+	return fallbackTimezone(runtime.GOOS)
+}
+
+// fallbackTimezone answers when nothing on the host named the zone. On Unix
+// the remaining case is a machine that genuinely runs UTC (a slim container
+// with neither /etc/timezone nor the /etc/localtime symlink), so UTC is the
+// right answer. Windows has neither file and Go reports time.Local as the
+// literal "Local", so the real zone cannot be recovered there and a UTC guess
+// would be silently wrong for every user east or west of Greenwich; fail with
+// the variable that fixes it instead.
+func fallbackTimezone(goos string) (string, error) {
+	if goos == "windows" {
+		return "", errors.New("Cannot determine the system timezone on Windows. Set TOKENBOARD_TIMEZONE (an IANA name such as Asia/Shanghai) or pass --timezone")
+	}
+	return "UTC", nil
 }
 
 // systemTimezoneName reads the host zone name from the conventional
 // locations: /etc/timezone (Debian and derivatives) and the /etc/localtime
 // symlink into a zoneinfo tree (macOS, most Linux). Windows has neither, so
-// it falls through to the caller's UTC fallback.
+// it falls through to fallbackTimezone, which refuses to guess there.
 func systemTimezoneName() string {
 	if data, err := os.ReadFile("/etc/timezone"); err == nil {
 		if name := strings.TrimSpace(string(data)); contract.IsValidTimezone(name) {

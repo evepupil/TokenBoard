@@ -384,6 +384,22 @@ func TestLengthBoundsCountUTF16Units(t *testing.T) {
 // with it — accepts offset time zone identifiers (±HH:MM, ±HHMM, hours
 // 00-23, minutes 00-59). LoadLocation has no such names, so the TS client
 // collects under "+08:00" while this one refused the run outright.
+// The cache must key on the exact input. LoadLocation is case-sensitive on a
+// case-sensitive filesystem while Intl is not, so a lowercase alias that fails
+// to load must not inherit a canonical-case hit: the result would otherwise
+// depend on which spelling happened to be validated first.
+func TestIsValidTimezoneCacheDoesNotLeakAcrossCaseVariants(t *testing.T) {
+	if !IsValidTimezone("Asia/Shanghai") {
+		t.Fatal("Asia/Shanghai should be valid")
+	}
+	timezoneMu.RLock()
+	_, leaked := timezoneValid["asia/shanghai"]
+	timezoneMu.RUnlock()
+	if leaked {
+		t.Fatal("cache entry keyed by a case variant: each spelling must be validated on its own")
+	}
+}
+
 func TestIsValidTimezoneAcceptsIntlOffsetZones(t *testing.T) {
 	valid := []string{
 		"+08:00", "-05:30", "+0800", "-0530", "+00:00", "-00:00", "+23:59", "-23:59",

@@ -417,8 +417,7 @@ func LoadLocation(name string) (*time.Location, error) {
 
 // IsValidTimezone mirrors usage-core isValidTimezone: non-empty, no leading
 // or trailing whitespace, within the length bound, and loadable as an IANA
-// zone or an Intl offset identifier. Valid names are cached case-insensitively
-// like the TS Set does.
+// zone or an Intl offset identifier.
 func IsValidTimezone(value string) bool {
 	timezone := strings.TrimSpace(value)
 	if timezone == "" || timezone != value || utf16Length(timezone) > MaxUsageTimezoneLength {
@@ -430,12 +429,15 @@ func IsValidTimezone(value string) bool {
 	// here either. The lowercase comparison matches Intl's behavior, and on
 	// case-insensitive filesystems LoadLocation("factory") would otherwise
 	// resolve.
-	cacheKey := strings.ToLower(timezone)
-	if goOnlyZoneNames[cacheKey] {
+	if goOnlyZoneNames[strings.ToLower(timezone)] {
 		return false
 	}
+	// Cache on the exact spelling. The TS cache lowercases because Intl
+	// resolves zone names case-insensitively; LoadLocation does not on a
+	// case-sensitive filesystem, so sharing a lowercase entry would make the
+	// verdict depend on which spelling was validated first.
 	timezoneMu.RLock()
-	ok, cached := timezoneValid[cacheKey]
+	ok, cached := timezoneValid[timezone]
 	timezoneMu.RUnlock()
 	if cached {
 		return ok
@@ -444,7 +446,7 @@ func IsValidTimezone(value string) bool {
 	// The TS side additionally caches the resolved canonical name; LoadLocation
 	// resolves the same name the same way, so caching the requested one covers it.
 	timezoneMu.Lock()
-	timezoneValid[cacheKey] = err == nil
+	timezoneValid[timezone] = err == nil
 	timezoneMu.Unlock()
 	return err == nil
 }

@@ -54,6 +54,12 @@ func tasklistOutput(pid int) (string, error) {
 	// A killed child leaves its pipes open until the OS reaps it; WaitDelay keeps
 	// Output from blocking on them after the deadline.
 	cmd.WaitDelay = tasklistTimeout
+	// Measured on Windows 10 22H2: tasklist exits 0 whether or not the filter
+	// matched, and a missing pid prints a localized "no tasks match" line to
+	// stdout instead. So a zero exit says nothing about existence — the CSV
+	// line is the only signal, and tasklistContainsPid is what decides. Only a
+	// non-zero exit (tasklist itself failed: missing binary, policy block) is
+	// returned as an error here, which the caller treats as unknown liveness.
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
