@@ -21,7 +21,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/klauspost/compress/zstd"
 
 	_ "modernc.org/sqlite"
 )
@@ -108,10 +111,14 @@ func writeJSONL(path string, lines []any) error {
 }
 
 // writeGrok mirrors the Grok Build fixture: turn_completed is a per-turn total,
-// so two turns in one session must both be recorded at face value.
+// so two turns in one session must both be recorded at face value. One turn
+// reports a non-zero cachedReadTokens inside inputTokens, which the providers
+// must subtract back out (input is the inclusive total, unlike TokenBoard's
+// disjoint snapshot fields) — a fixture with every cached counter at zero
+// never exercises that branch on either side.
 func writeGrok(home string) (string, error) {
 	session := filepath.Join(home, "sessions", "enc-cwd", "session-1")
-	turn := func(timestamp int64, input, output int64) map[string]any {
+	turn := func(timestamp int64, input, cachedRead, output int64) map[string]any {
 		return map[string]any{
 			"method":    "_x.ai/session/update",
 			"timestamp": timestamp,
@@ -121,12 +128,12 @@ func writeGrok(home string) (string, error) {
 					"usage": map[string]any{
 						"inputTokens":      input,
 						"outputTokens":     output,
-						"cachedReadTokens": 0,
+						"cachedReadTokens": cachedRead,
 						"modelUsage": map[string]any{
 							"grok-4.5": map[string]any{
 								"inputTokens":      input,
 								"outputTokens":     output,
-								"cachedReadTokens": 0,
+								"cachedReadTokens": cachedRead,
 							},
 						},
 					},
@@ -135,66 +142,203 @@ func writeGrok(home string) (string, error) {
 		}
 	}
 	return home, writeJSONL(filepath.Join(session, "updates.jsonl"), []any{
-		turn(1785528000, 1000, 10),
-		turn(1785528060, 500, 5),
+		turn(1785528000, 1000, 0, 10),
+		// inputTokens includes the 400 cached tokens; fresh input is 500.
+		turn(1785528060, 900, 400, 5),
 	})
 }
 
-// writePi mirrors the Pi fixture: usage rides on an assistant message, and the
-// entry id is what de-duplicates a forked session's copied history.
+// writePi mirrors the Pi fixture: usage rides on assistant messages, tool
+// results that did nested model work, compaction and branch-summary entries,
+// and a forked session copies its parent's history. The audit found the old
+// fixture covered only a single assistant message, so three carrier shapes and
+// the fork dedup were never compared across implementations. The second
+// assistant message also splits its cache write across the two TTL tiers —
+// dropping `cacheWrite1h` under-reports usage on providers that offer it.
 func writePi(agentDir string) (string, error) {
-	session := filepath.Join(agentDir, "sessions", "project", "session-a.jsonl")
-	lines := []any{
-		map[string]any{"type": "session", "id": "s1", "timestamp": "2026-07-31T20:00:00.000Z"},
-		map[string]any{
+	sessions := filepath.Join(agentDir, "sessions", "project")
+	assistant := func(id, parent, timestamp string, usage map[string]any) map[string]any {
+		return map[string]any{
 			"type":      "message",
-			"id":        "entry-1",
-			"parentId":  "entry-0",
-			"timestamp": "2026-07-31T20:01:00.000Z",
+			"id":        id,
+			"parentId":  parent,
+			"timestamp": timestamp,
 			"message": map[string]any{
 				"role":     "assistant",
 				"api":      "anthropic",
 				"provider": "deepseek",
 				"model":    "deepseek-v4-pro",
+				"usage":    usage,
+			},
+		}
+	}
+	cost := func(total float64) map[string]any {
+		return map[string]any{"input": 0.0009, "output": 0.0014, "cacheRead": 0.0001, "cacheWrite": 0, "total": total}
+	}
+	first := assistant("entry-1", "entry-0", "2026-07-31T20:01:00.000Z", map[string]any{
+		"input": 3272, "output": 383, "cacheRead": 52480, "cacheWrite": 0, "cost": cost(0.0024),
+	})
+	parent := []any{
+		map[string]any{"type": "session", "id": "s1", "timestamp": "2026-07-31T20:00:00.000Z"},
+		first,
+		// A tool result that performed nested model work: same usage shape,
+		// role `toolResult` instead of `assistant`.
+		map[string]any{
+			"type":      "message",
+			"id":        "entry-2",
+			"parentId":  "entry-1",
+			"timestamp": "2026-07-31T20:02:00.000Z",
+			"message": map[string]any{
+				"role":     "toolResult",
+				"provider": "deepseek",
+				"model":    "deepseek-v4-pro",
 				"usage": map[string]any{
-					"input":      3272,
-					"output":     383,
-					"cacheRead":  52480,
-					"cacheWrite": 0,
-					"cost": map[string]any{
-						"input": 0.0009, "output": 0.0014, "cacheRead": 0.0001,
-						"cacheWrite": 0, "total": 0.0024,
-					},
+					"input": 100, "output": 20, "cacheRead": 0, "cacheWrite": 0, "cost": cost(0.0002),
 				},
 			},
 		},
-	}
-	return agentDir, writeJSONL(session, lines)
-}
-
-// writeDeepSeekHarness mirrors the DSH fixture: one assistant/message event
-// with its usage block, in the plain-text JSONL form.
-func writeDeepSeekHarness(home string) (string, error) {
-	session := filepath.Join(home, "sessions", "project", "session-1", "session.jsonl")
-	event := map[string]any{
-		"type": "assistant/message",
-		"seq":  1,
-		"time": 1785528000000,
-		"data": map[string]any{
-			"turn": 1,
-			"step": 0,
-			"message": map[string]any{
-				"id":     "m1",
-				"role":   "assistant",
-				"source": map[string]any{"kind": "model", "model": "deepseek-v4-pro"},
-			},
+		// Compaction: usage sits on the entry itself, no message wrapper.
+		map[string]any{
+			"type":      "compaction",
+			"id":        "entry-3",
+			"parentId":  "entry-2",
+			"timestamp": "2026-07-31T20:03:00.000Z",
 			"usage": map[string]any{
-				"inputTokens": 1000, "outputTokens": 10,
-				"cacheReadTokens": 0, "cacheWriteTokens": 0,
+				"input": 200, "output": 40, "cacheRead": 0, "cacheWrite": 10, "cacheWrite1h": 5,
+				"cost": cost(0.0004),
 			},
 		},
 	}
-	return home, writeJSONL(session, []any{event})
+	fork := []any{
+		map[string]any{"type": "session", "id": "s2", "timestamp": "2026-07-31T21:00:00.000Z"},
+		// The fork copies the shared prefix verbatim; only the new tail counts.
+		first,
+		map[string]any{
+			"type":      "branch_summary",
+			"id":        "entry-4",
+			"parentId":  "entry-1",
+			"timestamp": "2026-07-31T21:01:00.000Z",
+			"usage": map[string]any{
+				"input": 300, "output": 60, "cacheRead": 0, "cacheWrite": 0, "cost": cost(0.0006),
+			},
+		},
+	}
+	if err := writeJSONL(filepath.Join(sessions, "session-a.jsonl"), parent); err != nil {
+		return "", err
+	}
+	return agentDir, writeJSONL(filepath.Join(sessions, "session-b-fork.jsonl"), fork)
+}
+
+// writeDeepSeekHarness mirrors the DSH fixture. The real log is
+// Zstandard-compressed by default and appended in batches, so the fixture
+// carries a plain session, a multi-frame compressed session whose tail frame is
+// truncated (a live log being written), and a session directory that holds both
+// encodings with an overlapping sequence — the three shapes the provider's
+// frame reader and its per-directory dedup exist for.
+func writeDeepSeekHarness(home string) (string, error) {
+	sessions := filepath.Join(home, "sessions", "project")
+	message := func(seq int64, occurredAtMs int64, input, output int64) map[string]any {
+		return map[string]any{
+			"type": "assistant/message",
+			"seq":  seq,
+			"time": occurredAtMs,
+			"data": map[string]any{
+				"turn": 1,
+				"step": 0,
+				"message": map[string]any{
+					"id":     "m" + strconv.FormatInt(seq, 10),
+					"role":   "assistant",
+					"source": map[string]any{"kind": "model", "model": "deepseek-v4-pro"},
+				},
+				"usage": map[string]any{
+					"inputTokens": input, "outputTokens": output,
+					"cacheReadTokens": 0, "cacheWriteTokens": 0,
+				},
+			},
+		}
+	}
+	if err := writeJSONL(filepath.Join(sessions, "session-1", "session.jsonl"),
+		[]any{message(1, 1785528000000, 1000, 10)}); err != nil {
+		return "", err
+	}
+
+	// Multi-frame log with a torn trailing frame.
+	frames := [][]byte{
+		mustJSONLine(message(1, 1785528060000, 100, 10)),
+		mustJSONLine(message(2, 1785528061000, 200, 20)),
+		mustJSONLine(message(3, 1785528062000, 300, 30)),
+	}
+	log, err := appendZstdFrames(frames, 1)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(sessions, "session-2"), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(sessions, "session-2", "session.jsonl.zstd"), log, 0o600); err != nil {
+		return "", err
+	}
+
+	// Both encodings of one session, overlapping on seq 2.
+	if err := os.MkdirAll(filepath.Join(sessions, "session-3"), 0o700); err != nil {
+		return "", err
+	}
+	overlapping := []byte(string(mustJSONLine(message(2, 1785528070000, 20, 2))))
+	if err := writeJSONL(filepath.Join(sessions, "session-3", "session.jsonl"), []any{
+		message(2, 1785528070000, 20, 2),
+		message(3, 1785528071000, 30, 3),
+	}); err != nil {
+		return "", err
+	}
+	compressed, err := appendZstdFrames([][]byte{mustJSONLine(message(1, 1785528069000, 10, 1)), overlapping}, 0)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(sessions, "session-3", "session.jsonl.zstd"), compressed, 0o600); err != nil {
+		return "", err
+	}
+	return home, nil
+}
+
+// mustJSONLine encodes one fixture record; a marshal failure here is a
+// programming error, not a runtime condition.
+func mustJSONLine(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return append(encoded, '\n')
+}
+
+// appendZstdFrames concatenates one Zstandard frame per payload, the way DSH
+// appends its batches, and optionally truncates the last frame to mimic a
+// session still being written.
+func appendZstdFrames(payloads [][]byte, truncatedFrames int) ([]byte, error) {
+	var out []byte
+	for _, payload := range payloads {
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, encoder.EncodeAll(payload, nil)...)
+		encoder.Close()
+	}
+	for index := 0; index < truncatedFrames; index++ {
+		frameStart := len(out)
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+		if err != nil {
+			return nil, err
+		}
+		frame := encoder.EncodeAll(mustJSONLine(map[string]any{"type": "assistant/message"}), nil)
+		encoder.Close()
+		// Keep the frame header and part of the body: the reader must drop the
+		// incomplete frame and still return every frame before it.
+		out = append(out, frame[:len(frame)-8]...)
+		if len(out)-frameStart < 8 {
+			return nil, fmt.Errorf("truncated frame fixture is too short")
+		}
+	}
+	return out, nil
 }
 
 // writeOpenCode mirrors the OpenCode fixture: the message table with the
