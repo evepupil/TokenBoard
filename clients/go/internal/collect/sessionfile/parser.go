@@ -2,6 +2,7 @@ package sessionfile
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ func Parse(input ParseInput, lines []Line) (ParseResult, error) {
 			return ParseResult{}, err
 		}
 	}
-	return finish(state, input), nil
+	return finish(state, input)
 }
 
 // ParseLines consumes the lines of one session file as they are read, the way
@@ -102,7 +103,7 @@ func ParseLines(input ParseInput, lines func(yield func(Line) error) error) (Par
 	if err != nil {
 		return ParseResult{}, err
 	}
-	return finish(state, input), nil
+	return finish(state, input)
 }
 
 type timezoneError struct{ timezone string }
@@ -148,7 +149,7 @@ func consumeLine(state *parseState, input ParseInput, location *time.Location, l
 	return nil
 }
 
-func finish(state *parseState, input ParseInput) ParseResult {
+func finish(state *parseState, input ParseInput) (ParseResult, error) {
 	result := ParseResult{
 		IgnoredUploadSafeRows: state.ignoredUploadSafeRows,
 		MalformedRows:         state.malformedRows,
@@ -165,6 +166,14 @@ func finish(state *parseState, input ParseInput) ParseResult {
 	}
 	snapshots := make([]contract.Snapshot, 0, len(rows))
 	for _, row := range rows {
+		// The TS parser builds each snapshot through usageSnapshotSchema.parse,
+		// so one row the contract rejects fails the whole source there. Checking
+		// the same way here keeps a poisoned snapshot out of the hook cursor,
+		// which would otherwise replay it into an upload batch the server
+		// rejects as a whole.
+		if err := requireIntegerTokenCounts(row); err != nil {
+			return ParseResult{}, fmt.Errorf("%s %s %s: %w", input.Source, row.usageDate, row.model, err)
+		}
 		snapshot := contract.Snapshot{
 			Source:        input.Source,
 			UsageDate:     row.usageDate,
@@ -179,10 +188,34 @@ func finish(state *parseState, input ParseInput) ParseResult {
 			SessionCount:  int64(len(row.sessions)),
 			CollectedAt:   input.CollectedAt,
 		}
+		if err := snapshot.Validate(); err != nil {
+			return ParseResult{}, fmt.Errorf("%s %s %s: %w", input.Source, row.usageDate, row.model, err)
+		}
 		snapshots = append(snapshots, snapshot)
 	}
 	result.Snapshots = snapshots
-	return result
+	return result, nil
+}
+
+// requireIntegerTokenCounts mirrors the schema's integer range check on the
+// float the parser summed. Converting an out-of-range float to int64 is
+// implementation-defined in Go, so the range is enforced before the cast.
+func requireIntegerTokenCounts(row *aggregateRow) error {
+	for _, check := range []struct {
+		name  string
+		value float64
+	}{
+		{"inputTokens", row.inputTokens},
+		{"outputTokens", row.outputTokens},
+		{"cacheCreationTokens", row.cacheCreationTokens},
+		{"cacheReadTokens", row.cacheReadTokens},
+		{"totalTokens", row.totalTokens},
+	} {
+		if check.value < 0 || check.value > contract.MaxSnapshotTokens || check.value != math.Trunc(check.value) {
+			return fmt.Errorf("%s: must be an integer in 0..%d", check.name, contract.MaxSnapshotTokens)
+		}
+	}
+	return nil
 }
 
 func readLineRecord(line string) (map[string]any, bool) {
