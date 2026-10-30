@@ -154,7 +154,14 @@ for (const unsafe of [
   })
 }
 
-for (const safe of ['/home/tokenboard/.tokenboard', '/home/tokenboard/.tokenboard-work']) {
+for (const safe of [
+  '/home/tokenboard/.tokenboard',
+  '/home/tokenboard/.tokenboard-work',
+  // A user whose home is `/root` installs into `/root/.tokenboard`: two segments, but
+  // still the tool's own directory. The old three-segment minimum refused it, so
+  // `sudo` installs could not be uninstalled at all.
+  '/root/.tokenboard'
+]) {
   test(`still removes the tool's own config dir: ${safe}`, () => {
     const harness = createHarness()
 

@@ -105,6 +105,18 @@ export function buildInstallCollectorPlan({
   return steps
 }
 
+// resolveGitInstallOptions resolves the three settings a git install records.
+// Each falls back to the saved config before its default: a bare re-run (the
+// recovery path sync.mjs names when the checkout is missing) must not silently
+// reset a configured mirror, ref or package manager to the project defaults.
+export function resolveGitInstallOptions({ flags = {}, env = process.env, saved = {} } = {}) {
+  return {
+    repoUrl: flags['repo-url'] || env.TOKENBOARD_REPO_URL || saved.repoUrl || defaultRepoUrl,
+    repoRef: flags['repo-ref'] || env.TOKENBOARD_REPO_REF || saved.repoRef || null,
+    packageManager: readPackageManager(flags, saved)
+  }
+}
+
 function runCli() {
   if (
     printHelpIfRequested(
@@ -127,11 +139,12 @@ function runCli() {
   }
   const flags = parseArgs(process.argv.slice(2))
   const dir = collectorDir()
+  let saved = {}
   let clientType
   try {
     // The saved config is consulted so a bare re-run on a binary install does
-    // not silently clone git and switch the machine back to `git`.
-    let saved = {}
+    // not silently clone git and switch the machine back to `git`, and so the
+    // mirror, ref and package manager it records survive the re-run.
     if (existsSync(join(configDir(), 'config.json'))) {
       saved = readConfig()
     }
@@ -144,9 +157,11 @@ function runCli() {
   if (clientType === 'binary') {
     // A binary install has no checkout to clone or pull: the release tarball
     // carries everything the client needs. The config directory is the binary's
-    // home, so this is the only install step.
-    const repo = flags['release-repo'] || process.env.TOKENBOARD_RELEASE_REPO || defaultReleaseRepo
-    const baseUrl = flags['release-base-url'] || process.env.TOKENBOARD_RELEASE_BASE_URL || undefined
+    // home, so this is the only install step. A non-default feed recorded at
+    // install time is reused, for the same reason as the git settings below.
+    const repo = flags['release-repo'] || process.env.TOKENBOARD_RELEASE_REPO || saved.releaseRepo || defaultReleaseRepo
+    const baseUrl =
+      flags['release-base-url'] || process.env.TOKENBOARD_RELEASE_BASE_URL || saved.releaseBaseUrl || undefined
     installClientBinary({
       repo,
       tag: flags['release-tag'] || process.env.TOKENBOARD_RELEASE_TAG || undefined,
@@ -170,9 +185,7 @@ function runCli() {
     return
   }
 
-  const repoUrl = flags['repo-url'] || process.env.TOKENBOARD_REPO_URL || defaultRepoUrl
-  const repoRef = flags['repo-ref'] || process.env.TOKENBOARD_REPO_REF || null
-  const packageManager = readPackageManager(flags)
+  const { repoUrl, repoRef, packageManager } = resolveGitInstallOptions({ flags, env: process.env, saved })
 
   for (const step of buildInstallCollectorPlan({
     dir,

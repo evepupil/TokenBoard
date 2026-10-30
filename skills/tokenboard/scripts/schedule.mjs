@@ -335,12 +335,11 @@ function quoteWindowsArg(value) {
   return `"${String(value)}"`
 }
 
+// Only `%` needs escaping inside `set "NAME=value"`. Every other cmd
+// metacharacter is literal there — measured on Windows: `set "V=Tom & Jerry"`
+// keeps the `&`, and `set "V=Tom ^& Jerry"` stores a literal caret — so
+// escaping them would write a caret the value never had and point the variable
+// at a path that does not exist.
 function escapeWindowsCmdValue(value) {
-  return String(value)
-    .replaceAll('%', '%%')
-    .replaceAll('^', '^^')
-    .replaceAll('&', '^&')
-    .replaceAll('|', '^|')
-    .replaceAll('<', '^<')
-    .replaceAll('>', '^>')
+  return String(value).replaceAll('%', '%%')
 }

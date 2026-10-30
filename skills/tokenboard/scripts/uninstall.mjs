@@ -184,16 +184,19 @@ if (isMainModule(import.meta.url)) {
 // second install. Matching that namespaced prefix — rather than merely "a dot-directory" — is
 // what keeps the recursive delete from following a stray `TOKENBOARD_CONFIG_DIR` into `~/.ssh`,
 // `~/.aws`, `~/.claude`, `~/.config`, or any other dot-directory the user owns but this tool
-// never created. Requiring at least three path segments additionally rejects a filesystem root,
-// a bare relative name, and a top-level directory. The other installers do not validate this
-// themselves, so the guard belongs here, where the deletion happens.
+// never created. Requiring an absolute path with at least two segments additionally rejects a
+// filesystem root, a bare relative name, and a top-level directory; a two-segment absolute path
+// like `/root/.tokenboard` is the legitimate install of a user whose home is `/root`. The other
+// installers do not validate this themselves, so the guard belongs here, where the deletion
+// happens.
 function assertRemovableConfigDir(runtime) {
   const target = String(runtime.configDir)
+  const pathApi = runtime.platform === 'win32' ? windowsPath : posix
   const trimmed = target.replace(/[\\/]+$/, '')
   const segments = trimmed.split(/[\\/]+/).filter(Boolean)
   const basename = (segments.at(-1) ?? '').toLowerCase()
   const isTokenboardDir = basename === '.tokenboard' || basename.startsWith('.tokenboard-')
-  if (!isTokenboardDir || segments.length < 3) {
+  if (!isTokenboardDir || segments.length < 2 || !pathApi.isAbsolute(target)) {
     throw new Error(
       `Refusing to remove ${target}: the TokenBoard config directory must be the tool's own ~/.tokenboard (or a ~/.tokenboard-* variant), not a home directory, filesystem root, or another dot-directory. Remove it by hand if that is really what you want.`
     )

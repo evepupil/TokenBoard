@@ -307,6 +307,27 @@ test('Windows scheduled commands escape percent specifiers', () => {
   assert.match(script, /PATH=.*C:\\Tools%%Bin/)
 })
 
+// Inside `set "NAME=value"` every metacharacter except `%` is literal — measured
+// on a real Windows host: `set "V=Tom & Jerry"` keeps the `&`, while
+// `set "V=Tom ^& Jerry"` stores a literal caret. Escaping them inserted a caret
+// the value did not have, so a user name containing `&` or `^` pointed
+// TOKENBOARD_CONFIG_DIR at a directory that does not exist and every scheduled
+// sync failed.
+test('Windows scheduled commands leave cmd metacharacters literal inside set "..."', () => {
+  const script = buildWindowsTaskScript({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    scriptPath: 'C:\\TokenBoard\\sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: 'C:\\Windows\\System32',
+    homeDir: 'C:\\Users\\tokenboard',
+    configDir: 'C:\\Users\\Tom & Jerry ^|<>\\state'
+  })
+
+  assert.match(script, /TOKENBOARD_CONFIG_DIR=C:\\Users\\Tom & Jerry \^\|<>\\state/)
+  assert.doesNotMatch(script, /\^&/)
+  assert.doesNotMatch(script, /\^\^/)
+})
+
 test('normalizePathEnv prepends missing local and node bin directories once', () => {
   assert.equal(
     normalizePathEnv({

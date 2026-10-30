@@ -158,7 +158,7 @@ export async function runSyncInvocation({
         updatedAt: now(),
         ...(status === 'running' ? {} : { completedAt: now() }),
         ...(Number.isSafeInteger(details.exitCode) ? { exitCode: recordableExitCode(details.exitCode) } : {}),
-        ...(details.error ? { error: errorMessage(details.error) } : {})
+        ...(details.error ? { error: redactUrlCredentials(errorMessage(details.error)) } : {})
       })
     } catch (error) {
       try {
