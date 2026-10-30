@@ -182,6 +182,8 @@ describe('runJsonCommand', () => {
         '-e',
         'console.log(JSON.stringify({ token: process.env.TOKENBOARD_UPLOAD_TOKEN ?? null, ' +
           'pairing: process.env.TOKENBOARD_PAIRING_CODE ?? null, ' +
+          'releaseBaseUrl: process.env.TOKENBOARD_RELEASE_BASE_URL ?? null, ' +
+          'repoUrl: process.env.TOKENBOARD_REPO_URL ?? null, ' +
           'kept: process.env.TOKENBOARD_STATE_DIR ?? null }))'
       ],
       {
@@ -189,12 +191,20 @@ describe('runJsonCommand', () => {
           ...process.env,
           TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_must_not_leak',
           TOKENBOARD_PAIRING_CODE: 'tb_pair_must_not_leak',
+          TOKENBOARD_RELEASE_BASE_URL: 'https://user:tb_release_must_not_leak@feed.example',
+          TOKENBOARD_REPO_URL: 'https://user:tb_repo_must_not_leak@git.example/mirror.git',
           TOKENBOARD_STATE_DIR: '/tmp/kept-for-the-child'
         }
       }
     )
 
-    expect(result).toEqual({ token: null, pairing: null, kept: '/tmp/kept-for-the-child' })
+    expect(result).toEqual({
+      token: null,
+      pairing: null,
+      releaseBaseUrl: null,
+      repoUrl: null,
+      kept: '/tmp/kept-for-the-child'
+    })
   })
 
   test.skipIf(process.platform !== 'win32')('runs a Windows shim with quoted parenthesized arguments', async () => {

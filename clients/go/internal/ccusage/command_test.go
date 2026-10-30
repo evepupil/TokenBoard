@@ -85,6 +85,8 @@ func TestCommandHelperProcess(t *testing.T) {
 		// assert they were stripped rather than merely absent from the caller's map.
 		payload := `{"token":` + jsonQuote(os.Getenv("TOKENBOARD_UPLOAD_TOKEN")) +
 			`,"pairing":` + jsonQuote(os.Getenv("TOKENBOARD_PAIRING_CODE")) +
+			`,"releaseBaseUrl":` + jsonQuote(os.Getenv("TOKENBOARD_RELEASE_BASE_URL")) +
+			`,"repoUrl":` + jsonQuote(os.Getenv("TOKENBOARD_REPO_URL")) +
 			`,"kept":` + jsonQuote(os.Getenv("TOKENBOARD_STATE_DIR")) + `}`
 		os.Stdout.WriteString(payload + "\n")
 	case "fail-nontransient":
@@ -139,6 +141,8 @@ func TestRunJSONPassesArgumentsDirectlyWithoutShellParsing(t *testing.T) {
 func TestRunJSONStripsCredentialVariablesFromTheChildEnvironment(t *testing.T) {
 	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_must_not_leak")
 	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_must_not_leak")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:tb_release_must_not_leak@feed.example")
+	t.Setenv("TOKENBOARD_REPO_URL", "https://user:tb_repo_must_not_leak@git.example/mirror.git")
 	t.Setenv("TOKENBOARD_STATE_DIR", "/tmp/kept-for-the-child")
 
 	command, args := helperCommand(t)
@@ -154,9 +158,11 @@ func TestRunJSONStripsCredentialVariablesFromTheChildEnvironment(t *testing.T) {
 		t.Fatalf("result = %T", result)
 	}
 	for name, want := range map[string]string{
-		"token":   "",
-		"pairing": "",
-		"kept":    "/tmp/kept-for-the-child",
+		"token":          "",
+		"pairing":        "",
+		"releaseBaseUrl": "",
+		"repoUrl":        "",
+		"kept":           "/tmp/kept-for-the-child",
 	} {
 		value, _ := record.Get(name)
 		if value != want {

@@ -10,7 +10,17 @@
 //
 // `TOKENBOARD_PAIRING_CODE` is included for the same reason: it is a short-lived
 // credential that redeems a device, and nothing ccusage does needs it.
-export const credentialEnvKeys = ['TOKENBOARD_UPLOAD_TOKEN', 'TOKENBOARD_PAIRING_CODE'] as const
+//
+// `TOKENBOARD_RELEASE_BASE_URL` can carry `user:token@host` — install-collector
+// documents exactly that shape for a private feed — so it is stripped too.
+// `TOKENBOARD_REPO_URL` is the same shape for a private checkout mirror, and a
+// child that runs `npx ccusage` has no use for either.
+export const credentialEnvKeys = [
+  'TOKENBOARD_UPLOAD_TOKEN',
+  'TOKENBOARD_PAIRING_CODE',
+  'TOKENBOARD_RELEASE_BASE_URL',
+  'TOKENBOARD_REPO_URL'
+] as const
 
 /**
  * Returns a copy of `env` with credential-bearing variables removed.

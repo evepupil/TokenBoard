@@ -19,9 +19,19 @@ import (
 //
 // TOKENBOARD_PAIRING_CODE is included for the same reason: it is a short-lived
 // credential that redeems a device, and nothing ccusage does needs it.
+//
+// TOKENBOARD_RELEASE_BASE_URL can carry `user:token@host` — install-collector
+// documents exactly that shape for a private feed — so it is scrubbed too. The
+// client reads it itself when updating; the child never has a use for it.
+//
+// TOKENBOARD_REPO_URL is the same shape for a private checkout mirror. The
+// collector has no use for it either: only the skill's install and upgrade
+// steps consume it, and they do so in their own process.
 var credentialEnvKeys = map[string]bool{
-	"TOKENBOARD_UPLOAD_TOKEN": true,
-	"TOKENBOARD_PAIRING_CODE": true,
+	"TOKENBOARD_UPLOAD_TOKEN":     true,
+	"TOKENBOARD_PAIRING_CODE":     true,
+	"TOKENBOARD_RELEASE_BASE_URL": true,
+	"TOKENBOARD_REPO_URL":         true,
 }
 
 // scrubCredentialEnv returns env with credential-bearing entries removed. A nil
