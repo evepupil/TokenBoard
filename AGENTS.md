@@ -32,7 +32,7 @@ pnpm format:check
 - `node_modules/.bin/tsx scripts/clients-go-gen-pricing-goldens.mts`：从 TS 定价实现重新生成 Go 侧的 ccusage override 金样本（`clients/go/internal/pricing/goldens/ccusage-overrides.json`）；改动 catalogue 解析、歧义折叠、官方锚点、大小写别名或 above-200k 剥离后运行，输出需 diff 审查后提交。CI 会重跑两个生成脚本并对提交版做 diff，漂移即失败。
 - `node skills/tokenboard/scripts/status.mjs`：检查本机 collector、设备身份、hook、计划任务和最近同步状态；输出应脱敏。
 - `node skills/tokenboard/scripts/shadow-dual-run.mjs [--until <昨天>]`：生产双跑（spec §6.3）——逐源跑 `tokenboard shadow` 比较真实数据的 TS 与 Go 实现，结果追加进 `~/.tokenboard/logs/shadow-dual-run.jsonl`；不安装计划任务、不上传、不碰真实 cursor，只有 `diff`/`error` 才 exit 1。`shadow` 会把本机 `model-pricing-cache.json` 播种进两侧的临时 state 目录（缺失或损坏时两侧一起退回静态配置），所以动态定价路径也在比较范围内。
-- `node --test skills/tokenboard/scripts/*.test.mjs`：运行 skill 脚本的 Node 测试。
+- `node --test skills/tokenboard/scripts/*.test.mjs`：运行 skill 脚本的 Node 测试；CI 在 `baseline-test`（ubuntu）与 `skill-windows`（windows-latest，只跑这套测试）各跑一遍，Windows 上 POSIX 权限类断言按设计跳过。
 
 ### 目录速览
 
