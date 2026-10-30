@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // childUsageEvent builds the row shape the child scans read: one event with
@@ -186,6 +187,16 @@ func TestRejectsAnEarlyChildSessionReaderExitAfterASameSizeSourceReplacement(t *
 			t.Fatalf("unexpected record: %v", record)
 		}
 		if err := os.WriteFile(filePath, []byte(replacement), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// The in-place rewrite leaves dev/ino/size untouched, so the fingerprint
+		// can only differ through a timestamp. Push mtime forward explicitly: on a
+		// filesystem with a coarse clock (ext4 under some mounts: 1 ms) an
+		// immediate rewrite can land on the same mtimeMs and ctimeMs, which made
+		// this test pass or fail with the host's clock granularity rather than
+		// with the detection it is meant to pin.
+		forward := time.Now().Add(2 * time.Second)
+		if err := os.Chtimes(filePath, forward, forward); err != nil {
 			t.Fatal(err)
 		}
 		return ErrStopJSONL

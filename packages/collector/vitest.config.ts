@@ -16,6 +16,12 @@ process.env.TOKENBOARD_STATE_DIR = mkdtempSync(join(tmpdir(), 'tokenboard-collec
 
 export default defineConfig({
   test: {
+    // Vitest's 5s default is a per-test wall clock, and several cases here spawn
+    // SQLite fixtures or language-server stand-ins; under full-suite parallelism
+    // on a shared runner those exceeded it and failed without being wrong. The
+    // suite-level floor is 30s; the heaviest cases still carry their own
+    // explicit, longer timeouts.
+    testTimeout: 30_000,
     env: {
       TOKENBOARD_STATE_DIR: process.env.TOKENBOARD_STATE_DIR
     }

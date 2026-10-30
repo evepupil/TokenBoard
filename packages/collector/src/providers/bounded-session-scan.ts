@@ -143,11 +143,13 @@ async function statFile(filePath: string, options: ScanOptions) {
 
 /**
  * Read a session log line by line so a large file never lands in memory, skipping
- * any single line longer than `maxLineBytes` instead of materializing it.
+ * any single line longer than `maxLineBytes` before it reaches the parser.
  *
  * readline has no per-line ceiling: a file within `maxSessionFileBytes` (256 MiB)
  * can hand back a 256 MiB string, which then goes into `JSON.parse` as a full
- * object graph. The Go client caps a line at 64 MiB, so an unbounded reader is
+ * object graph. readline still materializes that one line to hand it over, so the
+ * cap bounds what reaches the parser, not the reader's peak allocation for an
+ * oversized row. The Go client caps a line at 64 MiB, so an unbounded reader is
  * both a memory hazard and a cross-client divergence.
  *
  * A skipped line is reported, not silently dropped — the caller decides whether a

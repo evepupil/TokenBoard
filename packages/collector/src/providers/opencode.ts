@@ -85,7 +85,7 @@ export async function collectOpenCodeUsage(options: CollectOpenCodeUsageOptions 
     throw error
   }
 
-  const sinceDate = readSinceDate(options.since, timezone)
+  const sinceDate = readSinceDate(options.since)
   const rows = await querySqliteJsonRows(dbPath, usageRowsSql, {
     sqliteBin: options.sqliteBin,
     runQuery: options.runQuery,
@@ -198,7 +198,7 @@ function readSessionId(value: unknown) {
   return typeof value === 'string' && value.trim() ? [value] : []
 }
 
-function readSinceDate(since: string | undefined, timezone: string) {
+function readSinceDate(since: string | undefined) {
   const value = since ?? process.env.TOKENBOARD_SINCE ?? process.env.TOKENBOARD_DEFAULT_SINCE ?? ''
   if (!value) return ''
   const normalized = assertValidDateFilter(value, `${label} since value`, true)
