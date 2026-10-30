@@ -89,3 +89,28 @@
 - skill：`node --test skills/tokenboard/scripts/*.test.mjs` **872 全过**（本轮新增 `child-env.test.mjs` 3 条）。
 - 真机：Windows 探针见第三、四节；`status.mjs` 本机实跑正常。
 - 真实性核验：`child-env` 的 spawn 测试做了 red→green 复验（临时移除 `env:` 行 → 失败 → 恢复 → 通过）。
+
+## 七、CI Windows 失败与修复（2026-10-30 补记）
+
+### 现象
+`Go client / Test (windows-latest)` 在 PR #26 上是红的，报三个测试失败：
+- `TestAFlagWithAValueIsAdoptedOverTheEnvironment`、`TestSinceEnvironmentChainUsesOrdinaryFallback`、`TestUnsetSourceTakesTheDefault`
+- 失败信息：`parseArgs: Cannot determine the system timezone on Windows. Set TOKENBOARD_TIMEZONE ...`
+
+### 根因
+是本轮 `localTimezone()` fail-closed 改动（第三节）的连带影响：这三个测试只验证 source/since/flag 的解析优先级，却调用 `parseArgs` 走完整参数解析，在 Windows CI 上没有可用时区 → 被新 gate 拦下。**产品逻辑正确，测试夹具需要显式提供时区**（skill 真实路径恒传 `TOKENBOARD_TIMEZONE`）。
+
+### 修复
+`4f737cd`：三个测试补 `TOKENBOARD_TIMEZONE=UTC`（onboarding 与真实调度器一致），并注释说明为什么不在这里测时区 gate（它有自己的测试 `TestFallbackTimezoneFailsClosedOnWindows`）。
+
+### 验证
+- Windows 真机（`<windows-host>`，仓库 `C:\Users\<user>\.tokenboard\TokenBoard` @ `4f737cd`）：`go test ./internal/cli/` → ok 3.044s
+- CI run 41031925282（commit `4f737cd`）：**success**（全部 job 绿，含 windows-latest）
+
+### 三平台基线（本轮结束时实测）
+| 项 | macOS 本机 | Linux <linux-host> | Windows <windows-host> |
+|---|---|---|---|
+| skill 套件 | 872/872 | 872/872（node 24.22.1） | 863 pass / 9 skip / 0 fail（便携 node 24.22.1） |
+| Go cli 包 | ok | 待跑 | ok（真机） |
+
+测试机运维注记：Linux 原 node 24.21.0 低于项目下限，已在 `~/.nvm/versions/node/v24.22.1` 安装合规版本（此前 6 个 setup 类失败均为此造成，非代码缺陷）；Windows 便携 node 24.22.1 解压在 `C:\Users\<user>\tools\node-v24.22.1-win-x64`。
