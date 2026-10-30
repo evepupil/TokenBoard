@@ -19,6 +19,8 @@ on:
       # The shadow gate runs the TypeScript collector against this client, so
       # a collector-source change is exactly what it must re-verify.
       - 'packages/collector/src/**'
+      - 'packages/collector/bin/**'
+      - 'packages/collector/vitest.config.ts'
       - 'packages/collector/package.json'
       - 'packages/collector/ccusage.json'
       - 'packages/usage-core/**'
@@ -37,6 +39,8 @@ on:
     paths:
       - 'clients/go/**'
       - 'packages/collector/src/**'
+      - 'packages/collector/bin/**'
+      - 'packages/collector/vitest.config.ts'
       - 'packages/collector/package.json'
       - 'packages/collector/ccusage.json'
       - 'packages/usage-core/**'
@@ -155,9 +159,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Heavy collector tests take seconds each and the runner is shared. Every
-      # one of them carries an explicit timeout, so a failure here is real
-      # rather than the 5s default being hit under load.
+      # Heavy collector tests take seconds each and the runner is shared. The
+      # collector's vitest config sets a 30s suite-level timeout, and the
+      # heaviest cases carry their own longer ones, so a failure here is real
+      # rather than the default being hit under load.
       - run: pnpm --filter @tokenboard/usage-core --filter @tokenboard/collector test
 
       # The skill scripts are what users actually run, they share the collector's
@@ -300,13 +305,20 @@ jobs:
           TOKENBOARD_CCUSAGE_BIN: ${{ github.workspace }}/packages/collector/node_modules/.bin/ccusage
         run: |
           set -euo pipefail
+          # The list is derived from the shared source declaration, not repeated
+          # here: this was a fifth hand-kept copy, so a source added to
+          # usage-core would collect but never be compared. The three
+          # Antigravity sources run in their own steps below (antigravity-cli
+          # needs a HOME override; the GUI pair needs a language server).
+          #
           # The ccusage tool family is included deliberately: the runner has
           # none of these tools installed, so both sides must agree on an
           # empty result. A wrong subcommand name is what this catches —
           # ccusage exits 2 on an unknown command, which fails the Go source
           # while the TS side reports "not installed", so the run diverges.
-          for source in grok-build pi deepseek-harness opencode claude-code codex \
-            amp droid codebuff hermes goose kilo copilot gemini-cli kimi qwen openclaw zcode; do
+          sources=$(node --input-type=module -e \
+            "import('./skills/tokenboard/scripts/usage-sources.mjs').then((m) => console.log(m.usageSources.filter((source) => !source.startsWith('antigravity')).join(' ')))")
+          for source in $sources; do
             echo "::group::shadow $source"
             "$RUNNER_TEMP/tokenboard" shadow --source "$source"
             echo "::endgroup::"
@@ -441,7 +453,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, typecheck, baseline-test, deps, shadow, release-dry-run]
+    needs: [test, typecheck, baseline-test, skill-windows, deps, shadow, release-dry-run]
     runs-on: ubuntu-latest
     permissions:
       contents: write

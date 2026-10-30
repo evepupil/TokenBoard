@@ -202,7 +202,7 @@ ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo�
 
 这些不变量一旦破坏就是静默计费分叉，两侧改动必须同步验证：
 
-- **ccusage 子进程环境必须剥离凭据**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.scrubCredentialEnv`）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。
+- **ccusage 子进程环境必须剥离凭据**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.scrubCredentialEnv`）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE`/`TOKENBOARD_RELEASE_BASE_URL`/`TOKENBOARD_REPO_URL` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。skill 侧的同一名单在 `skills/tokenboard/scripts/child-env.mjs`（`upgrade-utils.mjs` 的 `spawnRedacted` 用它保护 `git clone`/`pnpm install` 子进程，后者会执行依赖的 lifecycle 脚本），三处名单由 `skills/tokenboard/scripts/child-env.test.mjs` 与 Go/TS 各自测试对照，改动需同步。
 - **Codex 静态费率用运行时除法**：`internal/collect/providers/codex/context_pricing.go` 的 `codexDivisor` 是 `var` 而非 `const`——Go 对无类型常量表达式精确求值后舍入一次，JS 是 double 除法再舍入一次，`0.2/1e6` 一类字面量两边差 1 ULP，会让 `snapshotHash` 分叉、shadow 报 diff。`TestStaticRatesMatchTheJavaScriptDoubles` 钉住位模式。
 - **公开端点 `/api/public/model-pricing` 有 IP 限流**（`publicModelPricingRead` 120/60s）。Worker Cache 只存 200，所以带随机 `cursor` 的请求每次都直达 D1，不能撤掉这道闸。
 - **上传端点强制 https**，loopback（`localhost`/`127.0.0.1`/`::1`）例外（TS `endpoint.ts`，Go `cli/endpoint.go`）。上传请求一律 `redirect: 'manual'` / `CheckRedirect`（Go 同 host 异 port 会带 Authorization 转发）。
