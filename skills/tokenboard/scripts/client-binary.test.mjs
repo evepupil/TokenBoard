@@ -454,6 +454,61 @@ test('downloadBytes enforces the size bound while streaming, not only after the 
   )
 })
 
+// The asset download is the hop that carries the tarball and its checksums.
+// Letting fetch follow redirects to any host would let a redirect chain serve
+// both from somewhere the release page never named; the Go client pins the
+// same way (release.sameRedirectHost).
+test('downloadBytes refuses a redirect that leaves the release host', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url, options) => {
+    seen.push({ url, redirect: options?.redirect })
+    return {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://evil.example/tokenboard.tar.gz' },
+      body: null
+    }
+  }
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher
+      }),
+    /not the release host/
+  )
+  // The redirect is inspected by hand, never followed implicitly.
+  assert.equal(seen[0].redirect, 'manual')
+  assert.equal(seen.length, 1)
+})
+
+test('downloadBytes follows a redirect to the GitHub asset CDN', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const body = (async function* generate() {
+    yield Buffer.from('tarball')
+  })()
+  const responses = [
+    {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://objects.githubusercontent.com/assets/x' },
+      body: null
+    },
+    { ok: true, status: 200, headers: { get: () => null }, body }
+  ]
+  let calls = 0
+  const data = await downloadBytes({
+    url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher: () => responses[calls++]
+  })
+  assert.equal(data.toString(), 'tarball')
+  assert.equal(calls, 2)
+})
+
 // A swap killed between the two renames can leave the *staged* binary behind
 // as well as the backup. The staged one is newer, but a kill during its write
 // leaves a truncated file, so it is restored only after it answers `version`;

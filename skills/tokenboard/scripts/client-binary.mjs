@@ -147,14 +147,49 @@ export async function latestTag({ repo, baseUrl, fetcher = fetch }) {
   throw new Error(`TokenBoard release lookup redirected more than ${maxRedirects} times`)
 }
 
+// releaseRedirectHosts are the hosts a GitHub release download may land on:
+// the origin itself and the asset CDN GitHub redirects to. Same rule the Go
+// client's internal/release applies, so both installers trust the same hops.
+const releaseRedirectHosts = ['objects.githubusercontent.com', 'release-assets.githubusercontent.com']
+
+// sameRedirectHost keeps the port: hostname alone would treat two servers on
+// the same address (a proxy, a test server, a local mirror) as one host.
+function sameRedirectHost(origin, target) {
+  if (origin.host.toLowerCase() === target.host.toLowerCase()) return true
+  return releaseRedirectHosts.includes(target.hostname.toLowerCase())
+}
+
 // downloadBytes fetches an asset into memory, bounded the same way
 // internal/release bounds its downloads.
 //
 // The bound is enforced while reading, not after: a host that answers with a
 // chunked body and no Content-Length would otherwise be buffered in full
 // before the size check could refuse it.
+//
+// Redirects are followed by hand and pinned to the release host. A caller that
+// let fetch follow them would accept a chain to an arbitrary host — the tarball
+// and its checksums cannot vouch for each other when both arrive from a host
+// the release page never named.
 export async function downloadBytes({ url, name, fetcher = fetch }) {
-  const response = await fetcher(url)
+  const origin = new URL(url)
+  let current = origin
+  let response
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    response = await fetcher(current.toString(), { redirect: 'manual' })
+    if (response.status < 300 || response.status >= 400) break
+    const location = response.headers?.get?.('location')
+    if (!location) {
+      throw new Error(`download ${name} returned HTTP ${response.status} without a Location`)
+    }
+    const next = new URL(location, current)
+    if (!sameRedirectHost(origin, next)) {
+      throw new Error(`download ${name} redirected to ${next.host}, which is not the release host`)
+    }
+    current = next
+    if (hop === maxRedirects) {
+      throw new Error(`download ${name} redirected more than ${maxRedirects} times`)
+    }
+  }
   if (!response.ok) {
     throw new Error(`download ${name} returned HTTP ${response.status}`)
   }
