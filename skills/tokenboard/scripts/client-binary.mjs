@@ -12,6 +12,7 @@
 //   - the previous binary is kept until the new one has answered `version`.
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { scrubbedChildEnv } from './child-env.mjs'
 import {
   chmodSync,
   existsSync,
@@ -569,7 +570,10 @@ function runsVersion(path, spawn) {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
       maxBuffer: childOutputMaxBuffer,
-      timeout: versionProbeTimeoutMs
+      timeout: versionProbeTimeoutMs,
+      // The staged binary is a downloaded release artifact; it is probed before it is trusted,
+      // so it must not see the upload token either.
+      env: scrubbedChildEnv()
     })
     return !result.error && result.status === 0
   } catch {
@@ -587,7 +591,14 @@ function runsVersion(path, spawn) {
 export function readVersion(path, spawn = spawnSync, args = ['--version']) {
   let result
   try {
-    result = spawn(path, args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 5000 })
+    // The probed binary is third-party (ccusage) on the status path, so it must not inherit
+    // the upload token the way every other child of this skill is prevented from doing.
+    result = spawn(path, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 5000,
+      env: scrubbedChildEnv()
+    })
   } catch {
     return null
   }

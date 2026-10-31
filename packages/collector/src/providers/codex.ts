@@ -127,7 +127,8 @@ export async function collectCodexUsage(options: CollectCodexUsageOptions = {}):
     commandEnv.TOKENBOARD_PACKAGE_MANAGER,
     process.platform,
     existsSync,
-    commandEnv
+    commandEnv,
+    isHookMode(env)
   )
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const snapshots = await withCodexContextPricingRules(prepared.contextPricingRules, async () => {

@@ -55,7 +55,8 @@ export async function collectClaudeCodeUsage(options: CollectUsageOptions = {}):
     commandEnv.TOKENBOARD_PACKAGE_MANAGER,
     process.platform,
     existsSync,
-    commandEnv
+    commandEnv,
+    isHookMode(env)
   )
   const collectedAt = options.collectedAt ?? new Date().toISOString()
 

@@ -307,6 +307,26 @@ test('Windows scheduled commands escape percent specifiers', () => {
   assert.match(script, /PATH=.*C:\\Tools%%Bin/)
 })
 
+// cmd.exe expands `%` on every line of a batch file, not just inside `set`, so the command
+// line needs the same doubling. Measured on Windows: `echo [C:\Tools\100%node\node.exe]`
+// prints `[C:\Tools\100node\node.exe]` — the lone `%` is swallowed — while `100%%node` prints
+// `100%node`. Without this the task would point at a path that does not exist.
+test('Windows scheduled command line escapes percent in the node and script paths', () => {
+  const script = buildWindowsTaskScript({
+    nodePath: 'C:\\Tools\\100%node\\node.exe',
+    scriptPath: 'C:\\Users\\a%b\\TokenBoard\\sync.mjs',
+    packageManager: 'pnpm',
+    pathEnv: 'C:\\Windows\\System32',
+    homeDir: 'C:\\Users\\ab',
+    configDir: 'C:\\Users\\ab\\.tokenboard'
+  })
+
+  assert.match(
+    script,
+    /"C:\\Tools\\100%%node\\node\.exe" "C:\\Users\\a%%b\\TokenBoard\\sync\.mjs" --mode sync --scheduled/
+  )
+})
+
 // Inside `set "NAME=value"` every metacharacter except `%` is literal — measured
 // on a real Windows host: `set "V=Tom & Jerry"` keeps the `&`, while
 // `set "V=Tom ^& Jerry"` stores a literal caret. Escaping them inserted a caret
