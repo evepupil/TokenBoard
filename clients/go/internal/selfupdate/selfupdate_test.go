@@ -681,3 +681,35 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 		t.Errorf("stderr = %v, want a report of the ccusage left in place", lines)
 	}
 }
+
+// The staged binary is probed before it is trusted, so it must not see the upload token: a
+// tampered feed could answer `version` and read the credentials from its own environment. The
+// TS side scrubs this same probe (`client-binary.mjs` `runsVersion` → `scrubbedChildEnv`).
+func TestVerifyExecutableDoesNotHandCredentialsToTheStagedBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	envCapture := filepath.Join(dir, "staged-env")
+	staged := filepath.Join(dir, "tokenboard")
+	script := "#!/bin/sh\n" +
+		"printf '%s|%s|%s' \"$TOKENBOARD_UPLOAD_TOKEN\" \"$TOKENBOARD_PAIRING_CODE\" \"$TOKENBOARD_RELEASE_BASE_URL\" > '" + envCapture + "'\n" +
+		"echo \"tokenboard (go) 1.2.3\"\n"
+	if err := os.WriteFile(staged, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_secret")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_secret")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:pw@feed.example")
+
+	if err := verifyExecutable(staged, "1.2.3"); err != nil {
+		t.Fatalf("verifyExecutable: %v", err)
+	}
+	captured, err := os.ReadFile(envCapture)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	if string(captured) != "||" {
+		t.Errorf("staged binary saw credentials: %q, want all stripped", string(captured))
+	}
+}

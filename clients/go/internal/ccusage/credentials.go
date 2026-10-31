@@ -34,11 +34,15 @@ var credentialEnvKeys = map[string]bool{
 	"TOKENBOARD_REPO_URL":         true,
 }
 
-// scrubCredentialEnv returns env with credential-bearing entries removed. A nil
+// ScrubCredentialEnv returns env with credential-bearing entries removed. A nil
 // or empty env means "inherit the process environment", which is what
 // exec.Cmd does; that inherited environment is the one that carries the token,
 // so it is materialized here and scrubbed rather than left implicit.
-func scrubCredentialEnv(env []string) []string {
+//
+// Exported because selfupdate probes a freshly downloaded binary the same way:
+// any locally installed third-party executable must see the same scrubbed
+// environment, and one list is what keeps the two from drifting apart.
+func ScrubCredentialEnv(env []string) []string {
 	source := env
 	if len(source) == 0 {
 		source = os.Environ()
@@ -52,4 +56,10 @@ func scrubCredentialEnv(env []string) []string {
 		out = append(out, entry)
 	}
 	return out
+}
+
+// scrubCredentialEnv is the in-package spelling. Callers inside ccusage keep reading the same
+// way they did; the exported name is what selfupdate imports across the package boundary.
+func scrubCredentialEnv(env []string) []string {
+	return ScrubCredentialEnv(env)
 }

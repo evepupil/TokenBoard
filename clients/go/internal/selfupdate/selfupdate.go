@@ -434,6 +434,11 @@ func verifyExecutable(path, want string) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "version")
 	cmd.WaitDelay = versionProbeTimeout
+	// The staged binary is a freshly downloaded release artifact and is trusted only after this
+	// probe; the TS side scrubs the same probe (`runsVersion` → `scrubbedChildEnv`). If it were
+	// handed the inherited environment, a tampered feed could read the upload token (or the
+	// release feed's own `user:token@host`) by answering `version` and never touching a run path.
+	cmd.Env = ccusage.ScrubCredentialEnv(os.Environ())
 	output, err := cmd.Output()
 	if err != nil {
 		return err

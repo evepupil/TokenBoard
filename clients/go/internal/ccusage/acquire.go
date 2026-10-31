@@ -200,7 +200,13 @@ func binaryName(platform string) string {
 func probeVersion(path string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").Output()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	// The probe runs the same third-party binary the invocation path does, so it must be
+	// scrubbed the same way: a tampered ccusage could otherwise read the upload token from its
+	// own environment during `--version` and never touch the (correctly scrubbed) run path.
+	// `scrubCredentialEnv(nil)` materializes the inherited environment and strips the keys.
+	cmd.Env = scrubCredentialEnv(nil)
+	output, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}
