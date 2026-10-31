@@ -273,6 +273,44 @@ func TestParseSessionJSONLReportsMalformedNonEmptyRows(t *testing.T) {
 	}
 }
 
+// The TS parser runs every row through usageSnapshotSchema.parse, so a row the
+// contract rejects fails the whole source there. Without the same check here a
+// hook sync would keep a poisoned snapshot in its cursor and replay it into an
+// upload batch the server rejects as a whole.
+func TestParseSessionJSONLRejectsSnapshotsThatFailContractValidation(t *testing.T) {
+	input := ParseInput{
+		Source:      contract.SourceClaudeCode,
+		Timezone:    "Asia/Shanghai",
+		CollectedAt: "2026-10-30T00:00:00Z",
+		SessionID:   "session-1",
+	}
+	lines := []Line{{Text: `{"timestamp":"2026-10-30T08:00:00Z","message":{"model":"claude-sonnet-4","usage":{"input_tokens":10,"cache_read_input_tokens":500,"total_tokens":20,"cost_usd":0.01}}}`}}
+
+	_, err := Parse(input, lines)
+	if err == nil {
+		t.Fatal("Parse accepted a snapshot with cacheRead > total; usageSnapshotSchema rejects the same row")
+	}
+	want := "claude-code 2026-10-30 claude-sonnet-4: cacheReadTokens must not exceed totalTokens"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestParseSessionJSONLRejectsFractionalTokenCounts(t *testing.T) {
+	input := ParseInput{
+		Source:      contract.SourceClaudeCode,
+		Timezone:    "Asia/Shanghai",
+		CollectedAt: "2026-10-30T00:00:00Z",
+		SessionID:   "session-1",
+	}
+	lines := []Line{{Text: `{"timestamp":"2026-10-30T08:00:00Z","message":{"model":"claude-sonnet-4","usage":{"input_tokens":1.5,"output_tokens":2,"total_tokens":3.5,"cost_usd":0.01}}}`}}
+
+	_, err := Parse(input, lines)
+	if err == nil {
+		t.Fatal("Parse truncated a fractional token count; z.number().int() rejects it")
+	}
+}
+
 func TestParseSessionJSONLReportsInvalidTimezoneWithContext(t *testing.T) {
 	input := codexParseInput("codex-session")
 	input.Timezone = "Not/AZone"

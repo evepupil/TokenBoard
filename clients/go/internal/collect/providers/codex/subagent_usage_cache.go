@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/collate"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
@@ -627,7 +628,7 @@ func writeSubagentUsageCache(
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := renameAttributionCacheAtomic(tempPath, cachePath); err != nil {
+	if err := renameatomic.Rename(tempPath, cachePath); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}

@@ -59,6 +59,11 @@ describe('session cursor file identity', () => {
       })
 
       await writeFile(sessionFile, replacement)
+      // The rewrite keeps dev/ino/size, so only a timestamp can carry the
+      // change; push mtime forward so a coarse-clock filesystem (1 ms on some
+      // ext4 mounts) cannot hide it and make this depend on the host.
+      const forward = new Date(Date.now() + 2_000)
+      await utimes(sessionFile, forward, forward)
 
       await expect(readAllLines(changed.files[0])).rejects.toThrow('Session file changed while reading')
       expect(() => changed.commit()).toThrow('session cursor cannot commit after a changed file read failure')

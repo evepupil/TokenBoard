@@ -154,7 +154,14 @@ for (const unsafe of [
   })
 }
 
-for (const safe of ['/home/tokenboard/.tokenboard', '/home/tokenboard/.tokenboard-work']) {
+for (const safe of [
+  '/home/tokenboard/.tokenboard',
+  '/home/tokenboard/.tokenboard-work',
+  // A user whose home is `/root` installs into `/root/.tokenboard`: two segments, but
+  // still the tool's own directory. The old three-segment minimum refused it, so
+  // `sudo` installs could not be uninstalled at all.
+  '/root/.tokenboard'
+]) {
   test(`still removes the tool's own config dir: ${safe}`, () => {
     const harness = createHarness()
 
@@ -433,6 +440,10 @@ function createHarness() {
       deviceLinkPath: '/home/tokenboard/.tokenboard/device-link.json',
       fallbackCwd: '/home/tokenboard',
       homeDir: '/home/tokenboard',
+      // The seeded paths above are POSIX, so the guard must resolve them with the
+      // POSIX path API regardless of the host. The Windows-specific tests pass
+      // `platform: 'win32'` alongside Windows-style paths of their own.
+      platform: 'linux',
       log: () => {},
       exists: (path) => existingPaths.has(path),
       rm: (path) => {

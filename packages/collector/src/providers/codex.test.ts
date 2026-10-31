@@ -140,6 +140,76 @@ describe('collectCodexUsage', () => {
     }
   })
 
+  // The warning must track the cost that actually shipped, not the override set: ccusage prices
+  // from its own catalogue, so an unpriced-by-TokenBoard model normally still has a real cost.
+  test('stays quiet about models ccusage priced itself', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    try {
+      await collectCodexUsage({
+        codexHome,
+        timezone: 'UTC',
+        env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+        stderr: (line) => stderr.push(line),
+        async runner(_command, args) {
+          if (args.includes('session')) return { data: [] }
+          return {
+            data: [
+              {
+                date: '2026-04-28',
+                models: ['ccusage-priced-model'],
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+                costUSD: 0.25
+              }
+            ]
+          }
+        }
+      })
+
+      expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  test('still warns when a model came back with no cost at all', async () => {
+    const codexHome = await createEmptyCodexHome()
+    const stderr: string[] = []
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    try {
+      await collectCodexUsage({
+        codexHome,
+        timezone: 'UTC',
+        env: { TOKENBOARD_ENDPOINT: '', TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' },
+        stderr: (line) => stderr.push(line),
+        async runner(_command, args) {
+          if (args.includes('session')) return { data: [] }
+          return {
+            data: [
+              {
+                date: '2026-04-28',
+                models: ['self-hosted-alias'],
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12,
+                costUSD: 0
+              }
+            ]
+          }
+        }
+      })
+
+      expect(stderr.filter((line) => line.includes('model pricing unavailable'))).toEqual([
+        'TokenBoard model pricing unavailable for Codex model self-hosted-alias; preserving collected result'
+      ])
+    } finally {
+      await rm(codexHome, { recursive: true, force: true })
+    }
+  })
+
   test('keeps context pricing attribution separate for duplicate session paths across Codex homes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-duplicate-profile-pricing-'))
     const firstHome = join(root, 'first')
@@ -294,14 +364,14 @@ describe('collectCodexUsage', () => {
           usageDate: '2026-05-20',
           model: 'deepseek-v4-flash',
           totalTokens: 10,
-          costUsd: expect.closeTo(0.001 - (20 * 5) / 1_000_000, 12),
+          costUsd: expect.closeTo(0.001 - (20 * 4) / 1_000_000, 12),
           sessionCount: 1
         }),
         expect.objectContaining({
           usageDate: '2026-05-20',
           model: 'gpt-5.6-sol',
           totalTokens: 20,
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 12),
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 12),
           sessionCount: 0
         })
       ])
@@ -410,8 +480,8 @@ describe('collectCodexUsage', () => {
       // non-context model, so they are moved out of that row: the context model carries them in
       // ccusage's additive shape (100 uncached + 100 cached), and the non-context row keeps the
       // remaining 300 it was measured with. It is not corrected to zero, so it carries no flag.
-      // The cost splits the same way: 0.00055 of the row's 0.001 is context-priced (100 input at
-      // 5/M + 100 cached at 0.5/M) and moves with the tokens, leaving 0.00045 behind — the day
+      // The cost splits the same way: 0.00044 of the row's 0.001 is context-priced (100 input at
+      // 4/M + 100 cached at 0.4/M) and moves with the tokens, leaving 0.00056 behind — the day
       // total is conserved, and no floor warning applies.
       expect(snapshots).toEqual([
         expect.objectContaining({
@@ -420,7 +490,7 @@ describe('collectCodexUsage', () => {
           totalTokens: 300,
           inputTokens: 0,
           cacheReadTokens: 300,
-          costUsd: 0.00045
+          costUsd: expect.closeTo(0.00056, 12)
         }),
         expect.objectContaining({
           usageDate: '2026-05-20',
@@ -428,7 +498,7 @@ describe('collectCodexUsage', () => {
           totalTokens: 200,
           inputTokens: 100,
           cacheReadTokens: 100,
-          costUsd: 0.00055
+          costUsd: expect.closeTo(0.00044, 12)
         })
       ])
       expect(errors.filter((line) => line.includes('floored'))).toEqual([])
@@ -505,7 +575,7 @@ describe('collectCodexUsage', () => {
       // 10 tokens stay with the canonical model; the 20 that belong to the context model move to
       // it at context pricing. The canonical row keeps the 10 and floors its cost at zero rather
       // than going negative, because 20 context-priced tokens cost more than the row held. The
-      // context row carries its full 20-token price, 20 × 5/M = 0.0001.
+      // context row carries its full 20-token price, 20 × 4/M = 0.00008.
       expect(snapshots).toEqual([
         expect.objectContaining({
           usageDate: '2026-05-20',
@@ -517,16 +587,16 @@ describe('collectCodexUsage', () => {
           usageDate: '2026-05-20',
           model: 'gpt-5.6-sol',
           totalTokens: 20,
-          costUsd: 0.0001
+          costUsd: expect.closeTo(0.00008, 12)
         })
       ])
 
-      // The floor breaks the day's cost conservation — the 0.00009 by which the attributed share
+      // The floor breaks the day's cost conservation — the 0.00007 by which the attributed share
       // exceeded the row could not be deducted — so it must be announced with those figures
       // rather than silently absorbed. Sub-micro amounts must stay readable: toFixed(6) would
       // have printed the whole message as zeros.
       expect(errors).toContainEqual(
-        "Codex context pricing floored deepseek-v4-flash cost to 0 for 2026-05-20: this row's attributed context-priced share (0.0001) exceeded its canonical total (0.00001); 0.00009 of this row's share could not be deducted"
+        "Codex context pricing floored deepseek-v4-flash cost to 0 for 2026-05-20: this row's attributed context-priced share (0.00008) exceeded its canonical total (0.00001); 0.00007 of this row's share could not be deducted"
       )
     } finally {
       await rm(codexHome, { recursive: true, force: true })
@@ -822,7 +892,7 @@ describe('collectCodexUsage', () => {
           expect.objectContaining({
             model: 'gpt-5.6-sol',
             totalTokens: 60,
-            costUsd: expect.closeTo((60 * 5) / 1_000_000, 12),
+            costUsd: expect.closeTo((60 * 4) / 1_000_000, 12),
             sessionCount: 0
           })
         ])
@@ -897,13 +967,13 @@ describe('collectCodexUsage', () => {
           expect.objectContaining({
             model: 'deepseek-v4-flash',
             totalTokens: 10,
-            costUsd: expect.closeTo(0.00295, 12),
+            costUsd: expect.closeTo(0.00296, 12),
             sessionCount: 1
           }),
           expect.objectContaining({
             model: 'gpt-5.6-sol',
             totalTokens: 30,
-            costUsd: expect.closeTo((30 * 5) / 1_000_000, 12),
+            costUsd: expect.closeTo((30 * 4) / 1_000_000, 12),
             sessionCount: 1
           })
         ])
@@ -970,14 +1040,14 @@ describe('collectCodexUsage', () => {
           model: 'deepseek-v4-flash',
           totalTokens: 0,
           correction: 'codex-context-pricing',
-          costUsd: expect.closeTo(0.001 - (20 * 5) / 1_000_000, 12),
+          costUsd: expect.closeTo(0.001 - (20 * 4) / 1_000_000, 12),
           sessionCount: 1
         }),
         expect.objectContaining({
           usageDate: '2026-05-20',
           model: 'gpt-5.6-sol',
           totalTokens: 20,
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 12),
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 12),
           sessionCount: 0
         })
       ])
@@ -1032,7 +1102,7 @@ describe('collectCodexUsage', () => {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
           totalTokens: 10,
-          costUsd: expect.closeTo((10 * 5) / 1_000_000, 12)
+          costUsd: expect.closeTo((10 * 4) / 1_000_000, 12)
         })
       ])
     } finally {
@@ -1184,7 +1254,7 @@ describe('collectCodexUsage', () => {
           usageDate: '2026-05-20',
           model: 'gpt-5.6-sol',
           totalTokens: 10,
-          costUsd: expect.closeTo((10 * 5) / 1_000_000, 12)
+          costUsd: expect.closeTo((10 * 4) / 1_000_000, 12)
         })
       ])
     } finally {

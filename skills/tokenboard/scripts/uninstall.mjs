@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative, resolve, win32 as windowsPath } from 'node:path'
+import { posix, win32 as windowsPath } from 'node:path'
 import { isMainModule } from './is-main.mjs'
 import { collectorDir, configDir, configPath, parseArgs } from './config.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
@@ -125,7 +125,10 @@ function leaveDirectoryBeforeRemove(runtime, targetPath) {
 }
 
 function isInsidePath(candidatePath, targetPath, platform = process.platform) {
-  const pathApi = platform === 'win32' ? windowsPath : { relative, resolve, sep: '/' }
+  // The POSIX branch must be the POSIX implementation, not the host's: a test (or a
+  // Windows host simulating a Linux install) passes POSIX paths with `platform: 'linux'`,
+  // and the host `resolve`/`relative` would rewrite them as win32 paths and misjudge.
+  const pathApi = platform === 'win32' ? windowsPath : posix
   const resolvedTarget = pathApi.resolve(targetPath)
   const resolvedCandidate = pathApi.resolve(candidatePath)
   if (platform === 'win32' && !sameWindowsRoot(resolvedTarget, resolvedCandidate)) {
@@ -143,7 +146,7 @@ function sameWindowsRoot(leftPath, rightPath) {
 }
 
 function samePath(leftPath, rightPath, platform = process.platform) {
-  const pathApi = platform === 'win32' ? windowsPath : { resolve }
+  const pathApi = platform === 'win32' ? windowsPath : posix
   const normalize = (value) => {
     const resolved = pathApi.resolve(String(value))
     return platform === 'win32' ? resolved.toLowerCase() : resolved
@@ -181,16 +184,19 @@ if (isMainModule(import.meta.url)) {
 // second install. Matching that namespaced prefix — rather than merely "a dot-directory" — is
 // what keeps the recursive delete from following a stray `TOKENBOARD_CONFIG_DIR` into `~/.ssh`,
 // `~/.aws`, `~/.claude`, `~/.config`, or any other dot-directory the user owns but this tool
-// never created. Requiring at least three path segments additionally rejects a filesystem root,
-// a bare relative name, and a top-level directory. The other installers do not validate this
-// themselves, so the guard belongs here, where the deletion happens.
+// never created. Requiring an absolute path with at least two segments additionally rejects a
+// filesystem root, a bare relative name, and a top-level directory; a two-segment absolute path
+// like `/root/.tokenboard` is the legitimate install of a user whose home is `/root`. The other
+// installers do not validate this themselves, so the guard belongs here, where the deletion
+// happens.
 function assertRemovableConfigDir(runtime) {
   const target = String(runtime.configDir)
+  const pathApi = runtime.platform === 'win32' ? windowsPath : posix
   const trimmed = target.replace(/[\\/]+$/, '')
   const segments = trimmed.split(/[\\/]+/).filter(Boolean)
   const basename = (segments.at(-1) ?? '').toLowerCase()
   const isTokenboardDir = basename === '.tokenboard' || basename.startsWith('.tokenboard-')
-  if (!isTokenboardDir || segments.length < 3) {
+  if (!isTokenboardDir || segments.length < 2 || !pathApi.isAbsolute(target)) {
     throw new Error(
       `Refusing to remove ${target}: the TokenBoard config directory must be the tool's own ~/.tokenboard (or a ~/.tokenboard-* variant), not a home directory, filesystem root, or another dot-directory. Remove it by hand if that is really what you want.`
     )
@@ -211,7 +217,7 @@ function assertRemovableConfigDir(runtime) {
 // markers only because the repo really was cloned into the user's home.
 function assertRemovableCollectorDir(runtime) {
   const target = String(runtime.collectorDir)
-  const pathApi = runtime.platform === 'win32' ? windowsPath : { join, resolve }
+  const pathApi = runtime.platform === 'win32' ? windowsPath : posix
   const resolvedTarget = pathApi.resolve(target)
   const segments = resolvedTarget.split(/[\\/]+/).filter(Boolean)
   const isHome = samePath(resolvedTarget, runtime.homeDir, runtime.platform)

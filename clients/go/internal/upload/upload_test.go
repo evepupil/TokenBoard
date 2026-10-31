@@ -489,6 +489,28 @@ func TestLoadBackoffRequiresBothTypedFields(t *testing.T) {
 	}
 }
 
+// A corrupted count must not wrap negative and disable the pause forever:
+// converting an out-of-range float to int is implementation-defined in Go and
+// lands on a negative value on amd64/arm64. Any value at or past the threshold
+// keeps pausing; a negative one restarts from zero like a discarded record.
+func TestLoadBackoffClampsOutOfRangeFailureCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "upload-backoff.json")
+	write := func(content string) {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"consecutiveFailures":1e30,"lastErrorSummary":"boom"}`)
+	if state := LoadBackoff(dir); state == nil || state.ConsecutiveFailures < uploadFailurePauseThreshold {
+		t.Fatalf("a huge count must stay at or above the pause threshold: %+v", state)
+	}
+	write(`{"consecutiveFailures":-7,"lastErrorSummary":"boom"}`)
+	if state := LoadBackoff(dir); state == nil || state.ConsecutiveFailures < 0 {
+		t.Fatalf("a negative count must clamp to zero: %+v", state)
+	}
+}
+
 // Summarize reduces URLs to their origin before persisting: the backoff file
 // outlives the request and a transport error may embed query parameters.
 func TestSummarizeRedactsURLs(t *testing.T) {
@@ -537,5 +559,117 @@ func TestRecordFailureReportsAWriteFailure(t *testing.T) {
 	}
 	if _, err := RecordFailure(blocked, os.ErrPermission, time.Now()); err == nil {
 		t.Fatal("a write failure must be reported, not swallowed")
+	}
+}
+
+// The server rejects a whole batch when any snapshot's usageDate falls outside
+// [2023-01-01, today+1], and the client cannot retry its way out of that: the date is a
+// property of the row, not of the request. Left in, one such row fails its batch on every
+// run and five consecutive non-transient failures pause uploads for 24 hours.
+func TestUploadSnapshotsDropsOutOfWindowDatesBeforeSending(t *testing.T) {
+	var posted []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if snapshots, ok := body["snapshots"].([]any); ok && len(snapshots) > 0 {
+			posted = append(posted, body)
+		}
+		if r.URL.Path == "/check" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"existing": []any{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"upserted": 1})
+	}))
+	defer server.Close()
+
+	good := baseSnapshot("gpt-5", 17)
+	tooOld := baseSnapshot("gpt-5", 18)
+	tooOld.UsageDate = "2022-12-31"
+	tooFuture := baseSnapshot("gpt-5", 19)
+	tooFuture.UsageDate = "2099-01-01"
+
+	config := testConfig(server.URL)
+	config.Now = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	result, err := UploadSnapshots(t.Context(), config, []contract.Snapshot{good, tooOld, tooFuture}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RejectedUsageDates != 2 {
+		t.Fatalf("RejectedUsageDates = %d, want 2", result.RejectedUsageDates)
+	}
+	// The TS uploader names each dropped row so the operator can find it; the
+	// count alone leaves them guessing which date was wrong.
+	if len(result.Rejected) != 2 {
+		t.Fatalf("Rejected = %+v, want both dropped rows", result.Rejected)
+	}
+	if result.Rejected[0].Issue != "before-history-window" || result.Rejected[1].Issue != "too-far-future" {
+		t.Fatalf("Rejected issues = %q, %q", result.Rejected[0].Issue, result.Rejected[1].Issue)
+	}
+	if result.Rejected[0].Snapshot.UsageDate != "2022-12-31" || result.Rejected[1].Snapshot.UsageDate != "2099-01-01" {
+		t.Fatalf("Rejected dates = %q, %q", result.Rejected[0].Snapshot.UsageDate, result.Rejected[1].Snapshot.UsageDate)
+	}
+	if len(posted) != 1 {
+		t.Fatalf("posted batches = %d, want exactly one carrying the good row", len(posted))
+	}
+	snapshots, _ := posted[0]["snapshots"].([]any)
+	if len(snapshots) != 1 {
+		t.Fatalf("posted snapshots = %d, want 1", len(snapshots))
+	}
+}
+
+// A run whose every snapshot is out of window must not post the empty batch: unlike a
+// genuinely empty run, this one had rows and the count already says what happened.
+func TestUploadSnapshotsSendsNothingWhenEveryDateIsOutOfWindow(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(map[string]any{"upserted": 0})
+	}))
+	defer server.Close()
+
+	stale := baseSnapshot("gpt-5", 17)
+	stale.UsageDate = "2022-06-15"
+
+	config := testConfig(server.URL)
+	config.Now = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	result, err := UploadSnapshots(t.Context(), config, []contract.Snapshot{stale}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want none", requests)
+	}
+	if result.RejectedUsageDates != 1 {
+		t.Fatalf("RejectedUsageDates = %d, want 1", result.RejectedUsageDates)
+	}
+}
+
+// The upload carries the bearer token, and Go's redirect policy only drops the
+// Authorization header when the host changes — a same-host redirect to another port keeps
+// it, handing the credential to whatever listens there. The pricing fetcher already refuses
+// redirects; upload must too.
+func TestUploadRefusesRedirectsRatherThanForwardingTheToken(t *testing.T) {
+	var leaked string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(map[string]any{"upserted": 0})
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Same host (127.0.0.1), different port: exactly the case Go keeps the header on.
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	_, err := UploadSnapshots(t.Context(), testConfig(source.URL), nil, source.Client())
+	if err == nil {
+		t.Fatal("a redirect must be reported, not followed")
+	}
+	if !strings.Contains(err.Error(), "307") && !strings.Contains(err.Error(), "308") {
+		t.Fatalf("err = %v, want the redirect status named", err)
+	}
+	if leaked != "" {
+		t.Fatalf("redirect target received Authorization=%q; the token must never cross a redirect", leaked)
 	}
 }

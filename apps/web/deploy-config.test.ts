@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -161,6 +162,26 @@ describe('Wrangler deploy config', () => {
     expect(routeCheckScript).toContain('Cloudflare zone preflight')
     expect(routeCheckScript).toContain('oauth_token')
     expect(routeCheckScript).toContain('CLOUDFLARE_API_TOKEN')
+  })
+
+  // A declined "About to apply N migration(s)" prompt makes `migrations apply` exit 0 with
+  // nothing applied, and a pure-data migration leaves every schema gate green — so the deploy
+  // would publish a Worker against an unmigrated database. The re-list after apply is what
+  // closes that gap, and it must sit between the apply and the Worker publish.
+  test('manual production deploy re-lists migrations after applying and before publishing', () => {
+    const deployScript = readPackageFile('scripts/deploy.mjs')
+    // Whitespace-normalized: the listing call is a multi-line argument array, and the assertion
+    // is about which command runs and where, not how the line breaks.
+    const compactScript = deployScript.replace(/\s+/g, ' ')
+    const applyIndex = deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
+    const verifyIndex = deployScript.indexOf('assertNoPendingMigrations(configPath)')
+    const publishIndex = deployScript.indexOf("runPnpm(['exec', 'wrangler', 'deploy', '--config', configPath])")
+
+    expect(applyIndex).toBeGreaterThan(-1)
+    expect(verifyIndex).toBeGreaterThan(applyIndex)
+    expect(publishIndex).toBeGreaterThan(verifyIndex)
+    expect(compactScript).toContain("'d1', 'migrations', 'list', 'DB', '--remote', '--config', configPath")
+    expect(deployScript).toContain('No migrations to apply')
   })
 
   test('critical production schema check covers device identity and legacy upload tokens', () => {
@@ -915,7 +936,8 @@ describe('Wrangler deploy config', () => {
     try {
       for (const [name, message] of [
         ['BETTER_AUTH_SECRET', 'vars.BETTER_AUTH_SECRET'],
-        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY']
+        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY'],
+        ['GITHUB_CLIENT_SECRET', 'vars.GITHUB_CLIENT_SECRET']
       ]) {
         const outputFile = join(tempDir, `wrangler.production.${name}.jsonc`)
         const content = filledProductionExample().replace(
@@ -963,7 +985,17 @@ describe('Wrangler deploy config', () => {
         resolve(packageDir, 'wrangler.production.example.jsonc'),
         join(tempDir, 'wrangler.production.example.jsonc')
       )
-      writeFileSync(pnpmStub, 'process.exit(0)\n')
+      // The deploy re-lists migrations after applying them and treats an unreadable listing as
+      // pending (fail-closed), so the stub has to answer the `migrations list` call with the
+      // same clean-state line wrangler prints; every other command still exits 0 silently.
+      writeFileSync(
+        pnpmStub,
+        [
+          'const argv = process.argv.slice(2)',
+          "if (argv.includes('migrations') && argv.includes('list')) console.log('✅ No migrations to apply!')",
+          'process.exit(0)'
+        ].join('\n') + '\n'
+      )
 
       const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
         cwd: tempDir,
@@ -1006,6 +1038,59 @@ describe('Wrangler deploy config', () => {
       expect(generated).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "12"')
       expect(generated).toContain('"database_id": "11111111-1111-4111-8111-111111111111"')
       expect(result.stderr).toBe('')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  // pnpm's standalone install sets `npm_execpath` to an executable binary, not a JS file.
+  // Wrapping that in `node` dies on its first byte, which is what a real deploy hit. The
+  // distinction has to be by file type, so this stub is a shell script: an executable that
+  // Node cannot parse.
+  test('deploy spawns an executable npm_execpath directly instead of feeding it to Node', () => {
+    if (process.platform === 'win32') return
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-pnpm-bin-'))
+    const scriptDir = join(tempDir, 'scripts')
+
+    try {
+      mkdirSync(scriptDir)
+      copyFileSync(resolve(packageDir, 'scripts/deploy.mjs'), join(scriptDir, 'deploy.mjs'))
+      copyFileSync(
+        resolve(packageDir, 'scripts/write-production-config.mjs'),
+        join(scriptDir, 'write-production-config.mjs')
+      )
+      copyFileSync(
+        resolve(packageDir, 'wrangler.production.example.jsonc'),
+        join(tempDir, 'wrangler.production.example.jsonc')
+      )
+      writeFileSync(join(scriptDir, 'check-production-config.mjs'), 'process.exit(0)\n')
+      writeFileSync(join(scriptDir, 'check-production-route.mjs'), 'process.exit(0)\n')
+
+      const shellStub = join(tempDir, 'pnpm-executable')
+      writeFileSync(
+        shellStub,
+        ['#!/bin/sh', 'case "$*" in *"migrations list"*) echo "✅ No migrations to apply!" ;; esac', 'exit 0', ''].join(
+          '\n'
+        )
+      )
+      chmodSync(shellStub, 0o755)
+
+      const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
+        cwd: tempDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_PNPM_CLI: shellStub,
+          TOKENBOARD_WORKER_ROUTE: 'tokenboard.example.com',
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_COLLECTOR_REPO_URL: 'https://github.com/MisonL/TokenBoard.git',
+          TOKENBOARD_COLLECTOR_REF: 'master',
+          D1_DATABASE_ID: '11111111-1111-4111-8111-111111111111'
+        }
+      })
+
+      expect(result.status, result.stderr || result.stdout).toBe(0)
+      expect(result.stderr).not.toContain('SyntaxError')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }

@@ -48,6 +48,27 @@ describe('resolvePackageRunner', () => {
     ).toEqual([expectedCcusagePackageSpecifier, 'daily', '--json', '--config', packageConfigPath()])
   })
 
+  // A hook runs inside the editor lifecycle and must not reach the network. The local binary
+  // check above would have covered the normal install; reaching here means none exists, so the
+  // runner must refuse the `npx`/`pnpm dlx` fallback that would fetch one mid-session. The Go
+  // client refuses the same way in hook mode (`ccusage/acquire.go`).
+  test('hook mode refuses to fall back to a network package runner', () => {
+    vi.stubEnv('TOKENBOARD_PACKAGE_MANAGER', '')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '')
+    vi.stubEnv('TOKENBOARD_CCUSAGE_BIN', '')
+
+    expect(() => resolvePackageRunner(undefined, 'linux', () => false, {}, true)).toThrow(
+      'hook mode does not download it'
+    )
+  })
+
+  test('hook mode honors an explicit operator forced package runner', () => {
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '')
+    expect(() =>
+      resolvePackageRunner(undefined, 'linux', () => false, { TOKENBOARD_FORCE_PACKAGE_RUNNER: '1' }, true)
+    ).not.toThrow()
+  })
+
   test('prefers the generated dynamic pricing configuration over the static override', () => {
     const dynamicPath = '/tmp/tokenboard/ccusage.dynamic.json'
     const runner = resolvePackageRunner('', process.platform, (path) => path === dynamicPath, {

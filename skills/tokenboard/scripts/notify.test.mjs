@@ -11,6 +11,7 @@ import {
   defaultNotifyCooldownMs,
   executeTokenBoardSync,
   readNotifyCooldownMs,
+  readNotifyWorkerErrors,
   releaseDispatchLock,
   runNotify,
   runNotifyCli
@@ -110,17 +111,52 @@ test('notify leaves queued work intact when cooldown configuration is invalid', 
 })
 
 test('notify CLI reports an unrecovered coordinator error', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-'))
   const errors = []
-  const exitCode = await runNotifyCli({
-    env: { TOKENBOARD_CONFIG_DIR: '/state', TOKENBOARD_STATE_DIR: '/state' },
-    readConfig: () => ({ updatedAt: 'test-version' }),
-    configDir: () => '/state',
-    error: (message) => errors.push(message),
-    runNotify: () => ({ error: 'Invalid TokenBoard signal recovery journal', trailingScheduled: false })
-  })
+  try {
+    const exitCode = await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: (message) => errors.push(message),
+      runNotify: () => ({ error: 'Invalid TokenBoard signal recovery journal', trailingScheduled: false })
+    })
 
-  assert.equal(exitCode, 1)
-  assert.deepEqual(errors, ['Invalid TokenBoard signal recovery journal'])
+    assert.equal(exitCode, 1)
+    assert.deepEqual(errors, ['Invalid TokenBoard signal recovery journal'])
+    // The hook handler spawns this process with stdio ignored, so the fatal
+    // message also lands in the state directory where status.mjs can read it.
+    const recorded = readNotifyWorkerErrors(root)
+    assert.equal(recorded.length, 1)
+    assert.equal(recorded[0].message, 'Invalid TokenBoard signal recovery journal')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// A detached worker's failure must not write a credential-bearing URL or token
+// into a file that outlives the process.
+test('the worker error log redacts credentials', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-redact-'))
+  try {
+    await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: () => {},
+      runNotify: () => ({
+        error: 'POST https://user:tb_upload_secret@host.example/ingest failed',
+        trailingScheduled: false
+      })
+    })
+
+    const raw = await readFile(join(root, 'notify-worker-errors.log'), 'utf8')
+    assert.doesNotMatch(raw, /tb_upload_secret/)
+    assert.doesNotMatch(raw, /user:/)
+    assert.match(raw, /https:\/\/host\.example\/ingest/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('notify CLI preserves and reports a malformed recovery journal', async () => {
@@ -180,6 +216,26 @@ test('notify passes the coordinator lock token to its child sync', () => {
   assert.equal(invocation.options.env.TOKENBOARD_COORDINATOR_LOCK_HELD, '1')
   assert.equal(invocation.options.env.TOKENBOARD_COORDINATOR_LOCK_TOKEN, 'coordinator-token')
   assert.equal(invocation.options.env.TOKENBOARD_STATE_DIR, '/state')
+})
+
+// The hook child's whole stdout/stderr are captured to build the failure message, and Node's
+// default maxBuffer (1 MiB) is smaller than a diagnostic-heavy run prints. An ENOBUFS kill
+// mid-run would be indistinguishable from a real sync failure and would repeat deterministically
+// on every retry of the same hook event — so the capture needs the explicit headroom every
+// other spawn in the skill sets.
+test('notify bounds the hook child capture with an explicit maxBuffer', () => {
+  let options
+  executeTokenBoardSync('codex', {
+    syncScriptPath: '/repo/sync.mjs',
+    env: {},
+    lockToken: 'coordinator-token',
+    spawn: (command, args, opts) => {
+      options = opts
+      return { status: 0 }
+    }
+  })
+
+  assert.equal(options.maxBuffer, 64 * 1024 * 1024)
 })
 
 test('notify carries the sync phase timings back to the coordinator', () => {

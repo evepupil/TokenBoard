@@ -51,4 +51,35 @@ describe('public card preview route', () => {
     expect(svg).toContain('Public &quot;preview&quot;')
     expect(svg).not.toContain('<script>')
   })
+
+  test('rejects a non-string display name instead of coercing it', async () => {
+    const context = {
+      env: { DB: {} },
+      req: {
+        json: vi.fn(async () => ({ displayName: { nested: true } }))
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+    mockedRequireSessionUser.mockResolvedValue({ id: 'user_1' } as never)
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } })
+  })
+
+  test('rejects a body whose config is not an object', async () => {
+    const context = {
+      env: { DB: {} },
+      req: {
+        json: vi.fn(async () => ({ config: 'not-an-object' }))
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+    mockedRequireSessionUser.mockResolvedValue({ id: 'user_1' } as never)
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(400)
+  })
 })

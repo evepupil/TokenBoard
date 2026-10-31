@@ -55,7 +55,8 @@ export async function collectClaudeCodeUsage(options: CollectUsageOptions = {}):
     commandEnv.TOKENBOARD_PACKAGE_MANAGER,
     process.platform,
     existsSync,
-    commandEnv
+    commandEnv,
+    isHookMode(env)
   )
   const collectedAt = options.collectedAt ?? new Date().toISOString()
 
@@ -225,6 +226,11 @@ function readPackageCommandRetries(env: NodeJS.ProcessEnv = process.env) {
   return DEFAULT_PACKAGE_COMMAND_RETRIES
 }
 
+// A model missing from the TokenBoard override set is not by itself a problem: ccusage prices
+// it from its own builtin catalogue and the cost arrives with the snapshot. Warning on the
+// override set alone buried the log (43-44 models per run, all priced, 1666 lines in one week
+// of this machine's rotated stderr). Only a model that came back with zero cost — and real
+// usage, so a zero-token row is not confused with a free tier — is worth a line.
 function reportUnpricedClaudeSnapshots(
   snapshots: readonly UsageSnapshot[],
   coveredModelIds: ReadonlySet<string>,
@@ -233,6 +239,7 @@ function reportUnpricedClaudeSnapshots(
   const models = new Set(
     snapshots
       .filter((snapshot) => snapshot.source === 'claude-code' && snapshot.totalTokens > 0)
+      .filter((snapshot) => !(snapshot.costUsd > 0))
       .map((snapshot) => snapshot.model)
       .filter((model) => !coveredModelIds.has(model))
   )

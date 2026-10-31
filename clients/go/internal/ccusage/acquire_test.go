@@ -399,3 +399,45 @@ func TestResolveFallsBackToTheDefaultHomeCopy(t *testing.T) {
 		t.Errorf("binary = %+v, want %s", binary, legacy)
 	}
 }
+
+// The version probe runs the same third-party binary the invocation path does, so it must carry
+// the same scrubbed environment. A tampered ccusage that only answered `--version` — the path
+// that runs on every resolve — would otherwise still read the upload token from its environment.
+func TestResolveProbesVersionWithoutCredentials(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	probed := filepath.Join(dir, "ccusage")
+	envCapture := filepath.Join(dir, "child-env")
+	script := "#!/bin/sh\n" +
+		"printf '%s' \"$TOKENBOARD_UPLOAD_TOKEN|$TOKENBOARD_PAIRING_CODE\" > '" + envCapture + "'\n" +
+		"echo 'ccusage 20.0.33'\n"
+	if err := os.WriteFile(probed, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_secret")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_secret")
+
+	binary, err := Resolve(AcquireOptions{
+		Env:        acquireEnv(nil),
+		HomeDir:    t.TempDir(),
+		FileExists: func(string) bool { return false },
+		LookPath:   func(string) (string, error) { return probed, nil },
+		Stderr:     func(string) {},
+		Version:    "0.0.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binary.Path != probed {
+		t.Fatalf("binary = %+v, want the PATH layer", binary)
+	}
+	captured, err := os.ReadFile(envCapture)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	if string(captured) != "|" {
+		t.Errorf("child saw credentials: %q, want both stripped", string(captured))
+	}
+}

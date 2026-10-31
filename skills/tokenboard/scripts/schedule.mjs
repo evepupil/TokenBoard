@@ -74,7 +74,13 @@ export function buildWindowsTaskScript({ nodePath, scriptPath, packageManager, p
   // No --source here: sync.mjs resolves it at run time from config.source (default
   // 'all'), the same value status.mjs reads, so editing the config retargets the
   // scheduled sync without regenerating the task.
-  const syncCommand = `${quoteWindowsArg(nodePath)} ${quoteWindowsArg(scriptPath)} --mode sync --scheduled`
+  //
+  // `%` is expanded by cmd.exe on every line of a batch file, not only inside `set`, so the
+  // command line needs the same doubling the variable assignments get. Measured: a line
+  // `echo [C:\Tools\100%node\node.exe]` prints `[C:\Tools\100node\node.exe]` — the unmatched
+  // `%` is swallowed — while `100%%node` prints `100%node`. A checkout under a `%` path would
+  // otherwise point the task at a file that does not exist.
+  const syncCommand = `${quoteWindowsArg(escapeWindowsCmdValue(nodePath))} ${quoteWindowsArg(escapeWindowsCmdValue(scriptPath))} --mode sync --scheduled`
   return [
     '@echo off',
     `set "TOKENBOARD_CONFIG_DIR=${escapeWindowsCmdValue(stateDir)}"`,
@@ -335,12 +341,11 @@ function quoteWindowsArg(value) {
   return `"${String(value)}"`
 }
 
+// Only `%` needs escaping inside `set "NAME=value"`. Every other cmd
+// metacharacter is literal there — measured on Windows: `set "V=Tom & Jerry"`
+// keeps the `&`, and `set "V=Tom ^& Jerry"` stores a literal caret — so
+// escaping them would write a caret the value never had and point the variable
+// at a path that does not exist.
 function escapeWindowsCmdValue(value) {
-  return String(value)
-    .replaceAll('%', '%%')
-    .replaceAll('^', '^^')
-    .replaceAll('&', '^&')
-    .replaceAll('|', '^|')
-    .replaceAll('<', '^<')
-    .replaceAll('>', '^>')
+  return String(value).replaceAll('%', '%%')
 }

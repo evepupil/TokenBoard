@@ -1350,7 +1350,11 @@ test('coordinator still fails closed when lock release fails after a checkpoint 
 // absolute local paths and collector diagnostics. The scheduled path happens to be shielded
 // by the plist's `Umask 63`, which is a property of that launcher rather than of this code,
 // and the hook path runs from an interactive shell where the umask is typically 022.
-test('coordinator writes its run logs private regardless of umask', () => {
+// Windows has no POSIX mode bits: mkdir's `mode` is ignored and stat reports the
+// synthetic 0o666/0o444 set, so there is nothing to assert here. The same guard
+// pattern covers the equivalent permission tests in config.test.mjs. Windows
+// state-directory privacy is inherited from the user profile ACL instead.
+test('coordinator writes its run logs private regardless of umask', { skip: process.platform === 'win32' }, () => {
   // A directory that does not exist yet, so this exercises the modes the coordinator
   // chooses. `mkdtempSync` would hand back an already-private directory and hide them.
   const parent = mkdtempSync(join(tmpdir(), 'tokenboard-run-log-mode-'))
@@ -1385,7 +1389,7 @@ test('coordinator writes its run logs private regardless of umask', () => {
 // `mkdir(..., { mode })` does not touch the mode of a directory that already exists. The
 // coordinator therefore has to chmod it, or the state directory stays world-listable under the
 // usual 022 umask.
-test('coordinator tightens an already-existing state directory', () => {
+test('coordinator tightens an already-existing state directory', { skip: process.platform === 'win32' }, () => {
   const parent = mkdtempSync(join(tmpdir(), 'tokenboard-existing-state-'))
   const stateDir = join(parent, 'state')
   const runsDir = join(stateDir, 'runs')
@@ -1447,7 +1451,12 @@ test('coordinator refuses a symlinked state directory', () => {
         ),
       /must not be a symbolic link/
     )
-    assert.equal(statSync(realTarget).mode & 0o777, 0o755, "the link's target is left untouched")
+    // The refusal itself is what matters and runs everywhere; the "left untouched"
+    // check can only be expressed with POSIX mode bits (Windows ignores chmod for
+    // directories and stat reports a synthetic mode).
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(realTarget).mode & 0o777, 0o755, "the link's target is left untouched")
+    }
   } finally {
     process.umask(previousUmask)
     rmSync(parent, { recursive: true, force: true })

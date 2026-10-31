@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -175,7 +176,7 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		// hooks fail with the lock timeout (observed 2026-10-21: the 18:00
 		// sync timed out behind a shadow run). A concurrent sync is safe: both
 		// sides only read the session files.
-		return runShadow(ctx, options, env, stdout, stderr)
+		return runShadow(ctx, options, env, stateDir, stdout, stderr)
 	case "sync":
 		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	default:
@@ -210,6 +211,12 @@ func runSync(
 		fmt.Fprintf(stderr, "Missing required config for sync: %s\n", strings.Join(missing, ", "))
 		return ExitFailure
 	}
+	// The token travels on every request; a plain-http endpoint leaks it and the
+	// usage data. Loopback stays allowed for the local dev server.
+	if err := assertSecureEndpoint(options.Endpoint); err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		return ExitFailure
+	}
 	return withRunLock(stateDir, stderr, func() int {
 		return syncLocked(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	})
@@ -224,7 +231,15 @@ func syncLocked(
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	// The TS collector prints per-phase durations next to the upload result,
+	// and the skill's notify forwards them into the coordinator run record.
+	// Go's providers fold cursor scanning and the ccusage calls into one
+	// collection, so the phases it can attribute honestly are collect, upload
+	// and cursorAck; the names travel as-is and are additive.
+	timings := map[string]int64{}
+	phaseStarted := time.Now()
 	outcome, abortErr := collectAll(ctx, options, env, stateDir, cursorScope, stderr)
+	timings["collect"] = elapsedMillis(phaseStarted)
 	if abortErr != nil {
 		fmt.Fprintln(stderr, abortErr.Error())
 		return ExitFailure
@@ -242,7 +257,9 @@ func syncLocked(
 	}
 
 	config := upload.Config{Endpoint: options.Endpoint, UploadToken: options.UploadToken}
+	phaseStarted = time.Now()
 	result, uploadErr := upload.UploadSnapshots(ctx, config, outcome.snapshots, nil)
+	timings["upload"] = elapsedMillis(phaseStarted)
 	if uploadErr == nil {
 		upload.RecordSuccess(stateDir)
 	} else {
@@ -271,10 +288,12 @@ func syncLocked(
 		return classifyFailure(uploadErr, options, env)
 	}
 
+	phaseStarted = time.Now()
 	if err := acknowledgeUploadCursors(stateDir, outcome, options, cursorScope, env); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	timings["cursorAck"] = elapsedMillis(phaseStarted)
 	// The high-water mark claims a full scan covered everything up to the run's
 	// start; only the runs that actually did (unbounded, not hook mode) may
 	// advance it.
@@ -284,13 +303,49 @@ func syncLocked(
 		return ExitFailure
 	}
 
-	payload, _ := json.MarshalIndent(map[string]any{"upserted": result.Upserted, "skipped": result.Skipped}, "", "  ")
+	// Only surfaces when something was actually dropped, so a clean run's payload
+	// keeps the shape the TS collector prints. Each dropped row is named the way
+	// the TS uploader reports it — the count alone leaves the operator guessing
+	// which date was outside the window.
+	if result.RejectedUsageDates > 0 {
+		for index, rejected := range result.Rejected {
+			if index == 10 {
+				break
+			}
+			fmt.Fprintf(stderr,
+				"TokenBoard upload: dropping %s %s with usageDate %s (%s); the server rejects any batch containing it\n",
+				rejected.Snapshot.Source, rejected.Snapshot.Model, rejected.Snapshot.UsageDate, rejected.Issue)
+		}
+		if result.RejectedUsageDates > 10 {
+			fmt.Fprintf(stderr, "TokenBoard upload: %d more snapshots dropped for the same reason\n",
+				result.RejectedUsageDates-10)
+		}
+	}
+	payloadFields := map[string]any{
+		"upserted": result.Upserted,
+		"skipped":  result.Skipped,
+		"timings":  timings,
+	}
+	if result.RejectedUsageDates > 0 {
+		payloadFields["rejectedUsageDates"] = result.RejectedUsageDates
+	}
+	payload, _ := json.MarshalIndent(payloadFields, "", "  ")
 	fmt.Fprintln(stdout, string(payload))
 	if shouldFailForSourceErrors {
 		fmt.Fprintf(stderr, "One or more sources failed: %s\n", formatSourceFailures(outcome.failures))
 		return ExitFailure
 	}
 	return ExitOK
+}
+
+// elapsedMillis reports a phase duration the way the TS phase timings do:
+// rounded to whole milliseconds and never negative.
+func elapsedMillis(start time.Time) int64 {
+	elapsed := time.Since(start).Milliseconds()
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 // classifyFailure applies the exit-code contract: only a non-hook sync run
@@ -622,7 +677,7 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	switch command {
 	case "preview", "sync", "warm-hooks", "shadow":
 	default:
-		return Options{}, fmt.Errorf("Usage: %s", usageLine())
+		return Options{}, errors.New(usageLine())
 	}
 	// --hook is a boolean for `shadow` only: readFlags requires a value, and
 	// `--hook` is written bare. Pull it out first, then parse the rest
@@ -663,9 +718,17 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	}
 	timezone := flags["timezone"]
 	if _, given := flags["timezone"]; !given {
-		timezone = localTimezone()
+		// TS resolves this with `??`, so the machine's zone is only consulted
+		// when the variable is unset — that ordering is also what keeps a
+		// Windows host working, since the fallback there fails closed.
 		if value, ok := lookup("TOKENBOARD_TIMEZONE"); ok {
 			timezone = value
+		} else {
+			detected, err := localTimezone()
+			if err != nil {
+				return Options{}, err
+			}
+			timezone = detected
 		}
 	}
 	if err := assertValidTimezone(timezone); err != nil {
@@ -821,23 +884,37 @@ func firstNonEmpty(values ...string) string {
 // has no name, so the conventional system locations are consulted directly
 // before giving up — a silent UTC fallback would shift usageDate and fork the
 // server's dedup key against a TS collector on the same machine.
-func localTimezone() string {
+func localTimezone() (string, error) {
 	if name := strings.TrimSpace(os.Getenv("TZ")); name != "" {
-		return name // validated by assertValidTimezone, like the TS path
+		return name, nil // validated by assertValidTimezone, like the TS path
 	}
 	if name := time.Local.String(); name != "" && name != "Local" && contract.IsValidTimezone(name) {
-		return name
+		return name, nil
 	}
 	if name := systemTimezoneName(); name != "" {
-		return name
+		return name, nil
 	}
-	return "UTC"
+	return fallbackTimezone(runtime.GOOS)
+}
+
+// fallbackTimezone answers when nothing on the host named the zone. On Unix
+// the remaining case is a machine that genuinely runs UTC (a slim container
+// with neither /etc/timezone nor the /etc/localtime symlink), so UTC is the
+// right answer. Windows has neither file and Go reports time.Local as the
+// literal "Local", so the real zone cannot be recovered there and a UTC guess
+// would be silently wrong for every user east or west of Greenwich; fail with
+// the variable that fixes it instead.
+func fallbackTimezone(goos string) (string, error) {
+	if goos == "windows" {
+		return "", errors.New("Cannot determine the system timezone on Windows. Set TOKENBOARD_TIMEZONE (an IANA name such as Asia/Shanghai) or pass --timezone")
+	}
+	return "UTC", nil
 }
 
 // systemTimezoneName reads the host zone name from the conventional
 // locations: /etc/timezone (Debian and derivatives) and the /etc/localtime
 // symlink into a zoneinfo tree (macOS, most Linux). Windows has neither, so
-// it falls through to the caller's UTC fallback.
+// it falls through to fallbackTimezone, which refuses to guess there.
 func systemTimezoneName() string {
 	if data, err := os.ReadFile("/etc/timezone"); err == nil {
 		if name := strings.TrimSpace(string(data)); contract.IsValidTimezone(name) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -14,7 +14,8 @@ import {
   readRecentRecords,
   readDualRunConfig,
   summarizeDualRun,
-  summarizeDualRunTrend
+  summarizeDualRunTrend,
+  validateDualRunFlags
 } from './shadow-dual-run.mjs'
 
 const report = (overrides = {}) => JSON.stringify({ status: 'match', snapshots: 12, ...overrides }, null, 2)
@@ -304,16 +305,48 @@ test('every comparable source is one the client accepts', () => {
   assert.deepEqual(dualRunSources, [
     'claude-code',
     'codex',
-    'grok-build',
-    'deepseek-harness',
+    'antigravity-cli',
     'opencode',
     'pi',
-    'antigravity-cli'
+    'grok-build',
+    'deepseek-harness',
+    // The ccusage tool family, in usage-core's declaration order.
+    'amp',
+    'droid',
+    'codebuff',
+    'hermes',
+    'goose',
+    'kilo',
+    'copilot',
+    'gemini-cli',
+    'kimi',
+    'qwen',
+    'openclaw',
+    'zcode'
   ])
-  assert.equal(
-    readFileSync(new URL('./shadow-dual-run.mjs', import.meta.url), 'utf8').includes('antigravity-ide'),
-    false
-  )
+  // The two GUI sources need a language server, so they stay out of the dual
+  // run. Asserted on the list rather than on the file text: the module names
+  // them to exclude them, which is not the same as comparing them.
+  for (const source of ['antigravity', 'antigravity-ide']) {
+    assert.equal(dualRunSources.includes(source), false, `${source} must stay out of the dual run`)
+  }
+})
+
+// The tool family collects through ccusage, so the harness has to pin the
+// binary for it too. Without the pin the Go side resolves ccusage its own way
+// (bundled copy, then PATH, then a download) while the TypeScript child uses
+// the checkout's node_modules copy — a difference that shows up as a diff
+// rather than as the configuration bug it is.
+test('buildShadowInvocation pins the ccusage binary for the tool sources', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC', ccusageBin: '/bin/ccusage' }
+  for (const source of ['amp', 'gemini-cli', 'zcode', 'claude-code']) {
+    const invocation = buildShadowInvocation({ config, source })
+    assert.equal(invocation.env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage', `${source} must run the pinned ccusage`)
+  }
+  // A file-backed source never touches ccusage; injecting the variable would
+  // make the environment look like a difference between the two runs.
+  const pi = buildShadowInvocation({ config, source: 'pi' })
+  assert.equal(pi.env.TOKENBOARD_CCUSAGE_BIN, undefined)
 })
 
 // The dual run's default comparison is a full preview, but production runs the
@@ -464,4 +497,43 @@ test('the dual-run log path follows the config directory and the log override', 
     dualRunLogPath({ env: { TOKENBOARD_SHADOW_DUAL_RUN_LOG: '/tmp/moved.jsonl' }, root: '/cfg' }),
     '/tmp/moved.jsonl'
   )
+})
+
+// The harness is where both clients' stderr converges into a log line and a terminal echo.
+// It must not assume either side redacted: a provider or ccusage error can carry
+// `tb_upload_…` or `https://user:token@host/…`.
+test('classifyShadowRun redacts credentials from an error message before logging it', () => {
+  const record = classifyShadowRun({
+    source: 'codex',
+    status: 1,
+    stdout: '',
+    stderr: 'upload failed: POST https://ci-user:ci-token@example.invalid/ingest rejected tb_upload_abcdef123456'
+  })
+
+  assert.equal(record.status, 'error')
+  assert.match(record.message, /https:\/\/example\.invalid\/ingest/)
+  assert.doesNotMatch(record.message, /ci-token/)
+  assert.doesNotMatch(record.message, /tb_upload_abcdef123456/)
+})
+
+// A named `--until` that the source cannot honor must not be dropped quietly: the operator
+// asked for a settled-day window and would otherwise read an unbounded comparison as that
+// window. (An `all` run keeps passing --until to the two sources that accept it, which the
+// invocation test above pins down.)
+test('buildShadowInvocation still drops --until for sources that do not accept it', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC' }
+  assert.equal(buildShadowInvocation({ config, source: 'pi', until: '2026-10-20' }).args.includes('--until'), false)
+  assert.equal(buildShadowInvocation({ config, source: 'codex', until: '2026-10-20' }).args.includes('--until'), true)
+})
+
+// A named source that cannot honor `--until` or `--hook` is a usage error, not a silently
+// wider comparison: both would let the operator read the run as evidence for a window or
+// code path it never exercised.
+test('validateDualRunFlags refuses flags a named source cannot honor', () => {
+  assert.match(validateDualRunFlags({ source: 'pi', until: '2026-10-20' }), /--until is only supported/)
+  assert.match(validateDualRunFlags({ source: 'pi', hook: true }), /--hook is only supported/)
+  assert.equal(validateDualRunFlags({ source: 'codex', until: '2026-10-20' }), null)
+  assert.equal(validateDualRunFlags({ source: 'codex', hook: true }), null)
+  // An all-source run is allowed: the two hook sources use the flag, the rest run a preview.
+  assert.equal(validateDualRunFlags({ source: undefined, until: '2026-10-20', hook: true }), null)
 })

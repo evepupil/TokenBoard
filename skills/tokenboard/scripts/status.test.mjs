@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { buildStatus, collectRecentRunSummary, readClientStatus } from './status.mjs'
@@ -674,7 +674,7 @@ test('aggregates the last 7 days of run logs by filename prefix', () => {
     now: new Date('2026-10-14T00:00:00.000Z'),
     readdir: () => Object.keys(files),
     readFile: (path) => {
-      const name = path.split('/').pop()
+      const name = basename(path)
       if (!(name in files)) throw new Error('unexpected ' + name)
       return files[name]
     }
@@ -733,6 +733,25 @@ test('status surfaces an active upload pause and omits an absent one', () => {
     uploadBackoff: { pausedUntil: '2026-10-15T00:00:00.000Z', consecutiveFailures: 5 }
   })
   assert.deepEqual(paused.uploadBackoff, { pausedUntil: '2026-10-15T00:00:00.000Z', consecutiveFailures: 5 })
+})
+
+// The notify worker runs detached with stdio ignored; a fatal error there used
+// to be invisible. Status reports the recorded messages so an operator can see
+// why hooks stopped dispatching.
+test('status surfaces fatal notify-worker errors and omits an empty list', () => {
+  const base = { activeServer: 'https://tokenboard.example', timezone: 'Asia/Shanghai', source: 'all' }
+  assert.equal(
+    'notifyWorkerErrors' in buildStatus({ configPath: '/c.json', config: base, notifyWorkerErrors: [] }),
+    false
+  )
+  const reported = buildStatus({
+    configPath: '/c.json',
+    config: base,
+    notifyWorkerErrors: [{ message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }]
+  })
+  assert.deepEqual(reported.notifyWorkerErrors, [
+    { message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }
+  ])
 })
 
 // A binary install's health is not visible from clientType alone: the client

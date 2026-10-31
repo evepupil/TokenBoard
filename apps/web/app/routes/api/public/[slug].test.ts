@@ -12,6 +12,12 @@ vi.mock('../../../features/public-card/service', async (importOriginal) => {
   }
 })
 
+vi.mock('../../../lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../lib/rate-limit')>()),
+  clientIpRateLimitSubject: vi.fn(() => ({ kind: 'ip', value: '203.0.113.10' })),
+  enforceRateLimit: vi.fn()
+}))
+
 const mockedGetPublicUsageCard = vi.mocked(getPublicUsageCard)
 const mockedGetPublicUsageJson = vi.mocked(getPublicUsageJson)
 
@@ -155,7 +161,9 @@ function contextFor(slug: string, url: string) {
     },
     req: {
       param: vi.fn(() => ({ slug })),
-      url
+      url,
+      // The route reads `cf-connecting-ip` off the raw request for its IP rate limit.
+      raw: new Request(url)
     },
     json: (body: unknown, status = 200, headers?: Record<string, string>) => Response.json(body, { status, headers }),
     body: (body: BodyInit, status = 200, headers?: Record<string, string>) => new Response(body, { status, headers })

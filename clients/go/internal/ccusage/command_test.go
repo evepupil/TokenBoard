@@ -1,6 +1,7 @@
 package ccusage
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -79,6 +80,15 @@ func TestCommandHelperProcess(t *testing.T) {
 			os.Exit(1)
 		}
 		os.Stdout.WriteString(`{"ok":true}` + "\n")
+	case "echo-env":
+		// Reports the credential variables as seen by the child, so the test can
+		// assert they were stripped rather than merely absent from the caller's map.
+		payload := `{"token":` + jsonQuote(os.Getenv("TOKENBOARD_UPLOAD_TOKEN")) +
+			`,"pairing":` + jsonQuote(os.Getenv("TOKENBOARD_PAIRING_CODE")) +
+			`,"releaseBaseUrl":` + jsonQuote(os.Getenv("TOKENBOARD_RELEASE_BASE_URL")) +
+			`,"repoUrl":` + jsonQuote(os.Getenv("TOKENBOARD_REPO_URL")) +
+			`,"kept":` + jsonQuote(os.Getenv("TOKENBOARD_STATE_DIR")) + `}`
+		os.Stdout.WriteString(payload + "\n")
 	case "fail-nontransient":
 		os.Stderr.WriteString("invalid input\n")
 		os.Exit(1)
@@ -121,6 +131,46 @@ func TestRunJSONPassesArgumentsDirectlyWithoutShellParsing(t *testing.T) {
 
 // The timeout must be named so the scheduled log explains itself; Node's raw
 // kill error reads exactly like a tool exiting non-zero.
+// On a machine with no bundled ccusage binary the command is `npx`/`pnpm dlx`, which
+// downloads and executes a third-party package. That package must not inherit the upload
+// token: it authorizes writes as this device, and nothing ccusage does needs it.
+//
+// An empty Env means "inherit the process environment" in exec.Cmd, which is exactly the
+// case that used to leak: the token is in the parent's environment, not in the caller's
+// slice, so the test sets it in the parent and passes no Env at all.
+func TestRunJSONStripsCredentialVariablesFromTheChildEnvironment(t *testing.T) {
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_must_not_leak")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_must_not_leak")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:tb_release_must_not_leak@feed.example")
+	t.Setenv("TOKENBOARD_REPO_URL", "https://user:tb_repo_must_not_leak@git.example/mirror.git")
+	t.Setenv("TOKENBOARD_STATE_DIR", "/tmp/kept-for-the-child")
+
+	command, args := helperCommand(t)
+	result, err := RunJSON(context.Background(), command, append(args, "echo-env"), CommandOptions{
+		TimeoutMs:  30_000,
+		RetryDelay: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, ok := result.(*orderedRecord)
+	if !ok {
+		t.Fatalf("result = %T", result)
+	}
+	for name, want := range map[string]string{
+		"token":          "",
+		"pairing":        "",
+		"releaseBaseUrl": "",
+		"repoUrl":        "",
+		"kept":           "/tmp/kept-for-the-child",
+	} {
+		value, _ := record.Get(name)
+		if value != want {
+			t.Errorf("%s = %v, want %q", name, value, want)
+		}
+	}
+}
+
 func TestRunJSONNamesTheTimeoutWhenTheBudgetIsExceeded(t *testing.T) {
 	command, args := helperCommand(t)
 	_, err := RunJSON(context.Background(), command, append(args, "sleep-then-print", "200ms"), CommandOptions{
@@ -404,5 +454,24 @@ func TestCommandEnvValuesReadLikeParseInt(t *testing.T) {
 		if got := readRetryDelay(); got != tc.want {
 			t.Errorf("readRetryDelay(%q) = %v, want %v", tc.value, got, tc.want)
 		}
+	}
+}
+
+// A tool that floods stderr must fail the run rather than buffer without limit:
+// the stream carries diagnostics, and an unbounded buffer is how a runaway child
+// turns into an out-of-memory kill of the collector itself.
+func TestLimitedWriterRefusesToBufferPastItsLimit(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := &limitedWriter{buffer: &buffer, limit: 8}
+	if _, err := writer.Write([]byte("12345678")); err != nil {
+		t.Fatalf("write at the limit: %v", err)
+	}
+	if _, err := writer.Write([]byte("9")); err == nil {
+		t.Fatal("write past the limit must fail")
+	} else if !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("error = %v, want an 'exceeded' message", err)
+	}
+	if buffer.Len() != 8 {
+		t.Fatalf("buffer = %d bytes, want the pre-limit content preserved", buffer.Len())
 	}
 }

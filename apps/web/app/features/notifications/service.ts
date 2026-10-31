@@ -4,6 +4,7 @@ import { isValidTimezone } from '../../lib/timezone'
 import { encryptSecret } from './crypto'
 import { NotificationFormError } from './errors'
 import {
+  maxWebhookSubscriptionsPerUser,
   maskWebhookUrl,
   parseProviderWebhookUrl,
   hasValidEncryptionKey,
@@ -64,6 +65,17 @@ export async function createWebhookSubscription(input: {
   const secret = requireEncryptionKey(input.env)
   const webhookUrl = parseProviderWebhookUrl(input.form.provider, input.form.webhookUrl)
   const now = input.now ?? new Date()
+
+  // The count is checked before the insert, so the cap holds for the settings form and any
+  // future caller; the unique name rule is a separate, per-account concern.
+  const existing = await input.env.DB.prepare('SELECT COUNT(*) as count FROM webhook_subscriptions WHERE user_id = ?')
+    .bind(input.userId)
+    .first<{ count: number }>()
+  if (Number(existing?.count ?? 0) >= maxWebhookSubscriptionsPerUser) {
+    // A form error, not a JSON one: this route is reached by a browser form POST, and the
+    // caller redirects back to the page with the code so the user sees it inline.
+    throw new NotificationFormError('too-many-webhooks')
+  }
 
   await input.env.DB.prepare(
     `

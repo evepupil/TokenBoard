@@ -195,6 +195,70 @@ func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag,
 	})
 }
 
+// A feed whose "latest" points below the installed version (a yanked release,
+// a tag rolled back) must not silently downgrade the machine. A downgrade
+// reintroduces whatever the newer version fixed, and the scheduled path would
+// do it on every run without anyone asking.
+func TestRunDoesNotDowngradeWhenTheFeedPointsBelowTheInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	installed := stubBinary("2.0.0")
+	if err := os.WriteFile(target, installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("2.0.0")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	var downloads int
+	fake := fakeRelease{tag: "v1.9.0", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.9.0"))}
+	server := fake.server(t)
+	server.Config.Handler = countingDownloads(server.Config.Handler, &downloads)
+
+	var lines []string
+	result, err := Run(Input{
+		Repo:       "MisonL/TokenBoard",
+		Target:     target,
+		Platform:   "darwin",
+		Arch:       "arm64",
+		HTTPClient: server.Client(),
+		Env: func(key string) string {
+			if key == "TOKENBOARD_RELEASE_BASE_URL" {
+				return server.URL
+			}
+			return ""
+		},
+		Stderr: func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Updated {
+		t.Fatal("a release older than the installed version must not be installed")
+	}
+	if result.Version != "2.0.0" {
+		t.Errorf("result.Version = %q, want the installed 2.0.0", result.Version)
+	}
+	if downloads != 0 {
+		t.Errorf("downloads = %d, want none: the archive must not even be fetched", downloads)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "newer") {
+		t.Errorf("stderr = %q, want a line saying the installed version is newer", strings.Join(lines, "\n"))
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, installed) {
+		t.Errorf("the installed binary was replaced: %q", got)
+	}
+}
+
+// countingDownloads wraps a release handler and counts archive downloads.
+func countingDownloads(next http.Handler, downloads *int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			*downloads++
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // A release already installed is a no-op, so the scheduled path stays quiet.
 func TestRunIsANoopWhenTheVersionMatches(t *testing.T) {
 	dir := t.TempDir()
@@ -615,5 +679,37 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("stderr = %v, want a report of the ccusage left in place", lines)
+	}
+}
+
+// The staged binary is probed before it is trusted, so it must not see the upload token: a
+// tampered feed could answer `version` and read the credentials from its own environment. The
+// TS side scrubs this same probe (`client-binary.mjs` `runsVersion` → `scrubbedChildEnv`).
+func TestVerifyExecutableDoesNotHandCredentialsToTheStagedBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	envCapture := filepath.Join(dir, "staged-env")
+	staged := filepath.Join(dir, "tokenboard")
+	script := "#!/bin/sh\n" +
+		"printf '%s|%s|%s' \"$TOKENBOARD_UPLOAD_TOKEN\" \"$TOKENBOARD_PAIRING_CODE\" \"$TOKENBOARD_RELEASE_BASE_URL\" > '" + envCapture + "'\n" +
+		"echo \"tokenboard (go) 1.2.3\"\n"
+	if err := os.WriteFile(staged, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_secret")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_secret")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:pw@feed.example")
+
+	if err := verifyExecutable(staged, "1.2.3"); err != nil {
+		t.Fatalf("verifyExecutable: %v", err)
+	}
+	captured, err := os.ReadFile(envCapture)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	if string(captured) != "||" {
+		t.Errorf("staged binary saw credentials: %q, want all stripped", string(captured))
 	}
 }

@@ -5,6 +5,7 @@ export type ApiErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
+  | 'PAYLOAD_TOO_LARGE'
   | 'RATE_LIMITED'
   | 'SERVICE_UNAVAILABLE'
   | 'INTERNAL_SERVER_ERROR'

@@ -1685,3 +1685,110 @@ async function consumeFiles(files: Array<{ readLines: () => AsyncIterable<Sessio
     }
   }
 }
+
+// An entry whose file is gone used to be copied back verbatim on every run: this machine's
+// claude-code cursor reached 15 MB with 31% of its entries pointing at deleted files. When
+// every configured root listed successfully, a file the walk did not produce is gone, so the
+// entry can be reclaimed.
+describe('collectChangedSessionFiles cursor reclamation', () => {
+  test('drops a settled entry whose file no longer exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+    const sessionsDir = join(root, 'sessions')
+    const cursorPath = join(root, 'codex-cursor.json')
+    try {
+      const kept = join(sessionsDir, 'kept.jsonl')
+      const removed = join(sessionsDir, 'removed.jsonl')
+      await writeSession(kept, '{"type":"session"}\n', '2026-05-22T01:00:00.000Z')
+      await writeSession(removed, '{"type":"session"}\n', '2026-05-22T02:00:00.000Z')
+
+      const first = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+      await consumeFiles(first.files)
+      await first.commit()
+      expect(Object.keys(first.cursor.files).sort()).toEqual(['kept.jsonl', 'removed.jsonl'])
+
+      await rm(removed)
+      const second = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+
+      expect(Object.keys(second.cursor.files)).toEqual(['kept.jsonl'])
+      // Reclaiming is a cursor change, so the caller has to write it out.
+      expect(second.hasCursorCleanup).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  // A root that will not resolve leaves the tree unread rather than empty. Reclaiming there
+  // would drop every entry and make the next run re-read and re-upload the whole history.
+  test('keeps every entry when a root cannot be resolved', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+    const sessionsDir = join(root, 'sessions')
+    const cursorPath = join(root, 'codex-cursor.json')
+    try {
+      await writeSession(join(sessionsDir, 'a.jsonl'), '{"type":"session"}\n', '2026-05-22T01:00:00.000Z')
+      const first = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+      await consumeFiles(first.files)
+      await first.commit()
+
+      // Point the scan at a directory that does not exist: resolveSessionJsonlFiles returns
+      // null and the walk never runs.
+      const missingDir = join(root, 'gone')
+      const second = await collectChangedSessionFiles({ source: 'codex', sessionsDir: missingDir, cursorPath })
+
+      expect(Object.keys(second.cursor.files)).toEqual(['a.jsonl'])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  // A pending entry carries snapshots the server does not have yet; the file may be the only
+  // place they can be reconstructed from, so it survives even when the file is gone.
+  test('keeps a pending entry whose file no longer exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-cursor-'))
+    const sessionsDir = join(root, 'sessions')
+    const cursorPath = join(root, 'codex-cursor.json')
+    try {
+      const file = join(sessionsDir, 'pending.jsonl')
+      await writeSession(file, '{"type":"session"}\n', '2026-05-22T01:00:00.000Z')
+      const first = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+      await consumeFiles(first.files)
+      await first.commit()
+
+      // Touch the file so the next scan yields it, then mark it pending with a snapshot
+      // that has not been uploaded and drop the file.
+      await writeFile(file, '{"type":"session","seq":2}\n', { flag: 'a' })
+      const pending = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+      await consumeFiles(pending.files)
+      for (const entry of pending.files) {
+        updateCursorFile(pending.cursor, entry, {
+          snapshots: [
+            {
+              source: 'codex',
+              usageDate: '2026-05-22',
+              timezone: 'UTC',
+              model: 'gpt-5',
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+              totalTokens: 2,
+              costUsd: 0,
+              sessionCount: 1,
+              collectedAt: '2026-05-22T01:00:00.000Z'
+            }
+          ],
+          missingCost: false
+        })
+      }
+      pending.markPendingUpload()
+      await pending.commit()
+
+      await rm(file)
+      const second = await collectChangedSessionFiles({ source: 'codex', sessionsDir, cursorPath })
+
+      expect(Object.keys(second.cursor.files)).toHaveLength(1)
+      expect(second.missingPendingSnapshots.map((entry) => entry.relativePath)).toHaveLength(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})

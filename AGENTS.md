@@ -27,11 +27,12 @@ pnpm format:check
 - `pnpm format`：按根目录 Prettier 配置格式化 JavaScript、TypeScript 和 JSON 源文件。
 - `pnpm format:check`：检查上述文件是否符合统一格式，不修改工作树。
 - `cd clients/go && go test ./... -race`：运行 Go 客户端（M0+M1 阶段）的测试；`go vet ./...` 与 `GOOS=windows go build ./...` 是跨平台改动的最小验证。
-- `cd clients/go && go run ./cmd/tokenboard shadow --source <s>`：同 env 下跑 TS `preview` 与 Go 采集并做规范化 diff（需 `TOKENBOARD_COLLECTOR_DIR` 指向本仓库；正被写入的源用 `--until <昨天>` 避开活写竞态）；CI 的 `shadow` job 用 `cmd/shadow-fixtures` 生成的 fixture 跑 grok-build/pi/deepseek-harness/opencode 四个源。
+- `cd clients/go && go run ./cmd/tokenboard shadow --source <s>`：同 env 下跑 TS `preview` 与 Go 采集并做规范化 diff（需 `TOKENBOARD_COLLECTOR_DIR` 指向本仓库；正被写入的源用 `--until <昨天>` 避开活写竞态）；CI 的 `shadow` job 用 `cmd/shadow-fixtures` 生成的 fixture 跑 grok-build/pi/deepseek-harness/opencode 四个源，外加 claude-code/codex 与 12 个 ccusage 工具来源（后者在干净 HOME 下两侧都应报空，用来钉住子命令名映射）。
 - `node scripts/clients-go-gen-goldens.mjs`：从 `packages/usage-core` 重新生成 Go 契约层的金样本（`clients/go/internal/contract/goldens/snapshot-hash.json`）；仅在 TS 侧 schema 变更时运行，输出需 diff 审查后提交。
+- `node_modules/.bin/tsx scripts/clients-go-gen-pricing-goldens.mts`：从 TS 定价实现重新生成 Go 侧的 ccusage override 金样本（`clients/go/internal/pricing/goldens/ccusage-overrides.json`）；改动 catalogue 解析、歧义折叠、官方锚点、大小写别名或 above-200k 剥离后运行，输出需 diff 审查后提交。CI 会重跑两个生成脚本并对提交版做 diff，漂移即失败。
 - `node skills/tokenboard/scripts/status.mjs`：检查本机 collector、设备身份、hook、计划任务和最近同步状态；输出应脱敏。
-- `node skills/tokenboard/scripts/shadow-dual-run.mjs [--until <昨天>]`：生产双跑（spec §6.3）——逐源跑 `tokenboard shadow` 比较真实数据的 TS 与 Go 实现，结果追加进 `~/.tokenboard/logs/shadow-dual-run.jsonl`；不安装计划任务、不上传、不碰真实 cursor，只有 `diff`/`error` 才 exit 1。
-- `node --test skills/tokenboard/scripts/*.test.mjs`：运行 skill 脚本的 Node 测试。
+- `node skills/tokenboard/scripts/shadow-dual-run.mjs [--until <昨天>]`：生产双跑（spec §6.3）——逐源跑 `tokenboard shadow` 比较真实数据的 TS 与 Go 实现，结果追加进 `~/.tokenboard/logs/shadow-dual-run.jsonl`；不安装计划任务、不上传、不碰真实 cursor，只有 `diff`/`error` 才 exit 1。`shadow` 会把本机 `model-pricing-cache.json` 播种进两侧的临时 state 目录（缺失或损坏时两侧一起退回静态配置），所以动态定价路径也在比较范围内。
+- `node --test skills/tokenboard/scripts/*.test.mjs`：运行 skill 脚本的 Node 测试；CI 在 `baseline-test`（ubuntu）与 `skill-windows`（windows-latest，只跑这套测试）各跑一遍，Windows 上 POSIX 权限类断言按设计跳过。
 
 ### 目录速览
 
@@ -39,7 +40,7 @@ pnpm format:check
 - `apps/web/app/features/`：按业务 feature 组织的服务、查询、schema、组件和测试。
 - `packages/collector/`：本地 Node.js collector，负责调用 `ccusage`、读取各工具本地 usage 记录并上传 snapshot。
 - `packages/usage-core/`：跨端共享的 usage schema、normalize、hash 和工具函数。
-- `clients/go/`：Go 客户端（M0–M6 已落地：`internal/contract` 契约与金样本、`internal/upload` 上传与 backoff、`internal/state` 运行锁、`internal/cli` 子命令、`internal/collect` 全部九个来源 provider 与共享扫描/cursor 层、`internal/pricing` 动态定价目录、`internal/ccusage`/`codexusage` 外部工具调用、`internal/release` + `internal/selfupdate` 发布通道）。与 TS collector 共用 `collector-run.lock`、cursor 文件名和 `upload-backoff.json`，改动这些协议必须两侧同时验证（`docs/specs/go-client-spec.md`）。发布侧另有仓库根 `.goreleaser.yaml`（构建矩阵 3 OS × 2 arch）与 skill 的 `clientType`（`git`|`binary`，缺省 `git`）。
+- `clients/go/`：Go 客户端（M0–M6 已落地：`internal/contract` 契约与金样本、`internal/upload` 上传与 backoff、`internal/state` 运行锁、`internal/cli` 子命令、`internal/collect` 全部 21 个来源 provider（九个核心来源 + 12 个 ccusage 工具来源，后者由 `providers/ccusagetool` 参数化实现）与共享扫描/cursor 层、`internal/pricing` 动态定价目录、`internal/ccusage`/`codexusage` 外部工具调用、`internal/release` + `internal/selfupdate` 发布通道）。与 TS collector 共用 `collector-run.lock`、cursor 文件名和 `upload-backoff.json`，改动这些协议必须两侧同时验证（`docs/specs/go-client-spec.md`）。发布侧另有仓库根 `.goreleaser.yaml`（构建矩阵 3 OS × 2 arch）与 skill 的 `clientType`（`git`|`binary`，缺省 `git`）。
 - `skills/tokenboard/`：Codex / Claude Code 安装、同步、hook、schedule 脚本。
 - `apps/web/app/components/ui/`：通用 UI 原语；业务组件不要放这里。
 - `apps/web/db/migrations/`：按序执行的 D1 migration；部署前必须核对 migration、Drizzle schema 和 `db/verify-*.sql`。
@@ -69,7 +70,7 @@ TokenBoard 是一个面向多用户的 AI token 使用统计平台，而不是�
 第一阶段目标：
 
 - 支持用户注册或创建个人上传 token。
-- 支持 Claude Code、Codex、Antigravity CLI、Antigravity、Antigravity IDE、OpenCode、Pi、Grok Build、DeepSeek Harness 九类 usage 来源。
+- 支持 Claude Code、Codex、Antigravity CLI、Antigravity、Antigravity IDE、OpenCode、Pi、Grok Build、DeepSeek Harness，以及 amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode 十二个 ccusage 工具类 usage 来源（`packages/usage-core` 共 21 个来源枚举）。
 - 通过 TokenBoard skill + collector CLI 调用 `ccusage`、`@ccusage/codex`，并从 Antigravity 三类本地历史中提取 token 元数据。
 - Antigravity CLI 可额外通过官方 `statusLine.command` 写入脱敏本地诊断事件；该路径不参与 collector snapshot 或上传计量。
 - 后端接收标准化后的 usage snapshot，并按用户、日期、来源、模型聚合。
@@ -188,6 +189,38 @@ OpenCode / Pi / Grok Build / DeepSeek Harness 约束：
 - 这四类来源不安装 hook，不得进入 hook mode 采集，也不得参与 hook cursor warm。
 - 未安装的来源在 `--source all` 中按 unavailable 跳过；真实读取失败必须报错，禁止静默丢数据。
 
+ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode）：
+
+- 这 12 个来源由参数化 provider 统一采集：`<tool> daily --json` 取总量、`<tool> session --json` 取 session 数，两侧实现都只有一份代码（TS `providers/ccusage-tools.ts`，Go `providers/ccusagetool`）。
+- 子命令名固定为来源同名，唯一例外是 `gemini-cli` → `gemini`（ccusage 没有 `gemini-cli` 子命令，传错名会 exit 2 使整源失败）。命令名映射表两侧必须同时改。
+- 工具未安装时 ccusage 以 exit 0 返回空 daily 报告（`{"daily":[],...}`），provider 据此直接返回空结果、**不发起 session 调用**；这条短路只认 `daily` 数组，比 normalize 的行提取更严格。
+- 这 12 个来源不做动态定价 prepare（TS 侧同样不做），自报费用直接使用；它们不安装 hook，也不参与 hook cursor warm。
+- `--until` 只对 `claude-code` 和 `codex` 生效，工具类来源传 `--until` 是用法错误（两侧 CLI 一致 fail-fast）。
+- Go 侧 `contract.CcusageToolCommand`/`CcusageToolSources` 与 TS 的 `ccusageToolCommandNames`/`ccusageToolSources` 是同一契约；`TestUsageSourcesMatchUsageCore` 与 CI shadow 的 12 源循环钉住漂移。
+
+### 跨端协议不变量（2026-10-28 审查后新增）
+
+这些不变量一旦破坏就是静默计费分叉，两侧改动必须同步验证：
+
+- **ccusage 子进程环境必须剥离凭据**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.scrubCredentialEnv`）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE`/`TOKENBOARD_RELEASE_BASE_URL`/`TOKENBOARD_REPO_URL` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。skill 侧的同一名单在 `skills/tokenboard/scripts/child-env.mjs`（`upgrade-utils.mjs` 的 `spawnRedacted` 用它保护 `git clone`/`pnpm install` 子进程，后者会执行依赖的 lifecycle 脚本），三处名单由 `skills/tokenboard/scripts/child-env.test.mjs` 与 Go/TS 各自测试对照，改动需同步。
+- **Codex 静态费率用运行时除法**：`internal/collect/providers/codex/context_pricing.go` 的 `codexDivisor` 是 `var` 而非 `const`——Go 对无类型常量表达式精确求值后舍入一次，JS 是 double 除法再舍入一次，`0.2/1e6` 一类字面量两边差 1 ULP，会让 `snapshotHash` 分叉、shadow 报 diff。`TestStaticRatesMatchTheJavaScriptDoubles` 钉住位模式。
+- **公开端点 `/api/public/model-pricing` 有 IP 限流**（`publicModelPricingRead` 120/60s）。Worker Cache 只存 200，所以带随机 `cursor` 的请求每次都直达 D1，不能撤掉这道闸。
+- **上传端点强制 https**，loopback（`localhost`/`127.0.0.1`/`::1`）例外（TS `endpoint.ts`，Go `cli/endpoint.go`）。上传请求一律 `redirect: 'manual'` / `CheckRedirect`（Go 同 host 异 port 会带 Authorization 转发）。
+- **上传前过滤 usageDate 越界行**（usage-core `uploadIsoDateIssue`，Go `contract.UploadIsoDateIssue`）。服务端对整批 fail-closed，一行坏日期会把同批 30 行全堵死并触发 24h 上传暂停。
+- **cursor 条目在「所有根都解析成功且未见于本次扫描」时回收**（TS `preserveMissingCursorEntries` 的 `allRootsResolved`，Go 同名参数）。pending 条目永不回收；根解析失败时全部保留。
+- **ccusage 折叠语义是双向后缀剥离**，比 `foldToBaseModelId` 宽得多；两端实现必须保持同序同次数（见 `docs/model-pricing.md` 的「Known limitation」一节）。
+
+### 新增 usage 来源的检查单
+
+来源枚举有四处独立副本，任何一处漏改都是静默漂移（新来源能采集但漏比较、漏互斥或前端显示原始 slug）：
+
+1. `packages/usage-core/src/schema.ts` 的 `usageSources`（唯一权威）与 `ccusageToolSources`（若属工具族）。
+2. `skills/tokenboard/scripts/usage-sources.mjs` 的镜像。skill 脚本从 git checkout 直接跑、没有构建步骤，无法 import `@tokenboard/usage-core`，所以这份镜像必须手工同步；`usage-sources.test.mjs` 会解析 usage-core 的声明并在漂移时报错。定时重试的互斥锁集合与 `shadow-dual-run.mjs` 的可比源清单都由它派生，漏一处的后果是并发重试重复采集。
+3. `clients/go/internal/contract/contract.go` 的 `Source` 常量、closed set 与 `allSources`，同时补 `contract_test.go` 里硬编码的 `usageCoreSources`。
+4. 采集侧：TS 在 `providers/` 加 provider 并在 `cli.ts` 的 `collectAllSnapshots` 注册；Go 在 `providers/` 加包并加进 `collect/providers/providers.go` 的 blank import（漏这一步 `--source all` 会静默跳过并 exit 0，`TestEveryContractSourceHasAProvider` 专门守这条）。
+
+另外别忘：`apps/web/app/features/usage/source-format.ts` 的展示名（漏了会显示原始 slug）；费用不可用来源必须由 `costUnavailableSources` 派生而不是硬编码。
+
 ## 数据模型规范
 
 所有上传数据必须先标准化为统一 usage snapshot。后端只接收标准格式，不在 API route 中写来源特定解析逻辑。
@@ -204,7 +237,19 @@ type UsageSource =
   | "opencode"
   | "pi"
   | "grok-build"
-  | "deepseek-harness";
+  | "deepseek-harness"
+  | "amp"
+  | "droid"
+  | "codebuff"
+  | "hermes"
+  | "goose"
+  | "kilo"
+  | "copilot"
+  | "gemini-cli"
+  | "kimi"
+  | "qwen"
+  | "openclaw"
+  | "zcode";
 
 type UsageSnapshot = {
   source: UsageSource;
@@ -454,6 +499,7 @@ packages/collector/
       pi.ts
       grok-build.ts
       deepseek-harness.ts
+      ccusage-tools.ts
       bounded-session-scan.ts
       session-usage-aggregate.ts
       session-jsonl-parser.ts
@@ -481,6 +527,7 @@ skills/tokenboard/
     install-schedule.mjs
     coordinator.mjs
     client-binary.mjs
+    usage-sources.mjs
     antigravity-hook.mjs
     antigravity-statusline.mjs
     uninstall.mjs
@@ -513,7 +560,7 @@ skills/tokenboard/
 - 数据库字段使用 snake_case。
 - TypeScript 字段使用 camelCase。
 - route path 使用 kebab-case。
-- usage source 使用稳定枚举值：`claude-code`、`codex`、`antigravity-cli`、`antigravity`、`antigravity-ide`、`opencode`、`pi`、`grok-build`、`deepseek-harness`。
+- usage source 使用稳定枚举值（全集以 `packages/usage-core/src/schema.ts` 的 `usageSources` 为准，共 21 个）：`claude-code`、`codex`、`antigravity-cli`、`antigravity`、`antigravity-ide`、`opencode`、`pi`、`grok-build`、`deepseek-harness`、`amp`、`droid`、`codebuff`、`hermes`、`goose`、`kilo`、`copilot`、`gemini-cli`、`kimi`、`qwen`、`openclaw`、`zcode`。
 - user-facing slug 必须全局唯一。
 
 ## 测试规范

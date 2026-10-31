@@ -90,7 +90,14 @@ export async function runDueWebhookNotifications(input: {
   const fetcher = input.fetcher ?? defaultWebhookFetcher
 
   if (shouldPruneWebhookDeliveryLogs(now)) {
-    await pruneDeliveryLogs(input.env, now)
+    // Retention is housekeeping; a failed DELETE must not stop this tick's deliveries. The
+    // report-history prune below is isolated for the same reason, and a stalled delivery-log
+    // table is bounded by the same window that lets it fail once and retry on the next tick.
+    try {
+      await pruneDeliveryLogs(input.env, now)
+    } catch (error) {
+      console.error(`TokenBoard webhook delivery log prune failed: ${errorMessage(error)}`)
+    }
     // Report history is pruned here as well as after each delivery: a user who disables their
     // webhook stops delivering, and the retention the settings card promises has to hold either
     // way. The gate only runs at 00:00 UTC, when a user west of UTC is still on the previous local

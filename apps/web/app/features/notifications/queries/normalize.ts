@@ -30,7 +30,7 @@ export function normalizeSubscriptionSummary(row: WebhookSubscriptionRow): Webho
     provider: row.provider as WebhookProvider,
     scheduleTimeLocal: scheduleTimesLocal[0],
     scheduleTimesLocal,
-    scheduleWeekdays: normalizeScheduleWeekdays(row.scheduleWeekdays),
+    scheduleWeekdays: normalizeSettingsScheduleWeekdays(row).values,
     sendEmptyReport: Boolean(row.sendEmptyReport),
     enabled: Boolean(row.enabled),
     pendingReportDate: row.pendingReportDate ?? null,

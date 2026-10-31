@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import { readSessionLines, scanSessionFiles } from './bounded-session-scan'
+import { readSessionLinesBounded, scanSessionFiles } from './bounded-session-scan'
 import { formatDate } from './session-jsonl-parser-utils'
 import {
   parseJsonLine,
@@ -83,7 +83,9 @@ export async function collectGrokBuildUsage(options: CollectGrokBuildUsageOption
  */
 async function* readUsageEvents(filePath: string, stderr?: (line: string) => void): AsyncGenerator<UsageEvent> {
   const sessionId = basename(dirname(filePath))
-  for await (const line of readSessionLines(filePath)) {
+  for await (const line of readSessionLinesBounded(filePath, {
+    onSkippedLine: (bytes) => stderr?.(`Skipping an oversized line (${bytes} bytes) in Grok Build session ${filePath}`)
+  })) {
     const record = parseJsonLine(line)
     if (!record || record.method !== usageMethod) continue
 

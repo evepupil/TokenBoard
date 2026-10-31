@@ -18,6 +18,7 @@ import {
   prepareLegacyRetryFenceForAll,
   releaseLegacyRetryFence
 } from './scheduled-retry-legacy-fence.mjs'
+import { usageSources } from './usage-sources.mjs'
 
 export const scheduledRetryStateFileName = 'scheduled-sync-retry.json'
 export const scheduledRetryLockFileName = 'scheduled-sync-retry.lock'
@@ -30,7 +31,13 @@ export const defaultScheduledRetryDelayMs = 60_000
 // constant cannot be imported from the TypeScript package, so the collector test
 // suite asserts both sides still agree.
 export const transientSyncExitCode = 75
-const scheduledRetryGuardSources = ['antigravity', 'antigravity-cli', 'antigravity-ide', 'claude-code', 'codex']
+// An all-source retry has to hold every per-source retry lock, or a concurrent
+// single-source retry could collect at the same time as the all-source pass and
+// double-count the same snapshots. Deriving the list from the closed source set
+// is what keeps it complete: a hand-written copy went stale once already, and
+// the failure is silent — the new sources simply kept the mutual exclusion the
+// collector needs but not the retry layer.
+const scheduledRetryGuardSources = usageSources
 const scheduledRetryTransitionLockFileName = 'scheduled-sync-retry.transition.lock'
 
 export async function runScheduledRetry(options = {}) {

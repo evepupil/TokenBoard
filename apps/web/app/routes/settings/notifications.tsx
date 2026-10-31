@@ -24,6 +24,7 @@ import {
 import { NotificationFormError, notificationFormErrorMessage } from '../../features/notifications/errors'
 import { getProfileTimezoneSettings } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
+import { enforceRateLimit, writeRateLimitPolicies } from '../../lib/rate-limit'
 
 export { NotificationsPage }
 
@@ -64,6 +65,12 @@ export const GET = createRoute(async (c) => {
 export const POST = createRoute(async (c) => {
   try {
     const user = await requireUser(c)
+    // The form has a `test` action that sends an outbound webhook request, and every action
+    // writes D1 rows. Bound a scripted loop per user before any of it runs.
+    await enforceRateLimit(c.env.DB, {
+      policy: writeRateLimitPolicies.notificationsForm,
+      subject: { kind: 'user', value: user.id }
+    })
     const form = await c.req.parseBody({ all: true })
     const action = parseWebhookAction(form)
 

@@ -9,6 +9,7 @@ import { printHelpIfRequested } from './cli-help.mjs'
 import { errorMessage } from './error-message.mjs'
 import { deviceLinkStatus } from './device-link.mjs'
 import { hookStatus } from './hooks.mjs'
+import { readNotifyWorkerErrors } from './notify.mjs'
 import { scheduledRetryLegacyStatePath, scheduledRetryStatePath } from './scheduled-retry.mjs'
 import { readScheduledSyncState, scheduledSyncStatePath } from './scheduled-sync-state.mjs'
 import { dualRunLogPath, readRecentRecords, summarizeDualRunTrend } from './shadow-dual-run.mjs'
@@ -27,7 +28,8 @@ export function buildStatus({
   recentRuns,
   uploadBackoff,
   client,
-  shadowDualRun
+  shadowDualRun,
+  notifyWorkerErrors
 }) {
   return {
     configured: true,
@@ -52,6 +54,10 @@ export function buildStatus({
     ...(scheduledSync ? { scheduledSync: publicScheduledSync(scheduledSync) } : {}),
     ...(recentRuns ? { recentRuns } : {}),
     ...(uploadBackoff ? { uploadBackoff } : {}),
+    // Fatal diagnostics from the detached notify worker. The worker's stdio is
+    // ignored, so without this the only sign that a hook stopped dispatching
+    // is the absence of runs.
+    ...(notifyWorkerErrors && notifyWorkerErrors.length > 0 ? { notifyWorkerErrors } : {}),
     // The dual run's verdicts decide whether a source may move onto the Go
     // client. Reporting them here is what turns that log into something an
     // operator actually reads; absent log means no comparison has run.
@@ -197,6 +203,7 @@ function runCli() {
         scheduledSync: readScheduledSync(source, stateDir),
         recentRuns: collectRecentRunSummary(join(stateDir, 'runs')),
         uploadBackoff: readUploadBackoff(stateDir),
+        notifyWorkerErrors: readNotifyWorkerErrors(stateDir),
         client:
           config.clientType === 'binary'
             ? readClientStatus({ configDir: process.env.TOKENBOARD_CONFIG_DIR?.trim() || dirname(file) })

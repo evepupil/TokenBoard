@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 import { minimumNodeRange } from './node-version.mjs'
 
@@ -62,7 +62,9 @@ for (const name of ['setup.mjs', 'sync.mjs', 'install-collector.mjs']) {
       "Object.defineProperty(process.versions, 'node', { value: '22.18.0', configurable: true, writable: true, enumerable: true })\n"
     )
     try {
-      const result = spawnSync(process.execPath, ['--import', preload, scriptPath(name)], {
+      // Windows rejects a bare drive path as an ESM specifier ("C:" reads as a
+      // protocol), so the preload has to be passed as a file:// URL there.
+      const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, scriptPath(name)], {
         encoding: 'utf8',
         timeout: 20_000,
         env: {

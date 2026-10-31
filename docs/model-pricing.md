@@ -160,12 +160,63 @@ guessing which row applies. Agreeing rows collapse to one representative — pre
 official vendor's row for its spec metadata — and zero-priced rows never join a group that has a
 real price, so an official vendor's $0 placeholder cannot silently price a model as free.
 
+`ccusage` does not match an override key to a session's model name exactly: it folds a provider
+prefix and a fine-tune variant suffix first, so a `xiaomi/mimo-v2.6-flash-uncensored` key can price
+a plain `mimo-v2.6-flash` day. An unresolved id has no key of its own, so such a folding key is the
+only candidate left and it wins — one machine billed 3.6x the official rate for `mimo-v2.6-flash`
+this way while its reseller rows disagreed. Because an exact key beats a folding one, the official
+vendor row for a base id that a variant key could reach is emitted under the base id itself. Only an
+official row qualifies; anchoring from a reseller row would re-create the ambiguity the id was left
+unresolved for, and an id with no official row keeps whatever `ccusage` would have used.
+
+Several official vendors can price one id differently — `zai` and `zhipuai`, or `alibaba` and
+`alibaba-cn`, publish separate regional rates for the same model. The anchor picks the
+alphabetically first official provider (then model id) among its rows rather than the first match in
+arrival order. Arrival order comes from the public catalogue's `ORDER BY provider, model_id`, so
+letting it decide would make every collector's cost depend on a query in the web layer; the sort
+here keeps the choice a property of the collector contract, and CI's golden pins it on both sides.
+The collapse's representative pick follows the same rule for the same reason: rows that agree on
+price can still disagree on context window, and the representative's window becomes
+`maxInputTokens`.
+
+Matching is also case-sensitive: a session model `GLM-5.3-Flash` is not priced by a
+`glm-5.3-flash` key. The catalogue publishes several spellings of one id, and the collapse emits
+only the representative's spelling, so the collector repeats each override under every spelling the
+catalogue publishes for that id. Aliases are only added for ids that already have an emitted
+override, so the collapse's ambiguity decision stands and no spelling the catalogue does not
+publish is invented. On the 2026-10-27 catalogue this added 43 keys; over 2026-10-21..26 the
+Claude Code total moved from 6903.42 to 6885.12 — some sessions previously fell back to
+`ccusage`'s own table (a different price), others were unpriced at $0.
+
 The catalogue cache is `TOKENBOARD_STATE_DIR/model-pricing-cache.json`, is written atomically, and
 has a 24-hour TTL. A regular or manual sync refreshes an expired cache with ETag support. Hook mode
 does not make network requests: it uses a fresh or stale last-successful cache, then the bundled
 static config. A failed refresh never blocks token collection. Diagnostics identify the selected
-source and refresh failure; a model without reliable input/output pricing keeps the existing
-collector result and emits a warning instead of being silently treated as free.
+source and refresh failure. A model with no TokenBoard override is not by itself a problem —
+`ccusage` prices it from its own builtin catalogue — so the warning is emitted only for a model
+that came back with real usage and zero cost, which is what an unpriced model actually looks like.
+
+The generated `ccusage.dynamic.json` is a pure function of the catalogue, so a run whose catalogue
+did not change produces byte-identical output. The writer compares before replacing and skips the
+write when the bytes already match: the file is ~450 KB, every hook run would otherwise pay a
+write plus a rename, and the mtime is otherwise useless as a "did the catalogue move" signal.
+
+### Known limitation: `ccusage` folds variant keys onto base ids
+
+`ccusage` resolves an override key against the observed model name by stripping trailing
+`-`/`.`-separated segments, in both directions. Measured against 20.0.33: a session named
+`base-model` is priced by any of `base-model-free`, `base-model:free`, `base-model-thinking`,
+`base-model-preview`, `base-model-mini`, `base-model-20250101`, `provider/base-model` or
+`base-model-x-y-z`, and a session named `base-model-extra` is priced by a plain `base` key.
+
+This means the config cannot express "this exact `-free` variant is free while its base id is
+paid": the free key also prices the base. On the 2026-10-27 catalogue 26 zero-priced variant keys
+fold onto a base id that has positive-priced rows, and five of them price a real model at $0
+(`inclusionai/ling-3.1-flash`, `liquid/lfm-2.5-2.6b`, `nvidia/nemotron-3.5-content-safety`,
+`nvidia/nemotron-3.5-super-vl`, `poolside/laguna-xs-2.1`). Dropping those keys is not a fix — the
+free variant itself then falls back to `ccusage`'s builtin price (2.8/M for `glm-4.7-flash-free`,
+which is not free) — and emitting a price for the base id would be inventing one the catalogue
+does not support. The condition is reported here rather than papered over.
 
 The catalogue is intentionally not joined into historical usage aggregation. An ingested `costUsd`
 is the price that applied when the collector measured that day, not a live view of the catalogue, so

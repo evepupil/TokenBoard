@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   buildSyncInvocation,
@@ -314,17 +315,19 @@ test('a binary client invocation runs the Go binary with the same env contract',
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
   // Same subcommand surface, no node and no tsx: the binary is the collector.
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  // `join` inside the invocation is the host's, so compare separator-insensitively.
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
   assert.equal(invocation.clientType, 'binary')
   // A binary install has no checkout, so the working directory is the binary's
   // own directory — pointing it at the absent collector dir made spawn fail
   // with ENOENT on the command itself.
-  assert.equal(invocation.cwd, normalizeMemoryPath('/home/user/.tokenboard/bin'))
+  assert.equal(normalizeMemoryPath(invocation.cwd), normalizeMemoryPath('/home/user/.tokenboard/bin'))
   // The endpoint contract is identical to the git client's.
   assert.equal(invocation.env.TOKENBOARD_ENDPOINT, 'https://tokenboard.example.com/api/v1/ingest')
   assert.equal(invocation.env.TOKENBOARD_UPLOAD_TOKEN, 'test-upload-token')
@@ -414,7 +417,8 @@ test('the default client type stays git for an existing install', () => {
   })
 
   assert.equal(invocation.clientType, 'git')
-  assert.match(invocation.command, /node$/)
+  // The command is the running node itself (not the Go binary); `node.exe` on Windows.
+  assert.equal(invocation.command, process.execPath)
   assert.deepEqual(invocation.args.slice(0, 3), ['--import', 'tsx', 'src/cli.ts'])
 })
 
@@ -648,7 +652,6 @@ test('a binary client honors the skip-upgrade switch', () => {
       ...options,
       invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
       selfUpdate: (value) => selfUpdates.push(value),
-      binaryExists: () => true,
       log: () => {},
       warn: () => {}
     })
@@ -676,7 +679,6 @@ test('a binary client self-updates from the release source it was installed from
     },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -697,7 +699,6 @@ test('a binary client upgrades through its own self-update, not the checkout', (
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -716,7 +717,6 @@ test('a binary hook sync never upgrades at all', () => {
     flags: { hook: true },
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -724,18 +724,22 @@ test('a binary hook sync never upgrades at all', () => {
   assert.deepEqual(selfUpdates, [])
 })
 
-test('a binary client whose binary is missing does not try to self-update it', () => {
+// A missing target is the recovery case, not a skip case: `runSelfUpdate` is what calls
+// `recoverOrphanedBinary`, which restores a binary whose swap was interrupted between its two
+// renames. Returning early here made that recovery unreachable from the automatic path, so an
+// interrupted self-update left every later sync reporting "client is not installed".
+test('a binary client whose binary is missing still reaches self-update so the swap can be recovered', () => {
   const selfUpdates = []
   runPreCollectUpgrade({
     flags: {},
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => false,
     log: () => {},
     warn: () => {}
   })
 
-  assert.deepEqual(selfUpdates, [])
+  assert.equal(selfUpdates.length, 1)
+  assert.equal(selfUpdates[0].binaryPath, '/home/user/.tokenboard/bin/tokenboard')
 })
 
 test('a failed binary self-update warns instead of failing the sync', () => {
@@ -747,7 +751,6 @@ test('a failed binary self-update warns instead of failing the sync', () => {
       selfUpdate: () => {
         throw new Error('dial https://api-user:api-secret@example.invalid: timeout')
       },
-      binaryExists: () => true,
       log: () => {},
       warn: (message) => warnings.push(message)
     })
@@ -769,7 +772,6 @@ test('a git client still upgrades the checkout before collection', () => {
     selfUpdate: () => {
       throw new Error('a git client must not self-update')
     },
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -785,7 +787,6 @@ test('a git client honors the skip-upgrade switch', () => {
     invocation: { clientType: 'git', command: 'node' },
     env: {},
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -972,7 +973,13 @@ test('scheduled sync runs the real top-level entry without a temporal dead zone'
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1027,7 +1034,13 @@ test('a scheduled sync continues without logs when the log directory cannot be c
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1113,6 +1126,58 @@ test('an unscheduled collector run inherits the terminal instead of capturing', 
   assert.equal(result.error, null)
   assert.equal(calls.length, 1)
   assert.equal(calls[0].options.stdio, 'inherit')
+})
+
+// The hook path is exactly the unscheduled path: notify spawns sync.mjs with `--hook` and no
+// scheduled-log environment, so `logs` is null and the child inherits the terminal. The
+// wall-clock bound the hook mode advertises has to apply there too — a wedged ccusage scan on
+// a hook run would otherwise hold the coordinator's sync lock forever, and no timer exists to
+// kill it. This is the branch production hook traffic actually takes.
+test('a hook run without a scheduled log is still bounded by hookTimeoutMs', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  let killed = null
+  child.kill = (signal) => {
+    killed = signal
+    child.emit('exit', null, signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    { spawn: () => child, hookTimeoutMs: 5 }
+  )
+
+  assert.equal(killed, 'SIGKILL')
+  assert.equal(result.status, 1)
+  assert.equal(result.error.code, 'ETIMEDOUT')
+})
+
+// A run that finishes inside the bound must clear the timer, or the parent's event loop stays
+// alive for the full timeout after every successful hook.
+test('a hook run that finishes in time is not killed and reports its exit code', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  const killed = []
+  child.kill = (signal) => {
+    killed.push(signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    {
+      spawn: () => {
+        queueMicrotask(() => child.emit('exit', 0, null))
+        return child
+      },
+      hookTimeoutMs: 50
+    }
+  )
+
+  assert.deepEqual(killed, [])
+  assert.equal(result.status, 0)
+  assert.equal(result.error, null)
 })
 
 test('an unscheduled run reports a spawn failure and a zero exit as success', async () => {
@@ -1304,6 +1369,11 @@ test('readHookSyncTimeoutMs parses the env override and rejects invalid values',
     () => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '0' }),
     /TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be/
   )
+  // setTimeout clamps a delay past 2^31-1 to 1ms, so an "effectively infinite" bound would
+  // kill every hook run instantly — the opposite of what the operator asked for. Refuse it
+  // at parse time rather than letting the timer silently invert the intent.
+  assert.throws(() => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483648' }), /at most 2147483647/)
+  assert.equal(readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483647' }), 2_147_483_647)
 })
 
 test('a timed-out hook run resolves with an ETIMEDOUT error for runSync to report', async () => {
@@ -1482,10 +1552,11 @@ test('perSource runs a named source on the client it maps to', () => {
       homeDir: '/home/user',
       nodePath: '/usr/local/bin/node',
       pathEnv: '/usr/bin',
+      platform: 'linux',
       fileExists: () => true
     })
 
-    assert.equal(invocation.command, expectedCommand, `perSource pi=${mapped}`)
+    assert.equal(normalizeMemoryPath(invocation.command), expectedCommand, `perSource pi=${mapped}`)
     assert.deepEqual(invocation.args.slice(-2), ['--source', 'pi'])
   }
 })
@@ -1532,10 +1603,11 @@ test('perSource runs an all-source request when the mapping agrees', () => {
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
 })
 

@@ -138,6 +138,12 @@ Local usage sources:
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`) |
 | Grok Build | `~/.grok/{sessions,archived_sessions}/**/updates.jsonl` (`GROK_HOME`) |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl[.zstd]` (`DSH_HOME`, `DSH_SESSION_ROOT`) |
+| amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode | the tool's own store, read through the pinned `ccusage` runtime |
+
+The twelve `ccusage` tools share one collector: each runs `<tool> daily --json` and `<tool> session
+--json`, and `gemini-cli` uses ccusage's `gemini` subcommand. A tool that is not installed answers
+with an empty report, which is not an error — the source simply contributes nothing to that run.
+None of them installs a notifier hook, and none accepts a `--until` window.
 
 Only token counts, model ids and timestamps are read from these stores. For OpenCode the token fields
 are projected inside SQLite so the message blob, which also holds prompts and a local path, never

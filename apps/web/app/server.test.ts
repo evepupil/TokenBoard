@@ -99,6 +99,59 @@ describe('worker server', () => {
     })
   })
 
+  // The Worker cache only stores 200s, so a request that misses it — a novel `?cursor=`,
+  // a rejected limit — reaches D1 every time. The public alias needs the same ceiling the
+  // versioned route has, or anonymous traffic turns into unbounded catalogue reads.
+  test('rate-limits the public model pricing alias', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ rateLimitCount: 121 })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?cursor=bogus'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
+  // Hono dispatches a HEAD to the route's GET (hono-base.js: `if (method === "HEAD") ... dispatch(..., "GET")`),
+  // so the route handler still reads D1. Only GET reached the entrypoint ceiling, which left HEAD as an
+  // uncapped door to the same per-request GROUP BY the 429 above exists to bound.
+  test('rate-limits HEAD on the public model pricing alias too', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ rateLimitCount: 121 })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?cursor=bogus', { method: 'HEAD' }),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
+  // A HEAD that passes the ceiling still answers without a body — the status and headers
+  // describe what a GET would return, the way RFC 9110 §9.3.2 requires.
+  test('serves a bodyless HEAD from the public model pricing alias when under the ceiling', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv()
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?limit=2', { method: 'HEAD' }),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('')
+    expect(mockedGetModelPricing).toHaveBeenCalledTimes(1)
+  })
+
   test('serves the versioned model-pricing alias when the legacy slug is occupied', async () => {
     mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
     const env = createEnv({ publicProfile: true, profileSlug: 'model-pricing' })
@@ -187,7 +240,9 @@ describe('worker server', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('image/svg+xml; charset=utf-8')
     expect(await response.text()).toContain('<svg')
-    expect(env.boundValues[0]).toEqual(['eve'])
+    // The read-side rate limit binds its own keys first, so find the profile lookup rather
+    // than assuming it is the first statement.
+    expect(env.boundValues).toContainEqual(['eve'])
   })
 
   test('serves percent-encoded public JSON extensions through the worker entrypoint', async () => {
@@ -204,7 +259,9 @@ describe('worker server', () => {
       slug: 'eve',
       displayName: 'Eve'
     })
-    expect(env.boundValues[0]).toEqual(['eve'])
+    // The read-side rate limit binds its own keys first, so find the profile lookup rather
+    // than assuming it is the first statement.
+    expect(env.boundValues).toContainEqual(['eve'])
   })
 
   test('serves cached public responses after rechecking visibility', async () => {
@@ -226,7 +283,9 @@ describe('worker server', () => {
     expect(secondResponse.headers.get('x-cache-test')).toBe('hit')
     expect(secondResponse.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
     expect(await secondResponse.text()).toContain('<svg')
-    expect(env.DB.prepare).toHaveBeenCalledTimes(4)
+    // Request 1: rate-limit read + profile + two summary reads. Request 2 hits the cache but
+    // still pays its rate-limit read.
+    expect(env.DB.prepare).toHaveBeenCalledTimes(8)
     expect(cache.match).toHaveBeenCalledTimes(2)
     expect(cache.put).toHaveBeenCalledTimes(1)
   })
@@ -306,7 +365,9 @@ describe('worker server', () => {
     expect(secondResponse.status).toBe(200)
     expect(secondResponse.headers.get('x-cache-test')).toBeNull()
     expect(await secondResponse.text()).toContain('<svg')
-    expect(env.DB.prepare).toHaveBeenCalledTimes(6)
+    // Request 1: rate-limit read + profile + two summary reads. Request 2 re-checks after the
+    // ownership change: rate-limit read + profile + two summary reads again.
+    expect(env.DB.prepare).toHaveBeenCalledTimes(10)
     expect(cache.put).toHaveBeenCalledTimes(2)
   })
 
@@ -456,9 +517,10 @@ describe('worker server', () => {
   })
 
   test('returns JSON 404 for missing public profiles', async () => {
+    const env = createEnv()
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/missing-user.json'),
-      createEnv(),
+      env,
       createExecutionContext()
     )
 
@@ -470,12 +532,17 @@ describe('worker server', () => {
         message: 'Public profile not found'
       }
     })
+    // The miss fails on the profile lookup rather than on parsing, so the read-side rate limit
+    // runs first: an unauthenticated scanner guessing slugs is charged against the ceiling even
+    // though every guess is a 404 that is never cached.
+    expect(env.sqlStatements[0]).toContain('api_rate_limits')
   })
 
   test('rejects unsupported public API extensions with JSON', async () => {
+    const env = createEnv()
     const response = await worker.fetch(
       workerRequest('https://tokenboard.example/api/public/missing-user.txt'),
-      createEnv(),
+      env,
       createExecutionContext()
     )
 
@@ -487,6 +554,9 @@ describe('worker server', () => {
         message: 'Public route not found'
       }
     })
+    // The unsupported extension is refused by parsing, before any D1 read — that is the point
+    // of the ordering: only requests that would actually reach the slug lookup pay for it.
+    expect(env.DB.prepare).not.toHaveBeenCalled()
   })
 
   test('rejects malformed public API path encoding with JSON', async () => {
@@ -1069,6 +1139,7 @@ function createEnv(
     usageSummaryStrict?: string
     modelPricingSyncEnabled?: string
     modelPricingSyncIntervalHours?: string
+    rateLimitCount?: number
   } = {}
 ) {
   const boundValues: unknown[][] = []
@@ -1095,7 +1166,7 @@ function createEnv(
     dueSubscription: options.dueSubscription
   }
   return Object.assign(env, {
-    DB: createDb(env, boundValues, sqlStatements)
+    DB: createDb(env, boundValues, sqlStatements, options.rateLimitCount)
   })
 }
 
@@ -1111,7 +1182,8 @@ function createDb(
     summaryUpdatedAt?: string
   } = {},
   boundValues: unknown[][] = [],
-  sqlStatements: string[] = []
+  sqlStatements: string[] = [],
+  rateLimitCount?: number
 ) {
   return {
     prepare: vi.fn((sql: string) => ({
@@ -1120,6 +1192,12 @@ function createDb(
         boundValues.push(values)
         return {
           first: vi.fn(async () => {
+            // The read-side rate limit reads and increments a counter row on every request.
+            // Without an answer here the increment falls back to "over the ceiling" and every
+            // request 429s, so this stub reports a fresh, far-from-limit counter.
+            if (sql.includes('api_rate_limits')) {
+              return { count: rateLimitCount ?? 1, resetAt: '2099-01-01T00:00:00.000Z' }
+            }
             if (sql.includes('FROM profiles')) {
               if (!(options.profileExists ?? options.publicProfile)) return null
               return {

@@ -56,13 +56,23 @@ func guiSnapshot(source contract.Source) contract.Snapshot {
 // all-source run cannot read the developer machine's real sessions. Claude
 // Code has no local directory to point at — its provider shells out to
 // ccusage, which may probe PATH or download — so it is stubbed out instead.
-func emptyProviderHomes(t *testing.T) map[string]string {
+// stubCcusageBackedSources replaces every source whose scan belongs to
+// ccusage. Those providers have no local directory to point at, so leaving one
+// unstubbed runs a real scan over the machine's own stores — and the tool
+// family now includes widely used tools (amp, kimi, zcode) a developer machine
+// can genuinely have data for.
+func stubCcusageBackedSources(t *testing.T) {
 	t.Helper()
-	// The two ccusage-backed sources have no local directory to point at, and
-	// leaving them unstubbed would run a real scan over the machine's own
-	// sessions.
 	stubSource(t, contract.SourceClaudeCode, stubProvider{})
 	stubSource(t, contract.SourceCodex, stubProvider{})
+	for _, source := range contract.CcusageToolSources() {
+		stubSource(t, source, stubProvider{})
+	}
+}
+
+func emptyProviderHomes(t *testing.T) map[string]string {
+	t.Helper()
+	stubCcusageBackedSources(t)
 	return map[string]string{
 		"TOKENBOARD_TIMEZONE":     "UTC",
 		"TOKENBOARD_GROK_HOME":    t.TempDir(),

@@ -10,11 +10,11 @@ package pricing
 //   - url.Values.Encode sorts query keys, so the URL assertions compare parsed
 //     parameters instead of the raw query strings.
 //
-// One assertion family is not portable: the TS result carries
-// contextPricingRules built by buildCodexContextPricingRules
-// (packages/collector/src/providers/codex-context-pricing.ts), which the Go
-// pricing package does not port, and PreparedConfig has no such field. Those
-// assertion sites are marked NOT PORTED.
+// The TS result carries contextPricingRules built by buildCodexContextPricingRules
+// (packages/collector/src/providers/codex-context-pricing.ts), which lives in the
+// codex provider package here. PreparedConfig therefore carries the models those
+// rules may widen the static table with (ContextPricingModels), and the assertions
+// below check that list — the codex provider turns it into the same rule set.
 
 import (
 	"bytes"
@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -593,9 +594,15 @@ func TestFallsBackToUsableCcusageConfigWhenDynamicConfigDirectoryNotWritable(t *
 	if !result.CoveredModelIDs["gpt-6-astra"] {
 		t.Fatalf("coveredModelIds does not contain gpt-6-astra")
 	}
-	// NOT PORTED: TS asserts no context pricing rule covers gpt-6-astra
-	// (result.contextPricingRules). PreparedConfig has no rules field; see the
-	// file comment.
+	// TS asserts no context pricing rule covers gpt-6-astra
+	// (result.contextPricingRules). PreparedConfig carries the models the rules may
+	// widen the static table with rather than the rules themselves, because the
+	// rules live in the codex provider package and pricing cannot import it; an
+	// empty list is the same statement, and the codex provider turns it into the
+	// static-only rule set TS builds.
+	if len(result.ContextPricingModels) != 0 {
+		t.Fatalf("ContextPricingModels = %d rows, want none on the write-failure fallback", len(result.ContextPricingModels))
+	}
 	requireContains(t, log.text(), "dynamic ccusage config write failed")
 	requireContains(t, log.text(), "using explicit config "+explicitPath)
 }
@@ -774,9 +781,15 @@ func TestWritesCacheAtomicallyAndCreatesDynamicOverridesWithExplicitConfigPreced
 	if _, ok := gpt["inputCostPerTokenAbove200kTokens"]; ok {
 		t.Fatalf("gpt-6-astra carries a 200k override")
 	}
-	// NOT PORTED: TS also asserts result.contextPricingRules has no rule for
-	// gpt-6-astra and a grok-4.6 rule with threshold 200000. PreparedConfig has
-	// no rules field; see the file comment.
+	// TS also asserts result.contextPricingRules has no rule for gpt-6-astra and a
+	// grok-4.6 rule with threshold 200000. Those rules are built in the codex
+	// provider, which this package cannot import; what this layer decides is that
+	// the whole catalogue reaches it on a successful write, so the tier filtering
+	// happens in one place rather than two.
+	if len(result.ContextPricingModels) != len(result.Catalogue.Models) {
+		t.Fatalf("ContextPricingModels = %d rows, want the full catalogue (%d)",
+			len(result.ContextPricingModels), len(result.Catalogue.Models))
+	}
 
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
@@ -879,8 +892,8 @@ func TestDoesNotRepriceDatedModelAliasWithExplicitCcusageOverride(t *testing.T) 
 	requireNumber(t, dated, "inputCostPerToken", perMillion(77))
 	requireNumber(t, dated, "outputCostPerToken", perMillion(88))
 	alias := overrideOf(t, overrides, "gpt-5.6-sol")
-	requireNumber(t, alias, "inputCostPerToken", perMillion(5))
-	requireNumber(t, alias, "outputCostPerToken", perMillion(30))
+	requireNumber(t, alias, "inputCostPerToken", perMillion(4))
+	requireNumber(t, alias, "outputCostPerToken", perMillion(20))
 }
 
 func TestTreatsBlankStateDirectoryAsUnset(t *testing.T) {
@@ -969,8 +982,90 @@ func TestDoesNotMergePricesFromDifferentProvidersForSameModelID(t *testing.T) {
 	if result.CoveredModelIDs["provider-collision"] {
 		t.Fatalf("coveredModelIds contains provider-collision")
 	}
-	// NOT PORTED: TS also asserts no context pricing rule covers
-	// provider-collision. PreparedConfig has no rules field; see the file comment.
+	// TS also asserts no context pricing rule covers provider-collision. That
+	// decision belongs to the rule builder, which sees the same catalogue this
+	// layer hands it; the ambiguity filter is what removes the row.
+}
+
+// ccusage resolves an override key against the observed model name by folding
+// provider prefixes and variant suffixes, so `xiaomi/mimo-v2.6-flash-uncensored`
+// can price a plain `mimo-v2.6-flash` day. When the base id is unresolved (its
+// reseller rows disagree) that folding key is the only one left and it wins —
+// one machine billed 3.6x the official rate this way. An exact key beats a
+// folding one, so the official vendor row anchors the base id.
+func TestAnchorsBaseModelToOfficialPriceWhenOnlyAVariantKeyWouldPriceIt(t *testing.T) {
+	base := func(provider string, inputCostPerMillion float64) Model {
+		return testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = provider
+			model.InputCostPerMillion = inputCostPerMillion
+			model.OutputCostPerMillion = 0.28
+		})
+	}
+	variant := testModel("xiaomi/mimo-v2.6-flash-uncensored", func(model *Model) {
+		model.Provider = "xiaomi"
+		model.InputCostPerMillion = 0.5
+		model.OutputCostPerMillion = 1.5
+	})
+
+	// The bare id stays unresolved on its own: the two rows disagree.
+	if selected := selectUnambiguousDynamicPricingModels([]Model{
+		base("xiaomi", 0.14),
+		base("reseller-a", 0.12),
+	}); len(selected) != 0 {
+		t.Fatalf("selectUnambiguousDynamicPricingModels returned %d rows, want 0", len(selected))
+	}
+
+	overrides := CreateCcusagePricingOverrides([]Model{base("xiaomi", 0.14), base("reseller-a", 0.12), variant})
+
+	requireNumber(t, overrideOf(t, overrides, "mimo-v2.6-flash"), "inputCostPerToken", perMillion(0.14))
+	overrideOf(t, overrides, "xiaomi/mimo-v2.6-flash-uncensored")
+}
+
+// Without an official row there is nothing to anchor to. Falling back to a
+// reseller row would re-introduce the ambiguity the unresolved id was dropped
+// for, and would launder an arbitrary reseller price into an authoritative one.
+func TestLeavesVariantOnlyModelAloneWhenNoOfficialBaseRowExists(t *testing.T) {
+	base := func(provider string, inputCostPerMillion float64) Model {
+		return testModel("deepseek-v4.1-flash", func(model *Model) {
+			model.Provider = provider
+			model.InputCostPerMillion = inputCostPerMillion
+			model.OutputCostPerMillion = 0.12
+		})
+	}
+	variant := testModel("deepseek/deepseek-v4.1-flash-uncensored", func(model *Model) {
+		model.Provider = "deepseek"
+		model.InputCostPerMillion = 0.33
+		model.OutputCostPerMillion = 1.32
+	})
+
+	overrides := CreateCcusagePricingOverrides([]Model{base("reseller-a", 0.03), base("reseller-b", 0.672), variant})
+
+	if _, ok := overrides["deepseek-v4.1-flash"]; ok {
+		t.Fatalf("deepseek-v4.1-flash should not be anchored without an official row")
+	}
+}
+
+func TestFoldToBaseModelIDStripsOnlyTheObservedFolding(t *testing.T) {
+	cases := map[string]string{
+		"mimo-v2.6-flash":                        "mimo-v2.6-flash",
+		"xiaomi/mimo-v2.6-flash":                 "mimo-v2.6-flash",
+		"xiaomi/mimo-v2.6-flash-uncensored":      "mimo-v2.6-flash",
+		"z-ai/glm-5.3-flash-abliterated":         "glm-5.3-flash",
+		"xiaomi/mimo-v2.6-flash-uncensored:free": "mimo-v2.6-flash",
+		// -free and :tag are not folding suffixes on their own: the base keeps them.
+		"deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free",
+		"kimi-k3:fast":             "kimi-k3",
+		// Both suffixes are stripped once each, in a fixed order, so a stacked id folds to
+		// the same base the TS implementation produces. The TS side used a single
+		// non-global replace, which left this side anchoring a base it never saw.
+		"foo-uncensored-abliterated":          "foo-uncensored",
+		"provider/foo-abliterated-uncensored": "foo",
+	}
+	for input, want := range cases {
+		if got := foldToBaseModelID(input); got != want {
+			t.Errorf("foldToBaseModelID(%q) = %q, want %q", input, got, want)
+		}
+	}
 }
 
 func TestTreatsBundledConfigAsBaselineSoDynamicPricesOverrideIt(t *testing.T) {
@@ -1118,4 +1213,216 @@ func TestPreservesBundledLongContextFieldsWhenStaticFallbackWritesMergedConfig(t
 	requireNumber(t, grok, "inputCostPerTokenAbove200kTokens", perMillion(4))
 	requireNumber(t, grok, "outputCostPerTokenAbove200kTokens", perMillion(12))
 	requireNumber(t, grok, "cacheReadInputTokenCostAbove200kTokens", perMillion(0.6))
+}
+
+// The agreement check compares only positive-priced rows, so the representative
+// must come from that same group. When an official vendor row is a $0
+// placeholder and a reseller row carries the real price, picking the
+// representative from all rows silently prices the model as free — the exact
+// failure mode the zero-row isolation exists to prevent. The TypeScript side
+// fixed this in d15b5fa; this is the Go port of that fix, pinned by the same
+// shape of test.
+func TestZeroPricedOfficialRowDoesNotRepresentAPricedGroup(t *testing.T) {
+	models := []Model{
+		testModel("step-5-preview", func(model *Model) {
+			model.Provider = "nvidia"
+			model.InputCostPerMillion = 0
+			model.OutputCostPerMillion = 0
+		}),
+		testModel("step-5-preview", func(model *Model) {
+			model.Provider = "reseller"
+			model.InputCostPerMillion = 1
+			model.OutputCostPerMillion = 2.7
+		}),
+	}
+
+	selected := selectUnambiguousDynamicPricingModels(models)
+	if len(selected) != 1 {
+		t.Fatalf("selectUnambiguousDynamicPricingModels returned %d rows, want 1", len(selected))
+	}
+	if selected[0].Provider != "reseller" {
+		t.Fatalf("collapsed representative provider = %q, want %q", selected[0].Provider, "reseller")
+	}
+	overrides := CreateCcusagePricingOverrides(models)
+	requireNumber(t, overrideOf(t, overrides, "step-5-preview"), "inputCostPerToken", perMillion(1))
+}
+
+// The official vendor row still wins when it carries the real price: the fix
+// only drops $0 placeholders from the pick, it does not stop preferring the
+// vendor.
+func TestOfficialVendorRowStillRepresentsAnAgreeingGroup(t *testing.T) {
+	models := []Model{
+		testModel("gpt", func(model *Model) {
+			model.Provider = "reseller"
+			model.InputCostPerMillion = 2
+			model.OutputCostPerMillion = 8
+		}),
+		testModel("gpt", func(model *Model) {
+			model.Provider = "openai"
+			model.InputCostPerMillion = 2
+			model.OutputCostPerMillion = 8
+		}),
+	}
+	selected := selectUnambiguousDynamicPricingModels(models)
+	if len(selected) != 1 || selected[0].Provider != "openai" {
+		t.Fatalf("collapsed representative = %+v, want the openai row", selected)
+	}
+}
+
+// ccusage matches an override key case-sensitively, and the catalogue publishes
+// several spellings of the same id. Every published spelling has to carry the
+// collapsed price, or machines whose logs use the other spelling stay unpriced.
+func TestEmitsOverrideUnderEveryCatalogueSpellingOfAModelID(t *testing.T) {
+	models := []Model{
+		testModel("glm-5.3-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("GLM-5.3-Flash", func(model *Model) {
+			model.Provider = "amd"
+			model.InputCostPerMillion = 0
+			model.OutputCostPerMillion = 0
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	lower := overrideOf(t, overrides, "glm-5.3-flash")
+	requireNumber(t, lower, "inputCostPerToken", perMillion(0.15))
+	if got := overrides["GLM-5.3-Flash"]; !reflect.DeepEqual(got, lower) {
+		t.Fatalf("GLM-5.3-Flash override = %v, want %v", got, lower)
+	}
+}
+
+// The alias set is the catalogue's own spellings, never a generated variant.
+func TestDoesNotInventACatalogueSpelling(t *testing.T) {
+	overrides := CreateCcusagePricingOverrides([]Model{
+		testModel("gpt-6", func(model *Model) {
+			model.Provider = "openai"
+			model.InputCostPerMillion = 1
+			model.OutputCostPerMillion = 2
+		}),
+	})
+
+	if _, ok := overrides["gpt-6"]; !ok {
+		t.Fatalf("gpt-6 has no override: %v", overrides)
+	}
+	if _, ok := overrides["GPT-6"]; ok {
+		t.Fatalf("GPT-6 override was invented: %v", overrides)
+	}
+}
+
+// An anchored base id is emitted under the catalogue's first spelling of that
+// id; the other published spellings have to follow it.
+func TestAliasesAnAnchoredBaseIDToTheOtherCatalogueSpellings(t *testing.T) {
+	models := []Model{
+		testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = "xiaomi"
+			model.InputCostPerMillion = 0.14
+			model.OutputCostPerMillion = 0.28
+		}),
+		testModel("mimo-v2.6-flash", func(model *Model) {
+			model.Provider = "reseller-a"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.25
+		}),
+		testModel("MiMo-V2.6-Flash", func(model *Model) {
+			model.Provider = "reseller-b"
+			model.InputCostPerMillion = 0.2
+			model.OutputCostPerMillion = 0.4
+		}),
+		testModel("xiaomi/mimo-v2.6-flash-uncensored", func(model *Model) {
+			model.Provider = "xiaomi"
+			model.InputCostPerMillion = 0.5
+			model.OutputCostPerMillion = 1.5
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	base := overrideOf(t, overrides, "mimo-v2.6-flash")
+	requireNumber(t, base, "inputCostPerToken", perMillion(0.14))
+	if got := overrides["MiMo-V2.6-Flash"]; !reflect.DeepEqual(got, base) {
+		t.Fatalf("MiMo-V2.6-Flash override = %v, want %v", got, base)
+	}
+}
+
+// Two official vendors price one id differently (international and domestic
+// endpoints). The anchor must not let arrival order decide the price: that
+// order comes from the server's ORDER BY, and a change there would silently
+// move what every collector bills.
+func TestAnchorPicksTheAlphabeticallyFirstOfficialProvider(t *testing.T) {
+	models := []Model{
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zhipuai"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.42
+		}),
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("vendor/glm-9-flash-uncensored", func(model *Model) {
+			model.Provider = "vendor"
+			model.InputCostPerMillion = 5
+			model.OutputCostPerMillion = 10
+		}),
+	}
+
+	overrides := CreateCcusagePricingOverrides(models)
+	requireNumber(t, overrideOf(t, overrides, "glm-9-flash"), "inputCostPerToken", perMillion(0.15))
+}
+
+// The pick must not depend on arrival order: reversing the input rows has to
+// yield the same anchor, or a server-side ORDER BY change would move prices.
+func TestAnchorPickIsIndependentOfRowOrder(t *testing.T) {
+	rows := []Model{
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zhipuai"
+			model.InputCostPerMillion = 0.12
+			model.OutputCostPerMillion = 0.42
+		}),
+		testModel("glm-9-flash", func(model *Model) {
+			model.Provider = "zai"
+			model.InputCostPerMillion = 0.15
+			model.OutputCostPerMillion = 0.5
+		}),
+		testModel("vendor/glm-9-flash-uncensored", func(model *Model) {
+			model.Provider = "vendor"
+			model.InputCostPerMillion = 5
+			model.OutputCostPerMillion = 10
+		}),
+	}
+	reversed := []Model{rows[2], rows[1], rows[0]}
+
+	forward := CreateCcusagePricingOverrides(rows)
+	backward := CreateCcusagePricingOverrides(reversed)
+	if got, want := reflect.DeepEqual(forward, backward), true; got != want {
+		t.Fatalf("override set depends on row order: %v vs %v", forward["glm-9-flash"], backward["glm-9-flash"])
+	}
+}
+
+// Rows that agree on price can still disagree on context window, and the
+// representative carries its own into maxInputTokens. The pick must not depend
+// on arrival order, which comes from the catalogue's ORDER BY.
+func TestCollapsedRepresentativeIsIndependentOfRowOrder(t *testing.T) {
+	rows := []Model{
+		testModel("gpt-9-chat", func(model *Model) {
+			model.Provider = "zeta"
+			model.ContextWindow = 128_000
+			model.MaxInputTokens = nil
+		}),
+		testModel("gpt-9-chat", func(model *Model) {
+			model.Provider = "alpha"
+			model.ContextWindow = 400_000
+			model.MaxInputTokens = nil
+		}),
+	}
+
+	forward := CreateCcusagePricingOverrides(rows)
+	backward := CreateCcusagePricingOverrides([]Model{rows[1], rows[0]})
+	if !reflect.DeepEqual(forward, backward) {
+		t.Fatalf("override depends on row order: forward=%v backward=%v", forward["gpt-9-chat"], backward["gpt-9-chat"])
+	}
+	requireNumber(t, overrideOf(t, forward, "gpt-9-chat"), "maxInputTokens", 400_000)
 }

@@ -40,6 +40,11 @@ const defaultSyncLockTimeoutMs = 60_000
 // value trades a lost hook cycle for faster failure visibility. Manual and scheduled runs
 // are never bounded.
 const defaultHookSyncTimeoutMs = 30 * 60 * 1000
+// setTimeout stores its delay in a signed 32-bit integer and silently clamps anything
+// larger to 1ms (with a TimeoutOverflowWarning). A configured bound past this ceiling would
+// therefore kill every hook run immediately instead of never — the opposite of what the
+// operator asked for. `coordinator.mjs` documents the same clamp for its continuation delay.
+const maxHookSyncTimeoutMs = 2_147_483_647
 
 export function readHookSyncTimeoutMs(env = process.env) {
   const configured = env.TOKENBOARD_HOOK_SYNC_TIMEOUT_MS
@@ -47,7 +52,13 @@ export function readHookSyncTimeoutMs(env = process.env) {
   if (!/^[1-9][0-9]*$/.test(configured)) {
     throw new Error('TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be a positive integer number of milliseconds')
   }
-  return Number(configured)
+  const timeoutMs = Number(configured)
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs > maxHookSyncTimeoutMs) {
+    throw new Error(
+      `TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be at most ${maxHookSyncTimeoutMs}; larger values are clamped by setTimeout to 1ms and would kill every hook run`
+    )
+  }
+  return timeoutMs
 }
 
 if (isMain()) {
@@ -147,7 +158,7 @@ export async function runSyncInvocation({
         updatedAt: now(),
         ...(status === 'running' ? {} : { completedAt: now() }),
         ...(Number.isSafeInteger(details.exitCode) ? { exitCode: recordableExitCode(details.exitCode) } : {}),
-        ...(details.error ? { error: errorMessage(details.error) } : {})
+        ...(details.error ? { error: redactUrlCredentials(errorMessage(details.error)) } : {})
       })
     } catch (error) {
       try {
@@ -251,7 +262,6 @@ export function runPreCollectUpgrade({
   env = process.env,
   upgrade = runUpgrade,
   selfUpdate = runSelfUpdate,
-  binaryExists = existsSync,
   log = createUpgradeLogger(logs),
   warn = (message) => console.error(message)
 } = {}) {
@@ -260,7 +270,15 @@ export function runPreCollectUpgrade({
     // the binary too: an automatic self-update rewrites the executable itself,
     // which is harder to undo than a checkout `git checkout` can revert.
     // `shouldRunUpgrade` also covers `--hook`, so a hook still never upgrades.
-    if (!shouldRunUpgrade({ flags, env }) || !binaryExists(invocation.command)) {
+    //
+    // A missing binary must still reach `selfUpdate`: that is where
+    // `recoverOrphanedBinary` restores a swap interrupted between its two
+    // renames. Skipping the call because the target is missing is exactly the
+    // case the recovery exists for — without it the machine reports "client is
+    // not installed" on every run with no automatic way back. When there is
+    // nothing to recover, `runSelfUpdate` throws and the failure stays a
+    // warning, as with any other failed update.
+    if (!shouldRunUpgrade({ flags, env })) {
       return
     }
     try {
@@ -333,30 +351,89 @@ async function runSync({ flags, invocation, logs }) {
 // Output streams line by line instead of accumulating in a 64 MiB buffer: a run killed
 // mid-flight keeps everything it already printed, memory stays flat regardless of run length,
 // and per-line redaction is equivalent because every redact rule is single-line anchored.
+// A hook run's child is the collector, which spawns ccusage (or a language server) of its
+// own. Killing only the direct child leaves those grandchildren running: the collector is
+// gone, but the scan that blew the budget keeps burning CPU and memory with nothing left to
+// stop it. Spawning detached makes the child a process-group leader on POSIX, so the kill
+// can take the whole tree.
+//
+// `detached` is only set when a bound will actually be enforced. A manual run has no bound,
+// and detaching it would take the child out of the terminal's foreground process group —
+// Ctrl-C would then stop sync.mjs but leave the collector running.
+//
+// Windows has no process groups in that sense, and `detached` there means a new console
+// rather than a new group, so the direct-child kill stays the best available answer.
+function spawnOptionsFor(invocation, stdio, bounded) {
+  return {
+    cwd: invocation.cwd,
+    env: invocation.env,
+    stdio,
+    shell: invocation.shell,
+    detached: Boolean(bounded) && process.platform !== 'win32'
+  }
+}
+
+function killProcessTree(child, signal = 'SIGKILL') {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // The group is already gone (ESRCH) or the child never became a leader; fall through
+      // to the direct kill rather than reporting a timeout we did not actually enforce.
+    }
+  }
+  try {
+    child.kill(signal)
+  } catch {}
+}
+
 export async function runCollectorProcess(invocation, logs, options = {}) {
   const spawnChild = options.spawn || spawn
   const write = options.write || writeSync
   if (!logs) {
     // Interactive mode keeps the child on the real terminal, but the process must still be
     // awaited: spawn returns a ChildProcess, not a result, and the caller reads `status`.
-    const child = spawnChild(invocation.command, invocation.args, {
-      cwd: invocation.cwd,
-      env: invocation.env,
-      stdio: 'inherit',
-      shell: invocation.shell
+    //
+    // The hook timeout applies here too. A hook run is exactly this branch — notify spawns
+    // sync.mjs with `--hook` and no scheduled-log environment — so bounding only the logged
+    // branch left the production hook path unbounded, and a wedged scan there holds the
+    // coordinator's sync lock with nothing to kill it.
+    const child = spawnChild(
+      invocation.command,
+      invocation.args,
+      spawnOptionsFor(invocation, 'inherit', Boolean(options.hookTimeoutMs))
+    )
+    let timedOut = false
+    let timer
+    if (options.hookTimeoutMs) {
+      timer = setTimeout(() => {
+        timedOut = true
+        killProcessTree(child)
+      }, options.hookTimeoutMs)
+    }
+    const outcome = await new Promise((resolve) => {
+      child.once('error', (error) => resolve({ error }))
+      child.once('exit', (code, signal) => resolve({ code, signal }))
     })
-    return await new Promise((resolve) => {
-      child.once('error', (error) => resolve({ status: 1, error }))
-      child.once('exit', (code, signal) => resolve({ status: code ?? (signal ? 1 : 0), error: null }))
-    })
+    clearTimeout(timer)
+    if (outcome.error) return { status: 1, error: outcome.error }
+    if (timedOut) {
+      return {
+        status: 1,
+        error: Object.assign(new Error(`collector run exceeded the ${options.hookTimeoutMs} ms hook timeout`), {
+          code: 'ETIMEDOUT'
+        })
+      }
+    }
+    return { status: outcome.code ?? (outcome.signal ? 1 : 0), error: null }
   }
 
-  const child = spawnChild(invocation.command, invocation.args, {
-    cwd: invocation.cwd,
-    env: invocation.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: invocation.shell
-  })
+  const child = spawnChild(
+    invocation.command,
+    invocation.args,
+    spawnOptionsFor(invocation, ['ignore', 'pipe', 'pipe'], Boolean(options.hookTimeoutMs))
+  )
   const stdoutPipe = pipeRedacted(child.stdout, logs.stdoutFd, write)
   const stderrPipe = pipeRedacted(child.stderr, logs.stderrFd, write)
   let timedOut = false
@@ -365,7 +442,7 @@ export async function runCollectorProcess(invocation, logs, options = {}) {
     // Only hook-mode callers pass a bound; manual and scheduled runs are never killed.
     timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGKILL')
+      killProcessTree(child)
     }, options.hookTimeoutMs)
   }
 

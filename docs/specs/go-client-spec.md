@@ -57,10 +57,12 @@ clients/go/
 
 1. **snapshotHashPayload 字节级一致**：SHA-256 输入是键序固定、无空格的规范化 JSON。Go 侧**手工拼键序**，禁止依赖 `encoding/json` 的 map 序列化。金样本覆盖：全字段/缺字段/costUnavailable 来源/unicode 模型名。
 2. **cursor JSON v1 双向兼容**：TS 写 → Go 读 → Go 写 → TS 读，内容零差异（含 sha256+mtime+size+offset+pendingUpload、codexHookProfileHash、commit 前校验、缺失文件清理）。这是 per-source 灰度的前提。
-3. **usage-core 全部校验语义**：cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝——这是已知且唯一的时区接受集偏差，方向为拒绝而非静默算错。
+3. **usage-core 全部校验语义**：来源枚举（`usageSources`，当前 21 个，含 12 个 ccusage 工具来源）、cacheRead≤total、costUnavailable 来源 costUsd 必须 0、token/cost 上限、时区校验（嵌入 `time/tzdata`；金样本覆盖 Intl 边界，如 `Etc/GMT+5` 反号）。Intl 接受的偏移标识符（`±HH`、`±HHMM`、`±HH:MM`，时 00–23、分 00–59）由 `contract.LoadLocation` 以固定偏移支持，日期归属与 Intl 一致；ICU 缩写（如 `CST`、`EST`）依赖 CLDR 表、Go 无法复刻，仍按 `Invalid timezone` fail-closed 拒绝。**时区接受集偏差不止一种（2026-10-24 实测双向对照）**：Intl 接受而 Go 拒绝——`US/Pacific-New`、`SystemV/EST5`、`SystemV/YST9YDT`、`Canada/East-Saskatchewan`（方向安全：拒绝而非算错）；Go 接受而 Intl 拒绝——`posixrules`（tzdata 里真实存在的一个文件；方向危险：会采集成功、却因服务端用 Intl 校验而永久 400，5 次后进入 24h 上传暂停）。`local`/`factory`/`posixrules` 已列入 `goOnlyZoneNames` 显式拒绝，并有表驱动测试；新增此类名称须同时补测试与本节。
 4. **env 契约不变**：`TOKENBOARD_ENDPOINT/UPLOAD_TOKEN/TIMEZONE/SOURCE/SINCE/UNTIL/HOOK_MODE/STATE_DIR/FAIL_ON_SOURCE_ERROR/CCUSAGE_CONFIG/CODEX_SYMLINK_ROOTS_JSON/…` 与 TS 逐一同名同义；`transientSyncExitCode=75` 保留。
 5. **stderr 行为契约**：skill 脚本按行解析 stderr（脱敏、进度、跳过形态），Go 输出格式对齐。
-6. **providers 语义陷阱清单**（平移时逐条带 fixture 测试）：Pi cacheWrite+cacheWrite1h 双档与 entry-id 去重；Grok 面值入账+cachedRead 拆 fresh；DSH 多帧 zstd+尾帧截断容忍+seq 去重；OpenCode SQL 投影+只读打开；Antigravity 原文不落盘+bounded 扫描+cursor 上限；Codex 混合模型对账+重试消息前缀耦合+symlink 策略；costUnavailable fail-closed。
+6. **providers 语义陷阱清单**（平移时逐条带 fixture 测试）：Pi cacheWrite+cacheWrite1h 双档与 entry-id 去重；Grok 面值入账+cachedRead 拆 fresh；DSH 多帧 zstd+尾帧截断容忍+seq 去重；OpenCode SQL 投影+只读打开；Antigravity 原文不落盘+bounded 扫描+cursor 上限；Codex 混合模型对账+重试消息前缀耦合+symlink 策略；costUnavailable fail-closed；ccusage 工具族子命令映射（gemini-cli→`gemini`）与「空 daily 报告短路、不跑 session」两侧同口径。
+
+**来源枚举 parity 的专项测试（2026-10-25，随 PR #25 的 12 个工具来源补齐）**：金样本只覆盖 hash payload、不覆盖来源集合，所以 `contract_test.go` 的 `TestUsageSourcesMatchUsageCore` 用硬编码的 21 项声明序列断言 `AllSources()` 的顺序与内容——两侧任何一边加来源都会先红。CI 的 `shadow` job 同步把 12 个工具源加入逐源循环：干净 HOME 下两侧都应报空 match，子命令名一旦漂移（如误传 `gemini-cli`，ccusage 会 exit 2），Go 侧整源失败而 TS 侧报空，diff 即失败。
 
 ## 4. ccusage 集成（三层，fail-closed）
 
@@ -142,6 +144,8 @@ clients/go/
   - Go 侧捆绑二进制是 spec §4 的第一层，TS 没有；非 hook 获取失败仍回退 package runner 以保持 skill 安装兼容。
   - bundled 静态配置在 Go 侧是嵌入文件，运行时落盘到 `<stateDir>/ccusage.bundled.json`；TS 从 checkout 读 `ccusage.json`。
   - Windows 的 dev/ino 由 `identity_windows.go` 给出平台回退，不与 Node 的 stat 逐位对齐。
+  - **sync stdout 的 `timings` 键名不同**：TS 记录 `cursorScan`/`ccusageDaily`/`ccusageSession`/`upload`/`cursorAck`，Go 的 provider 把扫描与 ccusage 合并成一次采集，只能诚实归因 `collect`/`upload`/`cursorAck`（`internal/cli` 的 `elapsedMillis`）。skill 的 `parseSyncTimings` 接受任意合法键名，run record 只会少掉更细的拆分，不会丢整块计时。
+  - **cursor 锁的心跳失败被静默忽略**：TS `withCursorLock` 在回调成功时把心跳失败抛给调用方；Go 的 `refreshMtime` 只在锁仍属于自己时刷新，失败即放弃（见 `internal/state` 注释）。后果是锁被 stale sweep 抢走后，Go 不会在写入前断言所有权（TS 有 `assertCursorWriteOwnership`）。心跳每 5s、stale 窗口 30s，触发需要连续 6 次 Chtimes 失败，属已知、可接受的偏差。
 - M4 出口（hook 离线行为）：`TestHookModeNeverDownloadsCcusage`（无二进制时 hook 失败且 runner 不运行）、`TestResolveHookModeFailsClosedWithoutABinary`、`TestResolvePrefersTheBundledBinaryOverPATH`、`TestDownloadVerifiesIntegrityAndInstallsTheBinary` 覆盖获取层；`TestHookModeUsesChangedFilesToNarrowReconciliation` 等 6 条覆盖 hook 对账语义。
 - **M4 影子 diff 口径（2026-10-17 实测，commit 92b6493）**：同一 Claude home fixture（两个模型、cache 读写、跨小时），`TOKENBOARD_CCUSAGE_BIN` 指向 `packages/collector/node_modules/.bin/ccusage`（20.0.33），分别跑 TS `tsx src/cli.ts preview --source claude-code` 与 Go `tokenboard preview --source claude-code`：
   - range 模式：snapshot 数组除 `collectedAt`（墙钟）外逐字段、逐序一致；未定价诊断行一致。
@@ -179,6 +183,15 @@ clients/go/
 - 与 TS 的已知边界：
   - `codexFileStat.ctimeMs` 由反射取平台字段（Linux `Ctim`、Darwin `Ctimespec`、Windows 无），Windows 上退化为 mtime，change detection 弱于 Node。
   - Go 侧 context pricing 的规则来源是 `DefaultRules()` + 动态目录，与 TS 的内联常量表同源但表体由 `BuildCodexContextPricingRules` 生成，影子 diff 已逐模型核对（`gpt-5.6-sol` 重定价两侧一致）。
+
+**ccusage 工具族移植（2026-10-25，关闭 PR #25 合并后的 parity 缺口）**：
+
+- 背景：上游 PR #25 把 12 个 ccusage 工具来源（amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode）加进了 TS 侧，Go 契约层仍停在 9 个来源——`--source amp` 报 `Invalid source`，`--source all` 静默漏采这 12 个（不在 `AllSources()` 里，连 skip 提示都没有）。spec §1 的等价性要求因此被破坏，而金样本生成器只覆盖 hash payload，CI 钉不住。
+- 契约层：`contract` 新增 12 个 `Source` 常量、`usageSources` 集合、`ccusageToolCommandNames` 映射、`CcusageToolCommand`/`CcusageToolSources`，并把 `allSources` 扩到 21 项（顺序与 usage-core 的 `usageSources` 逐位一致）。`TestUsageSourcesMatchUsageCore` 硬编码同一份 21 项序列，两侧任一改动先红。
+- Provider：`internal/collect/providers/ccusagetool` 单个参数化实现服务 12 个来源，`init()` 逐个 `collect.Register`。行为对齐 TS：`<tool> daily --json` → `<tool> session --json`，`gemini-cli` 走 `gemini` 子命令，空 daily 报告直接返回空结果、不发起 session 调用；不做动态定价 prepare（TS 同样不做），ambient `TOKENBOARD_CCUSAGE_CONFIG` 仍经 package runner 传给 ccusage。
+- 共享层：`sessionusage.AssertValidDateFilterRange` 从 claudecode 的私有实现上提，claudecode 与 ccusagetool 共用一份；`ccusage.HasDailyRows` 是 `hasDailyRows` 的移植，刻意比 normalize 的行提取严格（只认 `daily` 数组），否则「工具未安装」会退化成多跑一次 session。
+- 验证：`ccusagetool_test.go` 9 条覆盖 TS 的 7 条用例（参数向量、gemini 映射、since/until 透传、空报告短路、非工具源拒绝）外加反向窗口拒绝与「12 个来源都已注册」；`go test ./... -race` 全绿，`GOOS=windows go vet ./...` 干净。CI `shadow` job 与 `shadow-dual-run.mjs` 的源列表都补上这 12 个。
+- 证据边界：本机未安装这 12 个工具，双跑只能得到 `empty`（两侧一致的空结果）——它能抓住子命令名漂移，但**不构成有数据的等价性验证**。真实数据验证要等某台机器装了其中之一。
 
 **M6 状态（GoReleaser / self-update / skill 改造，2026-10-18）**：
 
@@ -230,14 +243,13 @@ clients/go/
   - **踩到的坑（值得记）**：直接改配置文件的**根级** `clientType` 无效。本机配置有 `activeServer` + `servers` 多服务器结构，`normalizeActiveServerConfig` 会把根字段替换成 active profile 的 `profileScopedFields`，而 `clientType` 就在 profile-scoped 键集里（`config.mjs:390`）。第一次手改根字段后 `status.mjs` 仍报 `binary`，改用 `mergeConfig({ clientType: 'git' })` 才同时更新根与 profile。**回滚指令不能写成「手改 JSON」**，脚本里统一走 `mergeConfig`。
   - **无 published release 时的行为（已实测）**：`tokenboard self-update` exit 1，报 `release lookup did not land on a tag page: /MisonL/TokenBoard/releases`——**fail-closed，不会把机器误降级或误装**。而在 `sync.mjs` 里自更新失败只是 warning（`runPreCollectUpgrade` 的 catch），采集照常进行——所以即便有人留在 binary 通道，也只是每次定时同步多一行告警，不会中断上传。
   - **解除暂停的条件（缺一不可）**：
-    1. 真实数据覆盖 9 个源里至少 8 个。当前**只有 claude-code 与 codex 有真实数据**；`grok-build` / `deepseek-harness` / `opencode` / `pi` / `antigravity-cli` / `antigravity` / `antigravity-ide` 这 7 个源在本机没有可观测数据——即 7/9 个源没有可观测验证。
+    1. 真实数据覆盖：**按 21 个来源计，当前有数据的只有 7 个**——`claude-code`（350 快照）、`codex`（4）、`grok-build`（4）、`deepseek-harness`（4）、`amp`（4）、`kimi`（2）、`zcode`（2），全部双跑 match（2026-10-25 实测，`--since all`）。另外 9 个 ccusage 工具源在本机是两侧一致的 `empty`（能证明子命令映射与「未安装→空」语义，但不是有数据的对比）；`opencode` / `pi` / `antigravity-cli` 三源目录不存在（`~/.local/share/opencode/opencode.db`、`~/.pi/agent/sessions`、`~/.gemini/antigravity-cli/conversations`）。**「9 个源里覆盖 8 个」这条原始写法的比例已失去意义**，实际口径应是「有数据的源逐个双跑 match，无数据的源明确列为 not-installed 或 empty 而不是伪装成覆盖」。
        - **2026-10-23 复核（此前把这条写宽了）**：`grok-build` / `deepseek-harness` 并非「恒 0 快照」，而是**默认 7 天窗口内无数据**：`~/.grok/sessions` 最新 `updates.jsonl` 是 2026-10-09，`~/.dsh/sessions` 最新 `session.jsonl.zstd` 是 2026-09-18。用 `--since all` 重跑后两者都拿到数据且 **match**（各 4 快照）。因此这两源在本机**是有可观测验证的**，只是必须用全历史窗口——默认窗口会静默给出「0 快照 match」这种无信息量的结果。
-       - `opencode` / `pi` / antigravity 三源的目录确实不存在（`~/.local/share/opencode/opencode.db`、`~/.pi/agent/sessions`、`~/.gemini/antigravity*/conversations` 均缺失），这 5 源才是真正无数据的。
     2. GUI 两源（antigravity / antigravity-ide）拿到真实 language-server 数据并双跑 match；CI 不跑 language server，这是当前唯一完全没有端到端证据的路径。
     3. Windows 换入语义有真人验证。目前只有 `GOOS=windows go build` 与源码级论证（见本文件末「Windows 换入语义」条），首个 Windows 用户仍未出现。
     4. ~~03:41 的 `sessionCount` 瞬态 diff 定性~~ —— **2026-10-24 已定性**：会话首条 usage 行落在两次 `session` 扫描之间（活写竞态，非语义缺陷；见 M7 台账「定性结论」）。
     5. 观察期从「真正启用 binary」起重新起算 2 周，且期间 `shadow-dual-run.jsonl` 无未定性 `diff`。
-  - **当前可交付的验证结论**：`go test ./... -race` 全绿（35 个包中 31 个有测试），语句覆盖率 **77.4%**；三 OS CI 矩阵通过；ci shadow 门禁覆盖 7 个文件型源。这些是「代码正确性」的证据，**不等于**「产品可发布」——上面 5 条是后者。
+  - **当前可交付的验证结论**：`go test ./... -race` 全绿（35 个包中 31 个有测试），语句覆盖率 **77.4%**；三 OS CI 矩阵通过；ci shadow 门禁覆盖 6 个文件型源 + claude-code/codex（含 `--hook`）+ 12 个 ccusage 工具源。这些是「代码正确性」的证据，**不等于**「产品可发布」——上面 5 条是后者。
 - **上游如何接管发布（操作指引）**：前提是 PR #24（+#25）先合并进上游 master，且上游作者同意接管发布节奏——这两步都只能由上游作者本人完成。
   1. **模块路径**：`clients/go/go.mod` 是 `github.com/MisonL/TokenBoard/clients/go`，127 个文件 import 它。两个选项——(a) 保留 fork 路径（能工作，但上游发的版本内部带着 fork 模块名，只影响 `go install` / 源码引用）；(b) 一次性改名成 `github.com/evepupil/TokenBoard/clients/go`。**改名时 `.goreleaser.yaml` 的 `ldflags` 里的 `-X` 路径必须同步改**（`:36`），否则版本戳静默失效，构建出来的二进制永远报 `dev`，自更新每次都会重装同一版本。
   2. **默认发布源**：两处硬编码必须一起改——`clients/go/internal/release/release.go:29` 的 `DefaultRepo` 与 `skills/tokenboard/scripts/client-binary.mjs:30` 的 `defaultReleaseRepo`。注意测试里的耦合方式不同：Go 的 `release_test.go:172` 比较的是**常量本身**（改值不会红），但 `release_test.go:18`、`selfupdate_test.go:101` 与 `client-binary.test.mjs:63` 的 **stub 服务器把 `/MisonL/TokenBoard/...` 路径写死了**——只改常量不改这些路径，测试会以「找不到 release」的形式失败，而不是给出「默认仓库改了」的提示。
@@ -255,7 +267,7 @@ clients/go/
 **M7 状态（per-source 灰度 + 双跑，2026-10-21）**：
 
 - [x] `tokenboard shadow` 命令（§6.2）：TS `preview` 与 Go 采集同 env 对比，按 hash payload 做键序规范化 diff，结构化输出 + exit 1；两侧独立临时 state dir，真实 cursor 不可达。
-- [x] CI 门禁：`shadow` job 覆盖 grok-build / pi / deepseek-harness / opencode / claude-code / codex / antigravity-cli 七个源（`cmd/shadow-fixtures` 生成六个文件型源的 fixture；antigravity-cli 用 `scripts/antigravity-fixture.mts` + HOME 替换）；`release` 以 `needs: [test, typecheck, baseline-test, deps, shadow, release-dry-run]` 前置。GUI 两源因 language-server 不进 CI。
+- [x] CI 门禁：`shadow` job 覆盖 grok-build / pi / deepseek-harness / opencode / claude-code / codex / antigravity-cli 七个源（`cmd/shadow-fixtures` 生成六个文件型源的 fixture；antigravity-cli 用 `scripts/antigravity-fixture.mts` + HOME 替换），2026-10-25 起再加上 12 个 ccusage 工具源（干净 HOME 下两侧一致空，用作子命令映射的漂移哨兵）；`release` 以 `needs: [test, typecheck, baseline-test, deps, shadow, release-dry-run]` 前置。GUI 两源因 language-server 不进 CI。
   - **基线测试门禁（2026-10-23 补，`736d0bd`）**：此前 CI **从不运行 TS collector 的 1218 条测试**——`typecheck` 只证明类型自洽，`shadow` 只跑 fixture。一条破坏 collector 自身测试的改动会绿灯通过，并静默移动 shadow 的对比基线。新增 `baseline-test` job：`pnpm --filter @tokenboard/usage-core --filter @tokenboard/collector test` + `pnpm format:check`，并加入 `release.needs`。**作用域刻意只覆盖这两个包**——它们是本 workflow 的 `paths` 过滤所触发的那两个；`apps/web` 同样没有 CI，但不属这条基线，写进来会让 job 声称的范围大于它的触发范围。
   - **手动触发（`a14d728`）**：`push` 只匹配 `master` 与 `v*` tag，feature 分支上的 workflow 改动**无法由 CI 自验证**——这正是本轮遇到的：改完 workflow 推上去，CI 一次都没跑。加 `workflow_dispatch` 后可在任意分支跑同一批 job；`release` 仍由 `if: startsWith(github.ref, 'refs/tags/v')` 把住，手动触发不可能发布。
   - **跨平台测试树类型检查（2026-10-23 补，`4e7af76`）**：`go build ./...` **不编译 `_test.go`**，而原生测试矩阵的每个 runner 只为自己那个 GOOS 编译——所以「某个测试文件在别的平台编不过」两边都看不见。`go vet` 会 typecheck 测试文件，按目标逐个跑即覆盖测试树。本机对 windows/amd64+arm64、darwin/arm64、linux/arm64 全部干净。**已在 CI 验证**：上游 PR #24 的 run `39958268161`（`4e7af76`）全 8 job 通过，含新增的 `collector and usage-core test`，`Release` 按 tag 条件 skip。
@@ -265,7 +277,7 @@ clients/go/
 - [ ] **M7 出口未达成：TS collector 尚未 deprecated。** 原始出口标准是「全 source 走 Go，TS deprecated」，两者都未发生——本机 `clientType: git`，TS 仍是生产主路径，Go 客户端只在本机以 `shadow` 对照方式运行过。达成该出口需要「发版状态：暂停」的 5 个条件全部解除，并完成 2 周稳定观察。
 - [x] 逐源切换机制本身已可用（2026-10-23 实测切换并回滚）：`upgrade.mjs --to-binary` → `clientType: binary` → 所有源由 Go 二进制执行 → 当日回滚为 `git`，两条路径都在真机上走通。`perSource` 保留为逐源开关（注意：`all` 运行要求映射与 `clientType` 一致，混合映射会 fail-closed）。**切换动作本身已验证，持续运行未验证**——见下条。
 - [ ] 「全部 source 走 Go 稳定 2 周」：**未开始，且不以上述 2026-10-23 起算**。真实启用与观察都排在「发版状态：暂停」的 5 个解除条件之后；解除后从真正启用那天重新起算 2 周。
-  - **观察期有效性的证据边界**：本机有可观测数据的源是 `claude-code`、`codex`、`grok-build`、`deepseek-harness` 四个（后两者须用 `--since all`，默认 7 天窗口内无数据）；`opencode` / `pi` / `antigravity-cli` / `antigravity` / `antigravity-ide` 五源的目录不存在。那五源的双跑 match 不构成有效证据，其正确性只能依赖 CI fixture 的 shadow 门禁。
+  - **观察期有效性的证据边界**：本机有可观测数据的源是 7 个——`claude-code`、`codex`、`grok-build`、`deepseek-harness`、`amp`、`kimi`、`zcode`（后五个须用 `--since all`，默认 7 天窗口内无数据，见 2026-10-25 双跑）。其余 9 个 ccusage 工具源两侧一致空、`opencode` / `pi` / antigravity 三源的目录不存在。这些源的双跑结果不构成有效证据，其正确性只能依赖 CI fixture 的 shadow 门禁。
   - **空集匹配不再伪装成 match（2026-10-23，`0db6775`）**：上条的现象有工具层根源——`classifyShadowRun` 把「两侧一致地为零快照」也记成 `match`，于是默认窗口下 grok-build / DSH 每天都产出一条绿色记录，日志尾部看起来像这些源有覆盖。现在该情形记为 **`empty`**（`summarizeDualRun` 单独计数，exit code 仍为 0——没有东西失败，只是没有东西可比），`--help` 与 SKILL.md 都写明 `empty` 不是覆盖、要用 `--since all` 重跑该源。实跑验证：`2 match, 2 empty, 3 not installed, 0 diff`。
   - **`--summary` 补齐（同提交）**：`readRecentRecords` 及其注释声称的「趋势」此前从未接线——检查日志走向只能整跑一遍或手读 JSONL。现在 `shadow-dual-run.mjs --summary [--limit N]` 打印尾部记录的分状态计数，并列出最近的 `diff`/`error` 条目（带时间戳），不再运行任何比较。生产日志实跑输出：`19 match, 0 empty, 3 diff, 9 not installed`，三条历史 diff 正确列出。
   - **双跑趋势并入 `status.mjs`（2026-10-24）**：趋势只能靠单独跑一个命令看到，就等于日常体检看不到它——而这份趋势恰恰是「哪个源可以切 Go」的判据。现在 `status.mjs` 输出 `shadowDualRun` 块：末 50 条记录按状态计数 + 覆盖的时间跨度 + `lastDiffAt`/`lastErrorAt`。计数与时间戳由 harness 自己的 `summarizeDualRunTrend` 产出，`status` 与 `--summary` 读的是同一份实现，不会各说各话；**记录内容一律不进 status**——记录的 `message` 可能带着客户端错误原文（含本地路径），所以只留计数与时间戳。日志路径由 `dualRunLogPath()` 统一解析，`TOKENBOARD_SHADOW_DUAL_RUN_LOG` 移过位置也照样被读到；没有日志时该块整体省略，而不是报一个空趋势。本机实跑：`31 records（2026-10-21 → 2026-10-23），19 match, 0 empty, 3 diff, 9 not installed, lastDiffAt 2026-10-23T03:41:16.038Z`。

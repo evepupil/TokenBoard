@@ -179,8 +179,11 @@ func TestValidateFailClosedCases(t *testing.T) {
 			wantErr: "model",
 		},
 		{
+			// kimi joined the closed source set with the ccusage tool family,
+			// so the unknown-source fixture is a literal that can never be a
+			// real source name.
 			name:    "unknown source",
-			mutate:  func(s *Snapshot) { s.Source = Source("kimi") },
+			mutate:  func(s *Snapshot) { s.Source = Source("not-a-source") },
 			wantErr: "source",
 		},
 		{
@@ -262,7 +265,10 @@ func TestIsValidIsoDate(t *testing.T) {
 
 func TestIsValidTimezone(t *testing.T) {
 	valid := []string{"Asia/Shanghai", "UTC", "Etc/GMT+5", "America/New_York"}
-	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai "}
+	// `posixrules` is a real tzdata file that Go's loader resolves; Intl — and
+	// therefore the server's validation — has no such zone. Accepting it collects
+	// fine and then fails every upload, so it is rejected here like `local`.
+	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai ", "posixrules", "Local", "factory"}
 	for _, value := range valid {
 		if !IsValidTimezone(value) {
 			t.Errorf("%q should be valid", value)
@@ -378,6 +384,22 @@ func TestLengthBoundsCountUTF16Units(t *testing.T) {
 // with it — accepts offset time zone identifiers (±HH:MM, ±HHMM, hours
 // 00-23, minutes 00-59). LoadLocation has no such names, so the TS client
 // collects under "+08:00" while this one refused the run outright.
+// The cache must key on the exact input. LoadLocation is case-sensitive on a
+// case-sensitive filesystem while Intl is not, so a lowercase alias that fails
+// to load must not inherit a canonical-case hit: the result would otherwise
+// depend on which spelling happened to be validated first.
+func TestIsValidTimezoneCacheDoesNotLeakAcrossCaseVariants(t *testing.T) {
+	if !IsValidTimezone("Asia/Shanghai") {
+		t.Fatal("Asia/Shanghai should be valid")
+	}
+	timezoneMu.RLock()
+	_, leaked := timezoneValid["asia/shanghai"]
+	timezoneMu.RUnlock()
+	if leaked {
+		t.Fatal("cache entry keyed by a case variant: each spelling must be validated on its own")
+	}
+}
+
 func TestIsValidTimezoneAcceptsIntlOffsetZones(t *testing.T) {
 	valid := []string{
 		"+08:00", "-05:30", "+0800", "-0530", "+00:00", "-00:00", "+23:59", "-23:59",
@@ -411,5 +433,57 @@ func TestLoadLocationResolvesOffsetZones(t *testing.T) {
 	location, err := LoadLocation("Asia/Shanghai")
 	if err != nil || location.String() != "Asia/Shanghai" {
 		t.Errorf("LoadLocation(Asia/Shanghai) = %v, %v", location, err)
+	}
+}
+
+// usageCoreSources is the `usageSources` array from
+// packages/usage-core/src/schema.ts, in declaration order. It is copied rather
+// than generated so a change on either side has to be made deliberately; the
+// parity test below is what fails when the two drift.
+var usageCoreSources = []string{
+	"claude-code",
+	"codex",
+	"antigravity-cli",
+	"antigravity",
+	"antigravity-ide",
+	"opencode",
+	"pi",
+	"grok-build",
+	"deepseek-harness",
+	"amp",
+	"droid",
+	"codebuff",
+	"hermes",
+	"goose",
+	"kilo",
+	"copilot",
+	"gemini-cli",
+	"kimi",
+	"qwen",
+	"openclaw",
+	"zcode",
+}
+
+// The source list is a wire contract: usage-core's `usageSources` is what the
+// server accepts and what the TypeScript collector uploads. A source present
+// on one side and missing on the other does not fail loudly — the Go client
+// simply never collects it, so an `--source all` run silently under-reports.
+// The goldens cannot catch that (they cover the hash payload for one source),
+// so the parity is asserted here against the list usage-core exports.
+func TestUsageSourcesMatchUsageCore(t *testing.T) {
+	goSources := AllSources()
+	if len(goSources) != len(usageCoreSources) {
+		t.Fatalf("Go has %d sources, usage-core has %d: %v vs %v",
+			len(goSources), len(usageCoreSources), goSources, usageCoreSources)
+	}
+	for index, want := range usageCoreSources {
+		if string(goSources[index]) != want {
+			t.Errorf("source %d = %q, want %q (order is part of the contract)", index, goSources[index], want)
+		}
+	}
+	for _, source := range usageCoreSources {
+		if !IsValidSource(source) {
+			t.Errorf("IsValidSource(%q) = false", source)
+		}
 	}
 }

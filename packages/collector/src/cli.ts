@@ -26,6 +26,7 @@ import { normalizeCodexSymlinkRoots } from './providers/codex-symlink-policy'
 import { clearPendingUploadCursors, cursorSnapshotGroupKey, warmHookCursorHighWater } from './providers/session-cursor'
 import { withCursorLock } from './providers/session-cursor-store'
 import { isTransientNetworkError } from './transient-error'
+import { assertSecureEndpoint } from './endpoint'
 import { isUploadPaused, recordUploadFailure, recordUploadSuccess, summarize } from './upload-backoff'
 import { uploadSnapshots } from './upload'
 import { assertValidTimeZone } from './timezone'
@@ -146,6 +147,14 @@ export async function runCollectorCli(
         deps.stderr(`Missing required config for sync: ${missing.join(', ')}`)
         return 1
       }
+      // The token travels on every request; a plain-http endpoint leaks it and the
+      // usage data. Loopback stays allowed for the local dev server.
+      try {
+        assertSecureEndpoint(options.endpoint)
+      } catch (error) {
+        deps.stderr(errorMessage(error))
+        return 1
+      }
     }
 
     const collectionStartedAtMs = startedAtMs
@@ -198,7 +207,9 @@ export async function runCollectorCli(
             uploadToken: options.uploadToken,
             timezone: options.timezone
           },
-          collection.snapshots
+          collection.snapshots,
+          undefined,
+          { stderr: collectorDeps.stderr }
         )
       )
       uploadSucceeded = true

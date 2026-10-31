@@ -67,8 +67,27 @@ export async function recordUploadSuccess(stateDir: string): Promise<void> {
   await rm(join(stateDir, fileName), { force: true })
 }
 
+// Every http(s) URL is reduced to its origin. The summary is persisted, and a
+// transport error embeds the request URL, which can carry a query string or
+// userinfo that must not sit in a long-lived file. Same reduction as the Go
+// client's upload.RedactURLs, trailing sentence punctuation kept.
+export function redactUrls(message: string): string {
+  return message.replace(/https?:\/\/[^\s"'<>]+/g, (raw) => {
+    const trimmed = raw.replace(/[.,;:!?)\]}]+$/, '')
+    const trailer = raw.slice(trimmed.length)
+    let parsed: URL
+    try {
+      parsed = new URL(trimmed)
+    } catch {
+      return `https://<redacted>${trailer}`
+    }
+    if (!parsed.host) return `https://<redacted>${trailer}`
+    return `${parsed.protocol}//${parsed.host}${trailer}`
+  })
+}
+
 export function summarize(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = redactUrls(error instanceof Error ? error.message : String(error))
   return message.length > 200 ? `${message.slice(0, 197)}…` : message
 }
 

@@ -219,10 +219,15 @@ func runExternal(dbFile, sql string, jsonMode bool, options QueryOptions) (strin
 	defer cancel()
 	command := exec.CommandContext(ctx, sqliteBin, arguments...)
 	command.WaitDelay = timeout
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
+	limit := resolveMaxOutputBytes(options)
+	stdout := &boundedStdout{limit: limit, cancel: cancel}
+	var stderr bytes.Buffer
+	command.Stdout = stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
+		if stdout.exceeded {
+			return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, limit)
+		}
 		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("%s SQLite reader unavailable: %s not found", options.Label, sqliteBin)
 		}
@@ -239,11 +244,37 @@ func runExternal(dbFile, sql string, jsonMode bool, options QueryOptions) (strin
 		}
 		return "", fmt.Errorf("Failed to read %s SQLite data from %s: %s", options.Label, dbFile, message)
 	}
-	if stdout.Len() > resolveMaxOutputBytes(options) {
-		return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, resolveMaxOutputBytes(options))
+	if stdout.exceeded {
+		return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, limit)
 	}
-	return stdout.String(), nil
+	return stdout.buffer.String(), nil
 }
+
+// boundedStdout enforces the output ceiling while the executable is still
+// running. The post-run length check alone let a runaway result set grow the
+// collector's heap without bound; this writer refuses the chunk that would
+// cross the ceiling and cancels the context, which kills the reader instead of
+// leaving it blocked on a full pipe. The TS side gets the same behaviour from
+// execFile's maxBuffer.
+type boundedStdout struct {
+	buffer   bytes.Buffer
+	limit    int
+	cancel   context.CancelFunc
+	exceeded bool
+}
+
+func (w *boundedStdout) Write(p []byte) (int, error) {
+	if w.buffer.Len()+len(p) > w.limit {
+		w.exceeded = true
+		if w.cancel != nil {
+			w.cancel()
+		}
+		return 0, errStdoutLimitExceeded
+	}
+	return w.buffer.Write(p)
+}
+
+var errStdoutLimitExceeded = errors.New("SQLite output exceeded the byte ceiling")
 
 // missingDatabaseError mirrors the TS isSqliteOpenError: the executable could
 // not open the file, and the file really is gone (rather than merely locked or

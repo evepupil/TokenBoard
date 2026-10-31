@@ -340,6 +340,13 @@ func (r *lineReader) finishLine() error {
 	if !utf8.Valid(value) {
 		return errors.New("Session JSONL contains invalid UTF-8")
 	}
+	// `new TextDecoder('utf-8', {fatal: true})` (what the TS side decodes every line with) drops a
+	// leading BOM, so a file written by an editor or a PowerShell redirect that stamps one parses
+	// there and must parse here. Without this the first line would fail the JSON decode and be
+	// reported as a malformed row, silently dropping it.
+	if len(value) >= 3 && value[0] == 0xef && value[1] == 0xbb && value[2] == 0xbf {
+		value = value[3:]
+	}
 	return r.yield(Line{Text: string(value)})
 }
 

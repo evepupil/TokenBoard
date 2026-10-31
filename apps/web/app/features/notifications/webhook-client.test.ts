@@ -36,6 +36,31 @@ describe('webhook client', () => {
     expect(fetchCalls[0].body).toContain('2026-04-29 / Asia/Shanghai')
   })
 
+  // The provider host and path are pinned, so a 3xx can only be a redirect away from the verified
+  // endpoint — following it would replay the payload (and DingTalk's signature) to wherever it
+  // points. Every other outbound request in this worker is `manual` for the same reason.
+  test('does not follow provider redirects', async () => {
+    const encryptedUrl = await encryptSecret(
+      'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
+      testEncryptionKey
+    )
+    let seenRedirect: RequestRedirect | undefined
+    const fetcher = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      seenRedirect = init?.redirect
+      return new Response(JSON.stringify({ errcode: 0, errmsg: 'ok' }), { status: 200 })
+    }) as typeof fetch
+
+    await sendWebhookRequest({
+      env: { DB: {} as D1Database, WEBHOOK_ENCRYPTION_KEY: testEncryptionKey },
+      subscription: subscriptionRow(encryptedUrl, 'wecom'),
+      report: dailyReport(),
+      now: new Date('2026-04-29T01:30:00.000Z'),
+      fetcher
+    })
+
+    expect(seenRedirect).toBe('manual')
+  })
+
   test('rejects Feishu business failures returned with HTTP 200', async () => {
     const encryptedUrl = await encryptSecret('https://open.feishu.cn/open-apis/bot/v2/hook/test', testEncryptionKey)
 

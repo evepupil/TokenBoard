@@ -12,8 +12,8 @@
     "build": "pnpm --filter @tokenboard/web build",
     "preview": "pnpm --filter @tokenboard/web preview",
     "deploy": "pnpm --filter @tokenboard/web run deploy",
-    "format": "prettier --write '**/*.{js,mjs,ts,tsx,json,jsonc}'",
-    "format:check": "prettier --check '**/*.{js,mjs,ts,tsx,json,jsonc}'",
+    "format": "prettier --write '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
+    "format:check": "prettier --check '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test"
   },

@@ -11,8 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // Port of prepareDynamicCcusageConfig: the ccusage config ccusage is pointed at
@@ -43,6 +46,17 @@ type PreparedConfig struct {
 	// config. The TS side derives the same set with
 	// `new Set(Object.keys(explicitPricingOverrides))`.
 	ExplicitOverrideModelIDs map[string]bool
+	// ContextPricingModels is the catalogue the Codex context-pricing rules may
+	// widen the static table with, and it is nil when the dynamic config could not
+	// be written.
+	//
+	// ccusage is then pointed at the bundled or explicit config, which carries no
+	// catalogue prices, so letting the rules keep pricing from the catalogue would
+	// make the two halves of one run disagree: ccusage would bill from the static
+	// file while the context rules re-priced from the catalogue. The TS side
+	// rebuilds its rules with an empty model list on the same branch, and the two
+	// clients are diffed against each other on real data, so this has to match.
+	ContextPricingModels []Model
 }
 
 // Prepare ports prepareDynamicCcusageConfig. The returned path is always a
@@ -121,6 +135,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				Overrides:                overrides,
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+				ContextPricingModels:     nil,
 			}, nil
 		}
 		return PreparedConfig{
@@ -129,6 +144,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			Overrides:                overrides,
 			CoveredModelIDs:          covered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     catalogue.Models,
 		}, nil
 	}
 
@@ -151,6 +167,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			Overrides:                overrides,
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     nil,
 		}, nil
 	}
 	stderr(fmt.Sprintf("TokenBoard model pricing: prepared ccusage config at %s", configPath))
@@ -160,6 +177,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 		Overrides:                overrides,
 		CoveredModelIDs:          covered,
 		ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+		ContextPricingModels:     catalogue.Models,
 	}, nil
 }
 
@@ -191,7 +209,7 @@ func materializeBundledConfig(path string) error {
 	if err := os.WriteFile(tmp, bundledConfig, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -400,7 +418,135 @@ func createCcusagePricingOverrides(models []Model) map[string]any {
 			overrides[model.ModelID] = override
 		}
 	}
+	for modelID, override := range officialAnchorOverrides(models, overrides) {
+		overrides[modelID] = override
+	}
+	applyCaseVariantAliases(models, overrides)
 	return overrides
+}
+
+// applyCaseVariantAliases ports applyCaseVariantAliases: ccusage matches an
+// override key case-sensitively, and the catalogue publishes several spellings
+// of the same id, so every published spelling gets the collapsed price. Only
+// ids that already have an emitted override are aliased — a group the collapse
+// dropped for disagreeing rows stays dropped, and no spelling the catalogue
+// never publishes is invented.
+func applyCaseVariantAliases(models []Model, overrides map[string]any) {
+	spellings := map[string]map[string]bool{}
+	for _, model := range models {
+		key := strings.ToLower(strings.TrimSpace(model.ModelID))
+		set := spellings[key]
+		if set == nil {
+			set = map[string]bool{}
+			spellings[key] = set
+		}
+		set[model.ModelID] = true
+	}
+	for key, override := range overrides {
+		for spelling := range spellings[strings.ToLower(strings.TrimSpace(key))] {
+			if _, exists := overrides[spelling]; !exists {
+				overrides[spelling] = override
+			}
+		}
+	}
+}
+
+// officialAnchorOverrides ports officialAnchorOverrides: ccusage matches an
+// override key to the observed model name by folding provider prefixes and
+// variant suffixes, so `xiaomi/mimo-v2.6-flash-uncensored` can price a plain
+// `mimo-v2.6-flash` day. When the base id is unresolved its reseller rows
+// disagree and that folding key is the only one left, so it wins — one machine
+// billed 3.6x the official rate for mimo-v2.6-flash this way. An exact key beats
+// a folding one, so the official vendor row is emitted as the base id's own key.
+//
+// Only an official row qualifies: falling back to a reseller row would
+// re-introduce the ambiguity the unresolved id was dropped for.
+func officialAnchorOverrides(models []Model, emitted map[string]any) map[string]any {
+	foldBases := map[string]bool{}
+	for _, model := range models {
+		if base := foldToBaseModelID(model.ModelID); base != strings.ToLower(strings.TrimSpace(model.ModelID)) {
+			foldBases[base] = true
+		}
+	}
+	if len(foldBases) == 0 {
+		return nil
+	}
+
+	haveExact := map[string]bool{}
+	for key := range emitted {
+		haveExact[strings.ToLower(strings.TrimSpace(key))] = true
+	}
+
+	rowsByID := map[string][]Model{}
+	order := []string{}
+	for _, model := range models {
+		id := strings.ToLower(strings.TrimSpace(model.ModelID))
+		if !foldBases[id] || haveExact[id] {
+			continue
+		}
+		if _, ok := rowsByID[id]; !ok {
+			order = append(order, id)
+		}
+		rowsByID[id] = append(rowsByID[id], model)
+	}
+
+	anchors := map[string]any{}
+	for _, id := range order {
+		rows := rowsByID[id]
+		official := pickAnchorOfficialRow(rows)
+		if official == nil {
+			continue
+		}
+		if override := toCcusagePricingOverride(*official); override != nil {
+			anchors[rows[0].ModelID] = override
+		}
+	}
+	return anchors
+}
+
+// pickAnchorOfficialRow ports pickAnchorOfficialRow: several official vendors
+// can price one id differently — an international and a domestic endpoint of
+// the same vendor is the common case. Taking the first match would make the
+// anchor depend on the order rows arrive in, and that order comes from the
+// server's ORDER BY; a change there would silently move what every collector
+// bills. Sort first so the choice is a property of this function.
+func pickAnchorOfficialRow(rows []Model) *Model {
+	officials := make([]*Model, 0, len(rows))
+	for index := range rows {
+		row := &rows[index]
+		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(row.Provider))] && priceRowIsPositive(*row) {
+			officials = append(officials, row)
+		}
+	}
+	if len(officials) == 0 {
+		return nil
+	}
+	sort.SliceStable(officials, func(left, right int) bool {
+		leftProvider := strings.ToLower(strings.TrimSpace(officials[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(officials[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return officials[left].ModelID < officials[right].ModelID
+	})
+	return officials[0]
+}
+
+// foldToBaseModelID ports foldToBaseModelId: the bases ccusage may fold a key
+// onto — drop `:tag` segments, drop the provider prefix, then drop a fine-tune
+// variant suffix. Deliberately narrow: only the folding case observed on real
+// data, because over-folding would anchor ids ccusage never conflates.
+func foldToBaseModelID(modelID string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(modelID))
+	segments := strings.Split(trimmed, "/")
+	base := segments[len(segments)-1]
+	if index := strings.Index(base, ":"); index >= 0 {
+		base = base[:index]
+	}
+	for _, suffix := range []string{"-uncensored", "-abliterated"} {
+		base = strings.TrimSuffix(base, suffix)
+	}
+	return base
 }
 
 // toCcusagePricingOverride converts a catalogue row to ccusage's per-token
@@ -722,28 +868,34 @@ var officialVendorProviderIDs = map[string]bool{
 	"alibaba": true, "xai": true, "minimax": true, "nvidia": true, "longcat": true,
 }
 
+// pickCollapsedRepresentative ports pickCollapsedRepresentative: prefer the
+// official vendor row, then the alphabetically first provider. It walks the
+// group the agreement check compared, never the full entry list — an official
+// vendor's $0 placeholder row lives outside that group and would otherwise win
+// the pick and silently price the model as free.
+//
+// The tie-break is explicit rather than "whatever came first": rows that agree
+// on price can disagree on context window, the representative carries its own
+// into maxInputTokens, and arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(group []Model, entries []Model) int {
-	for index, entry := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(entry.Provider))] {
-			for candidateIndex, candidate := range group {
-				if sameModelIdentity(candidate, entry) {
-					return indexInOriginal(entries, candidateIndex, group, entry)
-				}
-			}
-			return index
+	candidates := make([]Model, len(group))
+	copy(candidates, group)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[left].Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[right].Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
-	for index, entry := range entries {
-		if sameModelIdentity(entry, group[0]) {
-			return index
+		leftProvider := strings.ToLower(strings.TrimSpace(candidates[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(candidates[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
 		}
-	}
-	return 0
-}
-
-func indexInOriginal(entries []Model, _ int, group []Model, target Model) int {
+		return candidates[left].ModelID < candidates[right].ModelID
+	})
+	chosen := candidates[0]
 	for index, entry := range entries {
-		if sameModelIdentity(entry, target) {
+		if sameModelIdentity(entry, chosen) {
 			return index
 		}
 	}

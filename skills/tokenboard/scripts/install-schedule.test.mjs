@@ -196,14 +196,36 @@ test('builds Windows stale task cleanup for all TokenBoard task names outside th
   assert.match(command, /Unregister-ScheduledTask -Confirm:\$false/)
 })
 
+// status.mjs reports config.scheduleTimes as the installed schedule, so a
+// re-install with different times has to record them: otherwise a manual
+// `install-schedule.mjs --schedule-times` leaves status describing a schedule
+// the machine does not actually run.
+test('a re-install records the schedule times it installed', () => {
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const harness = createHarness(platform)
+    try {
+      installSchedule({ ...harness.options, argv: ['--schedule-times', '08:15,21:45'] })
+      assert.deepEqual(
+        harness.mergedPatches.map((patch) => patch.scheduleTimes),
+        [['08:15', '21:45']],
+        `${platform} install did not persist its schedule times`
+      )
+    } finally {
+      harness.cleanup()
+    }
+  }
+})
+
 function createHarness(platform) {
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-schedule-test-'))
   const homeDir = join(root, 'home')
   const configDir = join(root, 'config')
   const calls = []
+  const mergedPatches = []
   return {
     homeDir,
     calls,
+    mergedPatches,
     options: {
       platform,
       homeDir,
@@ -216,6 +238,9 @@ function createHarness(platform) {
         USER: 'tokenboard-test'
       },
       readConfig: () => ({ packageManager: 'pnpm' }),
+      mergeConfig: (patch) => {
+        mergedPatches.push(patch)
+      },
       log: () => {},
       spawn: (command, args) => {
         calls.push({ command, args })

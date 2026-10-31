@@ -30,6 +30,11 @@ const DefaultRetryDelayMs = 5_000
 // instead of exhausting memory.
 const maxBufferBytes = 128 * 1024 * 1024
 
+// maxStderrBytes bounds the diagnostics stream. It matches maxBufferBytes so the
+// ceiling a caller sees is the same whichever stream the tool floods; the point is
+// that the ceiling exists at all, which it did not while stderr was a bare buffer.
+const maxStderrBytes = maxBufferBytes
+
 // CommandOptions configures one run.
 type CommandOptions struct {
 	Env        []string
@@ -108,15 +113,20 @@ func runOnce(ctx context.Context, inv invocation, env []string, timeoutMs int) (
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, inv.command, inv.args...)
-	if len(env) > 0 {
-		cmd.Env = env
-	}
+	// Every ccusage spawn goes through here, so stripping at this point is the
+	// one place that cannot be forgotten by a new provider. An empty env means
+	// "inherit", which is exactly the case that leaks the upload token.
+	cmd.Env = scrubCredentialEnv(env)
 	if inv.windowsCmdLine != "" {
 		cmd.SysProcAttr = verbatimProcessAttr(inv.windowsCmdLine)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &limitedWriter{buffer: &stdout, limit: maxBufferBytes}
-	cmd.Stderr = &stderr
+	// stderr carries diagnostics, not the report, so it is bounded the same way but
+	// with a larger ceiling: a runaway tool must not be able to drive the collector's
+	// RSS up without limit. The TS side's execFile maxBuffer covers both streams, so
+	// leaving this one uncapped was also a cross-client divergence.
+	cmd.Stderr = &limitedWriter{buffer: &stderr, limit: maxStderrBytes}
 	// A killed child must not leave grandchildren holding the pipes: wait for
 	// the process itself, not for output EOF.
 	cmd.WaitDelay = 2 * time.Second

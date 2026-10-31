@@ -128,17 +128,31 @@ type CodexContextPricingFileModelHints map[string]string
 
 // CodexContextPricingRules is the static rule set: the provider-published
 // per-token rates represented in the server catalogue.
+//
+// The divisor must be a runtime division, not a constant-folded one, so Go's
+// double arithmetic matches the JS collector exactly (0.4/1e6 etc.). This is
+// critical for gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna: their static rows are
+// used when the catalogue has no price agreement, and even a 1 ULP difference
+// changes snapshotHash() and breaks shadow/diff tests across clients.
+//
+// A `var` rather than a `const` is load-bearing: Go evaluates an untyped constant
+// expression in exact rational arithmetic and rounds once, while JS rounds the
+// double operand and then rounds again after the division. The two disagree by
+// 1 ULP for 0.2, 0.4, 0.8 and 1.8, which is precisely the set of fractional
+// rows these rules carry.
+var codexDivisor = 1_000_000.0
+
 var CodexContextPricingRules = []CodexContextPricingRule{
 	{
 		ModelIDs:  []string{"gpt-5.6-sol", "gpt-5.6"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 30.0 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 6.25 / 1_000_000,
+			Input: 4.0 / codexDivisor, Output: 20.0 / codexDivisor,
+			CacheRead: 0.4 / codexDivisor, CacheCreation: 5.0 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 10.0 / 1_000_000, Output: 45.0 / 1_000_000,
-			CacheRead: 1.0 / 1_000_000, CacheCreation: 12.5 / 1_000_000,
+			Input: 8.0 / codexDivisor, Output: 30.0 / codexDivisor,
+			CacheRead: 0.8 / codexDivisor, CacheCreation: 10.0 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -146,12 +160,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.6-terra"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 2.0 / 1_000_000, Output: 12.0 / 1_000_000,
-			CacheRead: 0.2 / 1_000_000, CacheCreation: 2.5 / 1_000_000,
+			Input: 2.0 / codexDivisor, Output: 12.0 / codexDivisor,
+			CacheRead: 0.2 / codexDivisor, CacheCreation: 2.5 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 4.0 / 1_000_000, Output: 18.0 / 1_000_000,
-			CacheRead: 0.4 / 1_000_000, CacheCreation: 5.0 / 1_000_000,
+			Input: 4.0 / codexDivisor, Output: 18.0 / codexDivisor,
+			CacheRead: 0.4 / codexDivisor, CacheCreation: 5.0 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -159,12 +173,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.6-luna"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 0.2 / 1_000_000, Output: 1.2 / 1_000_000,
-			CacheRead: 0.02 / 1_000_000, CacheCreation: 0.25 / 1_000_000,
+			Input: 0.2 / codexDivisor, Output: 1.2 / codexDivisor,
+			CacheRead: 0.02 / codexDivisor, CacheCreation: 0.25 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 0.4 / 1_000_000, Output: 1.8 / 1_000_000,
-			CacheRead: 0.04 / 1_000_000, CacheCreation: 0.5 / 1_000_000,
+			Input: 0.4 / codexDivisor, Output: 1.8 / codexDivisor,
+			CacheRead: 0.04 / codexDivisor, CacheCreation: 0.5 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -172,12 +186,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.5"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 30.0 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 0,
+			Input: 5.0 / codexDivisor, Output: 30.0 / codexDivisor,
+			CacheRead: 0.5 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 10.0 / 1_000_000, Output: 45.0 / 1_000_000,
-			CacheRead: 1.0 / 1_000_000, CacheCreation: 0,
+			Input: 10.0 / codexDivisor, Output: 45.0 / codexDivisor,
+			CacheRead: 1.0 / codexDivisor, CacheCreation: 0,
 		},
 		FastMultiplier: float64Pointer(2.5),
 	},
@@ -185,11 +199,11 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.5-pro"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 30.0 / 1_000_000, Output: 180.0 / 1_000_000,
+			Input: 30.0 / codexDivisor, Output: 180.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 60.0 / 1_000_000, Output: 270.0 / 1_000_000,
+			Input: 60.0 / codexDivisor, Output: 270.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 	},
@@ -197,12 +211,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.4"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 2.5 / 1_000_000, Output: 15.0 / 1_000_000,
-			CacheRead: 0.25 / 1_000_000, CacheCreation: 0,
+			Input: 2.5 / codexDivisor, Output: 15.0 / codexDivisor,
+			CacheRead: 0.25 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 22.5 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 0,
+			Input: 5.0 / codexDivisor, Output: 22.5 / codexDivisor,
+			CacheRead: 0.5 / codexDivisor, CacheCreation: 0,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -210,11 +224,11 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.4-pro"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 30.0 / 1_000_000, Output: 180.0 / 1_000_000,
+			Input: 30.0 / codexDivisor, Output: 180.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 60.0 / 1_000_000, Output: 270.0 / 1_000_000,
+			Input: 60.0 / codexDivisor, Output: 270.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 	},
@@ -222,12 +236,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"grok-4.5"},
 		Threshold: defaultLongContextThreshold,
 		Standard: PricingRates{
-			Input: 2.0 / 1_000_000, Output: 6.0 / 1_000_000,
-			CacheRead: 0.3 / 1_000_000, CacheCreation: 0,
+			Input: 2.0 / codexDivisor, Output: 6.0 / codexDivisor,
+			CacheRead: 0.3 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 4.0 / 1_000_000, Output: 12.0 / 1_000_000,
-			CacheRead: 0.6 / 1_000_000, CacheCreation: 0,
+			Input: 4.0 / codexDivisor, Output: 12.0 / codexDivisor,
+			CacheRead: 0.6 / codexDivisor, CacheCreation: 0,
 		},
 	},
 }
@@ -2569,13 +2583,29 @@ var officialVendorProviderIDs = map[string]bool{
 	"longcat": true,
 }
 
+// pickCollapsedRepresentative prefers the official vendor row, then the
+// alphabetically first provider. Rows that agree on price can disagree on
+// context window, and the representative carries its own into the rule, so the
+// tie-break has to be explicit: arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(models []pricing.Model, entries []int) int {
-	for _, index := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(models[index].Provider))] {
-			return index
+	candidates := make([]int, len(entries))
+	copy(candidates, entries)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftModel := models[candidates[left]]
+		rightModel := models[candidates[right]]
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(leftModel.Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(rightModel.Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
-	return entries[0]
+		leftProvider := strings.ToLower(strings.TrimSpace(leftModel.Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(rightModel.Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return leftModel.ModelID < rightModel.ModelID
+	})
+	return candidates[0]
 }
 
 // CodexSessionFingerprintMemo memoizes fingerprint computation within a single

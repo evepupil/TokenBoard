@@ -13,7 +13,8 @@ export function resolvePackageRunner(
   packageManager: string | undefined = undefined,
   platform = process.platform,
   fileExists: (path: string) => boolean = existsSync,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  hookMode = false
 ): PackageRunner {
   packageManager ??= env.TOKENBOARD_PACKAGE_MANAGER
   const forcePackageRunner = Boolean(env.TOKENBOARD_FORCE_PACKAGE_RUNNER)
@@ -28,6 +29,17 @@ export function resolvePackageRunner(
   const localCcusage = resolveLocalCcusageBin(platform)
   if (!forcePackageRunner && fileExists(localCcusage)) {
     return createLocalCcusageRunner(localCcusage, fileExists, env)
+  }
+
+  // A hook runs inside the editor's own lifecycle and must not reach the network, so a missing
+  // local ccusage is an error there rather than a prompt to fetch one. The Go client refuses the
+  // download in hook mode for the same reason (`ccusage/acquire.go`); without this the TS side
+  // would quietly run `npx ccusage@…` mid-session. `TOKENBOARD_FORCE_PACKAGE_RUNNER` is an
+  // explicit operator override and still wins.
+  if (hookMode && !forcePackageRunner) {
+    throw new Error(
+      'ccusage is not installed and hook mode does not download it; install the bundled client or put ccusage on PATH'
+    )
   }
 
   if (packageManager === 'bun') {

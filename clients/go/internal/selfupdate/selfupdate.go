@@ -13,6 +13,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,11 +30,9 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
 
-// maxBinaryBytes bounds the executable inside the tarball.
+// maxBinaryBytes bounds the executable inside the tarball. The tarball itself
+// is bounded by release.Download's maxDownloadBytes.
 const maxBinaryBytes = 128 * 1024 * 1024
-
-// maxTarballBytes bounds the downloaded tarball.
-const maxTarballBytes = 128 * 1024 * 1024
 
 // binaryName is the executable the tarball ships.
 func binaryName(goos string) string {
@@ -126,10 +126,22 @@ func Run(input Input) (Result, error) {
 	if version == "" {
 		return Result{}, fmt.Errorf("TokenBoard release %s has no usable version", assets.Tag)
 	}
-	if !pinned(input.Tag) && release.Version(CurrentVersion()) == version {
+	currentVersion := release.Version(CurrentVersion())
+	if !pinned(input.Tag) && currentVersion == version {
 		// A scheduled run must stay quiet when there is nothing to do: the
 		// log is long-lived and an "already current" line every hour is noise.
 		return Result{Version: version}, nil
+	}
+	// A feed whose "latest" points below the installed version is not an
+	// update. Installing it would silently reintroduce whatever the newer
+	// version fixed, on every scheduled run, without anyone asking — a tag
+	// rolled back or a release yanked is exactly when that happens. A pinned
+	// --tag is the operator's explicit choice and still installs.
+	if !pinned(input.Tag) && compareReleaseVersions(version, currentVersion) < 0 {
+		stderr(fmt.Sprintf(
+			"TokenBoard %s is newer than the published release %s; leaving the installed binary in place",
+			currentVersion, version))
+		return Result{Version: currentVersion}, nil
 	}
 
 	if client == nil {
@@ -254,6 +266,57 @@ func fileExists(path string) bool {
 
 func pinned(tag string) bool { return strings.TrimSpace(tag) != "" }
 
+// compareReleaseVersions orders two release versions by their leading dotted
+// numeric components. It returns 0 when either side is not a plain version
+// (an unstamped "dev" build, a snapshot stamp, a pre-release suffix): an
+// unparseable version cannot establish that the feed went backwards, and
+// refusing the update on a guess would freeze a machine on a broken build.
+func compareReleaseVersions(left, right string) int {
+	leftParts, ok := numericVersionParts(left)
+	if !ok {
+		return 0
+	}
+	rightParts, ok := numericVersionParts(right)
+	if !ok {
+		return 0
+	}
+	for index := 0; index < len(leftParts) || index < len(rightParts); index++ {
+		var leftPart, rightPart int
+		if index < len(leftParts) {
+			leftPart = leftParts[index]
+		}
+		if index < len(rightParts) {
+			rightPart = rightParts[index]
+		}
+		switch {
+		case leftPart < rightPart:
+			return -1
+		case leftPart > rightPart:
+			return 1
+		}
+	}
+	return 0
+}
+
+// numericVersionParts reads the dotted numeric prefix of a version, stopping at
+// the first non-numeric component ("1.2.3-rc1" → [1 2 3]). A version whose
+// first component is not a number is not a release version.
+func numericVersionParts(version string) ([]int, bool) {
+	fields := strings.Split(strings.TrimSpace(version), ".")
+	parts := make([]int, 0, len(fields))
+	for _, field := range fields {
+		number, err := strconv.Atoi(field)
+		if err != nil || number < 0 {
+			break
+		}
+		parts = append(parts, number)
+	}
+	if len(parts) == 0 {
+		return nil, false
+	}
+	return parts, true
+}
+
 // envValue reads a key through the input's environment, empty when unset.
 func envValue(env func(string) string, key string) string {
 	if env == nil {
@@ -351,6 +414,9 @@ func writeExecutable(path string, data []byte) error {
 // the same contract; production code never assigns it.
 var verifyStaged = verifyExecutable
 
+// versionProbeTimeout bounds the staged binary's version check.
+const versionProbeTimeout = 10 * time.Second
+
 // verifyExecutable runs the staged binary's version check. A binary that
 // cannot answer is not installed: swapping it in would break the next
 // scheduled sync with no way to notice.
@@ -359,7 +425,21 @@ var verifyStaged = verifyExecutable
 // substring test would accept "1.2.30" for "1.2.3", and the staged binary is
 // the only thing standing between a truncated download and a broken install.
 func verifyExecutable(path, want string) error {
-	output, err := exec.Command(path, "version").Output()
+	// A freshly staged binary can block on first run — Gatekeeper quarantine,
+	// antivirus scanning, a broken loader — and an unbounded wait here hangs
+	// self-update entirely (the `--scheduled` exit-zero fallback never runs
+	// because the error branch is never reached). The probe gets a bound, the
+	// same way ccusage's version probe does.
+	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
+	cmd.WaitDelay = versionProbeTimeout
+	// The staged binary is a freshly downloaded release artifact and is trusted only after this
+	// probe; the TS side scrubs the same probe (`runsVersion` → `scrubbedChildEnv`). If it were
+	// handed the inherited environment, a tampered feed could read the upload token (or the
+	// release feed's own `user:token@host`) by answering `version` and never touching a run path.
+	cmd.Env = ccusage.ScrubCredentialEnv(os.Environ())
+	output, err := cmd.Output()
 	if err != nil {
 		return err
 	}

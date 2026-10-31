@@ -36,6 +36,22 @@ const (
 	SourcePi              Source = "pi"
 	SourceGrokBuild       Source = "grok-build"
 	SourceDeepSeekHarness Source = "deepseek-harness"
+
+	// The ccusage tool family: each is collected by running the same pinned
+	// ccusage runtime with the tool's own subcommand. They carry the same
+	// report shape, so one parameterised provider serves all twelve.
+	SourceAmp       Source = "amp"
+	SourceDroid     Source = "droid"
+	SourceCodebuff  Source = "codebuff"
+	SourceHermes    Source = "hermes"
+	SourceGoose     Source = "goose"
+	SourceKilo      Source = "kilo"
+	SourceCopilot   Source = "copilot"
+	SourceGeminiCLI Source = "gemini-cli"
+	SourceKimi      Source = "kimi"
+	SourceQwen      Source = "qwen"
+	SourceOpenclaw  Source = "openclaw"
+	SourceZcode     Source = "zcode"
 )
 
 // Correction marks snapshots whose cost was re-derived from request-level
@@ -49,6 +65,47 @@ var usageSources = map[Source]bool{
 	SourceClaudeCode: true, SourceCodex: true,
 	SourceAntigravityCLI: true, SourceAntigravity: true, SourceAntigravityIDE: true,
 	SourceOpenCode: true, SourcePi: true, SourceGrokBuild: true, SourceDeepSeekHarness: true,
+	SourceAmp: true, SourceDroid: true, SourceCodebuff: true, SourceHermes: true,
+	SourceGoose: true, SourceKilo: true, SourceCopilot: true, SourceGeminiCLI: true,
+	SourceKimi: true, SourceQwen: true, SourceOpenclaw: true, SourceZcode: true,
+}
+
+// ccusageToolCommandNames maps each ccusage-tool source to the subcommand the
+// pinned runtime answers. Every source is its own subcommand except
+// gemini-cli, which runs `gemini` — ccusage has no `gemini-cli` command and
+// exits 2 on it, which would fail the whole source instead of reporting an
+// uninstalled tool as empty.
+var ccusageToolCommandNames = map[Source]string{
+	SourceAmp:       "amp",
+	SourceDroid:     "droid",
+	SourceCodebuff:  "codebuff",
+	SourceHermes:    "hermes",
+	SourceGoose:     "goose",
+	SourceKilo:      "kilo",
+	SourceCopilot:   "copilot",
+	SourceGeminiCLI: "gemini",
+	SourceKimi:      "kimi",
+	SourceQwen:      "qwen",
+	SourceOpenclaw:  "openclaw",
+	SourceZcode:     "zcode",
+}
+
+// CcusageToolCommand returns the ccusage subcommand for a ccusage-tool source.
+// ok is false for every other source.
+func CcusageToolCommand(source Source) (string, bool) {
+	command, ok := ccusageToolCommandNames[source]
+	return command, ok
+}
+
+// CcusageToolSources returns the ccusage tool family in canonical order.
+func CcusageToolSources() []Source {
+	out := make([]Source, 0, len(ccusageToolCommandNames))
+	for _, source := range allSources {
+		if _, ok := ccusageToolCommandNames[source]; ok {
+			out = append(out, source)
+		}
+	}
+	return out
 }
 
 // costUnavailableSources cannot report a cost: the collector uploads
@@ -95,6 +152,8 @@ var allSources = []Source{
 	SourceClaudeCode, SourceCodex,
 	SourceAntigravityCLI, SourceAntigravity, SourceAntigravityIDE,
 	SourceOpenCode, SourcePi, SourceGrokBuild, SourceDeepSeekHarness,
+	SourceAmp, SourceDroid, SourceCodebuff, SourceHermes, SourceGoose, SourceKilo,
+	SourceCopilot, SourceGeminiCLI, SourceKimi, SourceQwen, SourceOpenclaw, SourceZcode,
 }
 
 // AllSources returns the usage sources in their canonical order.
@@ -280,32 +339,28 @@ func IsValidIsoDate(value string) bool {
 	return t.Year() == year && t.Month() == time.Month(month) && t.Day() == day
 }
 
-// MinUploadIsoDate is the fixed history floor (AI tools did not exist before
-// 2023); MaxUploadIsoDate allows one day of headroom for UTC+14 collectors.
+// MinUploadIsoDate is the earliest calendar date the server accepts, mirroring
+// usage-core's minUploadIsoDate: a fixed floor rather than a function of the
+// clock, so a legitimate historical backfill works whenever it runs.
 const MinUploadIsoDate = "2023-01-01"
 
-func MaxUploadIsoDate(now time.Time) string {
-	return now.UTC().Add(24 * time.Hour).Format("2006-01-02")
-}
-
-// UploadIsoDateIssue classifies why a date is outside the accepted window.
-type UploadIsoDateIssue string
-
-const (
-	IssueInvalid            UploadIsoDateIssue = "invalid"
-	IssueTooFarFuture       UploadIsoDateIssue = "too-far-future"
-	IssueBeforeHistoryWindw UploadIsoDateIssue = "before-history-window"
-)
-
-func UploadIsoDateIssueFor(value string, now time.Time) UploadIsoDateIssue {
+// UploadIsoDateIssue mirrors usage-core uploadIsoDateIssue. It returns "" when
+// the date is acceptable, and names the violated bound otherwise.
+//
+// The caller is the upload path, not the ingestion validator: the server has the
+// authoritative check, and this one exists so a client can drop a row the server
+// would refuse before it poisons a whole batch. `now` is the caller's clock — the
+// server's is authoritative but unreachable, so an upload-side ceiling uses the
+// local clock plus the same one-day headroom the server grants.
+func UploadIsoDateIssue(value string, now time.Time) string {
 	if !IsValidIsoDate(value) {
-		return IssueInvalid
+		return "invalid"
 	}
-	if value > MaxUploadIsoDate(now) {
-		return IssueTooFarFuture
+	if value > now.UTC().Add(24*time.Hour).Format("2006-01-02") {
+		return "too-far-future"
 	}
 	if value < MinUploadIsoDate {
-		return IssueBeforeHistoryWindw
+		return "before-history-window"
 	}
 	return ""
 }
@@ -320,6 +375,17 @@ var (
 // — ±HH, ±HHMM, ±HH:MM. Exactly what ECMA-402's TimeZoneOffsetString allows
 // for hours 00-23 and minutes 00-59.
 var offsetZonePattern = regexp.MustCompile(`^[+-](\d{2})(?::?(\d{2}))?$`)
+
+// goOnlyZoneNames are zone names Go's loader resolves but Intl rejects. `local`
+// is the unnamed system zone and `factory` is tzdata's placeholder; `posixrules`
+// ships with tzdata as a real file and loads fine, while Intl has no such zone —
+// so accepting it here would collect successfully and then fail every upload,
+// because the server validates with Intl.
+var goOnlyZoneNames = map[string]bool{
+	"local":      true,
+	"factory":    true,
+	"posixrules": true,
+}
 
 // LoadLocation resolves a timezone name the way the TS side's Intl.DateTimeFormat
 // does: an IANA name through the zone database, or an offset identifier as a
@@ -351,8 +417,7 @@ func LoadLocation(name string) (*time.Location, error) {
 
 // IsValidTimezone mirrors usage-core isValidTimezone: non-empty, no leading
 // or trailing whitespace, within the length bound, and loadable as an IANA
-// zone or an Intl offset identifier. Valid names are cached case-insensitively
-// like the TS Set does.
+// zone or an Intl offset identifier.
 func IsValidTimezone(value string) bool {
 	timezone := strings.TrimSpace(value)
 	if timezone == "" || timezone != value || utf16Length(timezone) > MaxUsageTimezoneLength {
@@ -364,12 +429,15 @@ func IsValidTimezone(value string) bool {
 	// here either. The lowercase comparison matches Intl's behavior, and on
 	// case-insensitive filesystems LoadLocation("factory") would otherwise
 	// resolve.
-	cacheKey := strings.ToLower(timezone)
-	if cacheKey == "local" || cacheKey == "factory" {
+	if goOnlyZoneNames[strings.ToLower(timezone)] {
 		return false
 	}
+	// Cache on the exact spelling. The TS cache lowercases because Intl
+	// resolves zone names case-insensitively; LoadLocation does not on a
+	// case-sensitive filesystem, so sharing a lowercase entry would make the
+	// verdict depend on which spelling was validated first.
 	timezoneMu.RLock()
-	ok, cached := timezoneValid[cacheKey]
+	ok, cached := timezoneValid[timezone]
 	timezoneMu.RUnlock()
 	if cached {
 		return ok
@@ -378,7 +446,7 @@ func IsValidTimezone(value string) bool {
 	// The TS side additionally caches the resolved canonical name; LoadLocation
 	// resolves the same name the same way, so caching the requested one covers it.
 	timezoneMu.Lock()
-	timezoneValid[cacheKey] = err == nil
+	timezoneValid[timezone] = err == nil
 	timezoneMu.Unlock()
 	return err == nil
 }

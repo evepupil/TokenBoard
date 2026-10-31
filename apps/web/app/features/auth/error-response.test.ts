@@ -79,7 +79,7 @@ describe('normalizeAuthErrorResponse', () => {
   test('maps status to a code for an unmapped failure', async () => {
     const response = await normalizeAuthErrorResponse(jsonResponse({ message: 'nope' }, 429))
     await expect(response.json()).resolves.toEqual({
-      error: { code: 'TOO_MANY_REQUESTS', message: 'nope' }
+      error: { code: 'RATE_LIMITED', message: 'nope' }
     })
   })
 
@@ -129,7 +129,7 @@ describe('normalizeAuthErrorResponse', () => {
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(response.headers.get('retry-after')).toBe('8')
     await expect(response.json()).resolves.toEqual({
-      error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests. Please try again later.' }
+      error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' }
     })
   })
 

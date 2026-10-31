@@ -78,12 +78,12 @@ test('scheduled sync state rejects an exit code outside the process range', () =
 })
 
 test('scheduled sync state isolates non-all sources while preserving the all-source path', () => {
-  const stateDir = '/tmp/tokenboard-scheduled-state-paths'
+  const stateDir = join(tmpdir(), 'tokenboard-scheduled-state-paths')
 
-  assert.equal(scheduledSyncStatePath(stateDir), `${stateDir}/scheduled-sync-state.json`)
-  assert.equal(scheduledSyncStatePath(stateDir, 'all'), `${stateDir}/scheduled-sync-state.json`)
-  assert.equal(scheduledSyncStatePath(stateDir, 'codex'), `${stateDir}/scheduled-sync-state.codex.json`)
-  assert.equal(scheduledSyncStatePath(stateDir, 'claude-code'), `${stateDir}/scheduled-sync-state.claude-code.json`)
+  assert.equal(scheduledSyncStatePath(stateDir), join(stateDir, 'scheduled-sync-state.json'))
+  assert.equal(scheduledSyncStatePath(stateDir, 'all'), join(stateDir, 'scheduled-sync-state.json'))
+  assert.equal(scheduledSyncStatePath(stateDir, 'codex'), join(stateDir, 'scheduled-sync-state.codex.json'))
+  assert.equal(scheduledSyncStatePath(stateDir, 'claude-code'), join(stateDir, 'scheduled-sync-state.claude-code.json'))
   assert.notEqual(scheduledSyncStatePath(stateDir, 'codex'), scheduledSyncStatePath(stateDir, 'claude-code'))
 })
 

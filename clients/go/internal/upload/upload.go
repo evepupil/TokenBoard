@@ -6,6 +6,7 @@ package upload
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 const (
@@ -45,6 +47,9 @@ type Config struct {
 	RequestTimeoutMs int
 	// Client nil means http.DefaultClient.
 	Client *http.Client
+	// Now overrides the clock used for the upload-date window. Zero means the
+	// wall clock; tests set it so a fixture date stays inside the window.
+	Now time.Time
 }
 
 // ExistingSnapshotHash is one row of the /check response.
@@ -59,6 +64,19 @@ type ExistingSnapshotHash struct {
 type Result struct {
 	Upserted int
 	Skipped  int
+	// RejectedUsageDates counts snapshots dropped before upload because their
+	// usageDate falls outside the server's accepted window.
+	RejectedUsageDates int
+	// Rejected names the dropped snapshots so the CLI can report which rows
+	// went missing, the way the TS uploader does.
+	Rejected []RejectedSnapshot
+}
+
+// RejectedSnapshot is one snapshot the upload path dropped because the server
+// would reject any batch containing it.
+type RejectedSnapshot struct {
+	Snapshot contract.Snapshot
+	Issue    string
 }
 
 // SnapshotHash is the dedup identity the server stores and compares:
@@ -88,9 +106,42 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 		return Result{Upserted: upserted}, nil
 	}
 
+	// The server rejects a whole batch when any snapshot's usageDate falls outside
+	// [MinUploadIsoDate, today+1], and the client cannot retry its way out of that: the
+	// date is a property of the row, not of the request. Left in, one such row fails the
+	// batch it lands in on every run, and five consecutive non-transient failures pause
+	// uploads for 24 hours — a single bad date taking the whole machine offline.
+	//
+	// Dropping it here is not a silent downgrade: the count comes back on Result, and a
+	// snapshot the server can never accept is not data this run could have delivered.
+	now := config.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	uploadable := make([]contract.Snapshot, 0, len(snapshots))
+	rejected := 0
+	rejectedDetails := make([]RejectedSnapshot, 0)
+	for _, snapshot := range snapshots {
+		if issue := contract.UploadIsoDateIssue(snapshot.UsageDate, now); issue != "" {
+			rejected++
+			rejectedDetails = append(rejectedDetails, RejectedSnapshot{Snapshot: snapshot, Issue: issue})
+			continue
+		}
+		uploadable = append(uploadable, snapshot)
+	}
+
 	var result Result
+	result.RejectedUsageDates = rejected
+	result.Rejected = rejectedDetails
+	if len(uploadable) == 0 {
+		// Nothing left to send. The empty batch is not posted: unlike the no-snapshots
+		// case above, this run did have rows and the server has nothing to say about
+		// them that the count does not already.
+		return result, nil
+	}
+
 	uploaded := false
-	for _, batch := range chunk(snapshots, snapshotBatchSize) {
+	for _, batch := range chunk(uploadable, snapshotBatchSize) {
 		checked, err := filterChanged(ctx, config, batch, client)
 		if err != nil {
 			return Result{}, err
@@ -334,7 +385,16 @@ func postOnce(ctx context.Context, config Config, url string, body []byte, clien
 	}
 	request.Header.Set("authorization", "Bearer "+config.UploadToken)
 	request.Header.Set("content-type", "application/json")
-	response, err := client.Do(request)
+	// The upload carries the bearer token, and Go's redirect policy only drops the
+	// Authorization header when the *host* changes — a same-host redirect to another port
+	// keeps it, which hands the credential to whatever is listening there. The pricing
+	// fetcher already refuses redirects outright; upload does the same. The client is
+	// cloned so a caller's own transport and settings survive.
+	redirectClient := *client
+	redirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := redirectClient.Do(request)
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
@@ -482,8 +542,19 @@ func LoadBackoff(stateDir string) *BackoffState {
 	if json.Unmarshal(data, &raw) != nil || raw.ConsecutiveFailures == nil || raw.LastErrorSummary == nil {
 		return nil
 	}
+	// Clamp before converting: int(1e30) is implementation-defined and wraps to
+	// a negative on amd64/arm64, which would silently stop the pause from ever
+	// engaging again. Every value at or past the threshold pauses alike, so the
+	// exact count beyond it does not matter.
+	failures := *raw.ConsecutiveFailures
+	if failures < 0 || math.IsNaN(failures) {
+		failures = 0
+	}
+	if failures > uploadFailurePauseThreshold {
+		failures = uploadFailurePauseThreshold
+	}
 	return &BackoffState{
-		ConsecutiveFailures: int(*raw.ConsecutiveFailures),
+		ConsecutiveFailures: int(failures),
 		LastErrorSummary:    *raw.LastErrorSummary,
 		PausedUntil:         raw.PausedUntil,
 	}
@@ -535,15 +606,25 @@ func writeBackoff(stateDir string, state BackoffState) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d", backoffFileName, os.Getpid()))
+	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d-%s", backoffFileName, os.Getpid(), randomHexSuffix()))
 	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
+	if err := renameatomic.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// randomHexSuffix keeps two writers' temp files apart even when a pid is
+// recycled, matching the TS backoff writer's `${pid}-${hex}` temp name.
+func randomHexSuffix() string {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // Summarize truncates an error message to 200 characters with an ellipsis,

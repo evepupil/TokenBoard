@@ -8,6 +8,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionfile"
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
 // A realistic cursor produced by the TS collector (shape taken from a live
@@ -297,5 +300,96 @@ func TestRejectsEntryLevelNullsAndFalseMarkers(t *testing.T) {
 				t.Errorf("%s: valid cursor rejected: %v", name, err)
 			}
 		})
+	}
+}
+
+// An entry whose file is gone used to be copied back verbatim on every run: one machine's
+// cursor reached 15 MB with 31% of its entries pointing at deleted files. When every
+// configured root listed successfully, a file the walk did not produce is gone, so the entry
+// can be reclaimed. The TS collector makes the same decision on the same signal.
+func TestScanReclaimsSettledEntriesWhoseFilesAreGone(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cursorPath := filepath.Join(stateDir, "codex-cursor.json")
+	kept := writeSessionFile(t, sessionsDir, "kept.jsonl", `{"type":"session"}`)
+	removed := writeSessionFile(t, sessionsDir, "removed.jsonl", `{"type":"session"}`)
+	_ = kept
+
+	input := ScanInput{Source: contract.SourceCodex, SessionsDir: sessionsDir, CursorPath: cursorPath}
+	first, err := CollectChangedSessionFiles(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range first.Files {
+		if err := file.ReadLines(func(sessionfile.Line) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.Commit(contract.SourceCodex); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Cursor.Files) != 2 {
+		t.Fatalf("initial entries = %d, want 2", len(first.Cursor.Files))
+	}
+
+	if err := os.Remove(removed); err != nil {
+		t.Fatal(err)
+	}
+	second, err := CollectChangedSessionFiles(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Cursor.Files) != 1 {
+		t.Fatalf("entries after reclamation = %v, want only the surviving file", second.Cursor.Files)
+	}
+	// Reclaiming is a cursor change, so the caller has to write it out.
+	if !second.HasCursorCleanup {
+		t.Fatal("reclaiming an entry must set HasCursorCleanup")
+	}
+}
+
+// A root that will not resolve leaves the tree unread rather than empty. Reclaiming there
+// would drop every entry and make the next run re-read and re-upload the whole history.
+func TestScanKeepsEveryEntryWhenARootCannotBeResolved(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cursorPath := filepath.Join(stateDir, "codex-cursor.json")
+	writeSessionFile(t, sessionsDir, "a.jsonl", `{"type":"session"}`)
+
+	input := ScanInput{Source: contract.SourceCodex, SessionsDir: sessionsDir, CursorPath: cursorPath}
+	first, err := CollectChangedSessionFiles(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range first.Files {
+		if err := file.ReadLines(func(sessionfile.Line) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.Commit(contract.SourceCodex); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point the scan at a directory that does not exist: Resolve reports !ok and the walk
+	// never runs.
+	missing := ScanInput{
+		Source:      contract.SourceCodex,
+		SessionsDir: filepath.Join(root, "gone"),
+		CursorPath:  cursorPath,
+	}
+	second, err := CollectChangedSessionFiles(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Cursor.Files) != 1 {
+		t.Fatalf("entries = %v, want the untouched entry preserved", second.Cursor.Files)
 	}
 }

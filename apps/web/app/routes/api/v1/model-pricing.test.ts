@@ -8,6 +8,12 @@ vi.mock('../../../features/model-pricing/service', () => ({
   maxModelPricingPageSize: 1_000
 }))
 
+vi.mock('../../../lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../lib/rate-limit')>()),
+  clientIpRateLimitSubject: vi.fn(() => ({ kind: 'ip', value: '203.0.113.10' })),
+  enforceRateLimit: vi.fn()
+}))
+
 const mockedGetModelPricing = vi.mocked(getModelPricing)
 const originalCaches = globalThis.caches
 

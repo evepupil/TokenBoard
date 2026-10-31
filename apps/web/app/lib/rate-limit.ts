@@ -25,8 +25,33 @@ export const writeRateLimitPolicies = {
   ingestCheckIp: { id: 'ingest-check-ip', maxRequests: 300, windowSeconds: 60 },
   devicePair: { id: 'device-pair', maxRequests: 20, windowSeconds: 15 * 60 },
   pairingCode: { id: 'pairing-code', maxRequests: 30, windowSeconds: 15 * 60 },
+  // The notifications form can send a webhook test, which is an outbound request to a
+  // user-supplied URL per POST. Ordinary use is a handful of saves per session, so the ceiling
+  // is far above that while still bounding a scripted loop that would otherwise turn this form
+  // into an outbound request amplifier.
+  notificationsForm: { id: 'notifications-form', maxRequests: 60, windowSeconds: 60 },
   modelPricingSyncInvalidIp: { id: 'model-pricing-sync-invalid-ip', maxRequests: 30, windowSeconds: 15 * 60 },
   modelPricingSyncToken: { id: 'model-pricing-sync-token', maxRequests: 5, windowSeconds: 15 * 60 }
+} satisfies Record<string, RateLimitPolicy>
+
+// Read-side policies for the unauthenticated GETs. A cached public response costs
+// nothing to serve, but a cache miss — and every 404/private-slug lookup, which is
+// `no-store` by policy and so never cached — reaches D1. Without a ceiling anyone
+// can turn anonymous traffic into D1 reads; past the ceiling the counter read is
+// the only query the request makes.
+export const readRateLimitPolicies = {
+  modelPricingRead: { id: 'model-pricing-read', maxRequests: 120, windowSeconds: 60 },
+  // The public alias of the same catalogue. It answers from the Worker cache when it
+  // can, but only 200s are stored there: a novel `?cursor=` or a rejected limit is a
+  // guaranteed miss that reaches D1, so it needs the same ceiling as the versioned
+  // route. Separate id so the two counters do not spend each other's budget.
+  publicModelPricingRead: { id: 'public-model-pricing-read', maxRequests: 120, windowSeconds: 60 },
+  publicCardRead: { id: 'public-card-read', maxRequests: 120, windowSeconds: 60 },
+  // The shared daily-report page is anonymous by design (the `drr_` id is the capability) and
+  // `no-store`, so every request — including one for a well-formed but unknown id — reaches D1.
+  // Without a ceiling anyone can turn random ids into unbounded reads, the same hazard the
+  // public card and pricing endpoints are capped for.
+  publicReportRead: { id: 'public-report-read', maxRequests: 120, windowSeconds: 60 }
 } satisfies Record<string, RateLimitPolicy>
 
 export async function assertRateLimitAvailable(

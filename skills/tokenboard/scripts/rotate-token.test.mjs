@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { applyRotatedToken } from './rotate-token.mjs'
 
@@ -172,4 +177,88 @@ test('updates legacy config by endpoint origin when active server is absent', ()
   assert.equal(nextConfig.activeServer, 'https://prod.example.com')
   assert.equal(nextConfig.uploadToken, 'prod-new')
   assert.equal(nextConfig.servers['https://prod.example.com'].uploadToken, 'prod-new')
+})
+
+// The rotated token is a long-lived credential. The CLI resolves it from the environment when
+// the flag is absent so an operator can keep it out of the process table and shell history;
+// without either channel it must refuse rather than rotate with an empty value.
+test('the CLI takes the upload token from TOKENBOARD_UPLOAD_TOKEN when the flag is absent', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-rotate-env-'))
+  const previousConfigDir = process.env.TOKENBOARD_CONFIG_DIR
+  const previousToken = process.env.TOKENBOARD_UPLOAD_TOKEN
+  process.env.TOKENBOARD_CONFIG_DIR = root
+  delete process.env.TOKENBOARD_UPLOAD_TOKEN
+  try {
+    writeFileSync(
+      join(root, 'config.json'),
+      JSON.stringify({
+        activeServer: 'https://prod.example.com',
+        servers: {
+          'https://prod.example.com': {
+            endpoint: 'https://prod.example.com/api/v1/ingest',
+            uploadToken: 'old-token',
+            deviceId: 'dev_old',
+            installationId: 'inst_old',
+            timezone: 'UTC'
+          }
+        }
+      })
+    )
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL('./rotate-token.mjs', import.meta.url)),
+        '--server-origin',
+        'https://prod.example.com',
+        '--device-id',
+        'dev_new',
+        '--installation-id',
+        'inst_new'
+      ],
+      { env: { ...process.env, TOKENBOARD_UPLOAD_TOKEN: 'rotated-token-value' }, encoding: 'utf8' }
+    )
+
+    assert.equal(result.status, 0, result.stderr)
+    const config = JSON.parse(readFileSync(join(root, 'config.json'), 'utf8'))
+    assert.equal(config.servers['https://prod.example.com'].uploadToken, 'rotated-token-value')
+  } finally {
+    if (previousConfigDir === undefined) delete process.env.TOKENBOARD_CONFIG_DIR
+    else process.env.TOKENBOARD_CONFIG_DIR = previousConfigDir
+    if (previousToken === undefined) delete process.env.TOKENBOARD_UPLOAD_TOKEN
+    else process.env.TOKENBOARD_UPLOAD_TOKEN = previousToken
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the CLI refuses to rotate without a token on either channel', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-rotate-none-'))
+  const previousConfigDir = process.env.TOKENBOARD_CONFIG_DIR
+  const previousToken = process.env.TOKENBOARD_UPLOAD_TOKEN
+  process.env.TOKENBOARD_CONFIG_DIR = root
+  delete process.env.TOKENBOARD_UPLOAD_TOKEN
+  try {
+    writeFileSync(join(root, 'config.json'), JSON.stringify({ activeServer: 'https://x.example.com' }))
+
+    // No flag and no env: the run fails instead of writing an empty token.
+    const missing = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL('./rotate-token.mjs', import.meta.url)),
+        '--device-id',
+        'dev',
+        '--installation-id',
+        'inst'
+      ],
+      { env: { ...process.env }, encoding: 'utf8' }
+    )
+    assert.notEqual(missing.status, 0)
+    assert.match(missing.stderr, /Missing --upload-token or TOKENBOARD_UPLOAD_TOKEN/)
+  } finally {
+    if (previousConfigDir === undefined) delete process.env.TOKENBOARD_CONFIG_DIR
+    else process.env.TOKENBOARD_CONFIG_DIR = previousConfigDir
+    if (previousToken === undefined) delete process.env.TOKENBOARD_UPLOAD_TOKEN
+    else process.env.TOKENBOARD_UPLOAD_TOKEN = previousToken
+    rmSync(root, { recursive: true, force: true })
+  }
 })

@@ -267,6 +267,43 @@ test('statusline log does not overwrite or remove a replacement lock owner', asy
   }
 })
 
+test('statusline log retries a Windows rename EPERM after the holder already released', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-eperm-race-'))
+  const logPath = join(root, 'events.jsonl')
+  const lockPath = `${logPath}.lock`
+  const originalRenameSync = fs.renameSync
+  try {
+    // Windows refuses a directory rename onto an existing directory with EPERM
+    // rather than ENOTEMPTY, and the holder can release the lock in the window
+    // between that failure and the classification check — the race that used to
+    // drop the event entirely.
+    await mkdir(lockPath)
+    await writeFile(join(lockPath, 'pid'), String(process.pid))
+    let injected = false
+    fs.renameSync = (source, destination) => {
+      if (!injected && destination === lockPath) {
+        injected = true
+        originalRenameSync(lockPath, `${lockPath}.released`)
+        throw Object.assign(new Error(`EPERM: operation not permitted, rename '${source}' -> '${destination}'`), {
+          code: 'EPERM',
+          syscall: 'rename'
+        })
+      }
+      return originalRenameSync(source, destination)
+    }
+    syncBuiltinESMExports()
+
+    appendBoundedStatuslineEvent(logPath, { value: 'kept-after-rename-race' }, 1024)
+
+    assert.match(await readFile(logPath, 'utf8'), /kept-after-rename-race/)
+    await assert.rejects(stat(lockPath), { code: 'ENOENT' })
+  } finally {
+    fs.renameSync = originalRenameSync
+    syncBuiltinESMExports()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('statusline log removes a partial lock when pid write fails', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tokenboard-agy-statusline-pid-failure-'))
   const logPath = join(root, 'events.jsonl')
