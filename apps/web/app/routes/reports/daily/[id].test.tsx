@@ -2,6 +2,7 @@ import { renderToString } from 'hono/jsx/dom/server'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { getOptionalUser } from '../../../features/auth/middleware'
 import { getDailyReportHistoryById } from '../../../features/notifications/report-share'
+import { ApiError } from '../../../lib/errors'
 import { GET } from './[id]'
 
 vi.mock('../../../features/auth/middleware', () => ({
@@ -197,6 +198,25 @@ describe('daily report share route', () => {
     })
   })
 
+  // A `drr_` id is the capability, and the lookup is a D1 read on every request because the page is
+  // `no-store`. Without a ceiling a well-formed but random id is an anonymous read amplifier; the
+  // route caps at the same 120/60s the other anonymous read paths use.
+  test('rate-limits the shared daily report page', async () => {
+    mockedGetDailyReportHistoryById.mockResolvedValue(reportItem() as never)
+    const context = pageContext('drr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', undefined, undefined, 121)
+
+    let thrown: unknown
+    try {
+      await GET[0](context as never, async () => undefined)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(ApiError)
+    expect((thrown as ApiError).status).toBe(429)
+    expect(mockedGetDailyReportHistoryById).not.toHaveBeenCalled()
+  })
+
   test('keeps the logged-in nav when a private report id is not readable', async () => {
     mockedGetOptionalUser.mockResolvedValue({
       id: 'user_1',
@@ -216,11 +236,13 @@ describe('daily report share route', () => {
   })
 })
 
-function pageContext(id: string, cookie?: string, env?: Record<string, unknown>) {
+function pageContext(id: string, cookie?: string, env?: Record<string, unknown>, rateLimitCount = 1) {
   let statusCode = 200
   const headers = new Headers()
   return {
-    env: { DB: {}, ...env },
+    // The route now enforces a read-side ceiling, so the DB stub has to answer the counter
+    // read and increment the way the real table does; otherwise every request 429s.
+    env: { DB: createRateLimitDb(rateLimitCount), ...env },
     req: {
       param: vi.fn(() => ({ id })),
       header: vi.fn((name: string) => (name === 'cookie' ? (cookie ?? null) : null)),
@@ -278,5 +300,20 @@ function reportItemBase() {
     ],
     generatedAt: '2026-04-29T10:00:00.000Z',
     updatedAt: '2026-04-29T10:00:00.000Z'
+  }
+}
+
+// The route's read ceiling issues the same two statements the real table sees: a `SELECT count`
+// probe and the upsert that returns the incremented counter. Reporting `rateLimitCount` as the
+// count lets a test drive a request past the ceiling without a real D1.
+function createRateLimitDb(rateLimitCount: number) {
+  return {
+    prepare: (sql: string) => ({
+      bind: () => ({
+        first: async () =>
+          sql.includes('api_rate_limits') ? { count: rateLimitCount, resetAt: '2099-01-01T00:00:00.000Z' } : null,
+        run: async () => ({ meta: { changes: 1 } })
+      })
+    })
   }
 }

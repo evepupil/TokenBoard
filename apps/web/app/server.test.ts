@@ -117,6 +117,41 @@ describe('worker server', () => {
     expect(mockedGetModelPricing).not.toHaveBeenCalled()
   })
 
+  // Hono dispatches a HEAD to the route's GET (hono-base.js: `if (method === "HEAD") ... dispatch(..., "GET")`),
+  // so the route handler still reads D1. Only GET reached the entrypoint ceiling, which left HEAD as an
+  // uncapped door to the same per-request GROUP BY the 429 above exists to bound.
+  test('rate-limits HEAD on the public model pricing alias too', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv({ rateLimitCount: 121 })
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?cursor=bogus', { method: 'HEAD' }),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
+
+  // A HEAD that passes the ceiling still answers without a body — the status and headers
+  // describe what a GET would return, the way RFC 9110 §9.3.2 requires.
+  test('serves a bodyless HEAD from the public model pricing alias when under the ceiling', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv()
+
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/model-pricing?limit=2', { method: 'HEAD' }),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('')
+    expect(mockedGetModelPricing).toHaveBeenCalledTimes(1)
+  })
+
   test('serves the versioned model-pricing alias when the legacy slug is occupied', async () => {
     mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
     const env = createEnv({ publicProfile: true, profileSlug: 'model-pricing' })

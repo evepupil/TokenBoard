@@ -46,7 +46,12 @@ export const readRateLimitPolicies = {
   // guaranteed miss that reaches D1, so it needs the same ceiling as the versioned
   // route. Separate id so the two counters do not spend each other's budget.
   publicModelPricingRead: { id: 'public-model-pricing-read', maxRequests: 120, windowSeconds: 60 },
-  publicCardRead: { id: 'public-card-read', maxRequests: 120, windowSeconds: 60 }
+  publicCardRead: { id: 'public-card-read', maxRequests: 120, windowSeconds: 60 },
+  // The shared daily-report page is anonymous by design (the `drr_` id is the capability) and
+  // `no-store`, so every request — including one for a well-formed but unknown id — reaches D1.
+  // Without a ceiling anyone can turn random ids into unbounded reads, the same hazard the
+  // public card and pricing endpoints are capped for.
+  publicReportRead: { id: 'public-report-read', maxRequests: 120, windowSeconds: 60 }
 } satisfies Record<string, RateLimitPolicy>
 
 export async function assertRateLimitAvailable(

@@ -35,7 +35,12 @@ export default {
     if (redirect) return withSecurityHeaders(redirect, headers)
 
     const publicResponse = await handlePublicApiRequest(request, env, ctx)
-    if (publicResponse) return withResponsePolicies(withSecurityHeaders(publicResponse, headers), request)
+    if (publicResponse) {
+      const response = withResponsePolicies(withSecurityHeaders(publicResponse, headers), request)
+      // A HEAD answer carries the same status and headers as its GET but no body. The
+      // entrypoint now serves HEAD so the ceilings apply; the body has to be dropped here.
+      return request.method === 'HEAD' ? new Response(null, response) : response
+    }
 
     const response = await app.fetch(request, env, ctx)
     if (response.status === 404 && shouldFetchStaticAsset(request)) {
@@ -60,7 +65,11 @@ export default {
 } satisfies ExportedHandler<Bindings>
 
 async function handlePublicApiRequest(request: Request, env: Bindings, ctx: ExecutionContext) {
-  if (request.method !== 'GET') return null
+  // Hono answers a HEAD by dispatching the route's GET and dropping the body (hono-base.js:
+  // `if (method === "HEAD") ... #dispatch(..., "GET")`), so a HEAD reaches the same D1 reads a
+  // GET does. Letting only GET through here left HEAD as an uncapped door past the ceilings
+  // below; the body is stripped after the policies are applied so the answer stays bodyless.
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null
 
   try {
     const url = new URL(request.url)

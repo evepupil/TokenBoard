@@ -3,6 +3,7 @@ import { getOptionalUser } from '../../../features/auth/middleware'
 import { getDailyReportHistoryById, isDailyReportId } from '../../../features/notifications/report-share'
 import { dailyReportHistoryRetentionDays } from '../../../features/notifications/report-history'
 import { MissingDailyReportPage, SharedDailyReportPage } from '../../../features/notifications/report-page'
+import { clientIpRateLimitSubject, enforceRateLimit, readRateLimitPolicies } from '../../../lib/rate-limit'
 
 export const GET = createRoute(async (c) => {
   c.header('Cache-Control', 'no-store')
@@ -13,6 +14,14 @@ export const GET = createRoute(async (c) => {
     c.status(404)
     return c.render(<MissingDailyReportPage />)
   }
+
+  // The report lookup is a D1 query every request, and the page is `no-store`, so a random
+  // (well-formed) id is an anonymous read. Malformed ids never reach here, so the ceiling sits
+  // exactly where the read starts — the same placement as the other anonymous read paths.
+  await enforceRateLimit(c.env.DB, {
+    policy: readRateLimitPolicies.publicReportRead,
+    subject: clientIpRateLimitSubject(c.req.raw.headers)
+  })
 
   const user = await getOptionalUser(c)
   const report = await getDailyReportHistoryById({
