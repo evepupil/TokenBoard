@@ -3,6 +3,7 @@ package sessionfile
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"time"
@@ -223,10 +224,17 @@ func readLineRecord(line string) (map[string]any, bool) {
 	if trimmed == "" {
 		return nil, false
 	}
+	// Ports `JSON.parse`: trailing non-whitespace after the first value is a syntax error,
+	// matching the codex port's jsonlDecodeJSON — a line like `{"a":1}garbage` decodes fine
+	// with a bare first Decode and would otherwise be silently accepted and counted.
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	var parsed any
 	if err := decoder.Decode(&parsed); err != nil {
+		return nil, true
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, true
 	}
 	record, ok := parsed.(map[string]any)

@@ -26,9 +26,17 @@ func platformSignalZero(pid int) error {
 	return nil
 }
 
-// platformProcessStartIdentity degrades on Windows: the verbose CSV has no
-// creation-time column, so identity is unavailable and stale detection runs
-// on liveness alone (the TS side's documented degradation).
+// platformProcessStartIdentity is unavailable on Windows. The verbose CSV has no
+// creation-time column, and the TS side reads it by spawning PowerShell
+// (`cursor-process-liveness.ts` → `Get-Process … StartTime.ToUniversalTime().Ticks`),
+// which costs a process launch on every liveness probe. Go deliberately does not
+// pay that: a lock written here carries no identity, and the TS reader falls back
+// to liveness alone when a record has none (its documented degradation).
+//
+// The consequence is bounded, not a correctness hole: a lock written by TS carries
+// an identity Go cannot recompute, so Go treats it as indeterminate — i.e. alive —
+// and a Windows lock whose PID was reused is reclaimed by the lock's own timeout
+// rather than immediately. Erring toward "alive" can never steal a live lock.
 func platformProcessStartIdentity(int) (string, error) {
 	return "", errors.New("identity unsupported on windows")
 }
@@ -65,15 +73,6 @@ func tasklistOutput(pid int) (string, error) {
 		return "", err
 	}
 	return string(out), nil
-}
-
-func tasklistContainsPid(output string, pid int) bool {
-	for _, line := range strings.Split(output, "\r\n") {
-		if strings.Contains(line, fmt.Sprintf(`","%d"`, pid)) || strings.Contains(line, fmt.Sprintf(`","%d",`, pid)) {
-			return true
-		}
-	}
-	return false
 }
 
 func hideWindow() *syscall.SysProcAttr {

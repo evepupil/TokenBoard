@@ -7,6 +7,7 @@ package sessionusage
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sort"
@@ -329,10 +330,22 @@ func ParseJSONLine(line string) map[string]any {
 	if trimmed == "" {
 		return nil
 	}
+	// `line.trim()` in JS also strips U+FEFF, so a session file stamped by an editor or a
+	// PowerShell `>` redirect parses there. Go's TrimSpace does not remove U+FEFF, so the
+	// leading BOM has to be peeled here before the JSON decode — otherwise the very first
+	// line of such a file would be rejected and every entry that has no timestamp of its own
+	// would be dropped.
+	trimmed = stripUtf8BOM(trimmed)
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	var parsed any
 	if err := decoder.Decode(&parsed); err != nil {
+		return nil
+	}
+	// `JSON.parse` rejects trailing content, so a line like `{"a":1}garbage` is malformed
+	// there. A bare first Decode accepts it and would count the row the TS side drops.
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil
 	}
 	record, ok := parsed.(map[string]any)
@@ -340,6 +353,15 @@ func ParseJSONLine(line string) map[string]any {
 		return nil
 	}
 	return record
+}
+
+// stripUtf8BOM removes a single leading UTF-8 BOM, matching `new TextDecoder('utf-8',
+// {fatal: true})` / JS `String#trim` on the TS side.
+func stripUtf8BOM(value string) string {
+	if len(value) >= 3 && value[0] == 0xef && value[1] == 0xbb && value[2] == 0xbf {
+		return value[3:]
+	}
+	return value
 }
 
 // ReadRecordAt returns the value as an object, or nil.

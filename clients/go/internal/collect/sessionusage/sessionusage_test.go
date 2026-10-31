@@ -189,3 +189,21 @@ func TestSnapshotsRejectANaNCost(t *testing.T) {
 		t.Fatal("Snapshots accepted a NaN cost")
 	}
 }
+
+// JS `line.trim()` strips U+FEFF as well as whitespace, so a Pi/Grok/DSH session file written by
+// an editor or a PowerShell `>` redirect parses there. Go's TrimSpace does not, and the JSON
+// decoder rejects `\uFEFF{...}` — the first line of such a file would be dropped, taking the
+// session timestamp that entries without their own timestamp fall back on.
+func TestParseJSONLineDropsALeadingBOM(t *testing.T) {
+	record := ParseJSONLine("\ufeff{\"type\":\"session\",\"id\":\"s1\"}")
+	if record == nil {
+		t.Fatal("ParseJSONLine rejected a BOM-prefixed object")
+	}
+	if record["type"] != "session" || record["id"] != "s1" {
+		t.Fatalf("record = %#v", record)
+	}
+	// A BOM is only meaningful at the start: one between tokens is malformed, as in JS.
+	if ParseJSONLine("{\"a\":1}\ufeff") != nil {
+		t.Fatal("a trailing BOM must not be accepted")
+	}
+}
