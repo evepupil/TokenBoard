@@ -111,6 +111,55 @@
 | 项 | macOS 本机 | Linux <linux-host> | Windows <windows-host> |
 |---|---|---|---|
 | skill 套件 | 872/872 | 872/872（node 24.22.1） | 863 pass / 9 skip / 0 fail（便携 node 24.22.1） |
-| Go cli 包 | ok | 待跑 | ok（真机） |
+| Go 全量 `go test ./...` | 待跑（本机改动后已跑，见第六节） | 全绿（`-race` 同） | cli 包 ok（真机） |
 
 测试机运维注记：Linux 原 node 24.21.0 低于项目下限，已在 `~/.nvm/versions/node/v24.22.1` 安装合规版本（此前 6 个 setup 类失败均为此造成，非代码缺陷）；Windows 便携 node 24.22.1 解压在 `C:\Users\<user>\tools\node-v24.22.1-win-x64`。
+
+## 八、全维度 agent 审查第二轮（2026-10-31，12 个 agent，三平台）
+
+崩溃后全部 agent 以 transcript resume 复跑完成。覆盖：skill 全链路、Go 客户端、TS collector+usage-core、安全隐私、服务端+线上私人 CF、TS↔Go 一致性+跨平台、来源枚举四处副本、退出码与 hook 模式、通知与 cron、模型定价、公共面与前端。**0 P0/P1；确认 P2 8 项全部已修（各带红→绿测试）；P3 修复 6 项，其余记录在案。**
+
+### 本轮已修（P2）
+
+| # | 缺陷 | 证据 | 修复 |
+|---|---|---|---|
+| 1 | `HEAD /api/public/model-pricing` 绕过 IP 限流直达 D1 | `server.ts:63` 只放行 GET；Hono `hono-base.js:263` 把 HEAD 按 GET 派发；路由内无限流。测试先红（HEAD 得 200 而非 429） | 入口接受 GET+HEAD；HEAD 响应在 `fetch` 末尾剥 body（RFC 9110 §9.3.2），新增 2 条测试 |
+| 2 | 一行损坏 `schedule_weekdays` 拖垮全体用户日报 | `normalize.ts:33` 直调会抛错的 `normalizeScheduleWeekdays`，且 `listDueWebhookSubscriptions` 的 `.map` 在 per-subscription try/catch 之外；修复前测试红（stack 指向 time.ts:55） | 改走带 try/catch 的 `normalizeSettingsScheduleWeekdays`，新增 cron 路径 weekday 降级测试 |
+| 3 | 匿名 `/reports/daily/:id` 无限流，随机合法 id 即一次 D1 读 | 路由无 `enforceRateLimit`，`app/routes` 无 `_middleware` | 新增 `publicReportRead` 120/60s，格式校验之后、D1 读之前；新增 429 测试 |
+| 4 | Go `ccusage --version` 探测继承完整环境（凭据外传给第三方二进制） | `acquire.go` 无 `cmd.Env`；同一二进制正式路径已剥 | `cmd.Env = scrubCredentialEnv(nil)`；红绿复验（移除修复→子进程抓到 token） |
+| 5 | skill `readVersion`/`runsVersion` 同类泄漏 | `client-binary.mjs` 两个 spawn 无 env | 传 `scrubbedChildEnv()` |
+| 6 | Go `selfupdate.verifyExecutable` 探测暂存二进制继承环境 | `selfupdate.go` 无 `cmd.Env`；注释自陈 "probed before it is trusted" | `ccusage.ScrubCredentialEnv(os.Environ())`（名单由 selfupdate 与 ccusage 共用一份）；真实下载链路测试断言暂存二进制抓不到任何凭据 |
+| 7 | Go `sessionfile` 不剥行首 UTF-8 BOM | TS 每行 `new TextDecoder` 会剥；Go 直接 yield，首行 `\uFEFF{...}` 被 JSON 拒绝静默丢行 | `line_reader.go` 剥 BOM + 测试（红绿复验） |
+| 8 | Go `sessionscan`/`sessionusage`（Pi/Grok/DSH 唯一入口）同病 | Go `TrimSpace` 不删 U+FEFF；TS `line.trim()` 会删 | `ParseJSONLine` 剥 BOM + 测试 |
+
+### 本轮已修（P3）
+
+- **`tasklistContainsPid` 子串匹配会命中 Session# 列**（`tasklist /FI "PID eq 1"` 把会话 1 的进程当 pid 1 → 陈旧锁永不回收）。重写为只读 CSV 第 2 字段，与 TS 锚定正则对齐；函数移入无 build-tag 的 `tasklist_csv.go`，7 条子测试三平台可跑（含带引号逗号镜像名）。
+- **Go 行解析接受尾部垃圾**：`{"a":1}garbage` 在 TS 是 malformed、Go 静默入账（多算方向）。`sessionfile.readLineRecord` 与 `sessionusage.ParseJSONLine` 补二次 `Decode` 断言 `io.EOF`（照抄 codex `jsonlDecodeJSON` 的既有写法）。
+- **Windows 定时任务命令行未转义 `%`**：cmd 对 batch 每一行做 `%` 展开，`C:\Tools\100%node\node.exe` 会被吃掉 `%` 指向不存在的文件。`nodePath`/`scriptPath` 过 `escapeWindowsCmdValue`；真机行为已由 Windows 探针记录（`echo [100%node]` → `[100node]`）。
+- **TS hook 模式缺本地 ccusage 时会 `npx` 联网下载**：违反「hook 模式不得发起网络请求」，Go 侧早已 fail-closed。`resolvePackageRunner` 增 `hookMode` 参数，两个 hook-capable provider 传入；`TOKENBOARD_FORCE_PACKAGE_RUNNER` 显式覆盖仍放行。2 条新测试。
+- **`pruneDeliveryLogs` 失败会跳过该 tick 全部投递**（紧随其后的 report-history prune 有 try/catch，它没有）：包 try/catch 对齐。
+- **出站 webhook 未设 `redirect: 'manual'`**：投递目标钉死三家 provider，3xx 只能是偏离开箱路径的重定向，跟随会重放用量负载与钉钉签名；对齐上传/定价的既有口径。新增断言。
+- **`liveness_windows.go` 注释失实**：原注释称 Windows 身份降级「与 TS 相同」，实际 TS 用 PowerShell `Get-Process … StartTime` 实现了身份。注释改写为如实描述（Go 有意不为此每次探活起 PowerShell；后果有界：PID 复用型陈旧锁由锁自身超时回收，方向保守永不误抢活锁）。
+
+### 记录在案（未修，含理由）
+
+- **75 退出码产生面两侧不对称**（TS 对整个 sync body 做 transient 分类，Go 只对 upload）：错误消息撞传输层关键字时 TS 多重试。方向无害（不丢数据），对齐需动 hook/ack 路径的既有测试契约，暂不动。
+- **ingest body 上限只看 content-length**：分块上传可绕过预检；后续 Zod/批大小仍 fail-closed，Workers 平台自身有请求体上限。防御纵深项。
+- **`safeResponseText` 读体失败按空串处理**：2xx 后流中断时投递大概率已成功；改成失败会引入重复投递。保留现状。
+- **antigravity language-server / 外部 sqlite3 子进程继承完整环境**：两侧对称、均为本机可信二进制；与 ccusage（执行第三方包）威胁模型不同。
+- **Go `LocalTimezone()` 仍回落 UTC**：仅库级直调（shadow/测试）可触发，CLI 路径已在 parseArgs fail-closed。
+- **skill 裸 `renameSync`（scheduled-sync-state/scheduled-retry/coordinator-signal）无 Windows 重试**：collector 与 Go 均有；低频写、冲突窗口小。
+- **Go `costUnavailableSources` 缺 parity 测试、hook 来源集合三处手写**：守卫缺口而非现存漂移；行为断言已覆盖 5 个费用不可用来源中的 3 个。
+- 其余为文档级/不可达项（`usage-details-filters` 空洞断言、`collectSingleSource` 兜底、CI shadow 前缀过滤、Windows ctime 回退、时间戳严格度差异等），详见各 agent 报告。
+
+### 「服务端 agent 判 weekday 为误报」的澄清
+
+该 agent 按磁盘现状读取时我已把 `normalize.ts` 改为受保护调用，故其「证伪」读的是修复后代码；修复前的红灯测试（stack 明确指向 `normalize.ts:33 → time.ts:55` 抛 `Invalid schedule weekday`）是权威证据。**该缺陷为真。**
+
+### 本轮验证口径
+
+- Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/amd64`、`GOOS=windows/arm64`、`GOOS=linux` vet+build 通过。Linux 真机（<linux-host>）全量 `go test ./... -race` 全绿。
+- TS：`pnpm -r test`（usage-core 40 / collector 1268+3skip / web 1060）、`pnpm -r typecheck`、`pnpm format:check` 全过。
+- skill：`node --test skills/tokenboard/scripts/*.test.mjs` **873 全过**（新增 Windows `%` 命令行测试）。
+- 全部 P2 修复先红后绿（红态均实测记录），凭据类修复以子进程回写 env 文件实证「抓不到」。
