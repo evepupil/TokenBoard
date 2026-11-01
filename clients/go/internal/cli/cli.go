@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/selfupdate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 	"github.com/MisonL/TokenBoard/clients/go/internal/upload"
+	"github.com/MisonL/TokenBoard/clients/go/internal/urlorigin"
 )
 
 // Exit codes. 75 is the scheduler retry contract: a transient failure the
@@ -615,12 +615,12 @@ func expandWarmHookSources(source string) []string {
 }
 
 // cursorScopeFromEndpoint mirrors the TS cursorScopeFromEndpoint: the
-// endpoint URL's origin — lowercased host, default port dropped, IPv6 hosts
-// kept in brackets, port normalized — or empty when there is no endpoint. An
-// endpoint that does not parse is a failure; the TS new URL() throws and
-// aborts the run the same way. (The TS side would continue with the literal
-// origin "null" for scheme-less or file:// endpoints; refusing is the
-// fail-closed equivalent.)
+// endpoint URL's origin (normalized by urlorigin.Origin, shared with the
+// pricing cache identity), or empty when there is no endpoint. An endpoint
+// that does not parse, or whose host the URL parser would reject, is a
+// failure; the TS new URL() throws and aborts the run the same way. (The TS
+// side would continue with the literal origin "null" for scheme-less or
+// file:// endpoints; refusing is the fail-closed equivalent.)
 func cursorScopeFromEndpoint(endpoint string) (string, error) {
 	if endpoint == "" {
 		return "", nil
@@ -629,25 +629,11 @@ func cursorScopeFromEndpoint(endpoint string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("Invalid endpoint URL: %s", endpoint)
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]" // url.Hostname strips IPv6 brackets
-	}
-	if port := parsed.Port(); port != "" && !isDefaultPort(parsed.Scheme, port) {
-		host = host + ":" + port
-	}
-	return parsed.Scheme + "://" + host, nil
-}
-
-// isDefaultPort normalizes before comparing so a leading-zero port
-// ("https://h:0443") is recognized as default and dropped, the way the TS
-// URL parser canonicalizes it.
-func isDefaultPort(scheme, port string) bool {
-	normalized, err := strconv.Atoi(port)
+	origin, err := urlorigin.Origin(parsed)
 	if err != nil {
-		return false
+		return "", fmt.Errorf("Invalid endpoint URL: %s", endpoint)
 	}
-	return (scheme == "https" && normalized == 443) || (scheme == "http" && normalized == 80)
+	return origin, nil
 }
 
 func requiredSyncConfig(options Options) []string {

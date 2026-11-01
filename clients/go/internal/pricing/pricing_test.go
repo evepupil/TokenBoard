@@ -286,6 +286,15 @@ func TestDerivesEndpointOriginAndBuildsCursorURLsWithoutRetainingEndpointPaths(t
 		"https://example.com:8443/x":            "https://example.com:8443",
 		"https://[::1]:8443/x":                  "https://[::1]:8443",
 		"https://[::1]/x":                       "https://[::1]",
+		// TS punycodes a non-ASCII host (UTS #46, non-transitional); outputs pinned from Node.
+		"https://\u00fcnicode.example":          "https://xn--nicode-2ya.example",
+		"https://\u4f8b\u5b50.\u6d4b\u8bd5/api": "https://xn--fsqu00a.xn--0zwm56d",
+		"https://B\u00fccher.EXAMPLE:443/x":     "https://xn--bcher-kva.example",
+		"https://\u00c9COLE.fr:8443":            "https://xn--cole-9oa.fr:8443",
+		"https://fa\u00df.de":                   "https://xn--fa-hia.de",
+		"https://\uff21\uff22\uff23.example":    "https://abc.example",
+		// Node's URL parser throws on a host UTS #46 rejects, so TS reports no origin.
+		"https://\u200d.example": "",
 	} {
 		if got := EndpointOriginFromEndpoint(endpoint); got != want {
 			t.Errorf("EndpointOriginFromEndpoint(%q) = %q, want %q", endpoint, got, want)
