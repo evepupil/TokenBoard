@@ -1123,6 +1123,36 @@ describe('worker server', () => {
       consoleError.mockRestore()
     }
   })
+
+  // HonoX installs the root `_404.tsx` as a middleware that rewrites the body of every 404 the
+  // app returns, including the one a page route rendered itself. The route unit tests call the
+  // handler directly, so only the assembled app shows the overwrite: without the route marking
+  // its response, this shared-report page would answer with the generic "404 Not Found" shell
+  // instead of its own "日报不存在" body — the exact string the report tests assert on.
+  test("keeps a page route's own not-found body instead of the generic 404 shell", async () => {
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/reports/daily/not-a-report-id'),
+      createEnv(),
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(404)
+    const html = await response.text()
+    expect(html).toContain('日报不存在')
+    expect(html).not.toContain('404 Not Found')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+  })
+
+  test('still answers an unknown path with the generic 404 shell', async () => {
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/no-such-page'),
+      createEnv(),
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(404)
+    await expect(response.text()).resolves.toContain('404 Not Found')
+  })
 })
 
 function createEnv(

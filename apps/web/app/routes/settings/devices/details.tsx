@@ -5,6 +5,7 @@ import { LucideIcon } from '../../../components/ui/icon'
 import { requireUser } from '../../../features/auth/middleware'
 import { listDeviceAuditLogs, listUserDevices } from '../../../features/device/service'
 import { ApiError } from '../../../lib/errors'
+import { markRouteRenderedNotFound } from '../../../lib/not-found'
 import { X } from 'lucide'
 import { DeviceDetailsDialogContent, DeviceDetailsPage, type DevicesPageState, type DevicesView } from '../devices'
 
@@ -22,6 +23,11 @@ export const GET = createRoute(async (c) => {
     const device = devices.find((candidate) => candidate.id === deviceId)
 
     if (!device) {
+      // Both branches render this route's own not-found surface (a dialog-sized error for a
+      // fragment request, a full page otherwise). HonoX's root `_404` handler rewrites the body
+      // of every 404 the app returns, so each has to mark its response or the specific message
+      // is replaced by the generic page.
+      markRouteRenderedNotFound(c)
       if (fragmentRequest) {
         return c.html(<DeviceDetailsError message="设备不存在或已不可用。" />, 404)
       }
