@@ -12,7 +12,11 @@ import (
 // (`^"[^"]+","(\d+)"(?:,|$)`); this does the same without a regex.
 func tasklistContainsPid(output string, pid int) bool {
 	want := strconv.Itoa(pid)
-	for _, line := range strings.Split(output, "\r\n") {
+	// Split the way the TS side does (`/\r?\n/`), not on "\r\n" alone: a row
+	// terminated by a bare "\n" would otherwise leave every following row glued
+	// to the first line, so only the first row could ever match.
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if len(line) == 0 || line[0] != '"' {
 			// The localized "no tasks match" notice, or a blank trailing line.
 			continue

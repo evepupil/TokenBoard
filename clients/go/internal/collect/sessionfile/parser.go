@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -220,7 +221,8 @@ func requireIntegerTokenCounts(row *aggregateRow) error {
 }
 
 func readLineRecord(line string) (map[string]any, bool) {
-	trimmed := strings.TrimSpace(line)
+	// JS `line.trim()` also strips a U+FEFF BOM at either end; TrimJSWhitespace matches that.
+	trimmed := jsonl.TrimJSWhitespace(line)
 	if trimmed == "" {
 		return nil, false
 	}

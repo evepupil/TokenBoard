@@ -190,20 +190,25 @@ func TestSnapshotsRejectANaNCost(t *testing.T) {
 	}
 }
 
-// JS `line.trim()` strips U+FEFF as well as whitespace, so a Pi/Grok/DSH session file written by
-// an editor or a PowerShell `>` redirect parses there. Go's TrimSpace does not, and the JSON
-// decoder rejects `\uFEFF{...}` — the first line of such a file would be dropped, taking the
-// session timestamp that entries without their own timestamp fall back on.
-func TestParseJSONLineDropsALeadingBOM(t *testing.T) {
-	record := ParseJSONLine("\ufeff{\"type\":\"session\",\"id\":\"s1\"}")
-	if record == nil {
+// JS `line.trim()` strips U+FEFF at EITHER end as well as whitespace, so a Pi/Grok/DSH session
+// file written by an editor or a PowerShell `>` redirect parses there. Go's TrimSpace does not,
+// and the JSON decoder rejects a leading `\uFEFF{...}` — the first line of such a file would be
+// dropped, taking the session timestamp that entries without their own timestamp fall back on.
+// A trailing BOM is the same shape: the TS side accepts it, so this side must too.
+func TestParseJSONLineStripsABOMAtEitherEnd(t *testing.T) {
+	leading := ParseJSONLine("\ufeff{\"type\":\"session\",\"id\":\"s1\"}")
+	if leading == nil {
 		t.Fatal("ParseJSONLine rejected a BOM-prefixed object")
 	}
-	if record["type"] != "session" || record["id"] != "s1" {
-		t.Fatalf("record = %#v", record)
+	if leading["type"] != "session" || leading["id"] != "s1" {
+		t.Fatalf("record = %#v", leading)
 	}
-	// A BOM is only meaningful at the start: one between tokens is malformed, as in JS.
-	if ParseJSONLine("{\"a\":1}\ufeff") != nil {
-		t.Fatal("a trailing BOM must not be accepted")
+	trailing := ParseJSONLine("{\"type\":\"session\",\"id\":\"s2\"}\ufeff")
+	if trailing == nil || trailing["id"] != "s2" {
+		t.Fatalf("ParseJSONLine must accept a trailing BOM like JS trim does; record = %#v", trailing)
+	}
+	// A BOM between two tokens is not trimmed by `String#trim`: the line stays malformed, as in JS.
+	if ParseJSONLine("{\"a\":1}\ufeff{\"b\":2}") != nil {
+		t.Fatal("a mid-line BOM must not be accepted")
 	}
 }

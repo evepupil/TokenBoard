@@ -19,6 +19,10 @@ func TestTasklistContainsPidReadsThePidFieldOnly(t *testing.T) {
 		{name: "blank output", output: "", pid: 1234, want: false},
 		{name: "second row matches", output: "\"a.exe\",\"4\",\"Services\",\"0\",\"1 K\"\r\n\"b.exe\",\"999\",\"Console\",\"1\",\"2 K\"\r\n", pid: 999, want: true},
 		{name: "image name with a quoted comma", output: "\"we,ird.exe\",\"777\",\"Console\",\"1\",\"3 K\"\r\n", pid: 777, want: true},
+		// The TS side splits on /\r?\n/, so a row terminated by a bare "\n" is a
+		// row there too. Splitting on "\r\n" alone would leave this second row
+		// glued to the first and it would never match.
+		{name: "a row ending in a bare newline", output: "\"a.exe\",\"4\",\"Services\",\"0\",\"1 K\"\n\"b.exe\",\"999\",\"Console\",\"1\",\"2 K\"\n", pid: 999, want: true},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {

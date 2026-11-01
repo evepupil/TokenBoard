@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/collate"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -326,16 +327,14 @@ func truncateUTF16(value string, limit int) string {
 // ParseJSONLine parses one JSONL line into an object; anything else
 // (blank, malformed, array, scalar) is not an object.
 func ParseJSONLine(line string) map[string]any {
-	trimmed := strings.TrimSpace(line)
+	// `line.trim()` in JS strips U+FEFF from both ends, so a session file stamped by an editor
+	// or a PowerShell `>` redirect parses there. TrimJSWhitespace matches that set; Go's
+	// TrimSpace does not remove U+FEFF, so a leading BOM would reject the very first line of such
+	// a file and a trailing one would reject a row the TS side accepts.
+	trimmed := jsonl.TrimJSWhitespace(line)
 	if trimmed == "" {
 		return nil
 	}
-	// `line.trim()` in JS also strips U+FEFF, so a session file stamped by an editor or a
-	// PowerShell `>` redirect parses there. Go's TrimSpace does not remove U+FEFF, so the
-	// leading BOM has to be peeled here before the JSON decode — otherwise the very first
-	// line of such a file would be rejected and every entry that has no timestamp of its own
-	// would be dropped.
-	trimmed = stripUtf8BOM(trimmed)
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	var parsed any
@@ -353,15 +352,6 @@ func ParseJSONLine(line string) map[string]any {
 		return nil
 	}
 	return record
-}
-
-// stripUtf8BOM removes a single leading UTF-8 BOM, matching `new TextDecoder('utf-8',
-// {fatal: true})` / JS `String#trim` on the TS side.
-func stripUtf8BOM(value string) string {
-	if len(value) >= 3 && value[0] == 0xef && value[1] == 0xbb && value[2] == 0xbf {
-		return value[3:]
-	}
-	return value
 }
 
 // ReadRecordAt returns the value as an object, or nil.
