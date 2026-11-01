@@ -250,6 +250,27 @@ func provTokenEventWithCost(timestamp string, inputTokens, outputTokens int, cos
 	}
 }
 
+// provHookEventWithoutModel is the shape real Codex writes: a token_count event
+// whose info carries only the usage, no model. The session parser then records
+// the turn under the `all` sentinel.
+func provHookEventWithoutModel(timestamp string, inputTokens, outputTokens int, costUsd float64) map[string]any {
+	return map[string]any{
+		"type":      "event_msg",
+		"timestamp": timestamp,
+		"payload": map[string]any{
+			"type": "token_count",
+			"info": map[string]any{
+				"last_token_usage": map[string]any{
+					"input_tokens":  inputTokens,
+					"output_tokens": outputTokens,
+					"total_tokens":  inputTokens + outputTokens,
+					"cost_usd":      costUsd,
+				},
+			},
+		},
+	}
+}
+
 // provTurnContext is a turn_context record naming the model of the turns that
 // follow it.
 func provTurnContext(model string) map[string]any {

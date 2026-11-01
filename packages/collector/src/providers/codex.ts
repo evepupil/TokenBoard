@@ -380,10 +380,20 @@ async function collectCodexHookUsageAttempt(
   // it. Only the reusable copies are subject to this: a snapshot restored for a file that is
   // gone is not in the tree ccusage scanned, so dropping it would lose real usage.
   const coveredKeys = new Set(snapshots.map(codexSnapshotGroupKey))
+  // A pending snapshot whose turn carried no model id is labelled `all`. ccusage reports the
+  // day's usage under concrete model ids, so an exact group-key match would never fire for it
+  // and the cached copy would be added on top of a figure that already contains it — which is
+  // what happens for real codex logs, where `token_count` events carry no `info.model`. An
+  // `all` snapshot therefore covers on (source, date, timezone) alone, the same widening
+  // `assertHookReconciliationSnapshots` applies when it matches an `all` key against the date.
+  const coveredScopes = new Set(snapshots.map(codexSnapshotScopeKey))
   const reusableIds = new Set((incremental.reusablePendingSnapshots ?? []).map(codexSnapshotIdentity))
   const cachedSnapshots = incremental.cachedSnapshots.filter(
     (snapshot) =>
-      !(reusableIds.has(codexSnapshotIdentity(snapshot)) && coveredKeys.has(codexSnapshotGroupKey(snapshot))) &&
+      !(
+        reusableIds.has(codexSnapshotIdentity(snapshot)) &&
+        isCodexSnapshotCoveredByCcusage(snapshot, coveredKeys, coveredScopes)
+      ) &&
       !unresolvedSnapshotKeys.has(codexSnapshotIdentity(snapshot)) &&
       !isUnresolvedCodexContextPricingSnapshot(snapshot)
   )
@@ -405,6 +415,24 @@ function reportUnrecoverablePendingCodexPricing(snapshots: readonly UsageSnapsho
 // does when the two lists are combined.
 function codexSnapshotGroupKey(snapshot: UsageSnapshot) {
   return [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
+}
+
+// The same grouping without the model, i.e. the widest claim ccusage can make about a day.
+function codexSnapshotScopeKey(snapshot: UsageSnapshot) {
+  return [snapshot.source, snapshot.usageDate, snapshot.timezone].join('\0')
+}
+
+// The unknown-model label the session JSONL parser uses when a token_count row carries no
+// model (`session-jsonl-parser.ts` `readCodexMetric`), mirrored here so the two stay in step.
+const codexUnknownModelLabel = 'all'
+
+function isCodexSnapshotCoveredByCcusage(
+  snapshot: UsageSnapshot,
+  coveredKeys: ReadonlySet<string>,
+  coveredScopes: ReadonlySet<string>
+) {
+  if (coveredKeys.has(codexSnapshotGroupKey(snapshot))) return true
+  return snapshot.model === codexUnknownModelLabel && coveredScopes.has(codexSnapshotScopeKey(snapshot))
 }
 
 function codexSnapshotIdentity(snapshot: UsageSnapshot) {

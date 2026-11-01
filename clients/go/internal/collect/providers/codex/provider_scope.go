@@ -610,9 +610,20 @@ func (run *providerRun) collectHookUsageAttempt(forcePendingUploadRescan bool) (
 	// that figure and merging would double-count it. Only the reusable copies
 	// are subject to this: a snapshot restored for a file that is gone is not
 	// in the tree ccusage scanned.
+	//
+	// A pending snapshot whose turn carried no model id is labelled "all".
+	// ccusage reports the day under concrete model ids, so an exact group-key
+	// match never fires for it and the cached copy would be added on top of a
+	// figure that already contains it — the normal case for real codex logs,
+	// whose token_count rows carry no info.model. An "all" snapshot therefore
+	// covers on (source, date, timezone) alone, the same widening
+	// AssertHookReconciliationSnapshots applies when it matches an "all" key
+	// against a date.
 	coveredKeys := map[string]bool{}
+	coveredScopes := map[string]bool{}
 	for _, snapshot := range snapshots {
 		coveredKeys[codexSnapshotGroupKey(snapshot)] = true
+		coveredScopes[codexSnapshotScopeKey(snapshot)] = true
 	}
 	reusableIDs := map[string]bool{}
 	for _, snapshot := range incremental.ReusablePendingSnapshots {
@@ -621,7 +632,7 @@ func (run *providerRun) collectHookUsageAttempt(forcePendingUploadRescan bool) (
 	cached := make([]contract.Snapshot, 0, len(incremental.CachedSnapshots))
 	for _, snapshot := range incremental.CachedSnapshots {
 		identity := codexSnapshotIdentity(snapshot)
-		if reusableIDs[identity] && coveredKeys[codexSnapshotGroupKey(snapshot)] {
+		if reusableIDs[identity] && isCodexSnapshotCoveredByCcusage(snapshot, coveredKeys, coveredScopes) {
 			continue
 		}
 		if unresolvedKeys[identity] {
