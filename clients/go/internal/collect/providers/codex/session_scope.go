@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionwalk"
 )
 
@@ -1482,7 +1483,11 @@ func recordSessionTokenCountActivity(
 }
 
 func readSessionScopeTokenCountTimestamp(line string) (time.Time, bool) {
-	trimmed := strings.TrimSpace(line)
+	// `line.trim()` on the TS side strips a U+FEFF BOM at either end, so a session file stamped
+	// by an editor or a PowerShell redirect still yields its token_count timestamp there.
+	// TrimJSWhitespace matches that set; Go's TrimSpace would reject the line and drop the file
+	// from the window.
+	trimmed := jsonl.TrimJSWhitespace(line)
 	if trimmed == "" {
 		return time.Time{}, false
 	}
@@ -1490,6 +1495,12 @@ func readSessionScopeTokenCountTimestamp(line string) (time.Time, bool) {
 	decoder.UseNumber()
 	var value any
 	if err := decoder.Decode(&value); err != nil {
+		return time.Time{}, false
+	}
+	// Ports `JSON.parse`: trailing non-whitespace after the first value is a
+	// syntax error there, so a line like `{"a":1}garbage` must not be accepted.
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return time.Time{}, false
 	}
 	entry, ok := value.(map[string]any)

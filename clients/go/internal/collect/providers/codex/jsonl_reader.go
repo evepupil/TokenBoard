@@ -169,7 +169,7 @@ func jsonlReadStreamWithLifecycle(
 		lineNumber++
 		var record UnknownRecord
 		if line.isText {
-			if strings.TrimSpace(line.text) == "" {
+			if jsonl.TrimJSWhitespace(line.text) == "" {
 				continue
 			}
 			parsed, malformed := jsonlParseRecord(line.text)
