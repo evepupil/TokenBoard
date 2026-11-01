@@ -181,9 +181,12 @@
 | P3 | `tasklistContainsPid` 只按 `\r\n` 切行 | TS 用 `/\r?\n/` | 按 `\n` 切并去尾 `\r`，补裸换行用例 |
 | P3 | skill 升级流程里两处 `git` 探测继承完整环境 | `upgrade-utils.mjs` 的 `show-ref`/`fetch` 走 `runtime.spawn` | 改走 `spawnRedacted` |
 
-### 记录在案（未修）
+### 收尾（同日补修）
 
-- **IDN 域名的 origin 规范化**：agent 判为 P1，但触发需要 `BETTER_AUTH_URL` 配成非 ASCII 主机名；当前两个部署都是 ASCII 域名，无现实触发面。待真的启用 IDN 域名时再处理。
+- **IDN 域名的 origin 规范化（已修，`a8afd2a`）**：TS `new URL(endpoint).origin` 对主机做 UTS #46 ToASCII（punycode），Go 保留 Unicode 主机；origin 同时是定价缓存身份与 cursor 文件 scope，IDN 端点下两侧会互相丢弃缓存、分叉 cursor。Node 拒绝的主机（孤立 ZWJ）在 Go 侧原样通过。新增 `internal/urlorigin.Origin` 供 `pricing.EndpointOriginFromEndpoint` 与 `cli.cursorScopeFromEndpoint` 共用：非 ASCII 主机走 WHATWG 配置（非过渡、CheckBidi/CheckJoiners 开、CheckHyphens/STD3 关、不校验 DNS 长度），IDNA 失败按无效端点处理（与 Node 抛错一致）；纯 ASCII 主机保持原小写路径（Node 对不可解码的 `xn--zz` 原样放行，idna 会拒）。期望值全部取自 Node 实测，修复前测试红。`golang.org/x/net` 升为直接依赖并钉 `v0.62.0`（越过 GO-2026-6866/6860；`v0.60.0` 的两条均未被调用）。
+  - 仍不一致（有意不追）：Node 会解码主机里的 `%41`、把 `0x7f.1` 等 IPv4 简写规范为点分十进制、对 `a b.example` 抛错；Go `url.Parse` 对前两者报错、对含空格主机放行。都是非法或极罕见的端点写法，无现实触发面。
+- **排行榜页面路由 429 线上复验**：私人 CF 上 `/leaderboards` 并行 150 请求 → 120×200 + 30×429，429 响应带 `retry-after` 与 `cache-control: no-store`（此前只复验了 fragment）。
+- **三平台真机复验 @ `a8afd2a`**：Linux 测试机 `go test ./... -race` 34 包全 ok、skill 套件 873/873；Windows 测试机（toolchain 自动切到 go1.27.3）`go vet ./...` 通过、`go test ./...` 34 包全 ok（含 tasklist 裸换行修复）、skill 套件 864 通过 + 9 按设计跳过（POSIX 权限断言）、0 失败；macOS 本机 `-race` 全量 + 六个 OS/arch 交叉构建通过。
 
 ### 本轮验证口径
 
