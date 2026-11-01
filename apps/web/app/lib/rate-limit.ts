@@ -51,7 +51,13 @@ export const readRateLimitPolicies = {
   // `no-store`, so every request — including one for a well-formed but unknown id — reaches D1.
   // Without a ceiling anyone can turn random ids into unbounded reads, the same hazard the
   // public card and pricing endpoints are capped for.
-  publicReportRead: { id: 'public-report-read', maxRequests: 120, windowSeconds: 60 }
+  publicReportRead: { id: 'public-report-read', maxRequests: 120, windowSeconds: 60 },
+  // The leaderboard page and the fragment that swaps in its panel are both public and both
+  // `no-store`, and each renders by aggregating the whole summary table for the ranked window.
+  // Nothing is cached between requests, so an anonymous visitor can drive that aggregate at
+  // will; the board is the heaviest read on the site, so it gets the same ceiling as the other
+  // anonymous read paths.
+  publicLeaderboardRead: { id: 'public-leaderboard-read', maxRequests: 120, windowSeconds: 60 }
 } satisfies Record<string, RateLimitPolicy>
 
 export async function assertRateLimitAvailable(

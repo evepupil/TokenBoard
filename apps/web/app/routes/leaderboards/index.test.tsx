@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { getOptionalUser } from '../../features/auth/middleware'
 import { getProfileTimezoneSettings } from '../../features/settings/service'
 import { getLeaderboard } from '../../features/leaderboards/service'
+import { ApiError } from '../../lib/errors'
 import route from './index'
 
 vi.mock('../../features/auth/middleware', () => ({
@@ -96,13 +97,28 @@ describe('leaderboard page route', () => {
 
     expect(mockedGetLeaderboard.mock.calls[0][1]).toMatchObject({ viewerUserId: null })
   })
+
+  // The board aggregates the whole summary table and the page is `no-store`, so every anonymous
+  // request reaches D1. Without a ceiling that makes the heaviest read on the site an unbounded
+  // anonymous amplifier; the same 120/60s the other anonymous read paths use applies here, and
+  // the ceiling has to fire before the board is built.
+  test('rate-limits the public leaderboard page', async () => {
+    const thrown = await route[0](context('', 121) as never, async () => undefined).then(
+      () => null,
+      (error: unknown) => error
+    )
+
+    expect(thrown).toBeInstanceOf(ApiError)
+    expect((thrown as ApiError).status).toBe(429)
+    expect(mockedGetLeaderboard).not.toHaveBeenCalled()
+  })
 })
 
-function context(cookie: string) {
+function context(cookie: string, rateLimitCount = 1) {
   const request = new Request('https://tokenboard.example/leaderboards?period=daily')
   const headers = new Headers()
   return {
-    env: { DB: {} },
+    env: { DB: createRateLimitDb(rateLimitCount) },
     req: {
       raw: request,
       url: request.url,
@@ -113,5 +129,19 @@ function context(cookie: string) {
       headers.set(name, value)
     },
     render: async (body: unknown) => new Response(String(body), { status: 200, headers })
+  }
+}
+
+// The route's read ceiling issues a `SELECT count` probe against `api_rate_limits`; reporting a
+// count at or above the ceiling drives a request past it without a real D1.
+function createRateLimitDb(rateLimitCount: number) {
+  return {
+    prepare: (sql: string) => ({
+      bind: () => ({
+        first: async () =>
+          sql.includes('api_rate_limits') ? { count: rateLimitCount, resetAt: '2099-01-01T00:00:00.000Z' } : null,
+        run: async () => ({ meta: { changes: 1 } })
+      })
+    })
   }
 }

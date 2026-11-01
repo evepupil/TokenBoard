@@ -6,14 +6,23 @@ import { leaderboardMetricSchema, leaderboardPeriodSchema } from '../../features
 import { getLeaderboard } from '../../features/leaderboards/service'
 import { leaderboardDocumentTitle } from '../../features/leaderboards/title'
 import { resolveViewerTimezone } from '../../features/leaderboards/viewer-timezone'
+import { clientIpRateLimitSubject, enforceRateLimit, readRateLimitPolicies } from '../../lib/rate-limit'
 
 export default createRoute(async (c) => {
-  const user = await getOptionalUser(c)
   // The board itself is public, but the nav renders the signed-in viewer's email. This route
   // reads the session with `getOptionalUser` rather than `requireUser`, so it is outside the
   // boundary that sets `no-store` for session-gated pages; without a directive a browser may
   // cache the page heuristically and show the previous user's account on a shared machine.
   c.header('Cache-Control', 'no-store')
+  // Rendering the board aggregates the whole summary table for the ranked window, and the page is
+  // `no-store`, so every anonymous request reaches D1. Without a ceiling the heaviest read on the
+  // site is an unbounded anonymous amplifier; the same 120/60s applies here as on the other
+  // anonymous read paths. Placed before the session read so the ceiling covers that request too.
+  await enforceRateLimit(c.env.DB, {
+    policy: readRateLimitPolicies.publicLeaderboardRead,
+    subject: clientIpRateLimitSubject(c.req.raw.headers)
+  })
+  const user = await getOptionalUser(c)
   const period = leaderboardPeriodSchema.catch('daily').parse(c.req.query('period'))
   const metric = leaderboardMetricSchema.catch('tokens').parse(c.req.query('metric'))
   // The board is public, so an anonymous viewer has no profile: their browser's own zone is
