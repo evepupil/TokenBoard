@@ -297,7 +297,7 @@ function fetchOriginDefaultBranch(runtime, branchName, options) {
 }
 
 function checkoutDefaultBranch(runtime, branchName, remoteBranch, options) {
-  const localBranch = runtime.spawn('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], {
+  const localBranch = spawnRedacted(runtime, 'git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], {
     stdio: 'ignore',
     shell: false,
     ...options
@@ -312,7 +312,7 @@ function checkoutDefaultBranch(runtime, branchName, remoteBranch, options) {
 
 function fetchBranchOrRef(step, runtime) {
   const ref = String(step.args[0] ?? '')
-  const branchFetch = runtime.spawn('git', ['fetch', '--depth', '1', 'origin', `refs/heads/${ref}`], {
+  const branchFetch = spawnRedacted(runtime, 'git', ['fetch', '--depth', '1', 'origin', `refs/heads/${ref}`], {
     stdio: 'ignore',
     shell: false,
     ...step.options
