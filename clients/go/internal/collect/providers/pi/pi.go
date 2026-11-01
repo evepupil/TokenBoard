@@ -70,7 +70,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 		},
 	}, func(file sessionscan.ScannedSessionFile) error {
 		scannedFiles++
-		return readUsageEvents(file.Path, seenEntryIDs, func(event sessionusage.Event) {
+		return readUsageEvents(file.Path, seenEntryIDs, options.Stderr, func(event sessionusage.Event) {
 			if sinceDate != "" && sessionusage.FormatDate(event.OccurredAt, timezone) < sinceDate {
 				return
 			}
@@ -97,11 +97,16 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 //
 // A session file is a tree keyed by id/parentId, and a fork copies shared
 // history into the new file, so an entry id is only counted once per scan.
-func readUsageEvents(filePath string, seenEntryIDs map[string]bool, yield func(sessionusage.Event)) error {
+func readUsageEvents(
+	filePath string,
+	seenEntryIDs map[string]bool,
+	stderr func(line string),
+	yield func(sessionusage.Event),
+) error {
 	sessionID := strings.TrimSuffix(filepath.Base(filePath), ".jsonl")
 	var sessionTimestamp *time.Time
 
-	return sessionscan.ReadLines(filePath, func(line string) error {
+	return sessionscan.ReadLines(filePath, sessionscan.OversizedLineReporter(label, filePath, stderr), func(line string) error {
 		entry := sessionusage.ParseJSONLine(line)
 		if entry == nil {
 			return nil

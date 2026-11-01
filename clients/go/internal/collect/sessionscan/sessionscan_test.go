@@ -211,3 +211,74 @@ func TestReportsAnOversizedFileInsteadOfVisitingIt(t *testing.T) {
 		t.Fatalf("skipped = %v, want [max-size]", skipped)
 	}
 }
+
+// maxLineBytes mirrors the TS `readSessionLinesBounded` policy: a single row
+// longer than the cap is skipped and the read continues, so an oversized row
+// does not discard every usage event after it. `bufio.Scanner` cannot express
+// that — it stops the read with `token too long` — so this test pins the
+// behaviour the reader has to provide instead.
+func TestSkipsAnOversizedLineAndKeepsReading(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	oversized := strings.Repeat("x", maxLineBytes+1)
+	content := "{\"a\":1}\n" + oversized + "\n{\"b\":2}\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var lines []string
+	var skipped []int
+	err := ReadLines(path, func(bytes int) { skipped = append(skipped, bytes) }, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ReadLines returned %v", err)
+	}
+	if len(lines) != 2 || lines[0] != `{"a":1}` || lines[1] != `{"b":2}` {
+		t.Fatalf("lines = %q, want the two rows around the oversized one", lines)
+	}
+	if len(skipped) != 1 || skipped[0] != len(oversized) {
+		t.Fatalf("skipped = %v, want [%d]", skipped, len(oversized))
+	}
+}
+
+// A final line with no trailing newline still counts; the reader must not drop
+// it just because the file ends there.
+func TestYieldsTheFinalLineWithoutATerminator(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte("{\"a\":1}\n{\"b\":2}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	if err := ReadLines(path, nil, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 2 || lines[1] != `{"b":2}` {
+		t.Fatalf("lines = %q, want the unterminated final row", lines)
+	}
+}
+
+// A CRLF terminator is normalized so the yielded row carries no carriage
+// return, matching the scanner's own stripping.
+func TestStripsCarriageReturnsFromCRLF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte("{\"a\":1}\r\n{\"b\":2}\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	if err := ReadLines(path, nil, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 2 || lines[0] != `{"a":1}` || lines[1] != `{"b":2}` {
+		t.Fatalf("lines = %q, want CR stripped", lines)
+	}
+}

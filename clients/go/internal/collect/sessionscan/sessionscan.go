@@ -11,6 +11,7 @@ package sessionscan
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -214,20 +215,129 @@ func ignorableScanError(err error) (string, bool) {
 	return "", false
 }
 
+// OversizedLineReporter builds the callback ReadLines calls for a line longer
+// than maxLineBytes, formatting the same message the TS providers pass to
+// their `onSkippedLine`: `Skipping an oversized line (<bytes> bytes) in <label>
+// session <path>`. A nil `stderr` yields a nil reporter, which ReadLines
+// accepts.
+func OversizedLineReporter(label, filePath string, stderr func(string)) func(int) {
+	if stderr == nil {
+		return nil
+	}
+	return func(bytes int) {
+		stderr(fmt.Sprintf("Skipping an oversized line (%d bytes) in %s session %s", bytes, label, filePath))
+	}
+}
+
 // ReadLines reads a session log line by line so a large file never lands in
 // memory. yield returning an error stops the read.
-func ReadLines(filePath string, yield func(line string) error) error {
+//
+// A line longer than maxLineBytes is skipped and the read continues with the
+// next line, the way the TS `readSessionLinesBounded` behaves: it drops the
+// single oversized line, reports it through onSkippedLine, and keeps whatever
+// follows. `bufio.Scanner` cannot do this — it stops the whole read with
+// `bufio.Scanner: token too long`, which would discard every usage event after
+// the oversized row. The scan is byte-oriented (lines are decoded by the
+// caller's parser), and only the line's length is tracked while it is
+// discarded, so a pathological multi-gigabyte line cannot grow the buffer.
+func ReadLines(filePath string, onSkippedLine func(bytes int), yield func(line string) error) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
-	for scanner.Scan() {
-		if err := yield(scanner.Text()); err != nil {
-			return err
+
+	reader := bufio.NewReaderSize(file, 64*1024)
+	var pending []byte
+	skipping := false
+
+	// flushLine hands the accumulated line to the caller once its terminator is
+	// reached. CRLF is normalized the way the scanner used to strip it: a
+	// trailing '\r' is removed so the yielded text has no carriage return.
+	flushLine := func() error {
+		if skipping {
+			skipping = false
+			pending = nil
+			return nil
+		}
+		line := pending
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		pending = pending[:0]
+		return yield(string(line))
+	}
+
+	for {
+		chunk, readErr := reader.ReadSlice('\n')
+
+		// Peel complete lines out of the chunk. A chunk normally ends in '\n';
+		// when it does not (a partial line, ErrBufferFull) whatever is left is
+		// carried in `pending` for the next read.
+		for len(chunk) > 0 {
+			if skipping {
+				// Discard up to the terminator without buffering the line, so a
+				// pathological multi-gigabyte row cannot grow memory. The bytes
+				// are still counted for the diagnostic.
+				index := bytes.IndexByte(chunk, '\n')
+				if index < 0 {
+					pending = nil
+					break
+				}
+				chunk = chunk[index+1:]
+				if err := flushLine(); err != nil {
+					return err
+				}
+				continue
+			}
+
+			index := bytes.IndexByte(chunk, '\n')
+			if index < 0 {
+				pending = append(pending, chunk...)
+				if len(pending) > maxLineBytes {
+					skipping = true
+					if onSkippedLine != nil {
+						onSkippedLine(len(pending))
+					}
+					pending = nil
+				}
+				break
+			}
+			pending = append(pending, chunk[:index]...)
+			chunk = chunk[index+1:]
+			if len(pending) > maxLineBytes {
+				// Report the oversized line at the moment it is known to be too
+				// long, then drop it: `flushLine` takes the skip path while
+				// `skipping` is set, so the bytes never reach the caller.
+				if onSkippedLine != nil {
+					onSkippedLine(len(pending))
+				}
+				skipping = true
+				if err := flushLine(); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := flushLine(); err != nil {
+				return err
+			}
+		}
+
+		if readErr != nil {
+			if errors.Is(readErr, bufio.ErrBufferFull) {
+				continue
+			}
+			if errors.Is(readErr, io.EOF) {
+				// A final line with no terminator still counts, unless the file
+				// ended inside an oversized line that was being skipped.
+				if !skipping && len(pending) > 0 {
+					if err := flushLine(); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			return readErr
 		}
 	}
-	return scanner.Err()
 }

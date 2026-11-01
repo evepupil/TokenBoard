@@ -106,7 +106,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 // a non-string kind, or no kind at all is skipped rather than guessed at.
 func readUsageEvents(filePath string, stderr func(string), yield func(sessionusage.Event)) error {
 	sessionID := filepath.Base(filepath.Dir(filePath))
-	return sessionscan.ReadLines(filePath, func(line string) error {
+	return sessionscan.ReadLines(filePath, sessionscan.OversizedLineReporter(label, filePath, stderr), func(line string) error {
 		record := sessionusage.ParseJSONLine(line)
 		if record == nil || record["method"] != usageMethod {
 			return nil
@@ -231,13 +231,6 @@ func lookupSet(env func(string) string, key string) (string, bool) {
 	}
 	value := env(key)
 	return value, value != ""
-}
-
-func lookupEnv(env func(string) string, key string) string {
-	if env == nil {
-		return os.Getenv(key)
-	}
-	return env(key)
 }
 
 // defaultHome is the TS fallback `join(homedir(), '.grok')`: the user's home
