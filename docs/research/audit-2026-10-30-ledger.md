@@ -163,3 +163,30 @@
 - TS：`pnpm -r test`（usage-core 40 / collector 1268+3skip / web 1060）、`pnpm -r typecheck`、`pnpm format:check` 全过。
 - skill：`node --test skills/tokenboard/scripts/*.test.mjs` **873 全过**（新增 Windows `%` 命令行测试）。
 - 全部 P2 修复先红后绿（红态均实测记录），凭据类修复以子进程回写 env 文件实证「抓不到」。
+
+## 九、三平台全维度审查第三轮（2026-11-01，agent 审查 + 私人 CF `1abfeaba`）
+
+先把最新服务端部署到私人 CF（`tokenboard-independent` / `tokenboard.431695.xyz`），再按 skill、Go 客户端、TS collector、TS↔Go parity、安全、服务端+线上、前端多维度派 agent。agent 结论逐条复现后才定性；每个修复都做了红→绿（移除修复→测试失败→恢复→通过）。
+
+### 已修
+
+| 级别 | 缺陷 | 证据 | 修复 |
+|---|---|---|---|
+| P1 | Go `sessionscan.ReadLines` 遇单行 >64 MiB 整个文件中止，其后用量全丢（Pi/Grok/DSH 非 hook 路径） | `bufio.Scanner: token too long`；TS `readSessionLinesBounded` 只跳过该行。65 MiB 行夹在两行间的测试先红 | 改为 `ReadSlice` 分块读取，超限行只计长度丢弃并经 `OversizedLineReporter` 报告；补 CRLF、无结尾换行两条测试 |
+| P2 | codex hook 复用的 pending 快照被叠加到 ccusage 已含它的当日总量上（多算） | 本机 1444/1444 条 `token_count` 无 `info.model` → 解析器标为 `all`；ccusage 按具体模型报，精确分组键永不命中，`mergeSnapshots` 相加。复现 45 vs 30 | `all` 快照按 (source, date, timezone) 判定已覆盖；TS 与 Go 两侧同改，两侧各有回归测试且变异验证会红 |
+| P2 | 日报分享页 / 设备详情的专属 404 页被通用壳覆盖 | HonoX `createApp` 把根 `_404` 作为中间件改写任意 404 的 body；线上两种 404 字节完全相同 | 路由用 `markRouteRenderedNotFound` 打标，根 handler 保留原 body；`server.test.ts` 经 `worker.fetch` 断言 `日报不存在` |
+| P2 | `/leaderboards` 与 `/leaderboards/fragment` 无限流 | 两路由均匿名 + `no-store`，每次请求对汇总表做全窗口聚合；其余匿名读路径都有 120/60s | 新增 `publicLeaderboardRead` 120/60s，在构建榜单前执行；两条 429 测试（移除限流即红） |
+| P3 | Go 行解析的空白集合与 JS `String#trim` 不一致 | Node 实测：`trim()` 两端都剥 U+FEFF、不剥 U+0085；Go `TrimSpace` 正好相反。上轮测试断言「尾部 BOM 必须拒绝」是错的 | 新增 `jsonl.TrimJSWhitespace`（显式列出 ECMAScript 集合），`sessionusage`/`sessionfile`/codex reader/scope prefilter 统一使用；集合测试逐码点钉住 |
+| P3 | codex scope prefilter 不剥 BOM、接受尾部垃圾 | `readSessionScopeTokenCountTimestamp` 单次 `Decode` | 同上 trim + 二次 `Decode` 断言 `io.EOF`；表驱动测试，两处各自变异会红 |
+| P3 | `tasklistContainsPid` 只按 `\r\n` 切行 | TS 用 `/\r?\n/` | 按 `\n` 切并去尾 `\r`，补裸换行用例 |
+| P3 | skill 升级流程里两处 `git` 探测继承完整环境 | `upgrade-utils.mjs` 的 `show-ref`/`fetch` 走 `runtime.spawn` | 改走 `spawnRedacted` |
+
+### 记录在案（未修）
+
+- **IDN 域名的 origin 规范化**：agent 判为 P1，但触发需要 `BETTER_AUTH_URL` 配成非 ASCII 主机名；当前两个部署都是 ASCII 域名，无现实触发面。待真的启用 IDN 域名时再处理。
+
+### 本轮验证口径
+
+- Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/{amd64,arm64}`、`GOOS=linux` build 通过。
+- TS：usage-core 40 / web 1064 / collector 1269+3skip 全过；`pnpm -r typecheck`、`pnpm format:check` 通过。
+- skill：`node --test skills/tokenboard/scripts/*.test.mjs` 873 全过。
