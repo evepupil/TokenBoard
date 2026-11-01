@@ -527,6 +527,8 @@ func TestCursorScopeFromEndpoint(t *testing.T) {
 		{"", "", false},
 		{"not a url", "", true},
 		{"/only/a/path", "", true},
+		// new URL() throws on a host UTS #46 rejects (a lone zero-width joiner).
+		{"https://\u200d.example", "", true},
 	}
 	for _, tc := range cases {
 		got, err := cursorScopeFromEndpoint(tc.endpoint)
@@ -570,6 +572,9 @@ func TestCursorScopeFromEndpointEdgeForms(t *testing.T) {
 		{"http://h.example:0080", "http://h.example"},
 		{"https://h.example:443", "https://h.example"},
 		{"https://user:pw@H.example:8443/x?q=1", "https://h.example:8443"},
+		{"https://\u00fcnicode.example", "https://xn--nicode-2ya.example"},
+		{"https://B\u00fccher.EXAMPLE:443/x", "https://xn--bcher-kva.example"},
+		{"https://\u4f8b\u5b50.\u6d4b\u8bd5:8443/api", "https://xn--fsqu00a.xn--0zwm56d:8443"},
 	}
 	for _, tc := range cases {
 		got, err := cursorScopeFromEndpoint(tc.endpoint)
