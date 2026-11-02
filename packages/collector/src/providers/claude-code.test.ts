@@ -68,12 +68,23 @@ describe('collectClaudeCodeUsage', () => {
           '--json',
           '--breakdown',
           '--single-thread',
+          '--timezone',
+          'Asia/Shanghai',
           ...bundledCcusageConfigArgs
         ]
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.33', 'claude', 'session', '--json', '--single-thread', ...bundledCcusageConfigArgs]
+        args: [
+          'ccusage@20.0.33',
+          'claude',
+          'session',
+          '--json',
+          '--single-thread',
+          '--timezone',
+          'Asia/Shanghai',
+          ...bundledCcusageConfigArgs
+        ]
       }
     ])
     expect(snapshots[0]).toMatchObject({
@@ -91,6 +102,7 @@ describe('collectClaudeCodeUsage', () => {
     vi.stubEnv('TOKENBOARD_SINCE', '20260509')
 
     await collectClaudeCodeUsage({
+      timezone: 'Asia/Shanghai',
       async runner(command, args) {
         calls.push({ command, args })
         return { data: [] }
@@ -114,6 +126,8 @@ describe('collectClaudeCodeUsage', () => {
           '--single-thread',
           '--since',
           '20260509',
+          '--timezone',
+          'Asia/Shanghai',
           ...bundledCcusageConfigArgs
         ]
       },
@@ -132,6 +146,8 @@ describe('collectClaudeCodeUsage', () => {
           '--single-thread',
           '--since',
           '20260509',
+          '--timezone',
+          'Asia/Shanghai',
           ...bundledCcusageConfigArgs
         ]
       }
@@ -145,6 +161,7 @@ describe('collectClaudeCodeUsage', () => {
     vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '20260501')
 
     await collectClaudeCodeUsage({
+      timezone: 'Asia/Shanghai',
       async runner(_command, args) {
         calls.push(args)
         return { data: [] }
@@ -161,6 +178,8 @@ describe('collectClaudeCodeUsage', () => {
         '--single-thread',
         '--since',
         '20260501',
+        '--timezone',
+        'Asia/Shanghai',
         ...bundledCcusageConfigArgs
       ],
       [
@@ -171,6 +190,8 @@ describe('collectClaudeCodeUsage', () => {
         '--single-thread',
         '--since',
         '20260501',
+        '--timezone',
+        'Asia/Shanghai',
         ...bundledCcusageConfigArgs
       ]
     ])
@@ -183,6 +204,7 @@ describe('collectClaudeCodeUsage', () => {
     vi.stubEnv('TOKENBOARD_UNTIL', '20260510')
 
     await collectClaudeCodeUsage({
+      timezone: 'Asia/Shanghai',
       since: '20260708',
       until: '20260709',
       async runner(_command, args) {
@@ -203,6 +225,8 @@ describe('collectClaudeCodeUsage', () => {
         '20260708',
         '--until',
         '20260709',
+        '--timezone',
+        'Asia/Shanghai',
         ...bundledCcusageConfigArgs
       ],
       [
@@ -215,6 +239,8 @@ describe('collectClaudeCodeUsage', () => {
         '20260708',
         '--until',
         '20260709',
+        '--timezone',
+        'Asia/Shanghai',
         ...bundledCcusageConfigArgs
       ]
     ])
@@ -249,6 +275,7 @@ describe('collectClaudeCodeUsage', () => {
     vi.stubEnv('TOKENBOARD_DEFAULT_SINCE', '20260509')
 
     await collectClaudeCodeUsage({
+      timezone: 'Asia/Shanghai',
       since: 'all',
       async runner(command, args) {
         calls.push({ command, args })
@@ -266,12 +293,23 @@ describe('collectClaudeCodeUsage', () => {
           '--json',
           '--breakdown',
           '--single-thread',
+          '--timezone',
+          'Asia/Shanghai',
           ...bundledCcusageConfigArgs
         ]
       },
       {
         command: platformCommand('npx'),
-        args: ['ccusage@20.0.33', 'claude', 'session', '--json', '--single-thread', ...bundledCcusageConfigArgs]
+        args: [
+          'ccusage@20.0.33',
+          'claude',
+          'session',
+          '--json',
+          '--single-thread',
+          '--timezone',
+          'Asia/Shanghai',
+          ...bundledCcusageConfigArgs
+        ]
       }
     ])
   })

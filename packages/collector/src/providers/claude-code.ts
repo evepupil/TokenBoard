@@ -72,10 +72,19 @@ export async function collectClaudeCodeUsage(options: CollectUsageOptions = {}):
     return snapshots
   }
 
-  const rangeArgs = buildRangeArgs({
-    since: options.since ?? (env.TOKENBOARD_SINCE || env.TOKENBOARD_DEFAULT_SINCE || ''),
-    until: options.until ?? env.TOKENBOARD_UNTIL ?? ''
-  })
+  // The hook path has always pinned ccusage's day boundary with `--timezone`; the
+  // non-hook path did not, so ccusage grouped days by the machine zone while this
+  // side normalized the same rows by `options.timezone`. On 2026-10-25 that put the
+  // same history in two different days (6,504,939,769 vs 5,936,830,492 tokens) between
+  // TZ=UTC and Asia/Shanghai. Both paths pin it now, and the Go client matches.
+  const timezone = collectionOptions.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  const rangeArgs = withTimezoneArgs(
+    buildRangeArgs({
+      since: options.since ?? (env.TOKENBOARD_SINCE || env.TOKENBOARD_DEFAULT_SINCE || ''),
+      until: options.until ?? env.TOKENBOARD_UNTIL ?? ''
+    }),
+    timezone
+  )
 
   const snapshots = await collectClaudeCcusageRange({
     runner,

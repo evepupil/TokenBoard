@@ -121,8 +121,17 @@ func TestCollectRunsDailyAndSessionAndNormalizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDaily := append([]string{"ccusage@20.0.33", "claude", "daily", "--json", "--breakdown", "--single-thread"}, configArgs(stateDir)...)
-	wantSession := append([]string{"ccusage@20.0.33", "claude", "session", "--json", "--single-thread"}, configArgs(stateDir)...)
+	// Both the daily and session calls carry the configured timezone. The non-hook
+	// path used to leave ccusage on the machine zone while normalizing the same rows
+	// by the configured zone, so one history landed on two different usageDates.
+	wantDaily := append([]string{
+		"ccusage@20.0.33", "claude", "daily", "--json", "--breakdown", "--single-thread",
+		"--timezone", "Asia/Shanghai",
+	}, configArgs(stateDir)...)
+	wantSession := append([]string{
+		"ccusage@20.0.33", "claude", "session", "--json", "--single-thread",
+		"--timezone", "Asia/Shanghai",
+	}, configArgs(stateDir)...)
 	if len(runner.calls) != 2 {
 		t.Fatalf("calls = %v, want 2", runner.calls)
 	}

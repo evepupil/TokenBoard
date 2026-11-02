@@ -133,6 +133,12 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 		if err != nil {
 			return nil, err
 		}
+		// The hook path pins ccusage's day boundary with --timezone; this path did
+		// not, so ccusage grouped days by the machine zone while this side
+		// normalized the same rows by the configured one — the same history landed
+		// on two different usageDate values depending on TZ. Both paths pin it now,
+		// matching the TS collector.
+		rangeArgs = append(rangeArgs, "--timezone", timezone)
 		snapshots, err = collectRange(ctx, rangeInput{
 			runner:        runner,
 			packageRunner: packageRunner,
