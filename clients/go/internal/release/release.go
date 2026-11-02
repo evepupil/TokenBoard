@@ -24,9 +24,9 @@ import (
 )
 
 // DefaultRepo is the GitHub repository the client updates from. It is the
-// fork: that is where the releases are cut, and a check that cannot reach it
-// must not silently fall back to someone else's repository.
-const DefaultRepo = "MisonL/TokenBoard"
+// upstream repository: that is where the releases are cut, and a check that
+// cannot reach it must not silently fall back to someone else's repository.
+const DefaultRepo = "evepupil/TokenBoard"
 
 // DefaultBaseURL is github.com. Tests point it at a local server.
 const DefaultBaseURL = "https://github.com"

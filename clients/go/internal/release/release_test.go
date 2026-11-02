@@ -15,11 +15,11 @@ import (
 // must not depend on an anonymous quota.
 func TestResolveFollowsTheReleasesLatestRedirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/MisonL/TokenBoard/releases/latest" {
-			http.Redirect(w, r, "/MisonL/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
+		if r.URL.Path == "/evepupil/TokenBoard/releases/latest" {
+			http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
 			return
 		}
-		if r.URL.Path == "/MisonL/TokenBoard/releases/tag/v1.2.3" {
+		if r.URL.Path == "/evepupil/TokenBoard/releases/tag/v1.2.3" {
 			_, _ = w.Write([]byte("tag page"))
 			return
 		}
@@ -49,7 +49,7 @@ func TestResolveFollowsTheReleasesLatestRedirect(t *testing.T) {
 // of followed.
 func TestResolveRefusesARedirectLoop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/MisonL/TokenBoard/releases/latest", http.StatusFound)
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/latest", http.StatusFound)
 	}))
 	defer server.Close()
 

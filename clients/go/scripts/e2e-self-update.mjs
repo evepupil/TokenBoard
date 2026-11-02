@@ -75,7 +75,7 @@ try {
   }
   copyFileSync(join(distCcusage, 'LICENSE.ccusage'), join(staged, 'LICENSE.ccusage'))
 
-  const releaseDir = join(root, 'MisonL', 'TokenBoard', 'releases', 'download', tag)
+  const releaseDir = join(root, 'evepupil', 'TokenBoard', 'releases', 'download', tag)
   mkdirSync(releaseDir, { recursive: true })
   execFileSync('tar', ['-czf', join(releaseDir, archiveName), '-C', staged, '.'])
   const digest = createHash('sha256')
@@ -89,12 +89,12 @@ try {
     hits.push(path)
     // GitHub answers /releases/latest with a redirect to the tag page; the
     // client follows it instead of calling the rate-limited api.github.com.
-    if (path === '/MisonL/TokenBoard/releases/latest') {
-      response.writeHead(302, { location: `/MisonL/TokenBoard/releases/tag/${tag}` })
+    if (path === '/evepupil/TokenBoard/releases/latest') {
+      response.writeHead(302, { location: `/evepupil/TokenBoard/releases/tag/${tag}` })
       response.end()
       return
     }
-    if (path.startsWith('/MisonL/TokenBoard/releases/tag/')) {
+    if (path.startsWith('/evepupil/TokenBoard/releases/tag/')) {
       response.writeHead(200)
       response.end('<html>tag</html>')
       return
@@ -132,7 +132,7 @@ try {
         env: {
           ...process.env,
           TOKENBOARD_RELEASE_BASE_URL: `http://127.0.0.1:${port}`,
-          TOKENBOARD_RELEASE_REPO: 'MisonL/TokenBoard',
+          TOKENBOARD_RELEASE_REPO: 'evepupil/TokenBoard',
           TOKENBOARD_CONFIG_DIR: configDir
         }
       })

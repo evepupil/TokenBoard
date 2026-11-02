@@ -60,7 +60,7 @@ function serveRelease({
   tarball,
   omitChecksums = false,
   badChecksum = false,
-  repo = 'MisonL/TokenBoard'
+  repo = 'evepupil/TokenBoard'
 }) {
   const archive = archiveName(platform)
   const manifest = badChecksum ? `${'0'.repeat(64)}  ${archive}\n` : `${sha256(tarball)}  ${archive}\n`
@@ -133,7 +133,7 @@ test('verifyExecutable requires the version as a whole token', () => {
 
 test('resolveRelease refuses a redirect loop rather than walking it', async (t) => {
   const server = createServer((request, response) => {
-    response.writeHead(302, { location: '/MisonL/TokenBoard/releases/latest' })
+    response.writeHead(302, { location: '/evepupil/TokenBoard/releases/latest' })
     response.end()
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
