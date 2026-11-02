@@ -193,3 +193,24 @@
 - Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/{amd64,arm64}`、`GOOS=linux` build 通过。
 - TS：usage-core 40 / web 1064 / collector 1269+3skip 全过；`pnpm -r typecheck`、`pnpm format:check` 通过。
 - skill：`node --test skills/tokenboard/scripts/*.test.mjs` 873 全过。
+
+## 十、收尾修复（2026-11-02，`203b08b`）
+
+第三轮审查后逐项复现并修复的剩余项。除「记录在案」外全部带回归测试，Go/TS/skill 三套件全绿。
+
+| # | 缺陷 | 证据 | 修复 |
+|---|---|---|---|
+| 1 | Go 时间戳解析不接受 JS `new Date` 的部分形态 | 探测表：`2026-05-09t04:24:07z`、`+0800`、`T04:24Z`、`T24:00Z`、`2026-02-30`（JS 归一为 3-02）TS 侧全过、Go 全拒；同一行会落到不同 `usageDate`（服务端去重键）或被丢弃 | 新增 `internal/jsdate`（按形态复刻 V8：小写 t/z、无冒号偏移、省略秒、24 时、日溢出、偏移小时上限 23、小数截到毫秒），期望值全部取自 Node 实测；`sessionusage`/`sessionfile`/codex 三处解析器统一改走它 |
+| 2 | Go codex `cachedSnapshotIdentity` 用 `%q` 编码字段数组 | `%q` 对 int64 ≥ 0x110000 输出 rune 字面量（`'\U0010ffff'`），不同快照可得同一 identity，hook 复用错缓存 | 改 `encoding/json`，与 TS `JSON.stringify` 同形 |
+| 3 | Go Antigravity cascade 文件名正则区分大小写 | TS 的 `cascadeIdPattern` 带 `i` 标志；大写十六进制的 `.db` 在 TS 是会话、在 Go 被静默跳过 | 正则加 `(?i)` |
+| 4 | claude-code 非 hook 路径不传 `--timezone` | 2026-10-25 实测同一历史 TZ=UTC 6,504,939,769 vs Asia/Shanghai 5,936,830,492 tokens；ccusage 按机器时区分组、本地按配置时区归一，同一行落到两天 | TS 与 Go 两侧非 hook 路径都补 `--timezone`；测试钉住时区使期望确定 |
+| 5 | skill `verifyExecutable` 与 `upgrade.mjs` 四个 git 探测继承完整环境 | 探测的是尚未信任的暂存二进制；`git status` 会跑 checkout 里的 `core.fsmonitor` hook | 统一走 `scrubbedChildEnv()`（新增 `runGitProbe` 包装） |
+| 6 | `jsonError` 的 404 体被 HonoX 根 `_404` 覆盖 | 页路由已打标，共享的 JSON 错误出口没打标：设备「无活跃安装」到采集端变成通用 `Route not found` | `jsonError` 在 404 分支调用 `markRouteRenderedNotFound`，新增 7 条测试（含非 404 不得打标） |
+| 7 | 前端两处可访问名缺失 | 设备重命名 `Input` 的可见文案不是绑定 `<label>`；`CustomSelect` 的 label 是兄弟 `<span>`，按钮无可访问名 | 分别补 `aria-label` |
+
+### 本轮验证口径
+
+- Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/{amd64,arm64}`、`GOOS=linux/amd64` 交叉构建通过。
+- TS：`pnpm -r typecheck` 通过；usage-core 40 / web 1071 / collector 1269+3skip 全过；`pnpm format:check` 通过。
+- skill：`node --test skills/tokenboard/scripts/*.test.mjs` 873 全过。
+- 已提交 7 个分层 commit 并推送 `fix/post-merge-audit-followups`（`8967e73..203b08b`）。
