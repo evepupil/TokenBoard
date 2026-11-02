@@ -373,7 +373,11 @@ export function verifyExecutable(path, version, { spawn = spawnSync } = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
     maxBuffer: childOutputMaxBuffer,
-    timeout: versionProbeTimeoutMs
+    timeout: versionProbeTimeoutMs,
+    // The staged binary is probed before it is trusted, and this is the one
+    // spawn in the upgrade path that used to inherit the full environment.
+    // A substituted or half-written download must not get the upload token.
+    env: scrubbedChildEnv()
   })
   if (result.error) throw new Error(`the downloaded TokenBoard binary does not run: ${errorMessage(result.error)}`)
   if (result.status !== 0) {
