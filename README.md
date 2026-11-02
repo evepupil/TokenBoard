@@ -1,17 +1,18 @@
 # TokenBoard
 
-TokenBoard is a hosted AI token usage dashboard for Claude Code, Codex, Antigravity, OpenCode, Pi,
-Grok Build and DeepSeek Harness. A local collector normalizes daily usage snapshots, uploads them to
-a Cloudflare Workers + D1 backend, and the web app serves private dashboards, leaderboards, public
-JSON, README SVG cards, and scheduled reports.
+TokenBoard is a hosted AI token usage dashboard for Claude Code, Codex, Antigravity CLI, Antigravity,
+Antigravity IDE, OpenCode, Pi, Grok Build, DeepSeek Harness, and the twelve `ccusage`-backed tools
+(amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode). A local
+collector normalizes daily usage snapshots, uploads them to a Cloudflare Workers + D1 backend, and the
+web app serves private dashboards, leaderboards, public JSON, README SVG cards, and scheduled reports.
 
 TokenBoard never uploads prompts, completions, raw conversation logs, local paths, or plaintext upload
 tokens.
 
 ## Highlights
 
-- Claude Code, Codex, Antigravity CLI, Antigravity, Antigravity IDE, OpenCode, Pi, Grok Build and
-  DeepSeek Harness collection through a local Node.js collector.
+- Claude Code, Codex, Antigravity CLI, Antigravity, Antigravity IDE, OpenCode, Pi, Grok Build,
+  DeepSeek Harness and the twelve `ccusage`-backed tools through a local Node.js collector.
 - Dashboard totals, detail drill-down, CSV export, public JSON, README SVG cards, and leaderboards.
 - Total tokens, tokens without cache reads, and cache-read rate across every reporting surface.
 - Device-aware upload tokens, device-link reconnect, and legacy collector compatibility.
@@ -134,6 +135,11 @@ Local usage sources:
 
 | Source | Reads |
 | --- | --- |
+| Claude Code | `ccusage` daily/session reports |
+| Codex | `@ccusage/codex` daily/session reports |
+| Antigravity CLI | `~/.gemini/antigravity-cli/conversations/*.db` token metadata |
+| Antigravity | `~/.gemini/antigravity/conversations` token metadata |
+| Antigravity IDE | `~/.gemini/antigravity-ide/conversations` token metadata |
 | OpenCode | `~/.local/share/opencode/opencode.db` (`XDG_DATA_HOME` respected) |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`) |
 | Grok Build | `~/.grok/{sessions,archived_sessions}/**/updates.jsonl` (`GROK_HOME`) |
@@ -142,8 +148,9 @@ Local usage sources:
 
 The twelve `ccusage` tools share one collector: each runs `<tool> daily --json` and `<tool> session
 --json`, and `gemini-cli` uses ccusage's `gemini` subcommand. A tool that is not installed answers
-with an empty report, which is not an error — the source simply contributes nothing to that run.
-None of them installs a notifier hook, and none accepts a `--until` window.
+the daily call with an empty report, which is not an error — the session call is skipped and the
+source contributes nothing to that run. None of them installs a notifier hook, and none accepts a
+`--until` window.
 
 Only token counts, model ids and timestamps are read from these stores. For OpenCode the token fields
 are projected inside SQLite so the message blob, which also holds prompts and a local path, never
