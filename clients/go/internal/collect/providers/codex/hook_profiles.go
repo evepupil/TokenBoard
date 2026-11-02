@@ -751,11 +751,17 @@ func sortPendingSnapshots(entries []sessioncursor.HookPendingSnapshotEntry) []co
 }
 
 func cachedSnapshotIdentity(snapshot contract.Snapshot) string {
-	return fmt.Sprintf("%q", []any{
+	// JSON.stringify on the same fields — %q encodes int64 ≥0x110000
+	// as a rune literal ("\U0010ffff") which diverges from the TS side.
+	data, err := json.Marshal([]any{
 		string(snapshot.Source), snapshot.UsageDate, snapshot.Timezone, snapshot.Model,
 		snapshot.InputTokens, snapshot.OutputTokens, snapshot.CacheCreation, snapshot.CacheRead,
 		snapshot.TotalTokens, snapshot.CostUSD, snapshot.SessionCount,
 	})
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func copiedPendingSnapshotKey(entry sessioncursor.HookPendingSnapshotEntry) string {
