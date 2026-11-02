@@ -34,6 +34,9 @@ export function CustomSelect(props: {
         id={buttonId}
         type="button"
         class={props.buttonClass ?? customSelectButtonClass}
+        // The label renders as a sibling <span>, not a <label for>, so the button had no
+        // accessible name; a screen reader announced only "button" plus the current value.
+        aria-label={props.label}
         aria-haspopup="listbox"
         aria-expanded="false"
         aria-controls={menuId}
