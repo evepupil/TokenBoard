@@ -51,8 +51,11 @@ const (
 	scanLimitCeiling = 512
 )
 
+// cascadeIDPattern mirrors antigravity-history-db.ts's cascadeIdPattern, which
+// is compiled with the `i` flag: an uppercase-hex database filename is a
+// conversation there, so it must be one here too.
 var cascadeIDPattern = regexp.MustCompile(
-	`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // StatResult is what a caller's stat reports about a database file.
 type StatResult struct {
