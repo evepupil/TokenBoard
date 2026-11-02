@@ -1,5 +1,13 @@
 # 同步机制优化（2026-10-14 审查修订版）实施计划
 
+> **状态：已全部落地（历史归档）。** 12 个任务在 `feat/model-pricing-maintenance` 分支实现（632acab..713f454）
+> 并已合并。文件里的 `- [ ]` 保持原样，只是当时的计划模板，不代表未完成；当前行为以代码与测试为准。
+> 各项落点：Task 1 `packages/collector/src/pricing-diagnostics.ts`；Task 2 `notify.mjs` 的 `normalizeChildOutput`；
+> Task 3 配置键 `upgradedCommit` + `status.mjs` 的 `lastUpgradedCommit`；Task 4 `TOKENBOARD_NOTIFY_COOLDOWN_MS`；
+> Task 5 `TOKENBOARD_HOOK_SYNC_TIMEOUT_MS`；Task 6 `status.mjs` 近 7 天聚合；Task 7 `sync.mjs` 的 readline 流式捕获；
+> Task 8 `codex-subagent-usage-cache.ts` 的 `evictToSerializedSize`；Task 9 单次 collect 内的指纹 memo；
+> Task 10 `packages/collector/src/upload-backoff.ts`；Task 11 `session-cursor.ts` 的 `cursorStatesEqual`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 落地 2026-10-14 三 agent 审查确认的 10 项同步机制优化（可观测性 3 项、廉价性能/防御 4 项、中型 3 项），砍掉采集并行化与 cursor 全量分片。
