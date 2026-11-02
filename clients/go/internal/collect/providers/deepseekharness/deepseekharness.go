@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionscan"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/zstdframes"
@@ -304,7 +305,7 @@ func readModel(data map[string]any) string {
 	message := sessionusage.ReadRecordAt(data["message"])
 	provenance := sessionusage.ReadRecordAt(message["source"])
 	for _, candidate := range []any{provenance["model"], message["model"], data["model"]} {
-		if text, ok := candidate.(string); ok && strings.TrimSpace(text) != "" {
+		if text, ok := candidate.(string); ok && jsonl.TrimJSWhitespace(text) != "" {
 			return text
 		}
 	}

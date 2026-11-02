@@ -18,6 +18,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/collate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 // UnknownModel is the label for usage whose model cannot be determined.
@@ -202,7 +203,7 @@ func ReadFiniteNumber(value any) (float64, bool) {
 			return parsed, true
 		}
 	case string:
-		trimmed := strings.TrimSpace(typed)
+		trimmed := jsonl.TrimJSWhitespace(typed)
 		if trimmed == "" {
 			return 0, false
 		}
@@ -238,14 +239,10 @@ func ReadEventTimestamp(value any) (time.Time, bool) {
 	if !ok || strings.TrimSpace(text) == "" {
 		return time.Time{}, false
 	}
-	trimmed := strings.TrimSpace(text)
-	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", trimmed, time.Local); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.Parse("2006-01-02", trimmed); err == nil {
+	// `new Date` does not trim, so a padded timestamp is an invalid date there too; jsdate.Parse
+	// uses the value as given and rejects the same padding. It also rolls a day past the month's
+	// length the way JS does ("2026-02-30" is March 2), which time.Parse would reject outright.
+	if parsed, ok := jsdate.Parse(text); ok {
 		return parsed, true
 	}
 	return time.Time{}, false
@@ -292,7 +289,7 @@ func BoundedModel(value any) string {
 	if !ok {
 		return UnknownModel
 	}
-	model := strings.TrimSpace(text)
+	model := jsonl.TrimJSWhitespace(text)
 	if model == "" {
 		return UnknownModel
 	}

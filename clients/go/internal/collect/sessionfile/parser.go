@@ -10,6 +10,7 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 // ParseInput describes one session file parse.
@@ -496,14 +497,7 @@ func readTimestamp(record map[string]any) (time.Time, bool) {
 	if value == "" {
 		return time.Time{}, false
 	}
-	trimmed := strings.TrimSpace(value)
-	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", trimmed, time.Local); err == nil {
-		return parsed, true
-	}
-	return time.Time{}, false
+	return jsdate.Parse(value)
 }
 
 func readNumber(record map[string]any, keys ...string) float64 {
