@@ -9,13 +9,25 @@
 // space instead of the "T", a lowercase "t"/"z", an offset without the colon, an omitted seconds
 // field, and hour "24" meaning the following midnight.
 //
-// Two V8 details are reproduced because they change the result, not just whether one exists:
-// a fraction is truncated to milliseconds (V8 keeps no sub-millisecond precision), and an offset
-// hour is bounded at 23. V8 also carries a legacy parser for shapes the ISO grammar does not
-// cover (a padded date-only value, "May 9, 2026", slash dates); that path is not reproduced.
-// None of those shapes occurs in a machine-written timestamp, and the codex reader keeps its own
-// fallback for the one legacy form it genuinely needs — the "… UTC" suffix V8 accepts on a
-// space-separated value.
+// Two V8 details are reproduced because they change the result, not just whether one exists: a
+// fraction is truncated to milliseconds (V8 keeps no sub-millisecond precision), and an offset
+// hour is bounded at 23. The remainder of V8's legacy layer is reproduced only where a
+// machine-written record can reach it: a value padded with whitespace has to parse exactly as V8
+// parses it, because otherwise one client normalizes what the other throws away. A "T" separator
+// selects V8's strict ISO grammar, which does not trim, so a padded "…T…" value is invalid; the
+// space-separated form and the bare date go to the legacy parser, which does trim — and a legacy
+// bare date is *local* midnight, not UTC.
+//
+// Three degenerate shapes are knowingly left unreproduced, all on the space-separated form: a
+// colon-less offset whose digit count is ambiguous ("…+08", read by V8 as +8 hours rather than
+// +8 minutes), an offset hour past 23 ("…+24:00"), and the same with no colon ("…+2360"). V8's
+// legacy scanner takes a free-form numeric offset with no hour bound there. Each is rejected
+// here, so a row carrying one is dropped rather than mis-dated — the fail-closed direction — and
+// no real session log writes any of them: sampling every timestamp field across the local Pi,
+// Grok, DSH, Codex, Claude and Antigravity histories turned up only the "…Z" and "±HH:MM" forms.
+// V8's free-form legacy shapes ("May 9, 2026", slash dates, a " UTC" suffix, a single-digit
+// field) are left out for the same reason; the codex reader keeps its own fallback for the one it
+// genuinely needs.
 package jsdate
 
 import (
@@ -30,30 +42,66 @@ var (
 	dateTimePattern    = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?([Zz]|[+-]\d{2}:?\d{2})?$`)
 	offsetWithColon    = regexp.MustCompile(`^([+-])(\d{2}):(\d{2})$`)
 	offsetWithoutColon = regexp.MustCompile(`^([+-])(\d{2})(\d{2})$`)
+	// clockTime matches a date-time's time-of-day, which is how the legacy layer is told apart
+	// from a strict "T" form.
+	clockTime = regexp.MustCompile(`\d{2}:\d{2}`)
 )
 
 // Parse reads a date-only or date-time string.
 //
 // A date-only value is UTC midnight and a date-time with an explicit offset (or Z) is honoured;
-// a date-time without one is the local zone — which is what `new Date` does with each. The value
-// is used exactly as given: no surrounding whitespace is trimmed away, so a padded timestamp this
-// reports as unparseable is one V8's strict ISO parser rejects too.
+// a date-time without one is the local zone — which is what `new Date` does with each.
+//
+// Whitespace around the value follows V8's two layers, described in the package doc: a padded
+// "…T…" value is invalid, while a padded space-separated date-time or bare date parses, the
+// latter as local midnight.
 func Parse(value string) (time.Time, bool) {
 	if dateOnlyPattern.MatchString(value) {
-		return dateOnly(value)
+		return dateOnly(value, time.UTC)
 	}
-	return parseDateTime(value)
+	if parsed, ok := parseDateTime(value); ok {
+		return parsed, true
+	}
+	trimmed := trimLegacy(value)
+	if trimmed == value {
+		return time.Time{}, false
+	}
+	// The legacy layer only reaches the shapes it owns: the space-separated date-time and the
+	// bare date. A padded "T" form stays invalid, which is what V8's strict parser does with it.
+	if dateOnlyPattern.MatchString(trimmed) {
+		return dateOnly(trimmed, time.Local)
+	}
+	if !clockTime.MatchString(trimmed) || strings.ContainsAny(trimmed, "Tt") {
+		return time.Time{}, false
+	}
+	return parseDateTime(trimmed)
 }
 
-// dateOnly builds UTC midnight, letting a day past the month's length roll into the next month
-// the way JS normalises it ("2026-02-30" is 2026-03-02). Month and day are range-checked first:
-// time.Date would otherwise roll month 13 into the next year instead of rejecting it.
-func dateOnly(value string) (time.Time, bool) {
+// trimLegacy removes the characters V8's legacy date parser skips at either end: the ECMAScript
+// WhiteSpace set, less the two line separators (U+2028/U+2029) and U+0085, which it rejects
+// outright rather than trimming. Node-probing `new Date` is what separates this from String#trim,
+// which does strip those three.
+func trimLegacy(value string) string {
+	return strings.TrimFunc(value, func(r rune) bool {
+		switch r {
+		case '\t', '\n', '\v', '\f', '\r', ' ',
+			0x00A0, 0x1680, 0x202F, 0x205F, 0x3000, 0xFEFF:
+			return true
+		}
+		return r >= 0x2000 && r <= 0x200A
+	})
+}
+
+// dateOnly builds midnight in the given zone, letting a day past the month's length roll into the
+// next month the way JS normalises it ("2026-02-30" is 2026-03-02). Month and day are
+// range-checked first: time.Date would otherwise roll month 13 into the next year instead of
+// rejecting it.
+func dateOnly(value string, location *time.Location) (time.Time, bool) {
 	month, day := atoi(value[5:7]), atoi(value[8:10])
 	if month < 1 || month > 12 || day < 1 || day > 31 {
 		return time.Time{}, false
 	}
-	return time.Date(atoi(value[:4]), time.Month(month), day, 0, 0, 0, 0, time.UTC), true
+	return time.Date(atoi(value[:4]), time.Month(month), day, 0, 0, 0, 0, location), true
 }
 
 func parseDateTime(value string) (time.Time, bool) {
@@ -74,9 +122,9 @@ func parseDateTime(value string) (time.Time, bool) {
 	}
 	nanoseconds := fractionToNanoseconds(match[7])
 	if hour == 24 {
-		// 24:00 is the following midnight, and only exactly midnight: V8 rejects
-		// "24:30", "24:00:01", and any non-zero fraction — including one shorter than the
-		// millisecond it truncates to, so the check is on the raw digits, not the nanoseconds.
+		// 24:00 is the following midnight, and only exactly midnight: V8 rejects "24:30",
+		// "24:00:01", and any non-zero fraction — including one shorter than the millisecond it
+		// truncates to, so the check is on the raw digits, not the nanoseconds.
 		if minute != 0 || second != 0 || !isZeroFraction(match[7]) {
 			return time.Time{}, false
 		}
