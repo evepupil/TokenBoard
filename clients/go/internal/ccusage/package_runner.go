@@ -3,7 +3,6 @@ package ccusage
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -139,15 +138,4 @@ func (r PackageRunner) Args(packageArgs []string, env func(string) string, fileE
 		return nil, err
 	}
 	return r.RunPackageArgs(PackageSpecifier, "ccusage", append(packageArgs, configArgs...)), nil
-}
-
-// DefaultBundledConfigPath returns the bundled config path a TS collector
-// would use, for diagnostics that need to name it. The Go client embeds the
-// same file; this path only exists when running from a repo checkout.
-func DefaultBundledConfigPath() string {
-	executable, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(executable), "ccusage.json")
 }

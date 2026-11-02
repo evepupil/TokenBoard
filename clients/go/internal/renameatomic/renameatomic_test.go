@@ -44,3 +44,64 @@ func TestIsBusyRejectsNonTransientErrors(t *testing.T) {
 		t.Fatal("nil must not be busy")
 	}
 }
+
+// swapRename replaces the rename seam for the duration of the test.
+func swapRename(t *testing.T, fn func(string, string) error) {
+	t.Helper()
+	previous := renameFunc
+	renameFunc = fn
+	t.Cleanup(func() { renameFunc = previous })
+}
+
+// Mirrors the TS test: two busy collisions clear, and the third rename lands.
+func TestRenameRetriesBusyErrorsUntilTheDestinationFreesUp(t *testing.T) {
+	attempts := 0
+	swapRename(t, func(string, string) error {
+		attempts++
+		if attempts <= 2 {
+			return testBusyErr
+		}
+		return nil
+	})
+	if err := Rename("t", "d"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+}
+
+// Mirrors the TS test: after the budget is spent the last busy error is returned.
+func TestRenameGivesUpAfterTheRetryBudget(t *testing.T) {
+	attempts := 0
+	swapRename(t, func(string, string) error {
+		attempts++
+		return testBusyErr
+	})
+	err := Rename("t", "d")
+	if !errors.Is(err, testBusyErr) {
+		t.Fatalf("err = %v, want the busy error", err)
+	}
+	if want := len(Delays) + 1; attempts != want {
+		t.Fatalf("attempts = %d, want %d (initial + retries)", attempts, want)
+	}
+}
+
+// A non-busy error on a retry stops the loop immediately with that error.
+func TestRenameStopsOnANonBusyRetryError(t *testing.T) {
+	attempts := 0
+	swapRename(t, func(string, string) error {
+		attempts++
+		if attempts == 1 {
+			return testBusyErr
+		}
+		return os.ErrPermission
+	})
+	err := Rename("t", "d")
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("err = %v, want the retry's own error", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}

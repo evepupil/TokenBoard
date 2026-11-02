@@ -487,3 +487,42 @@ func TestUsageSourcesMatchUsageCore(t *testing.T) {
 		}
 	}
 }
+
+// usageCoreCostUnavailableSources is the `costUnavailableSources` array from
+// packages/usage-core/src/schema.ts, copied for the same reason as the source
+// list: a divergence has to be deliberate, and the parity test below is what
+// fails when it is not.
+var usageCoreCostUnavailableSources = []string{
+	"antigravity-cli",
+	"antigravity",
+	"antigravity-ide",
+	"grok-build",
+	"deepseek-harness",
+}
+
+// The cost-unavailable set is a wire contract too: a source the Go client
+// thinks can report a cost, while usage-core forbids one above zero, would
+// upload a snapshot the server rejects — one rejected row fails the whole batch.
+// The table below asserts the behavior rather than the map, so it keeps working
+// if the set is ever restructured.
+func TestCostUnavailableSourcesMatchUsageCore(t *testing.T) {
+	blocked := map[string]bool{}
+	for _, source := range usageCoreCostUnavailableSources {
+		blocked[source] = true
+	}
+	for _, source := range usageCoreSources {
+		snapshot := goldenSnapshotByName(t, "base")
+		snapshot.Source = Source(source)
+		snapshot.CostUSD = 0.5
+		err := snapshot.Validate()
+		if blocked[source] {
+			if err == nil {
+				t.Errorf("%s must reject a non-zero cost", source)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s reports its own cost and must accept a non-zero one: %v", source, err)
+		}
+	}
+}

@@ -33,3 +33,6 @@ func TestIsBusyDoesNotMatchTheInventedSyscallValues(t *testing.T) {
 		t.Fatal("syscall.EBUSY is not a Win32 code and must not be treated as busy")
 	}
 }
+
+// testBusyErr mirrors the POSIX test file with a Win32 code this platform retries.
+var testBusyErr = errorSharingViolation

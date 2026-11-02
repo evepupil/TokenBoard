@@ -26,8 +26,6 @@ const maxCodexChildSessionLineBytes = 1024 * 1024
 
 func floatPtr(value float64) *float64 { return &value }
 
-func stringPtr(value string) *string { return &value }
-
 func assertCloseTo(t *testing.T, got, want float64, digits int) {
 	t.Helper()
 	tolerance := 0.5 * math.Pow(10, -float64(digits))

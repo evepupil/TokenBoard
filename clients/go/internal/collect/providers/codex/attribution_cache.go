@@ -236,11 +236,6 @@ func runAttributionCacheTransaction(
 	}, lockPath, lock)
 }
 
-// IsEmpty reports whether the loaded cache holds no entries.
-func (cache *CodexSessionAttributionCache) IsEmpty() bool {
-	return len(cache.entries) == 0
-}
-
 // Lookup fingerprints filePath and returns its attribution when the cache
 // entry still matches that fingerprint. The observed file is verified again
 // before the transaction commits.

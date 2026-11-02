@@ -14,16 +14,20 @@ import (
 // precedes, so a collision released in milliseconds never fails the write.
 var Delays = []time.Duration{50 * time.Millisecond, 150 * time.Millisecond, 400 * time.Millisecond}
 
+// renameFunc is the seam the retry tests inject through, mirroring the TS
+// `renameFn` parameter. Production always renames for real.
+var renameFunc = os.Rename
+
 // Rename renames tempPath to destinationPath, retrying only the transient
 // busy-handle errors. Any other error is returned unchanged on the first try.
 func Rename(tempPath, destinationPath string) error {
-	err := os.Rename(tempPath, destinationPath)
+	err := renameFunc(tempPath, destinationPath)
 	if !IsBusy(err) {
 		return err
 	}
 	for _, delay := range Delays {
 		time.Sleep(delay)
-		retryErr := os.Rename(tempPath, destinationPath)
+		retryErr := renameFunc(tempPath, destinationPath)
 		if retryErr == nil {
 			return nil
 		}

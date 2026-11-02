@@ -2,30 +2,17 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
-	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
 // The warm-hooks contract, mirroring the TS cli tests: a full scan may claim
 // its high-water mark, a bounded one may not, and hook mode never warms.
-
-type recordingProvider struct {
-	snapshots []contract.Snapshot
-	calls     int
-}
-
-func (p *recordingProvider) Collect(context.Context, collect.Options) ([]contract.Snapshot, error) {
-	p.calls++
-	return p.snapshots, nil
-}
 
 func TestWarmHookCursorsSkipsHookMode(t *testing.T) {
 	stateDir := t.TempDir()

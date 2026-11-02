@@ -170,13 +170,6 @@ func IsValidSource(source string) bool {
 	return usageSources[Source(source)]
 }
 
-// IsCostUnavailableSource reports whether the source cannot report a cost, so
-// costUsd carries no meaning and must be zero.
-func IsCostUnavailableSource(source Source) bool {
-	_, ok := costUnavailableSources[source]
-	return ok
-}
-
 // SnapshotKey builds the server's upsert lookup key: source, date and model
 // joined by NUL. It excludes timezone and every counter by design — those
 // describe the row, not its identity.

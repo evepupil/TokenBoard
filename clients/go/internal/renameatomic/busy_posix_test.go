@@ -12,3 +12,7 @@ func TestIsBusyMatchesTheTransientCodes(t *testing.T) {
 		t.Fatal("EPERM/EBUSY must be retried")
 	}
 }
+
+// testBusyErr is one transient code this platform retries; the retry cases in
+// renameatomic_test.go share one name so the same tests run on POSIX and Windows.
+var testBusyErr = syscall.EBUSY
