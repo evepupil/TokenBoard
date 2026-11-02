@@ -329,12 +329,6 @@ func (r *Rules) IsCodexContextPricingModel(model string) bool {
 	return ok
 }
 
-// IsCodexContextPricingModel reports whether the model has a pricing rule in
-// the default rule set.
-func IsCodexContextPricingModel(model string) bool {
-	return DefaultRules().IsCodexContextPricingModel(model)
-}
-
 // IsCodexContextPricingCostGuaranteedZero reports whether every published
 // rate for the model is zero, so a non-zero cost proves the snapshot was never
 // repriced.
@@ -344,11 +338,6 @@ func (r *Rules) IsCodexContextPricingCostGuaranteedZero(model string) bool {
 		return false
 	}
 	return ratesAreZero(rule.Standard) && ratesAreZero(rule.LongContext)
-}
-
-// IsCodexContextPricingCostGuaranteedZero is the default-rule form.
-func IsCodexContextPricingCostGuaranteedZero(model string) bool {
-	return DefaultRules().IsCodexContextPricingCostGuaranteedZero(model)
 }
 
 func ratesAreZero(rates PricingRates) bool {
@@ -973,11 +962,6 @@ func (r *Rules) CollectCodexContextPricingUsagesFromHomes(input CollectHomesInpu
 		Until:                 input.Until,
 		Stderr:                input.Stderr,
 	})
-}
-
-// CollectCodexContextPricingUsagesFromHomes is the default-rule form.
-func CollectCodexContextPricingUsagesFromHomes(input CollectHomesInput) ([]CodexContextPricingUsage, error) {
-	return DefaultRules().CollectCodexContextPricingUsagesFromHomes(input)
 }
 
 // DiscoverInput configures one bounded file discovery.

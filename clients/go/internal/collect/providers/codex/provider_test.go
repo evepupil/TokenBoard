@@ -82,17 +82,6 @@ func (r *provStubRunner) callsWith(value string) []provCall {
 	return out
 }
 
-// callsWithout returns the recorded calls whose args do not contain value.
-func (r *provStubRunner) callsWithout(value string) []provCall {
-	out := []provCall{}
-	for _, call := range r.calls {
-		if !call.hasArg(value) {
-			out = append(out, call)
-		}
-	}
-	return out
-}
-
 func provEnvMap(env []string) map[string]string {
 	out := map[string]string{}
 	for _, entry := range env {

@@ -351,13 +351,6 @@ func lookupSet(env func(string) string, key string) (string, bool) {
 	return value, value != ""
 }
 
-func lookupEnv(env func(string) string, key string) string {
-	if env == nil {
-		return os.Getenv(key)
-	}
-	return env(key)
-}
-
 // defaultHome is the TS fallback `join(homedir(), '.dsh')`: the user's home
 // is the parent of the tool's directory, not the directory itself.
 func defaultHome() string {

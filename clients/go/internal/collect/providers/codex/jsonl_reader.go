@@ -724,32 +724,6 @@ func jsonlNormalizeJSONValue(value any) any {
 	return value
 }
 
-// ExtractRows ports extractRows: the record list inside a wrapper object, or
-// the array itself.
-func ExtractRows(input any) []UnknownRecord {
-	switch typed := input.(type) {
-	case []any:
-		return jsonlFilterRecords(typed)
-	case map[string]any:
-		for _, key := range []string{"sessions", "data", "rows", "items"} {
-			if values, ok := typed[key].([]any); ok {
-				return jsonlFilterRecords(values)
-			}
-		}
-	}
-	return nil
-}
-
-func jsonlFilterRecords(values []any) []UnknownRecord {
-	out := make([]UnknownRecord, 0, len(values))
-	for _, value := range values {
-		if record, ok := value.(map[string]any); ok {
-			out = append(out, record)
-		}
-	}
-	return out
-}
-
 // NormalizeDate ports normalizeDate. An impossible calendar date is rejected
 // rather than normalized; a timestamp becomes its UTC calendar date.
 func NormalizeDate(value string) (string, error) {
@@ -955,12 +929,6 @@ func ReadRecord(value any) UnknownRecord {
 		return record
 	}
 	return nil
-}
-
-// IsRecord ports isRecord.
-func IsRecord(value any) bool {
-	_, ok := value.(map[string]any)
-	return ok
 }
 
 func jsonlLabel(limits JSONLReadLimits) string {
