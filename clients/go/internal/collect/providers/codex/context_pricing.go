@@ -31,6 +31,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/codexusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionwalk"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
@@ -1929,28 +1930,13 @@ var (
 )
 
 // parseTimestamp mirrors `new Date(value)`: an explicit offset is honoured, a
-// bare date is UTC, and a date-time without an offset is the local zone.
+// bare date is UTC, and a date-time without an offset is the local zone. The
+// shared jsdate package carries the JS parser's per-shape quirks (lowercase
+// t/z, an offset without the colon, an omitted seconds field, hour 24, and a
+// day past the month's length rolling forward) that the previous hand-written
+// layouts rejected, so a row the TS side keeps is not dropped here.
 func parseTimestamp(value string) (time.Time, bool) {
-	switch {
-	case isoDateOnly.MatchString(value):
-		parsed, err := time.Parse("2006-01-02", value)
-		return parsed, err == nil
-	case isoDateTimeWithZone.MatchString(value):
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05Z07:00"} {
-			if parsed, err := time.Parse(layout, value); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
-	case isoDateTimeWithoutZone.MatchString(value):
-		for _, layout := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05", "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
-			if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
-	}
-	return time.Time{}, false
+	return jsdate.Parse(value)
 }
 
 func readSessionIdentity(record UnknownRecord) string {

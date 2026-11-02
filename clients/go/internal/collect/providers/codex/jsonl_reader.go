@@ -31,6 +31,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/codexusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 // UnknownRecord is one decoded JSONL row, the TS `UnknownRecord`.
@@ -772,57 +773,25 @@ func NormalizeDate(value string) (string, error) {
 var (
 	codexDateOnlyPattern        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	codexTimestampPrefixPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T`)
-	// codexISODateTimeWithZone covers an ISO date-time with an explicit
-	// offset or Z; codexISODateTimeWithoutZone is the form JS parses in the
-	// local zone.
-	codexISODateTimeWithZone    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$`)
-	codexISODateTimeWithoutZone = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$`)
 )
 
-// jsonlParseJSDate is the Date.parse subset these records carry: ISO date and
-// date-time forms, plus the "… UTC" suffix the fallback appends. A value
+// jsonlParseJSDate is the Date.parse subset these records carry: the ISO date
+// and date-time forms, plus the legacy shapes V8 falls back to — the "… UTC"
+// suffix the NormalizeDate retry appends, a space-separated offset, and the
+// human-written dates that occasionally reach an exported record. A value
 // outside this subset is reported as unparseable rather than guessed at; the
 // caller then keeps the raw string, which is what the TS code does when
 // Date.parse returns NaN.
 func jsonlParseJSDate(value string) (time.Time, bool) {
-	trimmed := strings.TrimSpace(value)
-	switch {
-	case codexDateOnlyPattern.MatchString(trimmed):
-		parsed, err := time.Parse("2006-01-02", trimmed)
-		return parsed, err == nil
-	case codexISODateTimeWithZone.MatchString(trimmed):
-		for _, layout := range []string{
-			time.RFC3339Nano,
-			time.RFC3339,
-			"2006-01-02T15:04Z07:00",
-			"2006-01-02T15:04:05Z0700",
-			"2006-01-02T15:04Z0700",
-			"2006-01-02 15:04:05.999999999Z07:00",
-			"2006-01-02 15:04:05Z07:00",
-			"2006-01-02 15:04Z07:00",
-		} {
-			if parsed, err := time.Parse(layout, trimmed); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
-	case codexISODateTimeWithoutZone.MatchString(trimmed):
-		// JS accepts a missing seconds field here; the pattern already does, so
-		// the layout list has to as well.
-		for _, layout := range []string{
-			"2006-01-02T15:04:05.999999999",
-			"2006-01-02T15:04:05",
-			"2006-01-02T15:04",
-			"2006-01-02 15:04:05.999999999",
-			"2006-01-02 15:04:05",
-			"2006-01-02 15:04",
-		} {
-			if parsed, err := time.ParseInLocation(layout, trimmed, time.Local); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
+	// The ISO forms go through the shared parser so both clients agree on them,
+	// including V8's refusal to trim a padded "T" form (which the previous
+	// TrimSpace here accepted, accepting a value the TS side drops).
+	if parsed, ok := jsdate.Parse(value); ok {
+		return parsed, true
 	}
+	// V8's legacy layer is reached only for a value the ISO grammar did not
+	// cover. That layer does trim, so the retry works on the trimmed value.
+	trimmed := strings.TrimSpace(value)
 	for _, layout := range []string{
 		"2006-01-02 15:04:05.999999999 MST",
 		"2006-01-02 15:04:05 MST",

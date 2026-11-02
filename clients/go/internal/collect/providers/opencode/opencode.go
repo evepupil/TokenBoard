@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sqlite"
@@ -237,7 +237,7 @@ func readCount(value any) float64 {
 
 func sessionSet(value any) map[string]bool {
 	text, ok := value.(string)
-	if !ok || strings.TrimSpace(text) == "" {
+	if !ok || jsonl.TrimJSWhitespace(text) == "" {
 		return map[string]bool{}
 	}
 	return map[string]bool{text: true}

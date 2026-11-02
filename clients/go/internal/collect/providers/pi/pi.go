@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionscan"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -241,8 +242,8 @@ func readModel(message map[string]any) string {
 		return sessionusage.UnknownModel
 	}
 	for _, key := range []string{"responseModel", "model", "modelId"} {
-		if value, ok := message[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		if value, ok := message[key].(string); ok && jsonl.TrimJSWhitespace(value) != "" {
+			return jsonl.TrimJSWhitespace(value)
 		}
 	}
 	return sessionusage.UnknownModel

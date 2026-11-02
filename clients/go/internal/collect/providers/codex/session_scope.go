@@ -33,6 +33,7 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionwalk"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 var codexSessionRootNames = []string{"sessions", "archived_sessions"}
@@ -1526,21 +1527,11 @@ func readSessionScopeTokenCountTimestamp(line string) (time.Time, bool) {
 
 // parseSessionScopeTimestamp accepts the ISO-8601 shapes `new Date(string)`
 // accepts for the timestamps Codex writes. A zone-less timestamp is local time,
-// as in JavaScript; a date-only value is UTC.
+// as in JavaScript; a date-only value is UTC. It defers to the shared jsdate
+// package so both clients agree on the quirky forms the parser accepts
+// (lowercase t/z, an omitted seconds field, hour 24, day overflow).
 func parseSessionScopeTimestamp(value string) (time.Time, bool) {
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02T15:04:05.999999999",
-		"2006-01-02 15:04:05.999999999",
-	} {
-		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-			return parsed, true
-		}
-	}
-	if parsed, err := time.Parse("2006-01-02", value); err == nil {
-		return parsed, true
-	}
-	return time.Time{}, false
+	return jsdate.Parse(value)
 }
 
 func isSessionScopeDateInRange(date, since, until time.Time) bool {
