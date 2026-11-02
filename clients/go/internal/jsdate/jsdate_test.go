@@ -8,7 +8,8 @@ import (
 // Every want is the output of Node's `new Date(value)` under TZ=Asia/Shanghai, probed on
 // 2026-11-02. The two collectors read the same session files, so a shape one parses and the
 // other does not is a row that lands on a different usageDate (the server's dedup key) or is
-// dropped. The table is the contract, not Go's own idea of a valid ISO timestamp.
+// dropped. The table is the contract, not Go's own idea of a valid ISO timestamp. Where a shape
+// is intentionally not reproduced, the row says so and states the direction.
 func TestParseMatchesTheJavaScriptDateParser(t *testing.T) {
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -89,31 +90,51 @@ func TestParseMatchesTheJavaScriptDateParser(t *testing.T) {
 		{"2026-05-09T04:24:07.999999999Z", "2026-05-09T04:24:07.999Z"},
 		{"2026-05-09T04:24:07.123456789+08:00", "2026-05-08T20:24:07.123Z"},
 
-		// ======== Padding ========
-		// V8's ISO parser does NOT trim, so a padded value is an invalid date there
-		// and here. (V8's separate legacy parser does trim a space-separated value
-		// and a bare date, but that path — and its local-midnight result for a
-		// padded bare date — is deliberately not reproduced; see the package doc.)
+		// ======== Padding, strict layer ========
+		// A "T" separator selects V8's strict ISO grammar, which does not trim, so a padded
+		// "…T…" value is an invalid date there and here.
 
 		{" 2026-05-09T04:24:07Z", ""},
 		{"2026-05-09T04:24:07Z ", ""},
 		{" 2026-05-09T04:24:07", ""},
 		{"2026-05-09T04:24:07 ", ""},
 		{"\t2026-05-09T04:24:07Z", ""},
-		{" 2026-05-09 04:24:07", ""},
-		{"2026-05-09 04:24:07 ", ""},
-		{" 2026-05-09 04:24:07Z", ""},
-		{" 2026-05-09", ""},
-		{"2026-05-09 ", ""},
+
+		// ======== Padding, legacy layer ========
+		// The space-separated form and the bare date go to V8's legacy parser, which does trim.
+		// A trimmed bare date is *local* midnight, not the UTC midnight the unpadded form gives.
+
+		{" 2026-05-09 04:24:07", "2026-05-08T20:24:07.000Z"},
+		{"2026-05-09 04:24:07 ", "2026-05-08T20:24:07.000Z"},
+		{" 2026-05-09 04:24:07 ", "2026-05-08T20:24:07.000Z"},
+		{"\t2026-05-09 04:24:07", "2026-05-08T20:24:07.000Z"},
+		{" 2026-05-09 04:24:07Z", "2026-05-09T04:24:07.000Z"},
+		{"2026-05-09 04:24:07Z ", "2026-05-09T04:24:07.000Z"},
+		{" 2026-05-09", "2026-05-08T16:00:00.000Z"},
+		{"2026-05-09 ", "2026-05-08T16:00:00.000Z"},
+		{" 2026-05-09 04:24:07", "2026-05-08T20:24:07.000Z"},
+		{"\uFEFF2026-05-09", "2026-05-08T16:00:00.000Z"},
+
+		// The legacy layer does not trim the two line separators or U+0085, so those stay invalid.
+		{" 2026-05-09", ""},
+		{"\u00852026-05-09", ""},
 
 		// ======== Invalid offset forms ========
-		// +08 (too short, needs +0800 or +08:00), and an offset hour past 23.
 
+		// A colon-less offset with a "T" separator and an offset hour past 23 are both invalid.
 		{"2026-05-09T04:24:07+08", ""},
 		{"2026-05-09T00:00:00+24:00", ""},
 		{"2026-05-09T00:00:00+2400", ""},
 		{"2026-05-09T00:00:00+99:99", ""},
 		{"2026-05-09T00:00:00+2360", ""},
+
+		// On the space-separated form V8's legacy scanner is laxer than this port (a free-form
+		// numeric offset with no hour bound). Those three shapes are rejected here, so a row
+		// carrying one is dropped rather than mis-dated — the fail-closed direction. See the
+		// package doc for why they are not reproduced.
+		{"2026-05-09 04:24:07+08", ""},
+		{"2026-05-09 04:24:07+24:00", ""},
+		{"2026-05-09 04:24:07+2360", ""},
 
 		// ======== Truly invalid dates ========
 
@@ -125,9 +146,9 @@ func TestParseMatchesTheJavaScriptDateParser(t *testing.T) {
 		{"2026-05-09T23:60Z", ""},
 		{"2026-05-09T23:59:60Z", ""},
 
-		// ======== Non-ISO string shapes ========
-		// These go to V8's legacy parser; the codex reader handles the " UTC" fallback
-		// it needs on its own, so none of them is accepted here.
+		// ======== Free-form legacy shapes ========
+		// V8's legacy parser reads these; no machine-written timestamp uses them, and the codex
+		// reader keeps its own fallback for the one it needs, so none is accepted here.
 
 		{"20260509", ""},
 		{"", ""},
