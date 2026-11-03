@@ -269,20 +269,20 @@ func (o multiplierOverrides) multiplierFor(model string) float64 {
 	if multiplier, ok := o.Exact[model]; ok {
 		return multiplier
 	}
-	if alias, ok := pricingAliasOf(model); ok {
+	if alias, ok := pricingAlias(model); ok {
 		if multiplier, ok := o.Exact[alias]; ok {
 			return multiplier
 		}
 	}
 	for _, part := range modelParts(model) {
-		base := baseModelWithoutDateSuffix(part)
+		base := modelWithoutDateSuffix(part)
 		if multiplier, ok := o.Exact[part]; ok {
 			return multiplier
 		}
 		if multiplier, ok := o.Exact[base]; ok {
 			return multiplier
 		}
-		if alias, ok := pricingAliasOf(base); ok {
+		if alias, ok := pricingAlias(base); ok {
 			if multiplier, ok := o.Exact[alias]; ok {
 				return multiplier
 			}
@@ -478,48 +478,6 @@ func normalizedModelsDevModelID(modelID string) string {
 func normalizePricingKey(value string) string {
 	replacer := strings.NewReplacer(".", "-", "@", "-")
 	return replacer.Replace(value)
-}
-
-// baseModelWithoutDateSuffix mirrors model_without_date_suffix: date-pinned
-// keys share their base model's rates. Kept separate from the lookup's own
-// helper because only the loader needs it here.
-func baseModelWithoutDateSuffix(model string) string {
-	if len(model) > 11 {
-		suffix := model[len(model)-11:]
-		if suffix[0] == '-' && isDigits(suffix[1:5]) && suffix[5] == '-' && isDigits(suffix[6:8]) && suffix[8] == '-' && isDigits(suffix[9:]) {
-			return model[:len(model)-11]
-		}
-	}
-	if len(model) > 9 {
-		suffix := model[len(model)-9:]
-		if suffix[0] == '-' && isDigits(suffix[1:]) {
-			return model[:len(model)-9]
-		}
-	}
-	return model
-}
-
-func isDigits(value string) bool {
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return len(value) > 0
-}
-
-// pricingAliasOf mirrors pricing_alias: default family names bill at the
-// variant they point to.
-func pricingAliasOf(model string) (string, bool) {
-	switch model {
-	case "gpt-reserve":
-		return "gpt-5.6-luna", true
-	case "gpt-5.6":
-		return "gpt-5.6-sol", true
-	case "gpt-5.3-spark":
-		return "gpt-5.3-codex-spark", true
-	}
-	return "", false
 }
 
 // modelsDevModalities mirrors ModelsDevModalities. A nil list is "absent"; a
@@ -742,9 +700,9 @@ func applyLongContextRates(models map[string]CorpusModel, dev map[string]CorpusM
 		if pricing.InputAbove != nil || pricing.OutputAbove != nil || pricing.CacheCreateAbove != nil || pricing.CacheReadAbove != nil {
 			continue
 		}
-		base := baseModelWithoutDateSuffix(model)
+		base := modelWithoutDateSuffix(model)
 		resolved := base
-		if alias, ok := pricingAliasOf(base); ok {
+		if alias, ok := pricingAlias(base); ok {
 			resolved = alias
 		}
 		source, ok := dev[resolved]

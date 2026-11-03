@@ -550,21 +550,6 @@ func TestMultiplierForResolvesExactAliasAndNormalizedPrefix(t *testing.T) {
 	}
 }
 
-func TestBaseModelWithoutDateSuffix(t *testing.T) {
-	cases := map[string]string{
-		"claude-3-5-haiku-20241022": "claude-3-5-haiku",
-		"gpt-5.5-2026-04-23":        "gpt-5.5",
-		"gpt-5.5":                   "gpt-5.5",
-		"claude-opus-4-6-v1:0":      "claude-opus-4-6-v1:0",
-		"claude-opus-4-20250514":    "claude-opus-4",
-	}
-	for model, want := range cases {
-		if got := baseModelWithoutDateSuffix(model); got != want {
-			t.Errorf("baseModelWithoutDateSuffix(%q) = %q, want %q", model, got, want)
-		}
-	}
-}
-
 func TestNormalizePricingKeyTouchesOnlyDotsAndAt(t *testing.T) {
 	cases := map[string]string{
 		"claude-opus-4.6":     "claude-opus-4-6",
