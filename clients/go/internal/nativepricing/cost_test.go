@@ -237,12 +237,19 @@ func TestCost_displayModeUsesReportedCost(t *testing.T) {
 }
 
 // referenceProduct is the test's own multiply: noinline so the caller cannot
-// fold it into an FMA with the accumulator. It is the multiplication half of the
-// mul-then-add reference below.
+// fold it into an FMA with the accumulator.
 //
 //go:noinline
 func referenceProduct(count int64, rate float64) float64 {
 	return float64(count) * rate
+}
+
+// referenceSum is a plain addition of two already-rounded values. noinline for
+// the same reason: an opaque result cannot be fused with a multiply.
+//
+//go:noinline
+func referenceSum(left, right float64) float64 {
+	return left + right
 }
 
 // referenceOp is one multiply-accumulate step: the unfused variant rounds the
@@ -257,24 +264,53 @@ func fusedStep(count int64, rate float64, accumulated float64) float64 {
 	return math.FMA(float64(count), rate, accumulated)
 }
 
-// referenceCost mirrors calculate_cost_from_pricing term for term, once with
-// mul-then-add and once with fused multiply-adds, so the test can tell which one
-// the implementation produced.
-func referenceCost(usage Usage, pricing CorpusModel, step referenceOp) float64 {
+// referenceGrouping selects how the marginal branch combines a bucket's two
+// banded terms. ccusage returns each tiered_cost as an independent value and adds
+// it to the running total - total + (low + high), which cost.go's
+// addTerms(tieredCost(...), ...) reproduces. Folding the threshold term into the
+// running total instead (high + (low + total)) is a different association and
+// rounds one ULP off on ordinary inputs, which is exactly the drift that forks
+// snapshotHash.
+type referenceGrouping int
+
+const (
+	groupingIndependent referenceGrouping = iota
+	groupingReassociated
+)
+
+// referenceCost mirrors calculate_cost_from_pricing term for term. step picks the
+// arithmetic - mul-then-add, which ccusage and cost.go must both produce, or
+// fused multiply-add, which an arm64 FMADDD build would produce for the same
+// expression - and grouping picks the marginal branch's association.
+//
+// Every multiplication goes through referenceProduct, so the fused twin differs
+// only where the reference has a real multiply-accumulate: the buckets that feed
+// the running total directly. A banded bucket is two rounded products added
+// together, and both arithmetics round it the same way, so a fixture whose
+// buckets are all past the boundary can pin the association but not the fusion.
+func referenceCost(usage Usage, pricing CorpusModel, step referenceOp, grouping referenceGrouping) float64 {
 	rate := func(base float64, above *float64, longContext bool) float64 {
 		if longContext && above != nil {
 			return *above
 		}
 		return base
 	}
-	tiered := func(accumulated float64, tokens int64, base float64, above *float64, threshold int64) float64 {
-		if tokens == 0 {
-			return accumulated
+	// marginal adds one bucket to the running total the way tiered_cost does: over
+	// the boundary the first `threshold` tokens bill at the base rate and the rest
+	// at the above rate, as an independent value the caller then sums.
+	marginal := func(total float64, tokens int64, base float64, above *float64, threshold int64) float64 {
+		if tokens <= 0 {
+			return total
 		}
 		if above != nil && tokens > threshold {
-			return step(tokens-threshold, *above, step(threshold, base, accumulated))
+			low := referenceProduct(threshold, base)
+			high := referenceProduct(tokens-threshold, *above)
+			if grouping == groupingReassociated {
+				return referenceSum(high, referenceSum(low, total))
+			}
+			return referenceSum(total, referenceSum(low, high))
 		}
-		return step(tokens, base, accumulated)
+		return step(tokens, base, total)
 	}
 
 	cacheCreate1hRate := pricing.Input * 2
@@ -295,64 +331,97 @@ func referenceCost(usage Usage, pricing CorpusModel, step referenceOp) float64 {
 	}
 	const threshold = 200_000
 	total := 0.0
-	total = tiered(total, usage.Input, pricing.Input, pricing.InputAbove, threshold)
-	total = tiered(total, usage.Output, pricing.Output, pricing.OutputAbove, threshold)
-	total = tiered(total, usage.CacheCreate5m, pricing.CacheCreate, pricing.CacheCreateAbove, threshold)
-	total = tiered(total, usage.CacheCreate1h, cacheCreate1hRate, cacheCreate1hAbove, threshold)
-	return tiered(total, usage.CacheRead, pricing.CacheRead, pricing.CacheReadAbove, threshold)
+	total = marginal(total, usage.Input, pricing.Input, pricing.InputAbove, threshold)
+	total = marginal(total, usage.Output, pricing.Output, pricing.OutputAbove, threshold)
+	total = marginal(total, usage.CacheCreate5m, pricing.CacheCreate, pricing.CacheCreateAbove, threshold)
+	total = marginal(total, usage.CacheCreate1h, cacheCreate1hRate, cacheCreate1hAbove, threshold)
+	return marginal(total, usage.CacheRead, pricing.CacheRead, pricing.CacheReadAbove, threshold)
 }
 
-// TestCostFromPricing_isFMAFreeOnArm64 pins the arm64 hazard: Go's compiler
-// fuses a*b+c into FMADDD, Rust (and so ccusage) does not, and a fused term
-// rounds once instead of twice - a 1 ULP difference that forks snapshotHash.
-// Every product therefore goes through an opaque helper, and the accumulation
-// must match the multiply-then-add reference bit for bit.
+// TestCostFromPricing_isFMAFreeOnArm64 pins the two ways this formula can drift
+// from ccusage by one ULP, either of which forks snapshotHash:
 //
-// The reference must also differ from its explicitly fused twin: if it did not,
-// the comparison would pass on a fused build too and prove nothing.
+//   - Go fuses a*b+c into FMADDD on arm64 where Rust never fuses, so a fused term
+//     rounds once instead of twice. Every product therefore goes through an
+//     opaque helper, and the accumulation must match the multiply-then-add
+//     reference bit for bit.
+//   - ccusage sums five independent tiered_cost values left to right, so a bucket
+//     past the boundary contributes total+(low+high). A port that folds the
+//     threshold term into the running total (high+(low+total)) is a different
+//     association and rounds one ULP off on ordinary inputs.
+//
+// Each fixture declares which hazard it can expose, and the test verifies that
+// declaration against the references themselves, so no fixture can quietly
+// become vacuous.
 func TestCostFromPricing_isFMAFreeOnArm64(t *testing.T) {
+	marginalPricing := CorpusModel{
+		Input: 3e-6, Output: 1.5e-5, CacheCreate: 3.75e-6, CacheRead: 0.3e-6,
+		InputAbove: floatValue(6e-6), OutputAbove: floatValue(3e-5),
+		CacheCreateAbove: floatValue(4.5e-6), CacheReadAbove: floatValue(0.6e-6),
+	}
+	wholeRequestPricing := marginalPricing
+	wholeRequestPricing.LongContextThreshold = int64Value(200_000)
+
 	cases := map[string]struct {
 		pricing CorpusModel
 		usage   Usage
+		// fmaDiffers records whether the unfused reference and its fused twin
+		// round differently: only a bucket whose product feeds the running total
+		// directly can show that.
+		fmaDiffers bool
+		// groupingDiffers records whether the independent and re-associated sums
+		// round differently: only a bucket past the boundary has an association
+		// to get wrong.
+		groupingDiffers bool
 	}{
-		"marginal band, below the boundary": {
-			pricing: CorpusModel{
-				Input: 3e-6, Output: 1.5e-5, CacheCreate: 3.75e-6, CacheRead: 0.3e-6,
-				InputAbove: floatValue(6e-6), OutputAbove: floatValue(3e-5),
-				CacheCreateAbove: floatValue(4.5e-6), CacheReadAbove: floatValue(0.6e-6),
-			},
-			usage: Usage{Input: 133_333, Output: 177_777, CacheCreate5m: 111_119, CacheCreate1h: 122_223, CacheRead: 144_447},
+		"marginal band, every bucket inside the boundary": {
+			pricing:    marginalPricing,
+			usage:      Usage{Input: 133_333, Output: 177_777, CacheCreate5m: 111_119, CacheCreate1h: 122_223, CacheRead: 144_447},
+			fmaDiffers: true,
 		},
-		"marginal band, above the boundary": {
-			pricing: CorpusModel{
-				Input: 3e-6, Output: 1.5e-5, CacheCreate: 3.75e-6, CacheRead: 0.3e-6,
-				InputAbove: floatValue(6e-6), OutputAbove: floatValue(3e-5),
-				CacheCreateAbove: floatValue(4.5e-6), CacheReadAbove: floatValue(0.6e-6),
-			},
-			usage: Usage{Input: 764_327, Output: 216_533, CacheCreate5m: 331_001, CacheCreate1h: 55_555, CacheRead: 199_999},
+		"marginal band, just past the boundary": {
+			pricing:         marginalPricing,
+			usage:           Usage{Input: 200_015, Output: 200_080, CacheCreate5m: 200_005, CacheRead: 199_999},
+			groupingDiffers: true,
+		},
+		"marginal band, every bucket past the boundary": {
+			pricing:         marginalPricing,
+			usage:           Usage{Input: 200_015, Output: 200_080, CacheCreate5m: 200_005, CacheCreate1h: 200_009, CacheRead: 199_999},
+			groupingDiffers: true,
 		},
 		"whole-request band": {
-			pricing: CorpusModel{
-				Input: 3e-6, Output: 1.5e-5, CacheCreate: 3.75e-6, CacheRead: 0.3e-6,
-				InputAbove: floatValue(6e-6), OutputAbove: floatValue(3e-5),
-				CacheCreateAbove: floatValue(4.5e-6), CacheReadAbove: floatValue(0.6e-6),
-				LongContextThreshold: int64Value(200_000),
-			},
-			usage: Usage{Input: 333_331, Output: 777_773, CacheCreate5m: 111_119, CacheCreate1h: 222_229, CacheRead: 444_443},
+			pricing:    wholeRequestPricing,
+			usage:      Usage{Input: 333_331, Output: 777_773, CacheCreate5m: 111_119, CacheCreate1h: 222_229, CacheRead: 444_443},
+			fmaDiffers: true,
 		},
 	}
+	fmaCovered, groupingCovered := false, false
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			unfused := referenceCost(testCase.usage, testCase.pricing, unfusedStep)
-			fused := referenceCost(testCase.usage, testCase.pricing, fusedStep)
-			if sameBits(unfused, fused) {
-				t.Fatalf("fixture is not sensitive to FMA: both references are %v", unfused)
+			unfused := referenceCost(testCase.usage, testCase.pricing, unfusedStep, groupingIndependent)
+			fused := referenceCost(testCase.usage, testCase.pricing, fusedStep, groupingIndependent)
+			folded := referenceCost(testCase.usage, testCase.pricing, unfusedStep, groupingReassociated)
+			if got := !sameBits(unfused, fused); got != testCase.fmaDiffers {
+				t.Fatalf("fma sensitivity = %v, want %v (unfused %#x, fused %#x)",
+					got, testCase.fmaDiffers, math.Float64bits(unfused), math.Float64bits(fused))
+			}
+			if got := !sameBits(unfused, folded); got != testCase.groupingDiffers {
+				t.Fatalf("grouping sensitivity = %v, want %v (independent %#x, re-associated %#x)",
+					got, testCase.groupingDiffers, math.Float64bits(unfused), math.Float64bits(folded))
 			}
 			got := CostFromPricing(testCase.usage, testCase.pricing, false)
 			if !sameBits(got, unfused) {
-				t.Fatalf("CostFromPricing = %v (%#x), want the mul-then-add reference %v (%#x); the fused value would be %v (%#x)",
-					got, math.Float64bits(got), unfused, math.Float64bits(unfused), fused, math.Float64bits(fused))
+				t.Fatalf("CostFromPricing = %v (%#x), want the mul-then-add, independently summed reference %v (%#x); the fused value is %#x and the re-associated one %#x",
+					got, math.Float64bits(got), unfused, math.Float64bits(unfused),
+					math.Float64bits(fused), math.Float64bits(folded))
 			}
 		})
+		fmaCovered = fmaCovered || testCase.fmaDiffers
+		groupingCovered = groupingCovered || testCase.groupingDiffers
+	}
+	// Keep at least one fixture per hazard: an all-vacuous table would pass
+	// against a fused or re-associated implementation.
+	if !fmaCovered || !groupingCovered {
+		t.Fatalf("fixtures cover fma=%v grouping=%v, want both hazards covered", fmaCovered, groupingCovered)
 	}
 }

@@ -91,12 +91,15 @@ func (c Corpus) findEntry(model string, which stage, fuzzy bool) (CorpusModel, b
 		// answered from it rather than gated into a miss below. Answering is all
 		// this step does: ccusage returns the entry lookup even when it is empty.
 		//
-		// One case cannot be answered exactly: an exact-only id that both tables
-		// price keeps the primary rates in Corpus, while ccusage answers from its
-		// models.dev entry. Only gpt-5-codex's cache-read rate differs among the
-		// 50 such ids in the frozen snapshot, and reaching it takes a respelled
-		// request such as "gpt-5.codex", so the merged corpus is left as Task 1
-		// built it.
+		// Some of these cannot be answered exactly: an exact-only id that a
+		// primary snapshot also prices keeps the primary rates in Corpus, while
+		// ccusage answers from its models.dev entry. 52 exact-only primary rows
+		// share a models.dev key, and four of them differ materially - gpt-5-codex's
+		// cache read (1.25e-7 vs 1.3e-7), and the cache-create rate of the three
+		// rows the builtin table takes over (gpt-5.1-codex 1.25e-6 vs 1.5625e-6;
+		// gpt-5.2-codex and gpt-5.2 1.75e-6 vs 2.1875e-6). Reaching any of them
+		// takes a respelled request such as "gpt-5.codex", so the merged corpus is
+		// left as Task 1 built it and Task 5's goldens probe the cases that matter.
 		if id, ok := c.exactOnlyIDSpelledBy(model); ok {
 			if pricing, ok := c.Models[id]; ok {
 				return pricing, true

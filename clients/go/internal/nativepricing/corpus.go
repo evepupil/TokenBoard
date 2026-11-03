@@ -74,7 +74,10 @@ type CorpusModel struct {
 	//
 	// The value is the union of both embedded snapshots' exact-only flags: when
 	// a key appears in both maps and models.dev marks it exactOnly, this flag is
-	// set even though the LiteLLM entry carries the rates (50 such keys). That
+	// set even though the primary entry carries the rates. 47 rows carry it from
+	// LiteLLM and 5 from the builtin table: three of those builtin rows took over
+	// a LiteLLM row that already had the flag (gpt-5.1-codex, gpt-5.2-codex,
+	// gpt-5.2) and two took over a models.dev row (glm-5-turbo, glm-5.1). That
 	// matches ccusage's is_exact_only_lookup_with_fallback, which gates on
 	// ExactOnlyKeys::contains_any_spelling across both maps.
 	//
@@ -205,8 +208,9 @@ func loadCorpus(fsys fs.FS) (Corpus, error) {
 	// even though the rates are from LiteLLM. ccusage's is_exact_only_lookup
 	// gates on ExactOnlyKeys::contains_any_spelling across both maps.
 	// The exact-only flag is the union of both maps. models.dev publishes it as
-	// a field; on a key collision the LiteLLM entry carries the rates, so the
-	// flag has to be stamped onto that entry or the union is lost (50 keys).
+	// a field; on a key collision the primary entry carries the rates, so the
+	// flag has to be stamped onto that entry or the union is lost (52 primary
+	// rows carry it today: 47 from LiteLLM and 5 from the builtin table).
 	for model, entry := range models {
 		if !dev.exactOnlyNames[normalizePricingKey(model)] {
 			continue

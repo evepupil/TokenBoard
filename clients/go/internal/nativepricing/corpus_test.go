@@ -449,11 +449,12 @@ func TestCorpusExactOnlyIsTheUnionOfBothMaps(t *testing.T) {
 			t.Errorf("%s is exactOnly in models.dev; the union must keep the flag", model)
 		}
 	}
-	// Count both halves of the union so a flattened flag cannot hide a gap. The
-	// prime half is the models.dev stage; everything else is a primary row, which
-	// since Task 3 includes the five exact-only builtin rows (gpt-5.1-codex,
-	// gpt-5.2-codex, gpt-5.2, glm-5-turbo, glm-5.1 - the ids whose builtin write
-	// mode replaces the table row).
+	// Count every part of the union so a flattened flag cannot hide a gap: the
+	// models.dev stage, the rows a primary snapshot carries (the LiteLLM set, now
+	// 47), and the five builtin rows. Three of them took over a LiteLLM row that
+	// already carried the flag (gpt-5.1-codex, gpt-5.2-codex, gpt-5.2); the other
+	// two (glm-5-turbo, glm-5.1) replaced a models.dev row, so their flag now
+	// rides on a builtin row even though the models.dev index supplied it.
 	modelsDevOnly, primary, builtin := 0, 0, 0
 	for _, entry := range corpus.Models {
 		if !entry.ExactOnly {

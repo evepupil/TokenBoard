@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// CostMode selects where a cost comes from, mirroring ccusage's CostMode
-// (rust/crates/ccusage-core/src/cli.rs). S1 needs all three because the parity
-// goldens compare reported and computed costs side by side; the adapters pick
-// the mode in S2/S3.
+// CostMode selects where a cost comes from, mirroring ccusage's CostMode, which
+// is defined in crates/ccusage-cli/src/types.rs:243 and re-exported as
+// ccusage_core::cli (rust/crates/ccusage-core/src/lib.rs:24-26). S1 needs all
+// three because the parity goldens compare reported and computed costs side by
+// side; the adapters pick the mode in S2/S3.
 type CostMode int
 
 const (
