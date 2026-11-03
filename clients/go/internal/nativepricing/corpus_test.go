@@ -449,23 +449,32 @@ func TestCorpusExactOnlyIsTheUnionOfBothMaps(t *testing.T) {
 			t.Errorf("%s is exactOnly in models.dev; the union must keep the flag", model)
 		}
 	}
-	// Count both halves of the union so a flattened flag cannot hide a gap.
-	modelsDevOnly, collided := 0, 0
-	for model, entry := range corpus.Models {
+	// Count both halves of the union so a flattened flag cannot hide a gap. The
+	// prime half is the models.dev stage; everything else is a primary row, which
+	// since Task 3 includes the five exact-only builtin rows (gpt-5.1-codex,
+	// gpt-5.2-codex, gpt-5.2, glm-5-turbo, glm-5.1 - the ids whose builtin write
+	// mode replaces the table row).
+	modelsDevOnly, primary, builtin := 0, 0, 0
+	for _, entry := range corpus.Models {
 		if !entry.ExactOnly {
 			continue
 		}
-		if entry.Source == SourceLiteLLM {
-			collided++
-		} else {
+		switch entry.Source {
+		case SourceModelsDev:
 			modelsDevOnly++
+		case SourceBuiltin:
+			builtin++
+		default:
+			primary++
 		}
-		_ = model
 	}
-	if collided != 50 {
-		t.Fatalf("exact-only keys carried by LiteLLM = %d, want 50", collided)
+	if primary != 47 {
+		t.Fatalf("exact-only keys carried by a primary snapshot = %d, want 47", primary)
 	}
-	if got := modelsDevOnly + collided; got != 639 {
+	if builtin != 5 {
+		t.Fatalf("exact-only keys carried by the builtin table = %d, want 5", builtin)
+	}
+	if got := modelsDevOnly + primary + builtin; got != 639 {
 		t.Fatalf("exact-only union = %d, want 639", got)
 	}
 }
@@ -567,14 +576,19 @@ func TestNormalizePricingKeyTouchesOnlyDotsAndAt(t *testing.T) {
 
 func TestCorpusSizesArePinned(t *testing.T) {
 	corpus := mustLoadCorpus(t)
-	// The merged table is the LiteLLM table plus the models.dev keys it does not
-	// already price. Both numbers are frozen: a change means the vendored corpus
-	// moved.
-	if got, want := len(corpus.Models), 3418; got != want {
+	// The merged table is the LiteLLM table (531 keys survive the builtin pass)
+	// plus the 2,873 models.dev keys it does not already price plus the 19 rows
+	// the code builtin table answers: 5 ids no snapshot prices (claude-3-opus,
+	// claude-3-sonnet, claude-3-haiku and the two claude-3-5-haiku ids), 11
+	// models.dev-only ids the builtin rates correct, and the 3 rows the builtin
+	// table writes with a bare insert. The number is frozen: a change means the
+	// vendored corpus or the builtin table moved.
+	if got, want := len(corpus.Models), 3423; got != want {
 		t.Fatalf("len(Models) = %d, want %d", got, want)
 	}
-	// 483 LiteLLM context windows plus the 2884 models.dev-only models, all of
-	// which publish a limit.context.
+	// 483 LiteLLM context windows plus the 2,884 models.dev-only models, all of
+	// which publish a limit.context. The builtin pass writes no context limits
+	// (see builtin.go), so this count does not move with it.
 	if got, want := len(corpus.ContextLimits), 3367; got != want {
 		t.Fatalf("len(ContextLimits) = %d, want %d", got, want)
 	}

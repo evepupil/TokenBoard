@@ -193,6 +193,13 @@ func loadCorpus(fsys fs.FS) (Corpus, error) {
 	contextLimits := map[string]int64{}
 	litellmCount := loadLitellmEntries(models, contextLimits, litellm, fast, flex)
 	dev.mergeInto(models, contextLimits, fast, flex)
+	// The builtin table is part of the corpus load, in ccusage's order
+	// (load_embedded, pricing.rs:982-998): LiteLLM, then put_builtin_pricing,
+	// then the long-context graft. It runs before the exact-only stamping so a
+	// builtin row that replaces a models.dev key still picks up the union flag
+	// Find's gate reads, and before the graft so its rows borrow models.dev's
+	// above-threshold bands like any other primary entry.
+	applyBuiltins(models, fast, flex)
 	// C2: union of both maps' exact-only flags. When a key exists in both maps
 	// and models.dev marks it exactOnly, the merged entry must keep the flag
 	// even though the rates are from LiteLLM. ccusage's is_exact_only_lookup
