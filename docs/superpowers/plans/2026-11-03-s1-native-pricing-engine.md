@@ -536,6 +536,13 @@ Above200k 只在 `threshold==200000` 时发出，且 `max_input_tokens` 不是�
 （该 id 两表都有且都是 exact-only，ccusage 的 `id_spelled_by` 走 models.dev 费率
 `cache_read=1.3e-7`，合并表返回主表 `1.25e-7`）。金样本要么如实记录这条差异并在测试里
 显式排除（附注释与出处），要么在 Step 5 回头改 Task 1 的数据模型——不能让这道闸门无声漏过。
+**并系统地覆盖同类**：对每个 exact-only id 也测其分隔符变体拼写（`.`/`@`），把这一族分歧
+作为**一组**记进台账（附 `id_spelled_by` 的源码出处），而不是逐个加探针。已量化的分歧仅
+出现在「合并表碰撞且费率不同」的少数 id 上（LiteLLM×models.dev 碰撞 190 个中 10 个费率不同；
+另有内置表覆盖 models.dev 行的少数 id，如 `gpt-5.1.codex` 的 cache-create 1.25e-6 vs
+ccusage 1.5625e-6）。**共同前提**：只有「请求写成 exact-only id 的分隔符变体」才会触发——
+规范拼写两边一致。若 Task 5 发现真实夹具里出现此类拼写且差异不可接受，则该步骤是回头重构
+Corpus 为两张表的决策点。
 
 - [ ] **Step 2: 生成金样本**
 
