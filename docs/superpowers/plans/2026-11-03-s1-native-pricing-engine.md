@@ -299,9 +299,25 @@ git commit -m "feat(nativepricing): vendor and embed the frozen pricing corpus"
 - Test: `clients/go/internal/nativepricing/alias_test.go`
 
 **Interfaces:**
-- Consumes: `Corpus`、`CorpusModel`（Task 1）
+- Consumes: `Corpus`、`CorpusModel`、`ModelSource`（Task 1）
 - Produces: `(Corpus) Find(model string) (CorpusModel, bool)`；`normalizePricingKey(string) string`；
   `modelWithoutDateSuffix(string) string`；`pricingAlias(string) (string, bool)`
+
+**复用 Task 1 的 helper**：`corpus.go` 已有 `normalizePricingKey`、`baseModelWithoutDateSuffix`、
+`pricingAliasOf`、`matchesModelSuffix`（未导出）——**复用或提升，不要重复声明**。
+
+**关键：`Find` 必须是「主表段 → models.dev 段」的两段式扫描，不能全局「精确优先」。**
+ccusage 的 `find_with_fallbacks`（`pricing.rs:1404-1455`）是：
+1. 主表（`Source != SourceModelsDev`）精确（+别名）→ 命中即返回；
+2. 主表模糊（`Fuzzy::Denied` 之外的每次尝试都要过 exact-only 门）；
+3. 主表全 miss 后，才用 `models.dev` 段重复①（精确+别名）②（模糊）。
+Task 1 已把来源导出为 `ModelSource`，用它分段。反例（必须由测试钉住）：
+`databricks-gpt-5-6-luna` 是 models.dev-only key，ccusage 走主表模糊命中 `gpt-5.6-luna`
+（i=2e-7），**不是** models.dev 行（i=1e-6）；`anthropic/claude-opus-5.5-fast` → `claude-opus-5-5`
+（4e-6），不是 models.dev 精确（8e-6）。
+**exact-only 门**：`ExactOnly` 是两表并集，作用是「请求名门」——`gpt-5.6-luna` 虽在 models.dev
+里 exact-only，主表模糊仍要能命中它；但请求名本身落在 exact-only 集合时拒绝整次模糊
+（`is_exact_only_lookup_with_fallback`）。**不要**把并集当成「模糊候选过滤器」。
 
 - [ ] **Step 1: 写失败测试（精确 / 归一化 / exactOnly / 大小写 / 别名 / 日期后缀 / 版本边界）**
 
@@ -313,6 +329,8 @@ func TestFind_exactOnlyModelsAreNotPrefixMatched(t *testing.T)  // exactOnly 模
 func TestFind_isCaseSensitive(t *testing.T)                     // "GPT-5" 不匹配 "gpt-5"
 func TestFind_resolvesHardcodedAliases(t *testing.T)            // "gpt-5.6" → "gpt-5.6-sol"
 func TestFind_stripsDateSuffixBeforeTierLookup(t *testing.T)    // "claude-3-5-haiku-20241022" 共享基准
+func TestFind_primaryFuzzyBeatsModelsDevExact(t *testing.T)     // databricks-gpt-5-6-luna → gpt-5.6-luna（主表段）
+func TestFind_modelsDevOnlyReachedAfterPrimaryMisses(t *testing.T) // models.dev-only key 无主表模糊命中时才用 models.dev 段
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -323,8 +341,11 @@ Expected: FAIL
 - [ ] **Step 3: 实现查找与别名**
 
 `normalizePricingKey`：**只**把 `.` 和 `@` 换成 `-`（源码 `pricing.rs:2725`），`/`、`_` 原样保留。
-精确命中优先；否则归一化后按长度降序做最长前缀匹配，候选需满足「边界为非字母数字」且
-「后缀不紧跟数字版本」（`suffix_starts_with_numeric_model_version`），跳过 `ExactOnly` 候选。
+分段顺序见 Interfaces：主表（精确→别名→模糊），全 miss 后 models.dev 段（精确→别名→模糊）。
+模糊匹配：归一化后按长度降序做最长前缀匹配，候选需满足「边界为非字母数字」且「后缀不紧跟
+数字版本」（`suffix_starts_with_numeric_model_version`，`MODEL_DATE_SUFFIX_DIGITS=8`）。
+版本边界行为的**权威判据是 ccusage 的实际输出**（Task 5 金样本），不是计划文字或直觉：
+先按源码逐行移植，再对不一致处用金样本定案，并在代码注释里记录该 case 的实测结论。
 **大小写敏感**（无数值大小写折叠）。
 `alias.go`：硬编码 `pricingAlias`（`gpt-reserve`→`gpt-5.6-luna`、`gpt-5.6`→`gpt-5.6-sol`、
 `gpt-5.3-spark`→`gpt-5.3-codex-spark`）；`modelWithoutDateSuffix` 去掉尾部 `-YYYY-MM-DD` 或 `-YYYYMMDD`。
@@ -402,7 +423,11 @@ contextTokens          = saturatingAdd(input, cacheRead, cacheCreate5m, cacheCre
 **`builtin.go`**：从 `pricing.rs:2015-2560` 抄约 37 个内置模型 id 的费率常量
 （含 `claude-opus-4-5/4-6/4-7/4-8`、`claude-haiku-4-5`、`gpt-5`/`gpt-5.5`、`grok-4.3`、
 `moonshot/kimi-k2.5|2.6`、`zai/glm-*`、`glm-5*` 等），以**只补缺**方式并入 Corpus
-（`put_builtin_entry` 语义：已存在则不覆盖）。**FMA 抑制**：所有 `a*b+c` 累加处，先
+（`put_builtin_entry` 语义：已存在则不覆盖）。**但「已存在」只算主表（`Source != SourceModelsDev`）
+条目**：内置表属主表段，Task 1 的 `SourceModelsDev` 条目对内置表等同「不存在」，否则 11 个
+models.dev-only id（`glm-5`、`moonshot/kimi-k2.5`、`claude-opus-4`、`grok-4.3` 等）会保留 models.dev
+费率而不被内置表纠正。内置表插入后要对新条目重跑一次 `applyLongContextRates`
+（内置条目同属主表段，也需要嫁接）。**FMA 抑制**：所有 `a*b+c` 累加处，先
 `math.Float64bits` 往返或拆成独立语句，确保 arm64 不退化为 `FMADDD`。
 
 - [ ] **Step 4: 运行确认通过**
