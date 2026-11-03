@@ -528,6 +528,9 @@ JSONL 夹具树运行
 `(model, tokens, cost, costUsd上报值)` 四元组，写成 `cost-cases.json`。
 **`--offline` 是必须的**：生产 claude 路径不带它（`claudecode.go:291`），会联网拉当天价；
 而金样本必须对冻结语料确定，`--offline` 走的正是 ccusage 内嵌快照——即我们要移植的那套。
+**夹具 JSONL 必须写成紧凑 JSON（冒号后无空格）**：ccusage 20.0.33 对冒号后带空格的行
+会返回**空 `daily` 数组**（Task 4 实测），紧凑写才正常计价，否则金样本会静默为空。
+生成脚本要断言产出非空（每个夹具应有对应行），否则 fail-closed。
 夹具覆盖：普通模型、above-200k 模型（阈值下/上各一）、**真实整请求切档模型**（如
 `gemini-2.5-pro`，其 models.dev 有 `cost.tiers`）、1h cache creation、fast 乘数、未知模型、
 **免费模型**（cost 全 0）。**不要**造「272k custom threshold」夹具——ccusage 20.0.33 的
