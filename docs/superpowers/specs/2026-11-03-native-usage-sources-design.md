@@ -13,6 +13,8 @@ Go 客户端当前通过外部 `ccusage` 可执行文件获取三类来源的数
 ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全在我方复刻。
 
 用户决定（2026-11-03）：**彻底移除 ccusage 依赖，全部用 Go 重新实现，并量化性能差异。**
+本机实测的 ccusage 成本基线见 §9.1（单次全量扫 ~30 s、峰值 RSS 7.7–9.3 GB，且 `--since/--until`
+不减少扫描量）。
 
 调研确认的关键事实：
 
@@ -192,18 +194,50 @@ TokenBoard 服务端下发的动态目录继续叠加在最高优先级（现有
 
 ## 9. 性能测量方法
 
-- 工具：`clients/go/cmd/bench-collect`（dev-only），同一进程内跑 native；ccusage 侧 exec 20.0.33。
-- 指标：wall time、max RSS（`getrusage`）、读取字节数；每个场景 **≥5 轮取中位数**并记最大值
-  （本机单轮误差可达 2×，见既有经验）。
+### 9.1 ccusage 当前基线（2026-11-03 本机实测，load ≈ 59）
+
+| 场景 | 命令 | 墙钟 | 峰值 RSS |
+|------|------|------|---------|
+| claude daily，单日窗口 | `claude daily --json --offline --since 20261101 --until 20261101` | 35.8 s | 7.7 GB |
+| claude daily，全量 | `claude daily --json --offline` | 31.5 s | 9.3 GB |
+| claude session，全量 | `claude session --json --offline` | 32.4 s | 8.9 GB |
+
+**关键反直觉事实**：单日窗口与全量的耗时/RSS 几乎相同——`--since/--until` **只过滤输出，不减少扫描量**，
+ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-client-spec.md` §5 的既有记录一致。
+
+既有实测（已复核，见 `go-client-spec.md` §5）：
+
+- `--single-thread` 把峰值 RSS 从 5.55–5.67 GB 降到 2.43–2.47 GB（−57%），墙钟升 1.7×。
+- 一次真实的 Go 二进制 hook 同步 **352 s**（hook 上限 30 min）。Go 与 TS 调同一二进制，**两侧性能无差别**，
+  瓶颈在 ccusage 本身。
+- 本机语料：Claude Code 9,828 JSONL / 23 GB（单文件最大 1.25 GB）；Codex 13 文件 / 5.5 GB。
+
+> 注意：`~/.tokenboard/logs/daily-sync.out.log` 里 300–950 ms 的 `ccusageDaily` 计时出自 2026-09-21 的
+> 旧日志（该文件时间跨度止于当日），**不能**用于估计当前成本。
+
+### 9.2 native 预期（待 S1 基准校准）
+
+| 维度 | 预期 | 依据 |
+|------|------|------|
+| 峰值内存 | 大幅下降（GB → 数十~数百 MB） | 流式 + 有界读取，只驻留 (date,model) 聚合行 |
+| 增量场景 | 大幅下降（30 s 级 → 亚秒级） | 复用 cursor，hook 只读变更文件；ccusage 每次都全扫 |
+| 进程启动 | 消除 | 否则每次 exec + Node/二进制加载 |
+| JSON 往返 | 消除 | 否则序列化/解析 128 MB 级报表 JSON |
+| 全量吞吐 | **大致相当或略慢** | Rust 解析吞吐强（`memchr` SIMD）；Go GC/逐行可能不如 |
+
+### 9.3 测量协议
+
+- 工具：`clients/go/cmd/bench-collect`（dev-only），同进程跑 native；ccusage 侧 exec 20.0.33。
+- 指标：wall time、max RSS（`getrusage`）、读取字节数；每场景 **≥5 轮取中位数**并记最大值
+  （本机单轮误差可达 2×）。
 - 场景（均在本机真实语料上）：
-  - A 单日窗口（`--since/--until` 收窄到 1 天）：测「空跑成本」——进程启动 + JSON 往返占比最高的场景。
+  - A 单日窗口：测「空跑成本」——进程启动 + JSON 往返占比最高。
   - B 近 30 天窗口：典型定时同步。
   - C 全量（无 `--since`）：测吞吐与峰值内存。
   - D hook 增量（cursor 命中，仅少量文件变更）：native 增量 vs ccusage 全窗口。
   - E 冷启动到首字节（进程 spawn + 二进制加载）单独计时。
-- 诚实预期：Rust 与 Go 的解析吞吐相当，**native 不保证单轮更快**。预期收益来自
-  「无进程启动、无 `npx`/下载、无 JSON 序列化往返、可做真正的增量扫描、峰值内存可控」。
-  若某场景 native 反而更慢，如实记录并分析原因（例如 Go 的 GC 或正则差异）。
+- 诚实预期：**native 不保证单轮更快**；收益来自无进程启动、无下载、无 JSON 往返、真增量、内存可控。
+  若某场景 native 反而更慢，如实记录并分析（例如 Go GC 或逐行解析差异）。
 - 交付物：`docs/research/2026-11-XX-native-vs-ccusage-benchmark.md`，含方法学、原始数据表
   （每轮值 + 中位数 + 最大值）、结论与反例。
 
