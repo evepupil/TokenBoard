@@ -28,15 +28,27 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 ## 2. 目标（可验证）
 
 - **G1 生产路径零 ccusage**：Go 二进制在 `sync`/`preview`/`hook` 中不 exec、不下载、不捆绑 ccusage。
-  验收：`git grep -n 'ccusage' clients/go -- '*.go'` 仅剩 parity/bench 工具与文化性注释；
-  从零机器（无 ccusage、无网络）跑 `tokenboard preview --source all` 全量成功。
-- **G2 逐字段一致**：同一语料、同一 `--timezone`/`--since`/`--until` 下，原生实现的产物经现有 normalize
-  路径后与 ccusage 20.0.33 的产物 `snapshotHash` 完全一致。任何差异须进入台账并逐条解释。
+  验收：`git grep -n 'ccusage' clients/go` 仅剩 parity/bench 工具与文化性注释；
+  **binary 安装**（`clientType: binary`，无网络、无 ccusage）跑 `tokenboard preview --source all` 全量成功。
+  口径边界：**git 安装仍会拉 ccusage**（`install-collector.mjs` 会 `pnpm install` workspace 依赖，
+  `packages/collector/package.json` 含 `ccusage`），该组合在 M7 前不作为验收对象。
+- **G2 对「完全钉死的输入」确定性一致**（2026-11-03 重定义）：parity 的基准不是「线上 ccusage 的产物」，
+  而是「**冻结语料（20.0.33 构建期快照）+ 我们服务端下发的目录 override**」这一组完全确定的输入。
+  native 对固定输入必须逐字段可复现（`snapshotHash` 一致），且与 `ccusage --offline --config <我们的配置>`
+  在同一固定夹具上一致。
+  **为什么这样重定义**：生产 claude 路径不传 `--offline`（`claudecode.go:291`），ccusage 默认联网拉
+  LiteLLM `main` 分支**当天**定价并在内嵌快照之前使用在线 models.dev——实测同一天 online
+  `totalCost=1451.10` vs offline `1349.06`，5 个模型行不同。因此「与线上 ccusage 逐字节一致」在定义上
+  不可达；可达且有意义的目标是「对确定输入的确定性产出」。
+  另设**迁移闸门**：落地前在真机上做一次 `native vs 生产线上 ccusage` 的 diff，每一处差异逐条列出并解释
+  （预期差异只落在未被我们目录覆盖的模型上，来源是「实时 main vs 冻结快照」），形成台账后 D7 才成立。
+  顺带说明：旧的「不重算历史」表述针对服务端主动重算；客户端重传覆盖是既有语义，见 §9.4.1。
 - **G3 全部来源原生**：claude-code、codex 以及 12 个工具来源（amp、droid、codebuff、hermes、goose、
   kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode）均由 Go 直接读本地数据。
 - **G4 成本引擎自足**：Auto/Calculate/Display 三种费用模式、cache creation 两档（5m/1h）、
   长上下文分档、fast/flex 乘数、`pricingOverrides` 合并（含缓存率按比例缩放）、
-  DeepSeek V4 按时段定价，全部在 Go 内完成。
+  DeepSeek V4 按时段定价（按事件时间戳查询定价的 `FindAt` 接口承载，不能只保留「当前时刻」查询），
+  全部在 Go 内完成。
 - **G5 性能量化**：基准工具对同一语料、同一窗口输出 ccusage vs native 的 wall time、max RSS、
   读取字节数；每场景 ≥5 轮取中位数；报告提交到 `docs/research/`。
 - **G6 依赖面删除**：`internal/ccusage/{acquire,package_runner,version,credentials,command,normalize,orderedjson}`
@@ -71,7 +83,7 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 
 | 组件 | 职责 |
 |------|------|
-| `internal/pricing/engine.go` | 内存 `PricingMap`（内置基线 + overrides 合并），提供 `Cost(model, usage, at)` 纯函数；含模糊键匹配、分档、乘数、时段定价 |
+| `internal/nativepricing/` | 内存 `PricingMap`（冻结语料 + 服务端 overrides 合并），提供 `Cost(c, model, usage, at, mode, fast, flex)`；含模糊键匹配、分档、乘数、时段定价（`at` 形参 S2 接入） |
 | `internal/collect/adapters/claude` | 路径发现、JSONL 流式解析、去重（结构化键）、sidechain/advisor 规则、日/会话聚合 |
 | `internal/collect/adapters/codex` | `.jsonl[.zst]` 读取、事件状态机（累积→差分、replay/compacted、service_tier）、日聚合 |
 | `internal/collect/adapters/tools/*` | 12 个工具适配器，按 ccusage 语义读取各自本地格式，产出统一 `Row` |
@@ -100,10 +112,19 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 
 ### 6.1.2 定价语料的冻结范围
 
-G2 要求成本逐字段一致，而 ccusage 的 `PricingMap` 由四层叠加：LiteLLM 构建期快照
-（`flake.lock` pin 的 rev）、内置基础费率、models.dev 快照（含 `exactOnly`/`limit.context`）、
-`fast-multiplier-overrides.json` + `flex-multiplier-overrides.json`，另有运行时
-`CCUSAGE_MODEL_ALIASES` 参与查找。**四层语料与别名语义全部在冻结范围内**，缺一层成本即分叉。
+G2 要求成本逐字段一致，而 ccusage 的 `PricingMap` 由以下层叠加（2026-11-03 逐文件核对：
+
+- **五份嵌入资产**：① LiteLLM 构建期快照（`flake.lock` pin 的 rev，经 `is_embedded_model`
+  白名单过滤 + 字段压缩 + deflate）；② `models-dev-pricing.json`；③ `models-dev-catalog-rules.json`
+  （离线运行期仍被 `is_token_priced` 读取）；④ `fast-multiplier-overrides.json`；
+  ⑤ `flex-multiplier-overrides.json`。
+- **代码内置基础费率表**（`put_builtin_pricing`，约 37 个模型 id，含 `put_builtin_glm` 的
+  cache 字段补丁）——不是 JSON 资产，但同属冻结范围。
+- **派生 pass**：`fill_long_context_rates_from_models_dev` 把 models.dev 的 `cost.tiers`
+  嫁接到 LiteLLM 平面条目上（LiteLLM 不发布 OpenAI/xAI 的长上下文价）。
+- 运行时 `CCUSAGE_MODEL_ALIASES` 环境变量参与查找；本仓库生产路径不设置它（实测为空），
+  故冻结范围为「空别名表 + 上述五资产 + 内置表 + 派生 pass」。**缺任一层成本即分叉。**
+
 TokenBoard 服务端下发的动态目录继续叠加在最高优先级（现有行为），保证新模型仍能定价。
 
 ### 6.1.3 hook 路径的双源和解
@@ -171,11 +192,24 @@ TokenBoard 服务端下发的动态目录继续叠加在最高优先级（现有
 
 ### 定价
 
-- `PricingMap::find` 三级：精确 → 模糊（`@./_`→`-` 归一、最长前缀、`exact_only` 保护、大小写敏感）；
-  时间相关定价（DeepSeek V4）。
-- override 合并：字段级；仅覆盖 input 时缓存率按比例缩放（`new = old × new_input / old_input`）。
-- 计费：cache create 默认 `1.25 × input`（1h 档按 2×）；长上下文整请求切档；
-  fast/flex 乘数；缺价模型记 0 并标记 `missingPricing`。
+- `PricingMap::find` 三级：精确 → 模糊（`normalized_pricing_key` 只把 `.` 和 `@` 换成 `-`，
+  **不换 `/` 或 `_`**；边界按非字母数字判定、最长前缀、版本后缀保护、`exact_only` 保护、大小写敏感）；
+  时间相关定价（DeepSeek V4，按事件时间戳 `FindAt`）。
+- 费率来源优先级：LiteLLM 平面条目 → 内置基础费率表（只补缺）→ models.dev 快照（只补缺）→
+  运行时 override（最高优先级）。
+- 派生默认：`cache_create = 显式值 ?? input × 1.25`；`cache_read = 显式值 ?? input × 0.1`
+  （**不是 `input`**）。models.dev 的 `cost.*` 是每百万 token，加载时 `/1e6`，其 cache write 字段名是
+  `cost.cache_write`。
+- 长上下文：阈值只来自 models.dev 的 `cost.tiers`（`tier.type == "context"`，多档取最小 `size`）。
+  有阈值 → **整请求切档**；无阈值 → 200k 边际 `tiered_cost`。`max_input_tokens`/`limit.context`
+  只是上下文窗口，不是档位阈值。
+- override 合并：字段级；缩放闸门是 `覆盖了 input && base.input > 0 && !base.cache_read_explicit`
+  —— 即只在 base 缓存价是**派生值**时才按 `new = old × new_input / old_input` 缩放；
+  LiteLLM 显式给了 cache 价的模型（sonnet、gpt-4o）不缩放。override 键名是 camelCase。
+- 乘数：Claude 路径 `cost × fast_multiplier`（仅 `speed == Fast`，不用 flex）；
+  Codex 路径按 service_tier 分桶，`flex`/`fast` 以 `× (multiplier - 1.0)` 的增量叠加。
+  乘数来源：`provider_specific_entry.{fast,flex}` 优先，其次 override 文件（`exact` + `normalized_prefix`）。
+- 缺价模型记 0 并标记 `missingPricing`。
 
 ### 12 个工具来源
 
@@ -186,11 +220,17 @@ TokenBoard 服务端下发的动态目录继续叠加在最高优先级（现有
 
 | 子项目 | 内容 | 独立可交付 |
 |--------|------|-----------|
-| S1 | `pricing/engine` + parity/bench 骨架 + 契约金样本生成器 | 是 |
+| S1 | `internal/nativepricing` + parity/bench 骨架 + 契约金样本生成器 | 是 |
 | S2 | Claude Code 适配器（最难：去重/成本/增量） | 是 |
-| S3 | Codex 适配器（差分/重放/tier） | 是 |
-| S4 | 12 工具适配器 + provider 重接线 | 是 |
+| S3 | Codex 适配器（差分/重放/tier；含 Codex 的 flex 增量乘数与 service_tier 分桶） | 是 |
+| S4 | 12 工具适配器 + provider 重接线（工作量按 2026-11-03 复核上调，见 §9.4.2） | 是 |
 | S5 | 移除获取层/捆绑/环境变量；CI 与文档收尾；性能报告 | 是 |
+
+**阻塞项（S5 前必须完成）**：在移除 ccusage 获取层之前，必须先对 claude-code、codex 与 12 个
+工具来源逐一**固化行级金样本**（ccusage 20.0.33 对固定夹具树的 `--json` 原始输出，一次性生成提交）。
+ccusage 一旦从仓库移除，金样本就永久冻结、无法再生成；没有这批金样本，后续任何语义漂移都无从发现。
+金样本生成器属 S1（见 S1 计划 Task 5），但**逐来源固化**须在各自的 S2/S3/S4 落地时同步完成，
+S5 移除前做一次总盘点确认 14 个来源齐全。
 
 ## 9. 性能测量方法
 
@@ -228,8 +268,13 @@ ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-c
 ### 9.3 测量协议
 
 - 工具：`clients/go/cmd/bench-collect`（dev-only），同进程跑 native；ccusage 侧 exec 20.0.33。
-- 指标：wall time、max RSS（`getrusage`）、读取字节数；每场景 **≥5 轮取中位数**并记最大值
+- 指标：wall time、max RSS、读取字节数；每场景 **≥5 轮取中位数**并记最大值
   （本机单轮误差可达 2×）。
+- **RSS 采集口径**：测 native 自身用 `RUSAGE_SELF`；测 ccusage **子进程**必须用
+  `RUSAGE_CHILDREN`（或 `wait4`），否则测到的是 bench 进程。`Ru_maxrss` 单位**按平台分支**：
+  darwin 是**字节**、Linux 是 **KB**（实测本机一个极简 Go 程序 `Ru_maxrss = 2,633,728` 即字节）。
+  跨平台实现必须用 `//go:build` 约束拆文件（仅改文件名不构成构建约束，同包两个 `rss_*.go`
+  会 `redeclared`）。
 - 场景（均在本机真实语料上）：
   - A 单日窗口：测「空跑成本」——进程启动 + JSON 往返占比最高。
   - B 近 30 天窗口：典型定时同步。
@@ -238,8 +283,9 @@ ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-c
   - E 冷启动到首字节（进程 spawn + 二进制加载）单独计时。
 - 诚实预期：**native 不保证单轮更快**；收益来自无进程启动、无下载、无 JSON 往返、真增量、内存可控。
   若某场景 native 反而更慢，如实记录并分析（例如 Go GC 或逐行解析差异）。
-- 交付物：`docs/research/2026-11-XX-native-vs-ccusage-benchmark.md`，含方法学、原始数据表
-  （每轮值 + 中位数 + 最大值）、结论与反例。
+- 交付物：`docs/research/2026-11-03-native-vs-ccusage-baseline.md`（S1，只有 ccusage 基线，
+  native 侧尚未实现）与后续 `docs/research/<date>-native-vs-ccusage-benchmark.md`（S2+ 落地后
+  的 native vs ccusage 对比），均含方法学、原始数据表（每轮值 + 中位数 + 最大值）、结论与反例。
 
 ## 9.4 跨项目注意事项（2026-11-03 补充）
 
@@ -292,32 +338,52 @@ credit gap 对账），并非简单工具族格式。**S4 里 copilot 单独按�
 | Codex 差分/重放偏差 | 高 | 用真实 session 文件做 parity 夹具；与现有 context_pricing 对账 |
 | 历史 cost 被重传覆盖（§9.4.1） | 中 | 首次全量前 parity 全绿；差异逐条进台账；必要时上 `correction` 标记 |
 | copilot 复杂度被低估（§9.4.2） | 中 | S4 单独排期，独立 parity 夹具 |
-| 浮点 1 ULP 分叉 | 中 | 固定运算顺序；goldens 比对 snapshotHash |
+| 浮点 1 ULP 分叉 | 中 | 固定运算顺序；**禁用 FMA 融合**（arm64 上 `a*b+c` 会融合）；goldens 用 `math.Float64bits` 位级比对 snapshotHash |
 | 定价键匹配细节 | 中 | 移植 `exact_only`/大小写/版本后缀保护；用目录样本做表驱动测试 |
 | 工具格式漂移 | 中 | 冻结 20.0.33 语义；格式变更由我们维护并补测试 |
 | 大文件内存 | 中 | 流式 + 上限；基准里记录 max RSS |
-| 二进制体积膨胀 | 低 | 四层定价语料嵌入后测体积，纳入 S1 基准指标 |
-| MIT 署名缺失 | 低 | 仓库内 `THIRD_PARTY_LICENSES`；派生源码头注明出处 |
+| 二进制体积膨胀 | 低 | 五份定价语料嵌入后测体积，纳入 S1 基准指标 |
+| MIT 署名缺失 | 低 | 仓库内 `THIRD_PARTY_NOTICES.md`；派生源码头注明出处 |
 | Windows 路径/编码 | 中 | 三平台 CI；沿用既有 path 工具 |
+
+## 10.1 回滚设计（过渡期保持 ccusage 可切换）
+
+移除获取层之前，任何阶段都必须能**一键退回 ccusage 路径**，否则一次语义偏差就会让生产同步
+停摆且无退路。规则：
+
+1. **providers 保持可切换**：`providers/claudecode`、`providers/codex`、`providers/ccusagetool`
+   在 S2/S3/S4 期间同时保留「原生」与「ccusage」两条实现，用一个内部分支开关选择
+   （编译期常量或未导出的构建变量，**不作为新的用户可见环境变量**）。切换开关只在原生路径
+   parity 全绿后默认指向原生。
+2. **获取层最后移除**：`internal/ccusage` 的三层获取（捆绑 / `TOKENBOARD_CCUSAGE_BIN` /
+   package runner）保留到 S5，且移除动作本身是独立的可回滚提交（一个 commit 只删获取，不夹带语义改动）。
+3. **每个子项目单独可回滚**：S2/S3/S4 各自合并即产出一个可回滚点；回滚到上一个 tag 时原生开关
+   退回 ccusage 分支，采集行为与当前生产一致。
+4. **口径闸门**：每个来源默认切到原生之前，`tokenboard shadow`（TS 侧仍走 ccusage）必须全绿；
+   `cmd/parity` 对固定窗口全 match；`--source all` 全量预览与 ccusage 基线差异逐条进台账
+   （§9.4.1）。任一不满足则该来源保持 ccusage 分支。
 
 ## 11. 已定的架构决策（builder 复核后锁定，可否决）
 
 | # | 决策 | 影响 |
 |---|------|------|
 | D1 | 原生适配器产出 **ccusage 报表形状的行**，由现有 normalize 路径转 Snapshot（§6.1.1） | 消费层不重写；S2/S3 只换数据生产者 |
-| D2 | 定价语料**四层全部冻结**（LiteLLM rev + 内置费率 + models.dev + fast/flex overrides）+ 别名（§6.1.2） | 体积与移植量增加，但 G2 可达 |
+| D2 | 定价语料**全部冻结**：五份嵌入资产（LiteLLM/两 models.dev 快照/两乘数表）+ 代码内置基础费率表 + 派生 pass + 空别名表（§6.1.2） | 体积与移植量增加，但 G2 可达 |
 | D3 | hook 双源和解改为**同实现内两路交叉**（增量 vs 整窗重算）（§6.1.3） | S2 需实现并测试该重算校验 |
-| D4 | oracle 分两层：行级金样本（永久冻结）+ 端到端 snapshotHash 影子双跑（§6.1.4） | 定 S1 生成器与 CI 门禁 |
+| D4 | oracle 分两层：行级金样本（永久冻结，S5 前须 14 来源齐全）+ 端到端 snapshotHash 影子双跑（§6.1.4、§8 阻塞项） | 定 S1 生成器与 CI 门禁 |
 | D5 | 12 工具适配器**全部原生**（用户 2026-11-03 决定：彻底移除） | S4 立项 |
 | D6 | TS collector 保持 legacy 至 M7，本设计不涉及 TS 侧移除 | 过渡期天然提供对照基线 |
 | D7 | 接受「重传覆盖历史 cost」为既有语义，不加新保护层；首次全量前 parity 全绿（§9.4.1） | 无需改服务端；差异逐条进台账 |
 | D8 | copilot 按「复杂来源」单独排期，不并入参数化工具族（§9.4.2） | S4 拆分与测试口径 |
+| D9 | 过渡期 ccusage 路径**保持可切换**，获取层最后移除且独立成 commit（§10.1） | 每个子项目都是可回滚点 |
 
 ## 12. 留给实施者的决定
 
 - 去重键的具体表示（建议结构化字符串键，绕开散列碰撞语义）。
-- 内嵌定价基线快照的 vendor 方式（从 ccusage 仓库的 `models-dev-pricing.json`、
-  `fast-multiplier-overrides.json`、`flex-multiplier-overrides.json`，以及按 `flake.lock`
-  rev 取的 LiteLLM 快照，校验和固定、保留 MIT 署名）。
+- 内嵌定价基线快照的 vendor 方式（**五份资产**：从 ccusage 仓库取 `models-dev-pricing.json`、
+  `models-dev-catalog-rules.json`、`fast-multiplier-overrides.json`、`flex-multiplier-overrides.json`，
+  以及按 `flake.lock` rev 取并经 `is_embedded_model` 过滤 + 字段压缩的 LiteLLM 快照；
+  校验和固定、保留 MIT 署名）。**内置基础费率表**（`put_builtin_pricing`）从
+  `pricing.rs:2015-2560` 抄成 Go 常量，不经 JSON。
 - parity/bench 工具的 CLI 形状与报告格式。
 - 12 个适配器的包布局（每工具一包 vs 单包内多文件）。
