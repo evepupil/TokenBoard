@@ -241,16 +241,63 @@ ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-c
 - 交付物：`docs/research/2026-11-XX-native-vs-ccusage-benchmark.md`，含方法学、原始数据表
   （每轮值 + 中位数 + 最大值）、结论与反例。
 
+## 9.4 跨项目注意事项（2026-11-03 补充）
+
+### 9.4.1 历史 costUsd 会被重新上传覆盖（需决策）
+
+**事实**：AGENTS.md 规定「动态定价只作用于新采集；不得自动重算历史 `costUsd`」。但服务端
+ingest 的 upsert（`apps/web/app/features/ingest/repository/upsert.ts:141-155`）在
+`snapshot_hash` 变化时用 `excluded.cost_usd` 覆盖既有行：
+
+```sql
+ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET
+  cost_usd = CASE ... ELSE excluded.cost_usd END,
+  ...
+WHERE (daily_usage.snapshot_hash IS NULL OR daily_usage.snapshot_hash <> excluded.snapshot_hash)
+```
+
+而 `snapshotHash` 的 payload **包含 `costUsd`**（`contract.go:193-222`）。因此 native 算出的
+成本只要与 ccusage 差一个字节，hash 就变，该历史行的 cost 就会被 native 重算值替换。
+
+**决策 D7（我的判断，可否决）**：**接受这个行为，不为它加新的保护层**。理由：
+
+- 这不是 native 引入的新机制——它一直是 upsert 的既有语义；任何一次客户端成本口径变化
+  （含历史上升级 ccusage、改 pricingOverrides）都会触发同样的覆盖，只是过去没有大规模发生。
+- 覆盖发生在「同一 (source, date, model) 被重新上传」时，即该行本来就处于活跃重算范围；
+  native 冻结 20.0.33 语义后，同一输入的产出是稳定的，不会来回抖动。
+- 真正的风险是**一次性批量覆盖**：native 首次全量上传会把所有可见日期的 cost 换成 native 值。
+  缓解：G2 要求首次上线前 parity 全绿（snapshotHash 逐行一致），差异必须在台账中逐条解释，
+  从而让这次覆盖是「已知且有意」的，而非静默。
+- AGENTS.md 那句「不重算历史」原本针对的是「**服务端**主动批量重算」；客户端重传覆盖是另一回事。
+  实施时同步在 AGENTS.md/文档中澄清这一区分（避免后人误读）。
+
+**替代方案（备选，若实施时判断风险过高）**：客户端在 `costUsd` 变化的行上打一个 `correction`
+标记（`correction` 字段已在 contract 里，目前只有 `codex-context-pricing` 一个合法值），
+让服务端可区分「口径修正」与「常规重传」。此方案需改 `usage-core` schema 与服务端，成本更高，
+暂不采用。
+
+### 9.4.2 copilot 的工作量显著高于其余 11 个工具来源
+
+copilot 在来源枚举里属 12 工具族（`packages/usage-core/src/schema.ts:20,39,53`；
+`contract.go:69,85`），但我们通过 `ccusage copilot daily --json` 调用它。而 ccusage 对 copilot
+走的是**完整 adapter**（OTel JSONL + `session-state/*/events.jsonl` 粗粒度信用快照 +
+credit gap 对账），并非简单工具族格式。**S4 里 copilot 单独按「复杂来源」排期与测试**，
+不得按参数化工具族一刀切。
+
 ## 10. 风险与缓解
 
 | 风险 | 等级 | 缓解 |
 |------|------|------|
 | Claude 去重语义偏差 | 高 | 结构化键 + 逐条 golden 用例（sidechain/gateway/重复写） |
 | Codex 差分/重放偏差 | 高 | 用真实 session 文件做 parity 夹具；与现有 context_pricing 对账 |
+| 历史 cost 被重传覆盖（§9.4.1） | 中 | 首次全量前 parity 全绿；差异逐条进台账；必要时上 `correction` 标记 |
+| copilot 复杂度被低估（§9.4.2） | 中 | S4 单独排期，独立 parity 夹具 |
 | 浮点 1 ULP 分叉 | 中 | 固定运算顺序；goldens 比对 snapshotHash |
 | 定价键匹配细节 | 中 | 移植 `exact_only`/大小写/版本后缀保护；用目录样本做表驱动测试 |
 | 工具格式漂移 | 中 | 冻结 20.0.33 语义；格式变更由我们维护并补测试 |
 | 大文件内存 | 中 | 流式 + 上限；基准里记录 max RSS |
+| 二进制体积膨胀 | 低 | 四层定价语料嵌入后测体积，纳入 S1 基准指标 |
+| MIT 署名缺失 | 低 | 仓库内 `THIRD_PARTY_LICENSES`；派生源码头注明出处 |
 | Windows 路径/编码 | 中 | 三平台 CI；沿用既有 path 工具 |
 
 ## 11. 已定的架构决策（builder 复核后锁定，可否决）
@@ -263,6 +310,8 @@ ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-c
 | D4 | oracle 分两层：行级金样本（永久冻结）+ 端到端 snapshotHash 影子双跑（§6.1.4） | 定 S1 生成器与 CI 门禁 |
 | D5 | 12 工具适配器**全部原生**（用户 2026-11-03 决定：彻底移除） | S4 立项 |
 | D6 | TS collector 保持 legacy 至 M7，本设计不涉及 TS 侧移除 | 过渡期天然提供对照基线 |
+| D7 | 接受「重传覆盖历史 cost」为既有语义，不加新保护层；首次全量前 parity 全绿（§9.4.1） | 无需改服务端；差异逐条进台账 |
+| D8 | copilot 按「复杂来源」单独排期，不并入参数化工具族（§9.4.2） | S4 拆分与测试口径 |
 
 ## 12. 留给实施者的决定
 
