@@ -70,26 +70,87 @@ type CorpusModel struct {
 	// published that cache rate or it was derived from Input. User overrides of
 	// the input rate scale only the derived ones.
 	CacheReadExplicit, CacheCreateExplicit bool
-	// ExactOnly marks a separately priced tier that may only answer a lookup
-	// naming it, never a fuzzy prefix match.
+	// ExactOnly marks a separately priced tier.
+	//
+	// The value is the union of both embedded snapshots' exact-only flags: when
+	// a key appears in both maps and models.dev marks it exactOnly, this flag is
+	// set even though the LiteLLM entry carries the rates (50 such keys). That
+	// matches ccusage's is_exact_only_lookup_with_fallback, which gates on
+	// ExactOnlyKeys::contains_any_spelling across both maps.
+	//
+	// This is a *request-name* gate, not a candidate filter. ccusage asks it
+	// about the name being looked up (is_exact_only_lookup_with_fallback), and
+	// only then decides whether the primary fuzzy stage may run at all.
+	//
+	// The fuzzy scans filter candidates separately, each by its own stage's
+	// exact-only set, and those sets differ:
+	//   - the primary (LiteLLM + builtin) set is EMPTY: exact_only is only ever
+	//     populated by the models.dev load path, which fills the *separate*
+	//     models.dev map. So a primary entry is never filtered out as a fuzzy
+	//     candidate, even when this union flag is true (gpt-5.6-luna is the
+	//     case that matters - it is exact-only in models.dev yet still answers
+	//     a fuzzy primary lookup).
+	//   - the models.dev stage filters candidates with ExactOnly set, i.e.
+	//     Source == SourceModelsDev && ExactOnly.
+	// Find must implement it that way; filtering primary candidates by this
+	// flag would make gpt-5.6-luna unreachable and change its rate.
 	ExactOnly bool
-	// fromModelsDev records that this model came from the models.dev fallback
-	// rather than the primary LiteLLM table. Two later steps need it:
-	//   - fuzzy lookup: ccusage keeps the two tables apart and only consults
-	//     models.dev after the primary table misses, so a primary prefix match
-	//     must win over a longer models.dev one.
-	//   - builtin rates (Task 3): ccusage's put_builtin_entry fills gaps in the
-	//     *primary* table only, so a builtin replaces a models.dev entry but
-	//     never a LiteLLM one - and the replacement must then get the
-	//     long-context graft re-run over it.
-	fromModelsDev bool
+	// Source records which embedded snapshot provided this model. The finder
+	// uses it to implement ccusage's two-stage scan: a primary (SourceLiteLLM,
+	// SourceBuiltin) fuzzy match must win over any models.dev match, even a
+	// longer one, because ccusage keeps the two tables in separate maps and
+	// consults models.dev only after the primary map misses entirely.
+	Source ModelSource
 }
 
+// ModelSource identifies which embedded snapshot a CorpusModel came from.
+type ModelSource int
+
+const (
+	// SourceLiteLLM is an entry from the primary LiteLLM snapshot.
+	SourceLiteLLM ModelSource = iota
+	// SourceModelsDev is an entry from the models.dev fallback snapshot, which
+	// ccusage consults only when the primary table does not answer at all.
+	SourceModelsDev
+	// SourceBuiltin is a code builtin rate table entry (Task 3's
+	// put_builtin_entry), which ccusage inserts into the primary map only.
+	SourceBuiltin
+)
+
 // Corpus is the frozen pricing data.
+//
+// Models holds both stages in one map, keyed by the pricing key, with
+// CorpusModel.Source recording which stage each entry came from. ccusage keeps
+// the stages in two separate maps and find_with_fallbacks (pricing.rs:1404-1444)
+// walks them in a fixed order, so Find must reproduce that order from Source
+// rather than from one global scan:
+//
+//  1. exact primary hit (SourceLiteLLM / SourceBuiltin);
+//  2. exact hit for a hardcoded alias of the request in the same stages;
+//  3. primary fuzzy (normalized longest prefix), unless the request name is
+//     exact-only (Corpus.ExactOnlyNames) or an alias of one;
+//  4. exact models.dev hit (SourceModelsDev);
+//  5. models.dev fuzzy.
+//
+// Stage 3 wins over stages 4-5 even when the models.dev key is the longer or
+// more exact match, so a lookup that merely scans Models for the best match
+// diverges: "databricks-gpt-5-6-luna" must bill at gpt-5.6-luna's primary rate
+// (2e-7) rather than at the models.dev row for that key (1e-6).
 type Corpus struct {
-	// Models maps a pricing key (LiteLLM model id or models.dev model id) to its
-	// rates. Primary entries come first; models.dev fills the gaps.
+	// Models maps a pricing key (LiteLLM model id, models.dev model id, or a
+	// builtin id) to its rates. Every key is present exactly once; a key priced
+	// by an earlier stage keeps that stage's rates and Source.
 	Models map[string]CorpusModel
+	// ExactOnlyNames holds every spelling that names an exact-only model, keyed
+	// by normalizePricingKey of the id. It is ccusage's ExactOnlyKeys union
+	// across both embedded maps (is_exact_only_lookup_with_fallback): a request
+	// name is exact-only when ExactOnlyNames[normalizePricingKey(name)] is true.
+	//
+	// Find must consult this for the requested name before the fuzzy stages.
+	// This is deliberately separate from CorpusModel.ExactOnly because a request
+	// can name an exact-only id through a `.`/`@`/`-` spelling that is not a key
+	// in Models at all (e.g. "claude-opus-5.5" for the key "claude-opus-5-5").
+	ExactOnlyNames map[string]bool
 	// ContextLimits holds max_input_tokens (LiteLLM) / limit.context
 	// (models.dev) in tokens. It is a context window, not a billing threshold.
 	ContextLimits map[string]int64
@@ -132,11 +193,28 @@ func loadCorpus(fsys fs.FS) (Corpus, error) {
 	contextLimits := map[string]int64{}
 	litellmCount := loadLitellmEntries(models, contextLimits, litellm, fast, flex)
 	dev.mergeInto(models, contextLimits, fast, flex)
+	// C2: union of both maps' exact-only flags. When a key exists in both maps
+	// and models.dev marks it exactOnly, the merged entry must keep the flag
+	// even though the rates are from LiteLLM. ccusage's is_exact_only_lookup
+	// gates on ExactOnlyKeys::contains_any_spelling across both maps.
+	// The exact-only flag is the union of both maps. models.dev publishes it as
+	// a field; on a key collision the LiteLLM entry carries the rates, so the
+	// flag has to be stamped onto that entry or the union is lost (50 keys).
+	for model, entry := range models {
+		if !dev.exactOnlyNames[normalizePricingKey(model)] {
+			continue
+		}
+		if !entry.ExactOnly {
+			entry.ExactOnly = true
+			models[model] = entry
+		}
+	}
 	applyLongContextRates(models, dev.models)
 
 	return Corpus{
-		Models:        models,
-		ContextLimits: contextLimits,
+		Models:         models,
+		ExactOnlyNames: dev.exactOnlyNames,
+		ContextLimits:  contextLimits,
 		Counts: map[string]int{
 			countLitellm:   litellmCount,
 			countModelsDev: len(dev.models),
@@ -302,6 +380,7 @@ func loadLitellmEntries(
 			CacheCreateExplicit: entry.CacheCreate != nil,
 			CacheReadExplicit:   entry.CacheRead != nil,
 			InputAbove:          entry.InputAbove,
+			Source:              SourceLiteLLM,
 			OutputAbove:         entry.OutputAbove,
 			CacheCreateAbove:    entry.CCAbove,
 			CacheReadAbove:      entry.CRAbove,
@@ -534,6 +613,9 @@ func perToken(perMillion *float64) *float64 {
 type modelsDevSnapshot struct {
 	models map[string]CorpusModel
 	limits map[string]int64
+	// exactOnlyNames is every normalized spelling that names an exact-only
+	// models.dev entry, the union ccusage's exact-only gate reads.
+	exactOnlyNames map[string]bool
 	// order keeps the merge independent of hash iteration order.
 	order []string
 }
@@ -546,7 +628,11 @@ func readModelsDev(fsys fs.FS, rules catalogRules) (modelsDevSnapshot, error) {
 	if len(raw) == 0 {
 		return modelsDevSnapshot{}, fmt.Errorf("nativepricing: %s holds no models", modelsDevDataFile)
 	}
-	snapshot := modelsDevSnapshot{models: make(map[string]CorpusModel, len(raw)), limits: map[string]int64{}}
+	snapshot := modelsDevSnapshot{
+		models:         make(map[string]CorpusModel, len(raw)),
+		limits:         map[string]int64{},
+		exactOnlyNames: map[string]bool{},
+	}
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
 		keys = append(keys, key)
@@ -572,6 +658,9 @@ func readModelsDev(fsys fs.FS, rules catalogRules) (modelsDevSnapshot, error) {
 		}
 		snapshot.models[modelID] = pricing
 		snapshot.order = append(snapshot.order, modelID)
+		if pricing.ExactOnly {
+			snapshot.exactOnlyNames[normalizePricingKey(modelID)] = true
+		}
 		if entry.Limit != nil && entry.Limit.Context != nil {
 			snapshot.limits[modelID] = *entry.Limit.Context
 		}
@@ -629,7 +718,7 @@ func (s modelsDevSnapshot) mergeInto(
 		}
 		entry.FastMultiplier = fast.multiplierFor(model)
 		entry.FlexMultiplier = flex.multiplierFor(model)
-		entry.fromModelsDev = true
+		entry.Source = SourceModelsDev
 		models[model] = entry
 		if limit, ok := s.limits[model]; ok {
 			if _, primary := contextLimits[model]; !primary {
@@ -647,6 +736,9 @@ func (s modelsDevSnapshot) mergeInto(
 // actually carry a threshold.
 func applyLongContextRates(models map[string]CorpusModel, dev map[string]CorpusModel) {
 	for model, pricing := range models {
+		if pricing.Source == SourceModelsDev {
+			continue
+		}
 		if pricing.InputAbove != nil || pricing.OutputAbove != nil || pricing.CacheCreateAbove != nil || pricing.CacheReadAbove != nil {
 			continue
 		}

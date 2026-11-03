@@ -20,7 +20,7 @@
 // what a digest mismatch asks for when a pin has to be re-recorded on purpose.
 
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -282,7 +282,18 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// isMainModule compares canonical paths so the guard works through symlinks
+// (plain import.meta.url === pathToFileURL(process.argv[1]).href exits 0 silently).
+function isMainModule(importMetaUrl, argv1 = process.argv[1]) {
+  if (!argv1) return false
+  try {
+    return realpathSync(argv1) === fileURLToPath(importMetaUrl)
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule(import.meta.url)) {
   main(process.argv.slice(2)).catch((error) => {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1

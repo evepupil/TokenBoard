@@ -323,14 +323,150 @@ func TestCorpusGraftsLongContextRatesFromModelsDev(t *testing.T) {
 		t.Fatal("a LiteLLM entry with its own above-200k rates must not gain a models.dev threshold")
 	}
 
-	// The pass also reaches models.dev fallback entries: a date-pinned spelling
-	// of a model whose bare id carries the band shares it.
+	// The pass never reaches models.dev entries: ccusage runs it on the primary
+	// map before models.dev becomes a fallback, so a models.dev-only key with no
+	// tier of its own keeps none even when a related id carries one.
 	datedFallback, ok := corpus.Models["anthropic/claude-sonnet-4-20250514"]
 	if !ok {
 		t.Fatal("anthropic/claude-sonnet-4-20250514 is not priced")
 	}
-	if !datedFallback.fromModelsDev || datedFallback.LongContextThreshold == nil || *datedFallback.LongContextThreshold != 200_000 {
-		t.Fatalf("anthropic/claude-sonnet-4-20250514 must inherit the 200000 band of claude-sonnet-4, got %v", datedFallback.LongContextThreshold)
+	if datedFallback.Source != SourceModelsDev {
+		t.Fatal("anthropic/claude-sonnet-4-20250514 must come from the models.dev stage")
+	}
+	if datedFallback.LongContextThreshold != nil {
+		t.Fatalf("the graft must skip models.dev entries; got threshold %d", *datedFallback.LongContextThreshold)
+	}
+	// A models.dev entry that publishes its own tier keeps the threshold it was
+	// loaded with: gemini-2.5-pro bands itself at 200000.
+	gemini := corpus.Models["gemini-2.5-pro"]
+	if gemini.Source != SourceModelsDev || gemini.LongContextThreshold == nil || *gemini.LongContextThreshold != 200_000 {
+		t.Fatalf("gemini-2.5-pro must keep its own models.dev band, got %v", gemini.LongContextThreshold)
+	}
+}
+
+// TestCorpusRecordsProvenanceForTheTwoStageScan pins the facts Task 2's Find
+// needs: ccusage consults the LiteLLM table first and only falls back to
+// models.dev when the primary table misses entirely, so a models.dev-only key
+// must be marked SourceModelsDev even though its rates are already merged in.
+func TestCorpusRecordsProvenanceForTheTwoStageScan(t *testing.T) {
+	corpus := mustLoadCorpus(t)
+
+	// models.dev-only: ccusage would answer a request for this exact key from the
+	// models.dev stage. Its rates differ from gpt-5.6-luna's on purpose (5x), which
+	// is what makes a single global exact-first scan diverge.
+	fallback, ok := corpus.Models["databricks-gpt-5-6-luna"]
+	if !ok {
+		t.Fatal("databricks-gpt-5-6-luna is not priced")
+	}
+	if fallback.Source != SourceModelsDev {
+		t.Fatalf("databricks-gpt-5-6-luna Source = %v, want SourceModelsDev", fallback.Source)
+	}
+	luna := corpus.Models["gpt-5.6-luna"]
+	if luna.Source != SourceLiteLLM {
+		t.Fatalf("gpt-5.6-luna Source = %v, want SourceLiteLLM", luna.Source)
+	}
+	approx(t, luna.Input, 2e-7, "gpt-5.6-luna input (LiteLLM)")
+	approx(t, fallback.Input, 1e-6, "databricks-gpt-5-6-luna input (models.dev)")
+
+	// A key both snapshots price keeps the primary source, never the fallback.
+	if got := corpus.Models["claude-opus-4-6"].Source; got != SourceLiteLLM {
+		t.Fatalf("claude-opus-4-6 Source = %v, want SourceLiteLLM", got)
+	}
+
+	// The corpus exposes the exact-only spellings so the finder can gate a
+	// request before any fuzzy scan (ccusage's contains_any_spelling).
+	if !corpus.ExactOnlyNames[normalizePricingKey("claude-opus-5-5")] {
+		t.Fatal("ExactOnlyNames must contain the normalized spelling of an exact-only id")
+	}
+	if corpus.ExactOnlyNames[normalizePricingKey("claude-opus-4-6")] {
+		t.Fatal("claude-opus-4-6 is not exact-only")
+	}
+}
+
+// TestCorpusExactOnlyIsTheUnionOfBothMaps pins C2: ccusage's exact-only gate
+// reads both maps, so a models.dev exactOnly flag must survive on a key whose
+// rates come from LiteLLM.
+// TestCorpusCarriesWhatTheTwoStageScanNeeds pins the reviewer's C1 divergence
+// examples at the data level, without implementing Find (Task 2 owns it): the
+// exact key ccusage's staging would answer with, and the fact that the other
+// key is a reachable models.dev entry with a different rate. A single global
+// "best match" scan has no way to prefer the first.
+func TestCorpusCarriesWhatTheTwoStageScanNeeds(t *testing.T) {
+	corpus := mustLoadCorpus(t)
+
+	// ccusage's primary fuzzy stage answers this request from gpt-5.6-luna,
+	// because only the primary map's fuzzy scan runs before models.dev is
+	// consulted - and that stage does not filter candidates by the union
+	// ExactOnly flag.
+	luna := corpus.Models["gpt-5.6-luna"]
+	if luna.Source != SourceLiteLLM {
+		t.Fatalf("gpt-5.6-luna Source = %v, want SourceLiteLLM", luna.Source)
+	}
+	approx(t, luna.Input, 2e-7, "gpt-5.6-luna input")
+	approx(t, luna.Output, 1.2e-6, "gpt-5.6-luna output")
+	if !luna.ExactOnly {
+		t.Fatal("gpt-5.6-luna is exactOnly in models.dev; the union flag must survive on the LiteLLM entry")
+	}
+	// The models.dev row for the same spelling is 5x and must stay reachable only
+	// through the fallback stage.
+	fallback, ok := corpus.Models["databricks-gpt-5-6-luna"]
+	if !ok || fallback.Source != SourceModelsDev {
+		t.Fatal("databricks-gpt-5-6-luna must be a models.dev-stage key")
+	}
+	approx(t, fallback.Input, 1e-6, "databricks-gpt-5-6-luna input")
+
+	// The second reviewer example: the request spelling is not exact-only, so a
+	// staging finder reaches claude-opus-5-5 through the primary map, while the
+	// models.dev row for the exact spelling is a separate 2x key.
+	fast, ok := corpus.Models["anthropic/claude-opus-5.5-fast"]
+	if !ok || fast.Source != SourceModelsDev {
+		t.Fatal("anthropic/claude-opus-5.5-fast must be a models.dev-stage key")
+	}
+	approx(t, fast.Input, 8e-6, "anthropic/claude-opus-5.5-fast input")
+	if corpus.ExactOnlyNames[normalizePricingKey("anthropic/claude-opus-5.5-fast")] {
+		t.Fatal("this request spelling is not exact-only, so the primary fuzzy stage must run")
+	}
+	opus := corpus.Models["claude-opus-5-5"]
+	if opus.Source != SourceLiteLLM {
+		t.Fatalf("claude-opus-5-5 Source = %v, want SourceLiteLLM", opus.Source)
+	}
+	approx(t, opus.Input, 4e-6, "claude-opus-5-5 input")
+}
+
+func TestCorpusExactOnlyIsTheUnionOfBothMaps(t *testing.T) {
+	corpus := mustLoadCorpus(t)
+	// These exist in both snapshots and are exactOnly in models.dev; the LiteLLM
+	// entry supplies the rates, so the flag has to be stamped onto it.
+	for _, model := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "gpt-3.5-turbo-0125", "gpt-4-turbo"} {
+		entry, ok := corpus.Models[model]
+		if !ok {
+			t.Fatalf("%s is not priced", model)
+		}
+		if entry.Source != SourceLiteLLM {
+			t.Errorf("%s Source = %v, want SourceLiteLLM", model, entry.Source)
+		}
+		if !entry.ExactOnly {
+			t.Errorf("%s is exactOnly in models.dev; the union must keep the flag", model)
+		}
+	}
+	// Count both halves of the union so a flattened flag cannot hide a gap.
+	modelsDevOnly, collided := 0, 0
+	for model, entry := range corpus.Models {
+		if !entry.ExactOnly {
+			continue
+		}
+		if entry.Source == SourceLiteLLM {
+			collided++
+		} else {
+			modelsDevOnly++
+		}
+		_ = model
+	}
+	if collided != 50 {
+		t.Fatalf("exact-only keys carried by LiteLLM = %d, want 50", collided)
+	}
+	if got := modelsDevOnly + collided; got != 639 {
+		t.Fatalf("exact-only union = %d, want 639", got)
 	}
 }
 
@@ -345,7 +481,7 @@ func TestCorpusPrefersThePrimaryTableOnCollisions(t *testing.T) {
 	}
 	approx(t, entry.Input, 2e-6, "claude-sonnet-5 input (LiteLLM)")
 	approx(t, entry.Output, 1e-5, "claude-sonnet-5 output (LiteLLM)")
-	if entry.fromModelsDev {
+	if entry.Source != SourceLiteLLM {
 		t.Fatal("claude-sonnet-5 exists in LiteLLM; the entry must come from the primary table")
 	}
 	if got, want := corpus.Counts[countLitellm], wantLitellmCount; got != want {
@@ -365,7 +501,7 @@ func TestCorpusMarksModelsDevExactOnlyEntries(t *testing.T) {
 	if !exact.ExactOnly {
 		t.Fatal("GLM-4.6-Derestricted-v5 is exactOnly in models.dev")
 	}
-	if !exact.fromModelsDev {
+	if exact.Source != SourceModelsDev {
 		t.Fatal("GLM-4.6-Derestricted-v5 is a models.dev fallback entry")
 	}
 	if plain := corpus.Models["@cf/aisingapore/gemma-sea-lion-v4-27b-it"]; plain.ExactOnly {
