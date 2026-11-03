@@ -532,6 +532,10 @@ JSONL 夹具树运行
 `gemini-2.5-pro`，其 models.dev 有 `cost.tiers`）、1h cache creation、fast 乘数、未知模型、
 **免费模型**（cost 全 0）。**不要**造「272k custom threshold」夹具——ccusage 20.0.33 的
 Above200k 只在 `threshold==200000` 时发出，且 `max_input_tokens` 不是档位阈值。
+**必须加一个 `gpt-5.codex`（点号拼写）探针**：它是 Task 1 合并表无法表达的已知分歧
+（该 id 两表都有且都是 exact-only，ccusage 的 `id_spelled_by` 走 models.dev 费率
+`cache_read=1.3e-7`，合并表返回主表 `1.25e-7`）。金样本要么如实记录这条差异并在测试里
+显式排除（附注释与出处），要么在 Step 5 回头改 Task 1 的数据模型——不能让这道闸门无声漏过。
 
 - [ ] **Step 2: 生成金样本**
 
