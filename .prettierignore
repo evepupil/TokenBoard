@@ -2,3 +2,10 @@
 # canonicalize step (stable key order, fixed indentation). Reformatting them
 # here would make every later `check-deps.sh` run report drift.
 clients/go/testdata/ccusage-golden/
+
+# The frozen pricing corpus embedded by clients/go/internal/nativepricing.
+# `fetch-native-pricing.mjs` pins the sha256 of every file here and
+# `fetch-native-pricing.test.mjs` re-checks it, so reflowing these files would
+# fail that guard; `litellm.json` is also written with a fixed canonical layout
+# and its digest is recorded in the generator.
+clients/go/internal/nativepricing/data/
