@@ -247,8 +247,9 @@ type CorpusModel struct {
 }
 
 type Corpus struct {
-    Models map[string]CorpusModel
-    Counts map[string]int          // 每来源条数，供测试钉住
+    Models        map[string]CorpusModel
+    ContextLimits map[string]int64   // maxInputTokens / limit.context，只作窗口，不当档位阈值
+    Counts        map[string]int          // 每来源条数，供测试钉住
 }
 
 func LoadEmbeddedCorpus() (Corpus, error)
@@ -353,7 +354,7 @@ git commit -m "feat(nativepricing): add the three-level pricing lookup and alias
 
 **Interfaces:**
 - Consumes: `CorpusModel`
-- Produces: `type Usage struct { Input, Output, CacheCreate5m, CacheCreate1h, CacheRead int64 }`；
+- Produces: `type Usage struct { Input, Output, CacheCreate5m, CacheCreate1h, CacheRead int64; ReportedCost *float64 }`；
   `func Cost(c Corpus, model string, u Usage, at time.Time, mode CostMode, fast, flex bool) (cost float64, missingPricing bool)`；
   `type CostMode int`（`ModeAuto`/`ModeCalculate`/`ModeDisplay`）；
   `func CostFromPricing(u Usage, p CorpusModel, fast bool) float64`（无副作用的核心公式，
