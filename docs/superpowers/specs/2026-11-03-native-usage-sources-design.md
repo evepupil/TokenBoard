@@ -75,6 +75,49 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 | `internal/collect/adapters/tools/*` | 12 个工具适配器，按 ccusage 语义读取各自本地格式，产出统一 `Row` |
 | `internal/collect/adapters/agg` | 共享聚合：`Row` → `contract.Snapshot`（timezone 归属、sessionCount、collectedAt） |
 
+### 6.1.1 适配器的产出边界（2026-11-03 决策，builder 复核后锁定）
+
+**原生适配器产出「ccusage 报表形状」的行，不直接产出 `contract.Snapshot`。**
+
+理由与影响：
+
+- `internal/ccusage/normalize.go`（699 行）被 claudecode / codex / ccusagetool 三个 provider 共用；
+  `providers/codex` 共 28,716 行，其中 `provider_scope.go`、`session_scope.go`、`attribution_cache.go`、
+  `subagent_usage*.go`、`hook_profiles.go` 全部以 ccusage 的 **session 报表行**为输入
+  （`ccusage.SessionRows`、`ReadSessionFileRow` 的 `directory`/`sessionFile`/`sessionId`、
+  `ReadCcusageSessionAttribution`、home index）。连已自主的 Codex context-pricing 也经由
+  `canonicalModelsByScopedFileFromSessionRows` 依赖这批行。
+- 若改为直接产出 Snapshot，上述消费层全部要重写，S3 从「写解析器」膨胀为「重写 28K 行消费层」，
+  且 G2 的比对基准失去参照。
+- 因此原生适配器的契约是：**与 ccusage 20.0.33 的 `--json` 报表行同形状**
+  （Claude/工具族：`daily[]` + `sessions[]` + `modelBreakdowns[]`；
+  Codex：`daily[]` 的 `models` map 形状 + session 行的 `directory`/`sessionFile`/`sessionId`/
+  `lastActivity`/`modelBreakdowns`），由现有 normalize 路径转为 Snapshot。
+- 后果：pro-rata 分摊、session 归属、日期语法容错等 normalize 语义**原样保留**，S2/S3 只换数据生产者；
+  §5 的「如无必要不改会计口径」自然成立。
+
+### 6.1.2 定价语料的冻结范围
+
+G2 要求成本逐字段一致，而 ccusage 的 `PricingMap` 由四层叠加：LiteLLM 构建期快照
+（`flake.lock` pin 的 rev）、内置基础费率、models.dev 快照（含 `exactOnly`/`limit.context`）、
+`fast-multiplier-overrides.json` + `flex-multiplier-overrides.json`，另有运行时
+`CCUSAGE_MODEL_ALIASES` 参与查找。**四层语料与别名语义全部在冻结范围内**，缺一层成本即分叉。
+TokenBoard 服务端下发的动态目录继续叠加在最高优先级（现有行为），保证新模型仍能定价。
+
+### 6.1.3 hook 路径的双源和解
+
+现状是 fail-closed 的独立交叉校验：hook 自解析得到窗口 → ccusage 取同窗口报表 →
+`AssertHookReconciliationSnapshots` 断言覆盖一致。原生实现后不再有第二个外部数据源，
+改为**同实现内的两路交叉**：增量解析结果 vs 对同一日期窗口做整窗重算的结果，覆盖的
+`(date, model)` 必须一致，否则 fail-closed。语义等价、校验强度不变，但必须在 S2 中显式实现与测试。
+
+### 6.1.4 对照基准（oracle）的层级
+
+1. **行级金样本**：ccusage 20.0.33 对固定夹具树产出的原始 `--json` 行，一次性生成并提交，
+   CI 只跑 native 比对——ccusage 从仓库移除后金样本永久冻结，演化由人工审查提交。
+2. **端到端金样本**：TS collector（M7 前仍用 ccusage）产出的 snapshotHash，用于 Go native vs TS 的
+   影子双跑，作为第二道校验。
+
 ### 6.2 复用（不改接口）
 
 - `sessioncursor`（增量扫描/cursor/pending）、`sessionwalk`/`sessionscan`（有界遍历）、
@@ -150,10 +193,19 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 ## 9. 性能测量方法
 
 - 工具：`clients/go/cmd/bench-collect`（dev-only），同一进程内跑 native；ccusage 侧 exec 20.0.33。
-- 指标：wall time、max RSS（`getrusage`）、读取字节数；每场景 ≥5 轮，取中位数与最大值。
-- 场景：S1 近 3 天窗口；S2 2026-01-01 至今；S3 全量；S4 hook 增量（cursor 命中）。
-- 诚实预期：Rust 与 Go 解析吞吐相当；native 的收益主要来自**无进程启动、无 JSON 往返、
-  增量扫描、内存上限可控**。若某场景 native 反而更慢，如实记录并分析。
+- 指标：wall time、max RSS（`getrusage`）、读取字节数；每个场景 **≥5 轮取中位数**并记最大值
+  （本机单轮误差可达 2×，见既有经验）。
+- 场景（均在本机真实语料上）：
+  - A 单日窗口（`--since/--until` 收窄到 1 天）：测「空跑成本」——进程启动 + JSON 往返占比最高的场景。
+  - B 近 30 天窗口：典型定时同步。
+  - C 全量（无 `--since`）：测吞吐与峰值内存。
+  - D hook 增量（cursor 命中，仅少量文件变更）：native 增量 vs ccusage 全窗口。
+  - E 冷启动到首字节（进程 spawn + 二进制加载）单独计时。
+- 诚实预期：Rust 与 Go 的解析吞吐相当，**native 不保证单轮更快**。预期收益来自
+  「无进程启动、无 `npx`/下载、无 JSON 序列化往返、可做真正的增量扫描、峰值内存可控」。
+  若某场景 native 反而更慢，如实记录并分析原因（例如 Go 的 GC 或正则差异）。
+- 交付物：`docs/research/2026-11-XX-native-vs-ccusage-benchmark.md`，含方法学、原始数据表
+  （每轮值 + 中位数 + 最大值）、结论与反例。
 
 ## 10. 风险与缓解
 
@@ -167,10 +219,22 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
 | 大文件内存 | 中 | 流式 + 上限；基准里记录 max RSS |
 | Windows 路径/编码 | 中 | 三平台 CI；沿用既有 path 工具 |
 
-## 11. 留给实施者的决定
+## 11. 已定的架构决策（builder 复核后锁定，可否决）
+
+| # | 决策 | 影响 |
+|---|------|------|
+| D1 | 原生适配器产出 **ccusage 报表形状的行**，由现有 normalize 路径转 Snapshot（§6.1.1） | 消费层不重写；S2/S3 只换数据生产者 |
+| D2 | 定价语料**四层全部冻结**（LiteLLM rev + 内置费率 + models.dev + fast/flex overrides）+ 别名（§6.1.2） | 体积与移植量增加，但 G2 可达 |
+| D3 | hook 双源和解改为**同实现内两路交叉**（增量 vs 整窗重算）（§6.1.3） | S2 需实现并测试该重算校验 |
+| D4 | oracle 分两层：行级金样本（永久冻结）+ 端到端 snapshotHash 影子双跑（§6.1.4） | 定 S1 生成器与 CI 门禁 |
+| D5 | 12 工具适配器**全部原生**（用户 2026-11-03 决定：彻底移除） | S4 立项 |
+| D6 | TS collector 保持 legacy 至 M7，本设计不涉及 TS 侧移除 | 过渡期天然提供对照基线 |
+
+## 12. 留给实施者的决定
 
 - 去重键的具体表示（建议结构化字符串键，绕开散列碰撞语义）。
-- 内嵌定价基线快照的 vendor 方式（从 ccusage 仓库的 `models-dev-pricing.json` +
-  生成脚本拉取的 LiteLLM 快照，校验和固定）。
+- 内嵌定价基线快照的 vendor 方式（从 ccusage 仓库的 `models-dev-pricing.json`、
+  `fast-multiplier-overrides.json`、`flex-multiplier-overrides.json`，以及按 `flake.lock`
+  rev 取的 LiteLLM 快照，校验和固定、保留 MIT 署名）。
 - parity/bench 工具的 CLI 形状与报告格式。
 - 12 个适配器的包布局（每工具一包 vs 单包内多文件）。
