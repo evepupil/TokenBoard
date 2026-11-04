@@ -9,12 +9,15 @@ import "testing"
 // data.
 //
 // Like loadCorpus, a models.dev key the primary table already prices keeps the
-// primary entry, and every models.dev exact-only id lands in ExactOnlyNames.
+// primary entry, and ExactOnlyNames is the union of both stages' exact-only ids.
 func stagedCorpus(primary, modelsDev map[string]CorpusModel) Corpus {
 	models := make(map[string]CorpusModel, len(primary)+len(modelsDev))
 	exactOnlyNames := map[string]bool{}
 	for model, pricing := range primary {
 		models[model] = pricing
+		if pricing.ExactOnly {
+			exactOnlyNames[normalizePricingKey(model)] = true
+		}
 	}
 	for model, pricing := range modelsDev {
 		if pricing.ExactOnly {
@@ -36,6 +39,34 @@ func mustFind(t *testing.T, corpus Corpus, model string) CorpusModel {
 		t.Fatalf("Find(%q) missed, want a priced model", model)
 	}
 	return pricing
+}
+
+// TestStagedCorpus_stampsPrimaryExactOnly pins the helper's union semantics.
+// loadCorpus fills ExactOnlyNames from BOTH stages - the models.dev index and
+// the primary entries the union stamping flags - so a staged corpus has to do
+// the same, or a hand-built test could exercise a looser gate than the real
+// corpus has.
+func TestStagedCorpus_stampsPrimaryExactOnly(t *testing.T) {
+	corpus := stagedCorpus(map[string]CorpusModel{
+		"gpt-5.2-codex": {Input: 1.75e-6, ExactOnly: true},
+	}, nil)
+
+	if !corpus.ExactOnlyNames[normalizePricingKey("gpt-5.2-codex")] {
+		t.Fatal("stagedCorpus dropped a primary entry's ExactOnly flag; loadCorpus stamps the union of both stages")
+	}
+	// The gate is keyed by pricing key, so the canonical spelling and every
+	// '.'/'@' respelling of it are gated together.
+	for _, spelling := range []string{"gpt-5.2-codex", "gpt.5@2-codex", "gpt-5-2@codex"} {
+		if !corpus.isExactOnlyLookup(spelling) {
+			t.Errorf("isExactOnlyLookup(%q) = false, want true for an exact-only primary entry", spelling)
+		}
+	}
+
+	// An unflagged primary entry is not in the index.
+	plain := stagedCorpus(map[string]CorpusModel{"gpt-5": {Input: 1e-6}}, nil)
+	if plain.ExactOnlyNames[normalizePricingKey("gpt-5")] {
+		t.Error("a primary entry without ExactOnly must not be added to ExactOnlyNames")
+	}
 }
 
 func TestFind_prefersAnExactMatch(t *testing.T) {
@@ -180,8 +211,12 @@ func TestFind_resolvesHardcodedAliases(t *testing.T) {
 func TestFind_stripsDateSuffixBeforeTierLookup(t *testing.T) {
 	corpus := mustLoadCorpus(t)
 
-	// A dated request shares the undated model's rates, which is what
-	// modelWithoutDateSuffix exists for on the long-context and multiplier side.
+	// Neither dated spelling is a corpus key. Find answers both from the undated
+	// key through the fuzzy scan: suffixStartsNumericModelVersion treats an
+	// exactly-eight-digit trailing run after a separator as a release date
+	// rather than a new version, so the undated key stays a valid prefix match.
+	// modelWithoutDateSuffix plays no part here - it serves the long-context
+	// band graft and the multiplier lookup, which run on an already-resolved key.
 	for _, pair := range [][2]string{
 		{"claude-sonnet-4-6", "claude-sonnet-4.6-20260416"},
 		{"claude-opus-4-8", "claude-opus-4-8-20270898"},

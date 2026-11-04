@@ -1,7 +1,7 @@
 {
   "generatedBy": {
     "ccusageVersion": "20.0.33",
-    "command": "CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --config packages/collector/ccusage.json -z UTC -s 20260101 -u 20260214 --mode {auto,calculate}",
+    "command": "CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --config packages/collector/ccusage.json -z UTC -s 20260101 -u 20260217 --mode {auto,calculate}",
     "fixtureNote": "One compact-JSON assistant line per case, one distinct UTC day each, written under <fixture-tree>/projects/goldens/<index>.jsonl.",
     "configPath": "packages/collector/ccusage.json",
     "configSha256": "3e8a11fcd43f191f7602e33eadd71f1abd4d12279479ae8891e6da6cdea66883",
@@ -800,8 +800,56 @@
       "missingPricing": false
     },
     {
-      "name": "override-gpt5",
+      "name": "family-gpt41-mini-dash",
       "day": "2026-01-30",
+      "model": "gpt-4-1-mini",
+      "reportedModelName": "gpt-4-1-mini",
+      "inputTokens": 1000,
+      "outputTokens": 500,
+      "cacheCreate5m": 100,
+      "cacheCreate1h": 0,
+      "cacheRead": 200,
+      "fast": false,
+      "reportedCostUsd": null,
+      "cost": 0.00127,
+      "calculatedCost": 0.00127,
+      "missingPricing": false
+    },
+    {
+      "name": "family-gpt41-mini-date-dash",
+      "day": "2026-01-31",
+      "model": "gpt-4-1-mini-2025-04-14",
+      "reportedModelName": "gpt-4-1-mini-2025-04-14",
+      "inputTokens": 1000,
+      "outputTokens": 500,
+      "cacheCreate5m": 100,
+      "cacheCreate1h": 0,
+      "cacheRead": 200,
+      "fast": false,
+      "reportedCostUsd": null,
+      "cost": 0.00127,
+      "calculatedCost": 0.00127,
+      "missingPricing": false
+    },
+    {
+      "name": "family-gpt41-nano-dash",
+      "day": "2026-02-01",
+      "model": "gpt-4-1-nano",
+      "reportedModelName": "gpt-4-1-nano",
+      "inputTokens": 1000,
+      "outputTokens": 500,
+      "cacheCreate5m": 100,
+      "cacheCreate1h": 0,
+      "cacheRead": 200,
+      "fast": false,
+      "reportedCostUsd": null,
+      "cost": 0.0003175,
+      "calculatedCost": 0.0003175,
+      "missingPricing": false
+    },
+    {
+      "name": "override-gpt5",
+      "day": "2026-02-02",
       "model": "gpt-5",
       "reportedModelName": "gpt-5",
       "inputTokens": 1000,
@@ -817,7 +865,7 @@
     },
     {
       "name": "override-gpt51",
-      "day": "2026-01-31",
+      "day": "2026-02-03",
       "model": "gpt-5.1",
       "reportedModelName": "gpt-5.1",
       "inputTokens": 1000,
@@ -833,7 +881,7 @@
     },
     {
       "name": "override-gpt53-codex",
-      "day": "2026-02-01",
+      "day": "2026-02-04",
       "model": "gpt-5.3-codex",
       "reportedModelName": "gpt-5.3-codex",
       "inputTokens": 1000,
@@ -849,7 +897,7 @@
     },
     {
       "name": "override-gpt54",
-      "day": "2026-02-02",
+      "day": "2026-02-05",
       "model": "gpt-5.4",
       "reportedModelName": "gpt-5.4",
       "inputTokens": 1000,
@@ -865,7 +913,7 @@
     },
     {
       "name": "override-gpt56-sol",
-      "day": "2026-02-03",
+      "day": "2026-02-06",
       "model": "gpt-5.6-sol",
       "reportedModelName": "gpt-5.6-sol",
       "inputTokens": 1000,
@@ -881,7 +929,7 @@
     },
     {
       "name": "override-gpt56",
-      "day": "2026-02-04",
+      "day": "2026-02-07",
       "model": "gpt-5.6",
       "reportedModelName": "gpt-5.6",
       "inputTokens": 1000,
@@ -897,7 +945,7 @@
     },
     {
       "name": "override-claude-opus-5",
-      "day": "2026-02-05",
+      "day": "2026-02-08",
       "model": "claude-opus-5",
       "reportedModelName": "claude-opus-5",
       "inputTokens": 1000,
@@ -913,7 +961,7 @@
     },
     {
       "name": "override-claude-opus-4-6",
-      "day": "2026-02-06",
+      "day": "2026-02-09",
       "model": "claude-opus-4-6",
       "reportedModelName": "claude-opus-4-6",
       "inputTokens": 1000,
@@ -929,7 +977,7 @@
     },
     {
       "name": "override-claude-sonnet-4-5",
-      "day": "2026-02-07",
+      "day": "2026-02-10",
       "model": "claude-sonnet-4-5",
       "reportedModelName": "claude-sonnet-4-5",
       "inputTokens": 1000,
@@ -945,7 +993,7 @@
     },
     {
       "name": "override-claude-haiku-4-5",
-      "day": "2026-02-08",
+      "day": "2026-02-11",
       "model": "claude-haiku-4-5",
       "reportedModelName": "claude-haiku-4-5",
       "inputTokens": 1000,
@@ -961,7 +1009,7 @@
     },
     {
       "name": "override-grok-4.5",
-      "day": "2026-02-09",
+      "day": "2026-02-12",
       "model": "grok-4.5",
       "reportedModelName": "grok-4.5",
       "inputTokens": 1000,
@@ -977,7 +1025,7 @@
     },
     {
       "name": "override-modelsdev-only-gpt55-pro",
-      "day": "2026-02-10",
+      "day": "2026-02-13",
       "model": "gpt-5.5-pro",
       "reportedModelName": "gpt-5.5-pro",
       "inputTokens": 1000,
@@ -993,7 +1041,7 @@
     },
     {
       "name": "override-modelsdev-only-longcat",
-      "day": "2026-02-11",
+      "day": "2026-02-14",
       "model": "longcat-2.5-preview-free",
       "reportedModelName": "longcat-2.5-preview-free",
       "inputTokens": 1000,
@@ -1009,7 +1057,7 @@
     },
     {
       "name": "override-free-minimax",
-      "day": "2026-02-12",
+      "day": "2026-02-15",
       "model": "minimax/MiniMax-M3.1-Flash-Preview",
       "reportedModelName": "minimax/MiniMax-M3.1-Flash-Preview",
       "inputTokens": 1000,
@@ -1025,7 +1073,7 @@
     },
     {
       "name": "override-free-step-5",
-      "day": "2026-02-13",
+      "day": "2026-02-16",
       "model": "step-5-preview-free",
       "reportedModelName": "step-5-preview-free",
       "inputTokens": 1000,
@@ -1041,7 +1089,7 @@
     },
     {
       "name": "reported-cost-auto",
-      "day": "2026-02-14",
+      "day": "2026-02-17",
       "model": "claude-sonnet-4-5",
       "reportedModelName": "claude-sonnet-4-5",
       "inputTokens": 1000,

@@ -383,9 +383,6 @@ func TestCorpusRecordsProvenanceForTheTwoStageScan(t *testing.T) {
 	}
 }
 
-// TestCorpusExactOnlyIsTheUnionOfBothMaps pins C2: ccusage's exact-only gate
-// reads both maps, so a models.dev exactOnly flag must survive on a key whose
-// rates come from LiteLLM.
 // TestCorpusCarriesWhatTheTwoStageScanNeeds pins the reviewer's C1 divergence
 // examples at the data level, without implementing Find (Task 2 owns it): the
 // exact key ccusage's staging would answer with, and the fact that the other
@@ -434,6 +431,9 @@ func TestCorpusCarriesWhatTheTwoStageScanNeeds(t *testing.T) {
 }
 
 func TestCorpusExactOnlyIsTheUnionOfBothMaps(t *testing.T) {
+	// This test pins C2: ccusage's exact-only gate reads both maps, so a
+	// models.dev exactOnly flag must survive on a key whose rates come from
+	// LiteLLM, and a models.dev-only exact-only id must stay exact-only.
 	corpus := mustLoadCorpus(t)
 	// These exist in both snapshots and are exactOnly in models.dev; the LiteLLM
 	// entry supplies the rates, so the flag has to be stamped onto it.

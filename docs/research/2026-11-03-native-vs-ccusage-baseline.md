@@ -5,7 +5,7 @@
 - ccusage：`20.0.33`（`~/.tokenboard/bin/ccusage`）
 - Go：`go1.27.3 darwin/amd64`
 - 工具：`clients/go/cmd/bench-collect`（dev-only，Task 7 交付）
-- 数据文件：`docs/research/2026-11-03-baseline-artifacts/{single,30d,full}.json`、`run.log`
+- 数据文件：`docs/research/2026-11-03-baseline-artifacts/{single,30d,full}.json`、`run.log.txt`
   （原始产物；`run.sh` 见 §1.4）
 
 > 发布说明：提交的产物与本文档中**唯一**的变换是把本机 home 目录改写为 `~`
@@ -59,7 +59,7 @@ claude session --json             --single-thread [--since S --until U] --timezo
 ### 1.4 执行方式
 
 三个场景**严格串行**，每个场景 5 轮串行；场景之间记录 `uptime` 与 `vm_stat`。驱动脚本
-`run.sh` 与运行日志 `run.log` 见 `docs/research/2026-11-03-baseline-artifacts/`。
+`run.sh` 与运行日志 `run.log.txt` 见 `docs/research/2026-11-03-baseline-artifacts/`。
 
 ```bash
 cd ~/.tokenboard/TokenBoard/clients/go
@@ -84,7 +84,7 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 | 20:30 `full` 后 | **153.82 / 158.57 / 100.18** | 29 | 4.66 GiB | 27.20 GiB |
 | 20:30 复核（事后） | 134.34 / 153.66 / 99.77 | 29 | 4.28 GiB | 26.95 GiB |
 
-> 表中 free / free+inactive 均由**同一份** `vm_stat` 快照计算；`run.log` 的 `mem()` 另取过一次快照，
+> 表中 free / free+inactive 均由**同一份** `vm_stat` 快照计算；`run.log.txt` 的 `mem()` 另取过一次快照，
 > 因此日志里同一时刻的尾数可能差 ±0.03 GiB，不影响结论。
 
 - 全程 `Pages throttled: 0`（每次 `vm_stat` 快照均为 0），未观察到 OOM kill；纯 free 页最低 2.89 GiB，
@@ -92,9 +92,9 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
   used 370 MB / 2048 MB（**运行前未采集 swap，属方法学缺口**）。
 - 运行前确认无残留 ccusage 进程（`ps` 计数 0）。
 
-> **采样来源说明**：表中 load / 页数来自 `run.sh` 的 `uptime` / `vm_stat`（记录在 `run.log`）。
+> **采样来源说明**：表中 load / 页数来自 `run.sh` 的 `uptime` / `vm_stat`（记录在 `run.log.txt`）。
 > 而 20:30 事后复核行、`vm.swapusage`、`ps -r` 与“无 OOM kill”的判断是**事后手工执行**的，
-> **不在 `run.log` 里**。
+> **不在 `run.log.txt` 里**。
 
 ### 2.1 关键异常：测量窗口被无关负载污染（不可忽略）
 

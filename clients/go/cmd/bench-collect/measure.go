@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -245,8 +246,18 @@ func assertUsableBinary(bin string) error {
 	return nil
 }
 
-// defaultCcusageBin is the install layout the skill uses, resolved through the
-// shared helper so this command and the collector agree on the path.
+// defaultCcusageBin is the install layout the skill uses:
+// <BundledBinDir>/ccusage[.exe]. BundledBinDir is the same directory the
+// collector's bundled layer probes, so both sides agree on the install; the
+// executable name is resolved here because internal/ccusage keeps it unexported.
 func defaultCcusageBin() string {
-	return ccusage.DefaultBinaryPath(nil, "")
+	return filepath.Join(ccusage.BundledBinDir(nil, ""), ccusageBinaryName())
+}
+
+// ccusageBinaryName is the bundled ccusage executable's platform name.
+func ccusageBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "ccusage.exe"
+	}
+	return "ccusage"
 }

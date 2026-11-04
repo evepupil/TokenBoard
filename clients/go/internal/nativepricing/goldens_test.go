@@ -139,14 +139,31 @@ type knownDivergence struct {
 //     a 1-ULP cache_read (4e-7 vs 0.4/M), which is invisible at the cost's
 //     resolution, so both sides still agree bit for bit.
 //
-// The remaining exact-only ids the enumeration found differ only by float
-// rounding of models.dev's per-million rates (e.g. claude-opus-5-5's cache
-// read 2e-7 vs 0.2/M = 2.0000000000000002e-7); at the goldens' token counts
-// those never move the cost, and the canonical + respelled cases here would
-// catch it if they did.
+//   - family-gpt41-mini-dash, family-gpt41-mini-date-dash and
+//     family-gpt41-nano-dash: "gpt-4-1-mini", "gpt-4-1-mini-2025-04-14" and
+//     "gpt-4-1-nano" are dash spellings of the models.dev exact-only ids
+//     "gpt-4.1-mini", "gpt-4.1-mini-2025-04-14" and "gpt-4.1-nano", which
+//     LiteLLM also prices (input 4e-7, cache_read 1e-7 for the mini pair;
+//     input 1e-7, cache_read 2.5e-8 for nano). ccusage answers the dash
+//     spelling through id_spelled_by from its models.dev row, whose
+//     per-million division (0.4/M, 0.1/M for mini; 0.1/M, 0.025/M for nano)
+//     does not land on the same double as LiteLLM's explicit rate; the merged
+//     corpus answers from the LiteLLM entry. The rates are equal in decimal
+//     terms, so the divergence is exactly 1 ULP of the cost (mini:
+//     0x3f54cec41dd1a21e vs ccusage's 0x3f54cec41dd1a21f; nano:
+//     0x3f34cec41dd1a21e vs 0x3f34cec41dd1a21f).
 //
-// These are the ONLY divergences the merged corpus produces. All other
-// canonical and respelled spellings agree bit for bit.
+// knownDivergences below is the complete ledger of the divergences the merged
+// corpus produces on this golden set: every entry is a divergence, and the
+// parity gate fails on any case NOT in the ledger whose bits differ (and on any
+// ledger entry that stops diverging). The exact-only family is therefore covered
+// by the cases actually present - canonical spellings, the respelled cases
+// listed here, and controls such as family-gpt56-sol-dash that must still agree
+// - not by an argument about which spellings can move a cost. The gpt-4.1
+// entries exist because such an argument was made once and was wrong at these
+// very token counts. Any further exact-only respelling that crosses a bit
+// boundary and is added to the golden set surfaces as a test failure until it
+// is registered here; it cannot pass silently.
 var knownDivergences = map[string]knownDivergence{
 	"family-gpt5-codex-dot": {
 		ccusageCost: 0.0064322500000000005,
@@ -222,6 +239,27 @@ var knownDivergences = map[string]knownDivergence{
 		ccusageCost: 0.00046935,
 		nativeCost:  0.0004506,
 		reason:      "same as family-deepseek-provider-dot; '@' normalises to '-'",
+	},
+	"family-gpt41-mini-dash": {
+		ccusageCost: 0.00127,
+		nativeCost:  0.0012699999999999999,
+		reason: "merged corpus answers the dash spelling from the LiteLLM explicit rate " +
+			"(input=4e-7, cache_read=1e-7); ccusage resolves it through the models.dev " +
+			"exact-only id gpt-4.1-mini's id_spelled_by, whose 0.4/M and 0.1/M per-million " +
+			"division differs by 1 ULP (native 0x3f54cec41dd1a21e, ccusage 0x3f54cec41dd1a21f)",
+	},
+	"family-gpt41-mini-date-dash": {
+		ccusageCost: 0.00127,
+		nativeCost:  0.0012699999999999999,
+		reason: "same as family-gpt41-mini-dash; the dated models.dev id publishes the same " +
+			"per-million rates with their own rounding (input 0.39999999999999997/M)",
+	},
+	"family-gpt41-nano-dash": {
+		ccusageCost: 0.0003175,
+		nativeCost:  0.00031749999999999997,
+		reason: "same 1-ULP mechanism as family-gpt41-mini-dash with gpt-4.1-nano's rates " +
+			"(LiteLLM input=1e-7, cache_read=2.5e-8; models.dev 0.1/M and 0.025/M): " +
+			"native 0x3f34cec41dd1a21e, ccusage 0x3f34cec41dd1a21f",
 	},
 }
 

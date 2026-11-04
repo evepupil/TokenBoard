@@ -222,6 +222,16 @@ const cases = [
   { name: "family-deepseek-provider-canonical", model: "deepseek/deepseek-flash", usage: sharedFamilyUsage() },
   { name: "family-deepseek-provider-dot", model: "deepseek/deepseek.flash", usage: sharedFamilyUsage() },
   { name: "family-deepseek-provider-at", model: "deepseek/deepseek@flash", usage: sharedFamilyUsage() },
+  // gpt-4.1 family: the canonical dotted spellings (gpt-4.1-mini, gpt-4.1-nano,
+  // and the dated variant) are models.dev exact-only ids whose per-million
+  // rates (0.4/M input, 0.1/M cache_read) are not exact in binary floating
+  // point. The dash respellings resolve through models.dev id_spelled_by in
+  // ccusage while the merged corpus answers from the primary LiteLLM entry,
+  // whose rates are the exact doubles, so each differs by 1 ULP at these token
+  // counts. See knownDivergences.
+  { name: "family-gpt41-mini-dash", model: "gpt-4-1-mini", usage: sharedFamilyUsage() },
+  { name: "family-gpt41-mini-date-dash", model: "gpt-4-1-mini-2025-04-14", usage: sharedFamilyUsage() },
+  { name: "family-gpt41-nano-dash", model: "gpt-4-1-nano", usage: sharedFamilyUsage() },
 
   // 9. The rest of the overridden surface, canonical spellings only. These
   //    pin the override application itself (Task 4) against the real binary:

@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 // LiteLLM revision pinned by ccusage v20.0.33's flake.lock (nodes.litellm).
 export const LITELLM_REV = '6e0f0f7adb3083fb6681e636c947e3d6b8f53b26'
