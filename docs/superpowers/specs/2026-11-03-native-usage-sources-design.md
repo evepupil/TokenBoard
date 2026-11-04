@@ -232,6 +232,32 @@ ccusage 一旦从仓库移除，金样本就永久冻结、无法再生成；没
 金样本生成器属 S1（见 S1 计划 Task 5），但**逐来源固化**须在各自的 S2/S3/S4 落地时同步完成，
 S5 移除前做一次总盘点确认 14 个来源齐全。
 
+### 8.1 S1 结转义务（2026-11-05 最终审查后登记）
+
+S1 的整分支终审留下七项义务，均已写在代码注释里。S1 不读这些路径，所以当时只标注、不修；分派如下。
+
+**S2 必须处理**
+
+- `Find` 没有 memoization（ccusage 有 `find_cache`，`clients/go/internal/nativepricing/find.go:53`）：把
+  `collect.LookupNative` 接进热路径前必须先决策。
+- `parityEnv`（`clients/go/cmd/parity/main.go:306`）只剥离 `TOKENBOARD_HOOK_MODE`；S2 起的原生 provider
+  子进程必须沿用 `internal/ccusage.ScrubCredentialEnv`（`clients/go/internal/ccusage/credentials.go:45`）
+  的同一名单，即 AGENTS.md「ccusage 子进程环境必须剥离凭据」这条跨端不变量。
+- `Cost` 的 `at time.Time` 形参在 S1 无效（`clients/go/internal/nativepricing/cost.go:128-130`）：S2 用它
+  接 DeepSeek 时段定价。
+- parity 的 ccusage 侧目前比较 raw normalize 输出（无 codex corrections、无动态定价）：S2 扩展。
+
+**S4 必须处理**
+
+- builtin context limits 未移植（`clients/go/internal/nativepricing/builtin.go:27-35`）：ccusage 的三档
+  limit 会被 `Corpus.ContextLimits` 的单张合并表压平，移植 `context_limit` 时须补齐三档。
+- `missingPricing` 折叠了 ccusage 的零 token 诊断门（`clients/go/internal/nativepricing/cost.go:122-126`）：
+  适配器须自行补上空 usage 例外与别名解析后的诊断文案。
+- `find_exact_with_fallback`（exact + normalized，**无 fuzzy**）未移植：`adapters/hermes`、
+  `adapters/antigravity` 与 CLI 的 `context_limit` 路径需要它，属 S4 适配器入口，不是 S1 `Cost` 的需求。
+
+以上七项由 S1 最终整分支审查产出；首个记录它们的计划工作区台账已按流程删除，本节是其唯一留存处。
+
 ## 9. 性能测量方法
 
 ### 9.1 ccusage 当前基线（2026-11-03 本机实测，load ≈ 59）
@@ -274,7 +300,9 @@ ccusage 每次都全量扫 ~9,828 文件 / 23 GB。此结论与 `docs/specs/go-c
   `RUSAGE_CHILDREN`（或 `wait4`），否则测到的是 bench 进程。`Ru_maxrss` 单位**按平台分支**：
   darwin 是**字节**、Linux 是 **KB**（实测本机一个极简 Go 程序 `Ru_maxrss = 2,633,728` 即字节）。
   跨平台实现必须用 `//go:build` 约束拆文件（仅改文件名不构成构建约束，同包两个 `rss_*.go`
-  会 `redeclared`）。
+  会 `redeclared`）。Windows 侧（`OpenProcess` + `K32GetProcessMemoryInfo`）由
+  `cmd/bench-collect/rss_windows_test.go` 在 CI `test` job 的 `windows-latest` 矩阵腿里真实执行，
+  不再只是编译通过；§9.1 的基线数字测于 macOS，不受影响。
 - 场景（均在本机真实语料上）：
   - A 单日窗口：测「空跑成本」——进程启动 + JSON 往返占比最高。
   - B 近 30 天窗口：典型定时同步。
