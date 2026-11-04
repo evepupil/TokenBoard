@@ -5,7 +5,11 @@
 - ccusage：`20.0.33`（`~/.tokenboard/bin/ccusage`）
 - Go：`go1.27.3 darwin/amd64`
 - 工具：`clients/go/cmd/bench-collect`（dev-only，Task 7 交付）
-- 数据文件：`/tmp/tokenboard-bench-8/{single,30d,full}.json`、`run.log`
+- 数据文件：`docs/research/2026-11-03-baseline-artifacts/{single,30d,full}.json`、`run.log`
+  （原始产物；`run.sh` 见 §1.4）
+
+> 发布说明：提交的产物与本文档中**唯一**的变换是把本机 home 目录改写为 `~`
+> （`/Users/...` → `~`），其余字节未动，数值保持可审计。
 
 > **重要声明（必读）**
 >
@@ -54,11 +58,11 @@ claude session --json             --single-thread [--since S --until U] --timezo
 
 ### 1.4 执行方式
 
-三个场景**严格串行**，每个场景 5 轮串行；场景之间记录 `uptime` 与 `vm_stat`。脚本：
-`/tmp/tokenboard-bench-8/run.sh`。
+三个场景**严格串行**，每个场景 5 轮串行；场景之间记录 `uptime` 与 `vm_stat`。驱动脚本
+`run.sh` 与运行日志 `run.log` 见 `docs/research/2026-11-03-baseline-artifacts/`。
 
 ```bash
-cd <HOME>/.tokenboard/TokenBoard/clients/go
+cd ~/.tokenboard/TokenBoard/clients/go
 go run ./cmd/bench-collect -source claude-code -scenario single -rounds 5 \
   -ccusage-bin ~/.tokenboard/bin/ccusage -json > /tmp/tokenboard-bench-8/single.json
 go run ./cmd/bench-collect -source claude-code -scenario 30d -rounds 5 \
@@ -72,7 +76,7 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 
 ## 2. 环境与负载
 
-| 时刻 | load 1/5/15 | 登录会话数 | free 页 | free+inactive |
+| 时刻 | load 1/5/15 | 登录会话数 | free (GiB) | free+inactive (GiB) |
 |---|---|---|---|---|
 | 19:42 运行前 | **5.75 / 5.36 / 5.51** | 7 | 3.35 GiB | 29.27 GiB |
 | 19:50 `single` 后 | 5.44 / 6.69 / 6.29 | 15 | 2.89 GiB | 28.39 GiB |
@@ -83,9 +87,14 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 > 表中 free / free+inactive 均由**同一份** `vm_stat` 快照计算；`run.log` 的 `mem()` 另取过一次快照，
 > 因此日志里同一时刻的尾数可能差 ±0.03 GiB，不影响结论。
 
-- 全程 `Pages throttled: 0`，无 OOM kill；纯 free 页最低 2.89 GiB，另有约 26 GB inactive 可回收，
-  **未出现内存压力**。事后 `vm.swapusage`：used 370 MB / 2048 MB（**运行前未采集 swap，属方法学缺口**）。
+- 全程 `Pages throttled: 0`（每次 `vm_stat` 快照均为 0），未观察到 OOM kill；纯 free 页最低 2.89 GiB，
+  另有约 26 GB inactive 可回收，**未出现内存压力**。事后手工执行 `vm.swapusage`：
+  used 370 MB / 2048 MB（**运行前未采集 swap，属方法学缺口**）。
 - 运行前确认无残留 ccusage 进程（`ps` 计数 0）。
+
+> **采样来源说明**：表中 load / 页数来自 `run.sh` 的 `uptime` / `vm_stat`（记录在 `run.log`）。
+> 而 20:30 事后复核行、`vm.swapusage`、`ps -r` 与“无 OOM kill”的判断是**事后手工执行**的，
+> **不在 `run.log` 里**。
 
 ### 2.1 关键异常：测量窗口被无关负载污染（不可忽略）
 
@@ -96,11 +105,14 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 
 后果：
 
-- **墙钟数据受污染**，尤其 `30d`/`full`。证据：`full` 第 2 轮 174.7 s，第 5 轮 455.8 s（2.61×），
-  同期 load 从 13 升到 154；`30d` 五轮单调上升 162.1 → 236.8 s。
+- **墙钟数据受污染**，尤其 `30d`/`full`。按场景边界的采样：`30d` 在 load 5.4 → 13.3 之间测得，
+  `full` 在 13.3 → 153.8 之间测得（边界采样，非逐轮）。证据：`full` 第 2 轮 174.7 s，第 5 轮
+  455.8 s（2.61×），同期负载持续上行；`30d` 五轮整体上行（162.1 → 236.8 s），第 4 轮回落至 196.4 s。
 - **RSS 数据基本不受影响**：同场景各轮 RSS 离散 < 1.5%，且负载飙升期间没有抬升——内存分配不随
   CPU 调度变化。故 **RSS 是本次更可信的指标，墙钟中位数应视为上界**。
-- 没有轮次失败（15/15 exit 0，stderr 全空），未触发“停止”条件；按 brief 要求继续跑完并在此如实记录。
+- 没有轮次失败（15/15 exit 0，stderr 全空）。我判断继续跑完并如实记录比中止更有用：负载来自
+  长时间运行的无关进程（VM 已跑 2h14m），短期不会回落，等待无确定收益；这一点是我的取舍，
+  brief 并未定义停止条件。
 
 ## 3. 原始数据（每轮 + 中位数 + 最大值）
 
@@ -156,26 +168,34 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 
 设计文档 §9.1 的核心事实是：`--since/--until` **只过滤输出，不减少扫描量**。本次数据：
 
-- **输出量确实随窗口线性变化**：107 KB → 3.71 MB → 3.80 MB（single 是全量的 2.8%）。
+- **输出量随窗口增长，30 天后饱和**：107,195 B（0.10 MiB）→ 3,706,106 B（3.53 MiB）→
+  3,801,088 B（3.63 MiB）；single 是全量的 2.8%，30d 与 full 只差 2.5%。
 - **成本没有按同比例缩小**：single 的墙钟中位数是全量的 **44.0%**（103.6 / 235.4 s），RSS 是全量的
   **71.4%**（3.17 / 4.44 GiB）。一个只输出 2.8% 数据的单日窗口，仍要付出 44% 的墙钟和 71% 的峰值内存。
-  这与 §9.1 的“窄窗口不省扫描”方向一致：单日窗口依然是几十秒级、数 GB 级的成本。
+  这与 §9.1 的“窄窗口不省扫描”方向一致：**ccusage 单条命令约 30 秒（§9.1），而 collector 的双调用
+  路径（daily+session）单日窗口仍需约 100 秒、数 GB**。
 - **但本文没有复现字面意义的“三者几乎相同”**：实测中位数是 103.6 / 196.4 / 235.4 s 与
   3.17 / 4.42 / 4.44 GiB，不是等值。原因是**墙钟被无关负载污染**（§2.1）：single 在 load ≈ 5.4–6.7
-  下测得且五轮极稳（100.9–109.3 s，离散 8%）；30d 与 full 在 load 13→154 下测得，`full` 第 5 轮
-  （455.8 s）是第 2 轮（174.7 s）的 2.61×。因此 **30d/full 的墙钟中位数只能当上界**，无法据其判定
-  窗口对墙钟的真实影响。
-- **RSS 的差异更像真实差异**：single 3.17 GiB 明显低于 30d/full 的 4.42/4.44 GiB（低 28.2%），
-  且各轮稳定、与负载无关。**推断**（非测量）：差异来自结果集规模（daily `--breakdown` 与 session
-  报表按 日期×模型 累积的行数），而非扫描阶段；30d 与 full 的 RSS 中位数相差仅 0.55%，说明
-  30 天窗口已基本覆盖全量结果集。该推断未单独验证。
+  下测得且五轮极稳（100.9–109.3 s，离散 8%）；`30d` 在 load 5.4 → 13.3、`full` 在 13.3 → 153.8
+  下测得，`full` 第 5 轮（455.8 s）是第 2 轮（174.7 s）的 2.61×。因此 **30d/full 的墙钟中位数只能
+  当上界**，无法据其判定窗口对墙钟的真实影响。
+- **RSS 的差异是真实差异**：single 3.17 GiB 明显低于 30d 的 4.42 GiB 与 full 的 4.44 GiB
+  （低 **28.20%** vs 30d、**28.60%** vs full），且各轮稳定、与负载无关。**推断**（非测量）：差异
+  来自结果集规模（daily `--breakdown` 与 session 报表按 日期×模型 累积的行数），而非扫描阶段；
+  30d 与 full 的 RSS 中位数相差仅 0.55%，说明 30 天窗口已基本覆盖全量结果集。该推断未单独验证。
 - **与 §9.1 的交叉校验（推断，非测量）**：§9.1 记录单条 daily/session 约 31.5/32.4 s、8.9–9.3 GB
   （无 `--single-thread`、`--offline`）。按 go-client-spec §5 的 `--single-thread` 代价（墙钟约 1.7×、
   RSS 约 −57%）外推，每轮两次调用应约 110 s、约 4 GB。本次 full 的 RSS（4.44 GiB）与该外推吻合，
   说明 full 的 235 s 中位数确实被负载抬高；但外推不能替代干净窗口的实测。
 
-**结论**：本次数据支持“单日窗口不省扫描、成本仍是几十秒 + 数 GB”这一操作性事实，**不支持也不足以
-否定**字面等值；字面等值需要在低负载窗口重测才能判定。报告不把 103.6 < 235.4 s 当作“单日更便宜”的证据。
+**结论（分两个维度）**：
+
+- 墙钟：受负载污染，**不足以判定**窗口对墙钟的影响；`full` 的 235 s / `30d` 的 196 s 中位数只能
+  当上界，字面“single ≈ 30d ≈ full”需低负载窗口重测才能确认或被推翻。报告不把 103.6 < 235.4 s
+  当作“单日更便宜”的证据。
+- RSS：存在**真实的约 28% 差异**（single 3.17 GiB vs 30d/full 4.42/4.44 GiB），30d/full 更高；
+  这与“扫描不变、结果集不同”的推断一致。这一点支持设计文档“窄窗口不省扫描”（扫描阶段成本相同），
+  同时说明单日窗口仍需约 3.17 GiB 峰值 RSS，并非接近零。
 
 ## 5. 异常、限制与未覆盖边界
 
@@ -194,7 +214,7 @@ go run ./cmd/bench-collect -source claude-code -scenario full -rounds 5 \
 ## 6. 复现
 
 ```bash
-cd <HOME>/.tokenboard/TokenBoard/clients/go
+cd ~/.tokenboard/TokenBoard/clients/go
 # 低负载窗口执行；三个场景串行，勿并行
 for scn in single 30d full; do
   go run ./cmd/bench-collect -source claude-code -scenario "$scn" -rounds 5 \
