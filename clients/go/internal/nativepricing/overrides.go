@@ -56,7 +56,7 @@ func (c Corpus) WithOverrides(overrides map[string]any) (Corpus, error) {
 	// Deep copy: the caller's corpus keeps its own Models / ContextLimits /
 	// ExactOnlyNames / Counts, so applying overrides never rewrites history.
 	updated := Corpus{
-		Models:         maps.Clone(c.Models),
+		Models:         cloneModels(c.Models),
 		ExactOnlyNames: maps.Clone(c.ExactOnlyNames),
 		ContextLimits:  maps.Clone(c.ContextLimits),
 		Counts:         maps.Clone(c.Counts),
@@ -68,6 +68,47 @@ func (c Corpus) WithOverrides(overrides map[string]any) (Corpus, error) {
 		updated.applyOverride(model, parsed[model])
 	}
 	return updated, nil
+}
+
+// cloneModels copies a model table entry by entry.
+func cloneModels(models map[string]CorpusModel) map[string]CorpusModel {
+	if models == nil {
+		return nil
+	}
+	cloned := make(map[string]CorpusModel, len(models))
+	for model, pricing := range models {
+		cloned[model] = clonePricing(pricing)
+	}
+	return cloned
+}
+
+// clonePricing copies the optional band pointers. CorpusModel holds *float64 and
+// *int64, so cloning the map alone would leave the two corpora sharing the
+// pointed-to values: a caller that wrote through one would silently change the
+// other's rate. The pointers are read-only by contract, but "returns a new
+// Corpus" should not depend on that.
+func clonePricing(pricing CorpusModel) CorpusModel {
+	pricing.InputAbove = cloneFloat(pricing.InputAbove)
+	pricing.OutputAbove = cloneFloat(pricing.OutputAbove)
+	pricing.CacheReadAbove = cloneFloat(pricing.CacheReadAbove)
+	pricing.CacheCreateAbove = cloneFloat(pricing.CacheCreateAbove)
+	pricing.LongContextThreshold = cloneInt64(pricing.LongContextThreshold)
+	return pricing
+}
+
+func cloneFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	return floatValue(*value)
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 // WithServerOverrides parses a server payload and applies its pricingOverrides.

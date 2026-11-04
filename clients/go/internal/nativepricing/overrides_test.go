@@ -75,6 +75,23 @@ func mustOverride(t *testing.T, corpus Corpus, overrides map[string]any) Corpus 
 	return updated
 }
 
+// corpusWithEntry returns a fresh corpus whose model row has been rewritten by
+// mutate.
+//
+// It rebuilds through overrideCorpus() every time on purpose. Corpus is a struct
+// holding map and pointer fields, so `copyOf := corpus` shares the Models map,
+// and an earlier version of the scaling test wrote its fixture edit straight
+// into the map both values were reading - the later sub-case then ran against a
+// contaminated base and passed for the wrong reason. The clone is belt and
+// braces should overrideCorpus ever start returning a shared corpus.
+func corpusWithEntry(t *testing.T, model string, mutate func(CorpusModel) CorpusModel) Corpus {
+	t.Helper()
+	corpus := overrideCorpus()
+	corpus.Models = cloneModels(corpus.Models)
+	corpus.Models[model] = mutate(corpus.Models[model])
+	return corpus
+}
+
 // TestWithOverrides_parsesCamelCaseKeys feeds the exact shape
 // packages/collector/ccusage.json carries, then proves the snake_case spelling
 // serde's rename_all produces internally is NOT the wire format: those keys have
@@ -142,28 +159,41 @@ func TestWithOverrides_scalesCacheRatesOnlyWhenBaseIsDerived(t *testing.T) {
 	}
 
 	// An explicit cache rate on the base closes the gate, even for the other
-	// bucket: should_scale reads cache_read_explicit alone.
-	halfExplicit := corpus
-	half := halfExplicit.Models["claude-derived"]
-	half.CacheReadExplicit = true
-	halfExplicit.Models["claude-derived"] = half
+	// bucket: should_scale reads cache_read_explicit alone. The zero-rate case
+	// below gets its own corpus too - sharing one map across sub-cases would let
+	// an earlier edit leak into the later ones.
+	halfExplicit := corpusWithEntry(t, "claude-derived", func(base CorpusModel) CorpusModel {
+		base.CacheReadExplicit = true
+		return base
+	})
 	kept := mustOverride(t, halfExplicit, map[string]any{
 		"claude-derived": map[string]any{"inputCostPerToken": 1.5e-6},
 	})
 	approx(t, kept.Models["claude-derived"].CacheCreate, 3.75e-6, "cache create stays put when the gate is closed")
 	approx(t, kept.Models["claude-derived"].CacheRead, 3e-7, "cache read stays put when the gate is closed")
 
-	// A zero derived rate is left alone rather than multiplied into a NaN.
-	zero := corpus
-	zeroed := zero.Models["claude-derived"]
-	zeroed.CacheCreate, zeroed.CacheRead = 0, 0
-	zero.Models["claude-derived"] = zeroed
+	// A zero derived rate stays zero: ccusage guards the multiply with
+	// `base.cache_create > 0` / `base.cache_read > 0`, so the open gate is not
+	// enough. The companion model below has the same gate conditions but non-zero
+	// cache rates, and it does scale - that contrast is what proves the zero is
+	// held by the guard rather than by a closed gate.
+	zero := corpusWithEntry(t, "claude-derived", func(base CorpusModel) CorpusModel {
+		base.CacheCreate, base.CacheRead = 0, 0
+		return base
+	})
+	zero.Models["claude-gated"] = CorpusModel{
+		Input: 3e-6, Output: 15e-6, CacheCreate: 3.75e-6, CacheRead: 3e-7,
+		FastMultiplier: 1, FlexMultiplier: 1, Source: SourceLiteLLM,
+	}
 	zeroedOut := mustOverride(t, zero, map[string]any{
 		"claude-derived": map[string]any{"inputCostPerToken": 1.5e-6},
+		"claude-gated":   map[string]any{"inputCostPerToken": 1.5e-6},
 	})
 	if got := zeroedOut.Models["claude-derived"]; got.CacheCreate != 0 || got.CacheRead != 0 {
 		t.Fatalf("zero cache rates must stay zero, got %+v", got)
 	}
+	approx(t, zeroedOut.Models["claude-gated"].CacheRead, 1.5e-7,
+		"the same gate does scale a non-zero base, so the zero above is the guard")
 }
 
 // TestWithOverrides_keepsExplicitCacheRates is the sonnet/gpt-4o case the
@@ -221,14 +251,10 @@ func TestWithOverrides_parsesAbove200kSuffixKeys(t *testing.T) {
 	approx(t, entry.Output, 10e-6, "base output")
 
 	// The cache bands scale with the same gate as the base cache rates.
+	// gpt-tiered's fixture derives its cache rates (no explicit flag), so the
+	// gate is open and WithOverrides leaves the receiver untouched - the same
+	// corpus value can be reused here.
 	scaled := mustOverride(t, corpus, map[string]any{
-		"gpt-tiered": map[string]any{"inputCostPerToken": 2e-6},
-	})
-	derived := corpus
-	derivedEntry := derived.Models["gpt-tiered"]
-	derivedEntry.CacheReadExplicit = false
-	derived.Models["gpt-tiered"] = derivedEntry
-	scaled = mustOverride(t, derived, map[string]any{
 		"gpt-tiered": map[string]any{"inputCostPerToken": 2e-6},
 	})
 	approx(t, *scaled.Models["gpt-tiered"].CacheCreateAbove, 5e-6, "cache create above scaled by 2")
@@ -385,6 +411,20 @@ func TestWithOverrides_doesNotMutateTheReceiver(t *testing.T) {
 	}
 	if got := corpus.ContextLimits["claude-derived"]; got != 1_000_000 {
 		t.Fatalf("the returned ContextLimits map shares storage with the receiver: %d", got)
+	}
+
+	// The band pointers are the case maps.Clone cannot fix: replacing a map entry
+	// hides a shared pointer, so this writes THROUGH the pointer the returned
+	// corpus owns and checks the receiver's value did not move.
+	tiered := updated.Models["gpt-tiered"]
+	*tiered.OutputAbove = 777
+	*tiered.LongContextThreshold = 999
+	updated.Models["gpt-tiered"] = tiered
+	if got := *corpus.Models["gpt-tiered"].OutputAbove; got != 20e-6 {
+		t.Fatalf("the returned corpus shares the OutputAbove pointer with the receiver: %v", got)
+	}
+	if got := *corpus.Models["gpt-tiered"].LongContextThreshold; got != 200_000 {
+		t.Fatalf("the returned corpus shares the LongContextThreshold pointer with the receiver: %d", got)
 	}
 }
 
