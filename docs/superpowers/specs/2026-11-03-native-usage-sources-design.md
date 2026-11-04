@@ -234,7 +234,9 @@ S5 移除前做一次总盘点确认 14 个来源齐全。
 
 ### 8.1 S1 结转义务（2026-11-05 最终审查后登记）
 
-S1 的整分支终审留下七项义务，均已写在代码注释里。S1 不读这些路径，所以当时只标注、不修；分派如下。
+S1 的整分支终审留下七项义务，其中三项已写进代码注释（`clients/go/internal/nativepricing/cost.go:122-130`
+的 missingPricing 零 token 门与无效的 `at` 形参、`clients/go/internal/nativepricing/builtin.go:27-35`
+的 builtin context limits），其余四项仅由本节记载；S1 不读这些路径，所以当时只标注、不修；分派如下。
 
 **S2 必须处理**
 
@@ -253,8 +255,9 @@ S1 的整分支终审留下七项义务，均已写在代码注释里。S1 不�
   limit 会被 `Corpus.ContextLimits` 的单张合并表压平，移植 `context_limit` 时须补齐三档。
 - `missingPricing` 折叠了 ccusage 的零 token 诊断门（`clients/go/internal/nativepricing/cost.go:122-126`）：
   适配器须自行补上空 usage 例外与别名解析后的诊断文案。
-- `find_exact_with_fallback`（exact + normalized，**无 fuzzy**）未移植：`adapters/hermes`、
-  `adapters/antigravity` 与 CLI 的 `context_limit` 路径需要它，属 S4 适配器入口，不是 S1 `Cost` 的需求。
+- `find_exact_with_fallback`（exact + normalized，**无 fuzzy**）未移植：ccusage Rust 侧的
+  `adapters/hermes`、`adapters/antigravity` 与 CLI 的 `context_limit` 路径需要它；本仓库的落点是 S4 的
+  `internal/collect/adapters/tools/*`（12 个工具适配器）入口，不是 S1 `Cost` 的需求。
 
 以上七项由 S1 最终整分支审查产出；首个记录它们的计划工作区台账已按流程删除，本节是其唯一留存处。
 

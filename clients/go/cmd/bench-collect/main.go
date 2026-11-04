@@ -31,8 +31,11 @@
 // The two RSS files carry //go:build constraints (!windows / windows). Renaming
 // a file is not a build constraint: without the tags the package would declare
 // the same functions twice and fail to build for Windows. The Windows RSS path
-// has been compile-verified on all six targets but not run on a Windows host;
-// it fails closed to "unavailable" rather than reporting a wrong number.
+// is exercised by TestChildPeakRSSMeasuresTheRealChildWindows in
+// rss_windows_test.go, which runs on Windows CI; the first CI run is what
+// produces the real execution evidence. Until then, and on any host where the
+// measurement fails, it fails closed to "unavailable" rather than reporting a
+// wrong number.
 //
 // This command is deliberately absent from .goreleaser.yaml: it is dev-only and
 // is not part of the released client.

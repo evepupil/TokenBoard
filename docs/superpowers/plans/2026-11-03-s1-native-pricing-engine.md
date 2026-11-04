@@ -758,7 +758,9 @@ git commit -m "ci: gate the native pricing engine and keep dev commands out of r
 
 ## 完成标准（S1 出口）
 
-- `go test ./internal/nativepricing/...` 全绿（含 `-race`），与 ccusage 的 cost 金样本**位级零差异**。
+- `go test ./internal/nativepricing/...` 全绿（含 `-race`）：48 个 cost 金样本用例按 `math.Float64bits`
+  位级比对，canonical 拼写与 ccusage 位级一致，分歧仅限 exact-only id 的分隔符变体拼写，16 条已逐条
+  登记进 `goldens_test.go` 的 `knownDivergences`（两侧取值 + 依据）。
 - 金样本生成脚本钉死 `--offline --config packages/collector/ccusage.json -z UTC -s/-u`，可复现。
 - `cmd/parity` 与 `cmd/bench-collect` 可用且不在发布产物中；parity 的 native 接缝
   （`collect.LookupNative`）在 S1 恒报 `notImplemented`。
