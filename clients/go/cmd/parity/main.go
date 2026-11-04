@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -578,18 +576,10 @@ func ccusageReportArgs(source contract.Source, report string, rangeArgs []string
 	return args, nil
 }
 
-// defaultCcusageBin is the install layout the skill uses. Windows ships
-// ccusage.exe, so the name has to follow the platform.
+// defaultCcusageBin is the install layout the skill uses. It comes from
+// internal/ccusage so this command and the collector resolve the same path.
 func defaultCcusageBin() string {
-	name := "ccusage"
-	if runtime.GOOS == "windows" {
-		name = "ccusage.exe"
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".tokenboard", "bin", name)
-	}
-	return filepath.Join(home, ".tokenboard", "bin", name)
+	return ccusage.DefaultBinaryPath(nil, "")
 }
 
 // writeTextReport prints the count summary and one line per diverging row.

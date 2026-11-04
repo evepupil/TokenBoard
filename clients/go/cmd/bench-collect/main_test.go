@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -376,6 +379,10 @@ func TestRunRejectsInvalidInvocations(t *testing.T) {
 		{"unknown scenario", []string{"-source", "claude-code", "-scenario", "week"}},
 		{"too few rounds", []string{"-source", "claude-code", "-scenario", "full", "-rounds", "4"}},
 		{"hook without a cursor source", []string{"-source", "kimi", "-scenario", "hook"}},
+		// A source ccusage does not answer for is an invocation error, not a
+		// failed run: rejecting it up front keeps the exit code at 2 instead of
+		// surfacing a measurement failure after the harness has already started.
+		{"source without a ccusage path", []string{"-source", "opencode", "-scenario", "full"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -456,6 +463,40 @@ func TestCollectCcusageRoundReportsAFailingBinary(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("collectCcusageRound with a missing binary = nil error, want a failure")
+	}
+}
+
+// TestAssertUsableBinaryRejectsUnusablePaths pins the up-front checks: a missing
+// path, a directory, and — on unix — a file without an execute bit all fail
+// before the first round instead of once per round with a generic "permission
+// denied". Windows has no execute bit, so that case is skipped there.
+func TestAssertUsableBinaryRejectsUnusablePaths(t *testing.T) {
+	if err := assertUsableBinary("/nonexistent/ccusage-bench-test"); err == nil {
+		t.Error("missing path = nil error, want a failure")
+	}
+	if err := assertUsableBinary(t.TempDir()); err == nil {
+		t.Error("directory = nil error, want a failure")
+	}
+
+	dataFile := filepath.Join(t.TempDir(), "ccusage")
+	if err := os.WriteFile(dataFile, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	err := assertUsableBinary(dataFile)
+	if runtime.GOOS == "windows" {
+		if err != nil {
+			t.Errorf("windows = %v, want nil (no execute bit on Windows)", err)
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("non-executable file = %v, want a 'not executable' error", err)
+	}
+	if err := os.Chmod(dataFile, 0o755); err != nil {
+		t.Fatalf("chmod fixture: %v", err)
+	}
+	if err := assertUsableBinary(dataFile); err != nil {
+		t.Errorf("executable file = %v, want nil", err)
 	}
 }
 

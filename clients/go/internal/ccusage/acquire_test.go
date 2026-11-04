@@ -354,6 +354,30 @@ func TestResolveTreatsAWhitespaceExplicitBinaryAsSet(t *testing.T) {
 	}
 }
 
+// TestDefaultBinaryPathMatchesTheBundledLayer pins the helper the dev commands
+// default to: it has to name the same location Resolve's bundled layer probes
+// (TOKENBOARD_CONFIG_DIR/bin, else ~/.tokenboard/bin) with the platform's
+// executable name, or a command would report "not found" for a binary the
+// collector happily runs.
+func TestDefaultBinaryPathMatchesTheBundledLayer(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(t.TempDir(), "custom-config")
+
+	if got, want := DefaultBinaryPath(nil, home),
+		filepath.Join(home, ".tokenboard", "bin", binaryName(runtime.GOOS)); got != want {
+		t.Errorf("DefaultBinaryPath(home) = %q, want %q", got, want)
+	}
+	env := acquireEnv(map[string]string{"TOKENBOARD_CONFIG_DIR": configDir})
+	if got, want := DefaultBinaryPath(env, home),
+		filepath.Join(configDir, "bin", binaryName(runtime.GOOS)); got != want {
+		t.Errorf("DefaultBinaryPath(config dir) = %q, want %q", got, want)
+	}
+	// The name has to follow the platform: Windows ships ccusage.exe.
+	if got, want := filepath.Base(DefaultBinaryPath(nil, home)), binaryName(runtime.GOOS); got != want {
+		t.Errorf("binary name = %q, want %q", got, want)
+	}
+}
+
 // The skill installs the bundled ccusage beside its own config, which is
 // TOKENBOARD_CONFIG_DIR/bin when that is set. Looking only at
 // ~/.tokenboard/bin would miss that install and silently fall through to a

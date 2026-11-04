@@ -188,6 +188,17 @@ func defaultBundledBinDir(homeDir string) string {
 	return filepath.Join(homeDir, ".tokenboard", "bin")
 }
 
+// DefaultBinaryPath is the ccusage path to try when the caller has no explicit
+// one: the bundled install location, with the platform's executable name.
+//
+// It is the same location Resolve's bundled layer probes (TOKENBOARD_CONFIG_DIR
+// then ~/.tokenboard/bin), so a dev command that defaults to it and a collector
+// that resolves it agree on which binary they mean. Both cmd/parity and
+// cmd/bench-collect default to this instead of spelling the layout out.
+func DefaultBinaryPath(env func(string) string, homeDir string) string {
+	return filepath.Join(BundledBinDir(env, homeDir), binaryName(runtime.GOOS))
+}
+
 func binaryName(platform string) string {
 	if platform == "windows" {
 		return "ccusage.exe"
