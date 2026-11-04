@@ -21,19 +21,25 @@ package nativepricing
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
 
-// goldensPath is relative to this package, so the test does not depend on the
-// process's working directory.
-const goldensPath = "goldens/cost-cases.json"
+// costGoldensJSON is goldens/cost-cases.json compiled into the test binary.
+//
+// Embedding rather than reading the file keeps the gate independent of both the
+// process's working directory and `go test -trimpath`, which rewrites the paths
+// runtime.Caller reports. A missing or renamed file is a build failure instead
+// of a runtime one, which is the fail-closed direction.
+//
+//go:embed goldens/cost-cases.json
+var costGoldensJSON []byte
 
 type costGoldens struct {
 	GeneratedBy struct {
@@ -238,8 +244,9 @@ func TestCostMatchesTheCcusageGoldens(t *testing.T) {
 	// not silently run without it when the config file moves.
 	corpus := goldensCorpus(t, document)
 
+	names := goldenCaseNames(document.Cases)
 	for name := range knownDivergences {
-		if !hasGoldenCase(document.Cases, name) {
+		if !names[name] {
 			t.Errorf("knownDivergences lists %q, which is not a golden case — the ledger is stale", name)
 		}
 	}
@@ -350,9 +357,10 @@ func TestCostMatchesTheCcusageGoldens(t *testing.T) {
 	)
 }
 
-// wantAuto is the value ModeAuto must produce. Without a reported cost Auto is
-// the pure formula, so a recorded divergence applies to it as well; with one,
-// Auto trusts the stored cost and the golden records exactly that.
+// wantAuto is the value ModeAuto must produce. Without a reported cost, Auto is
+// intentionally identical to Calculate — Cost prices the request and only the
+// recorded divergence (if any) applies; with one, Auto trusts the stored cost
+// and the golden records exactly that.
 func wantAuto(testCase costGoldenCase) float64 {
 	if testCase.ReportedCostUsd != nil {
 		return *testCase.ReportedCostUsd
@@ -516,27 +524,25 @@ func goldensCorpus(t *testing.T, document costGoldens) Corpus {
 
 func loadCostGoldens(t *testing.T) costGoldens {
 	t.Helper()
-	path := filepath.Join(packageDir(t), goldensPath)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
 	var document costGoldens
-	if err := json.Unmarshal(raw, &document); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+	if err := json.Unmarshal(costGoldensJSON, &document); err != nil {
+		t.Fatalf("parse the embedded goldens/cost-cases.json: %v", err)
 	}
 	return document
 }
 
-// packageDir resolves this package's source directory, so the test reads the
-// goldens from the checkout rather than from the process's working directory.
+// packageDir resolves the package directory from the process's working
+// directory. `go test` always runs the test binary with cwd set to the package's
+// source directory, and unlike runtime.Caller this is unaffected by -trimpath
+// (which rewrites the compiled file paths to module-relative ones). The walk
+// only needs the repo root, which this cwd is a stable descendant of.
 func packageDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not resolve the test file's path")
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
 	}
-	return filepath.Dir(file)
+	return directory
 }
 
 // sameFloat compares two costs bit for bit. Every parity assertion goes through
@@ -545,11 +551,12 @@ func sameFloat(left, right float64) bool {
 	return math.Float64bits(left) == math.Float64bits(right)
 }
 
-func hasGoldenCase(cases []costGoldenCase, name string) bool {
+// goldenCaseNames is a lookup of every case in the committed golden set, so the
+// ledger-staleness check is O(1) per knownDivergences entry.
+func goldenCaseNames(cases []costGoldenCase) map[string]bool {
+	names := make(map[string]bool, len(cases))
 	for _, testCase := range cases {
-		if testCase.Name == name {
-			return true
-		}
+		names[testCase.Name] = true
 	}
-	return false
+	return names
 }
