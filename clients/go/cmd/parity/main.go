@@ -44,9 +44,14 @@ const (
 
 // Report statuses. notImplemented is not a difference: it says the native side
 // has no provider for the source yet (S1), so there is nothing to compare. It
-// must never read as a clean match.
+// must never read as a clean match. empty is likewise not a difference: both
+// sides agreed on zero rows in the window, which is not evidence that the two
+// implementations agree — a source whose data sits outside the window would
+// otherwise inflate the coverage claim. Both exit 0; a real clean match is the
+// only statusMatch that stands for coverage.
 const (
 	statusMatch          = "match"
+	statusEmpty          = "empty"
 	statusDiff           = "diff"
 	statusNotImplemented = "notImplemented"
 )
@@ -184,8 +189,9 @@ func runWith(args []string, stdout, stderr io.Writer, input parityInput) int {
 		writeTextReport(stdout, report)
 	}
 	// notImplemented is not a failure: S1 ships no native provider, and the
-	// operator asked for the boundary, not an error. A diff exits 1; a clean
-	// match (live-write rows included) exits 0.
+	// operator asked for the boundary, not an error. empty likewise exits 0:
+	// both sides agreeing on zero rows is not a difference. A diff exits 1; a
+	// clean match (live-write rows included) exits 0.
 	if report.Status == statusDiff {
 		return exitFailure
 	}
@@ -308,6 +314,12 @@ func parityEnv(key string) string {
 // differences. Values are compared through HashPayload, which already omits
 // collectedAt (wall clock, not semantics).
 //
+// A comparison over zero rows on both sides is statusEmpty, not statusMatch: an
+// empty window is not evidence that the two implementations agree, and reporting
+// it as a match would let a source whose data sits outside the window claim
+// coverage every day (shadow-dual-run's "empty" bucket exists for the same
+// reason).
+//
 // now is the comparison clock, used to recognise the live-write race; it is a
 // parameter so the classification is testable without touching the clock.
 func compareParity(native, ccusageRows []contract.Snapshot, now time.Time) parityReport {
@@ -354,6 +366,10 @@ func compareParity(native, ccusageRows []contract.Snapshot, now time.Time) parit
 	}
 	if len(report.OnlyInNative) > 0 || len(report.OnlyInCcusage) > 0 || len(report.ValueDiffs) > 0 {
 		report.Status = statusDiff
+	} else if len(nativeByKey) == 0 && len(ccusageByKey) == 0 {
+		// Both sides produced nothing: the window may sit entirely outside the
+		// source's data. This is not the same claim as a clean match.
+		report.Status = statusEmpty
 	}
 	return report
 }
@@ -589,6 +605,9 @@ func writeTextReport(w io.Writer, report parityReport) {
 	fmt.Fprintf(w, "matched=%d onlyInNative=%d onlyInCcusage=%d valueDiff=%d liveWrite=%d\n",
 		report.Matched, len(report.OnlyInNative), len(report.OnlyInCcusage),
 		len(report.ValueDiffs), len(report.LiveWrite))
+	if report.Status == statusEmpty {
+		fmt.Fprintln(w, "(both sides produced 0 rows in this window; an empty comparison is not coverage)")
+	}
 	for _, key := range report.OnlyInNative {
 		fmt.Fprintf(w, "onlyInNative %s %s\n", key.UsageDate, key.Model)
 	}

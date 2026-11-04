@@ -199,6 +199,42 @@ func TestCompareReportsNativeProviderMissing(t *testing.T) {
 	}
 }
 
+// TestCompareDistinguishesEmptyFromMatch pins the coverage taxonomy: both
+// sides agreeing on zero rows is statusEmpty, not a clean match. A source whose
+// data sits outside the window would otherwise read as verified every day
+// (shadow-dual-run learned the same lesson).
+func TestCompareDistinguishesEmptyFromMatch(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+
+	t.Run("zero rows on both sides is empty", func(t *testing.T) {
+		report := compareParity(nil, nil, now)
+		if report.Status != statusEmpty {
+			t.Fatalf("status = %q, want %q", report.Status, statusEmpty)
+		}
+		if report.Matched != 0 || len(report.OnlyInNative) != 0 || len(report.OnlyInCcusage) != 0 || len(report.ValueDiffs) != 0 {
+			t.Errorf("report = %+v, want no rows and no differences", report)
+		}
+	})
+
+	t.Run("one clean row is a match", func(t *testing.T) {
+		row := snapshotRow("2026-11-01", "claude-sonnet", 100, 10, 1)
+		report := compareParity([]contract.Snapshot{row}, []contract.Snapshot{row}, now)
+		if report.Status != statusMatch || report.Matched != 1 {
+			t.Fatalf("report = %+v, want status match with one matched row", report)
+		}
+	})
+
+	t.Run("rows on one side only stay a diff", func(t *testing.T) {
+		row := snapshotRow("2026-11-01", "claude-sonnet", 100, 10, 1)
+		if report := compareParity(nil, []contract.Snapshot{row}, now); report.Status != statusDiff {
+			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
+		}
+		if report := compareParity([]contract.Snapshot{row}, nil, now); report.Status != statusDiff {
+			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
+		}
+	})
+}
+
 // TestRunParityConsumesTheNativeSeam injects a native provider through the
 // seam and proves parity compares its rows (not ccusage's) against the ccusage
 // side.
@@ -316,6 +352,32 @@ func TestRunWithNotImplementedExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "ccusage: 1 snapshots") {
 		t.Errorf("stdout = %q, want the ccusage side's count", stdout.String())
+	}
+}
+
+// TestRunWithEmptyComparisonExitsZero covers the empty status at the CLI layer:
+// both sides agree on zero rows, the text output says so, and the run is not
+// treated as a failure.
+func TestRunWithEmptyComparisonExitsZero(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runWith([]string{"-source", "claude-code"}, &stdout, &stderr, parityInput{
+		LookupNative: func(contract.Source) (collect.Provider, bool) {
+			return &paritySeamStub{}, true
+		},
+		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+			return nil, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
+	})
+
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: empty") {
+		t.Errorf("stdout = %q, want status: empty", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "empty comparison is not coverage") {
+		t.Errorf("stdout = %q, want the empty-comparison note", stdout.String())
 	}
 }
 
