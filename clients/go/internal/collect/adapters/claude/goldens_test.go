@@ -7,16 +7,17 @@ package claude
 // and the two report builders (daily.go, session.go), and any deviation shows
 // up as a field-level diff against ccusage's own answer.
 //
+// The comparison is strict: every leaf of every report must match, with no
+// exemptions. The one divergence this corpus once had - a duplicate UNKNOWN
+// member in a null-free line, which ccusage's serde path ignores and this parser
+// used to reject - was fixed in entry.go (isKnownMember), not waived here. A
+// future mismatch is a defect in the port or in a rule that has not been ported
+// yet; neither may be papered over by an exemption list.
+//
 // The goldens are regenerated only with
 // `node clients/go/scripts/gen-claude-goldens.mjs`; that script owns the
 // version pin, the clean-environment assertions and the fixture hash. This file
 // never writes them.
-//
-// One divergence is registered, not fixed: see registeredDivergences. It is the
-// deliberate duplicate-member rule the controller ruled on in
-// .superpowers/sdd/2026-11-05-s2-claude-code-adapter/progress.md
-// ("Ruling (Task 2, duplicate keys)"), and it is frozen here as an exact table
-// so it can never silently widen.
 
 import (
 	"context"
@@ -59,13 +60,7 @@ var goldenNow = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 // differences are the informative ones; a whole-document dump is not.
 const maxDiffPaths = 10
 
-// maxCollectedDiffs bounds the walk. Every difference is collected (not just
-// the first few) so the registered divergence can be matched exactly and a
-// stale registration detected; a report with more differences than this is
-// broken beyond any useful diff, which the message says outright.
-const maxCollectedDiffs = 512
-
-// Report labels used by the divergence table.
+// Report labels, used for failure messages and command lookups.
 const (
 	reportDailyAuto      = "daily --mode auto"
 	reportDailyCalculate = "daily --mode calculate"
@@ -109,7 +104,7 @@ var ruleProvenance = map[string]string{
 	"cost":                "daily.rs:317-330 prices before dedupe; cost.rs:31-75 is the auto/calculate/display ladder",
 	"totalCost":           "daily.rs:620-633 sums the surviving entries' costs in row order",
 	"missingPricing":      "types.rs:109-111 serializes it only when true; cost.rs:48-75 decides it",
-	"inputTokens":         "types.rs:67-96 saturating TokenCounts",
+	"inputTokens":         "types.rs:67-96 saturating TokenCounts (and entry.go's isKnownMember for duplicates)",
 	"outputTokens":        "types.rs:67-96 saturating TokenCounts",
 	"cacheCreationTokens": "types.rs:41-50: 5m+1h when cache_creation is present, the flat count otherwise",
 	"cacheReadTokens":     "types.rs:67-96 saturating TokenCounts",
@@ -121,85 +116,6 @@ var ruleProvenance = map[string]string{
 	"lastActivity":        "summary.rs:136-152 keeps the latest timestamp of the session's in-window entries",
 }
 
-// registeredDivergence is one measured difference between the port and ccusage
-// that this repository has decided to keep. Both values are frozen, so the
-// divergence can neither widen nor silently disappear.
-type registeredDivergence struct {
-	// path is the tree path the diff walker reports.
-	path string
-	// golden is the value ccusage printed, port the value the adapter built.
-	// Both are the JSON rendering the diff walker produces.
-	golden string
-	port   string
-}
-
-// duplicateMemberCause documents the one cause behind every entry below.
-//
-// The fixture's projects/project-b/session-gamma.jsonl carries the invalid-row
-// probe `{"...","dup":1,"dup":2,"message":{...}}`. ccusage only runs its
-// duplicate-member deep scan when the line contains a null literal
-// (lib.rs:727-736); this line has none, so serde's typed deserialization runs
-// instead, and a duplicate member of an UNMODELLED field is simply ignored. The
-// line therefore survives upstream and contributes 1 input token, 1 output
-// token and 0.000018 USD on claude-sonnet-4-20250514 at 2026-03-10T07:00:04Z.
-//
-// entry.go rejects duplicate members unconditionally (its scanner comment cites
-// lib.rs:738-830). That is a deliberate superset: see the controller ruling in
-// progress.md ("Ruling (Task 2, duplicate keys): keep the plan's 'unconditional
-// drop' ... cost if wrong: one golden divergence entry"). This table IS that
-// entry, and it is measured, not assumed: with the line removed from a copy of
-// the fixture, the port matches ccusage tree-for-tree on all three reports.
-//
-// Consequence for a real transcript: the port under-counts one line by 1 input,
-// 1 output and its cost. It never over-counts, and it never drops a line whose
-// duplicate member is a modelled field (serde rejects those too).
-const duplicateMemberCause = "duplicate-member probe line dropped by the port, kept by ccusage"
-
-// registeredDivergences is the complete set of allowed differences, keyed by
-// report. Every entry must appear in the diff and nothing else may.
-var registeredDivergences = map[string][]registeredDivergence{
-	reportDailyAuto: {
-		{"daily[8].inputTokens", "500010", "500009"},
-		{"daily[8].outputTokens", "22", "21"},
-		{"daily[8].totalTokens", "500032", "500030"},
-		{"daily[8].totalCost", "1.65036", "1.650342"},
-		{"daily[8].modelBreakdowns[0].inputTokens", "250010", "250009"},
-		{"daily[8].modelBreakdowns[0].outputTokens", "12", "11"},
-		{"daily[8].modelBreakdowns[0].cost", "0.9002099999999998", "0.9001919999999999"},
-		{"totals.inputTokens", "501966", "501965"},
-		{"totals.outputTokens", "187", "186"},
-		{"totals.totalTokens", "503453", "503451"},
-		{"totals.totalCost", "2.184083", "2.1840650000000004"},
-	},
-	reportDailyCalculate: {
-		{"daily[8].inputTokens", "500010", "500009"},
-		{"daily[8].outputTokens", "22", "21"},
-		{"daily[8].totalTokens", "500032", "500030"},
-		{"daily[8].totalCost", "1.65036", "1.650342"},
-		{"daily[8].modelBreakdowns[0].inputTokens", "250010", "250009"},
-		{"daily[8].modelBreakdowns[0].outputTokens", "12", "11"},
-		{"daily[8].modelBreakdowns[0].cost", "0.9002099999999998", "0.9001919999999999"},
-		{"totals.inputTokens", "501966", "501965"},
-		{"totals.outputTokens", "187", "186"},
-		{"totals.totalTokens", "503453", "503451"},
-		{"totals.totalCost", "1.684122", "1.6841039999999998"},
-	},
-	reportSession: {
-		{"sessions[3].inputTokens", "10", "9"},
-		{"sessions[3].outputTokens", "2", "1"},
-		{"sessions[3].totalTokens", "12", "10"},
-		{"sessions[3].totalCost", "0.000059999999999999995", "0.000042"},
-		{"sessions[3].lastActivity", `"2026-03-10T07:00:04.000Z"`, `"2026-03-10T07:00:00.000Z"`},
-		{"sessions[3].modelBreakdowns[0].inputTokens", "10", "9"},
-		{"sessions[3].modelBreakdowns[0].outputTokens", "2", "1"},
-		{"sessions[3].modelBreakdowns[0].cost", "0.000059999999999999995", "0.000042"},
-		{"totals.inputTokens", "501955", "501954"},
-		{"totals.outputTokens", "186", "185"},
-		{"totals.totalTokens", "503441", "503439"},
-		{"totals.totalCost", "2.1840349999999997", "2.184017"},
-	},
-}
-
 // TestClaudeDailyMatchesTheGoldens compares `ccusage claude daily --json
 // --breakdown` row by row, once per --mode, against the adapter's own daily
 // document. auto and calculate are separate goldens because the fixture carries
@@ -208,20 +124,20 @@ func TestClaudeDailyMatchesTheGoldens(t *testing.T) {
 	document := loadGoldens(t)
 
 	for _, testCase := range []struct {
-		mode   CostMode
-		label  string
-		golden json.RawMessage
+		mode    CostMode
+		label   string
+		subtest string
+		golden  json.RawMessage
 	}{
-		{mode: nativepricing.ModeAuto, label: reportDailyAuto, golden: document.Daily.Auto},
-		{mode: nativepricing.ModeCalculate, label: reportDailyCalculate, golden: document.Daily.Calculate},
+		{mode: nativepricing.ModeAuto, label: reportDailyAuto, subtest: "auto", golden: document.Daily.Auto},
+		{mode: nativepricing.ModeCalculate, label: reportDailyCalculate, subtest: "calculate", golden: document.Daily.Calculate},
 	} {
-		t.Run(strings.TrimPrefix(testCase.label, "daily --mode "), func(t *testing.T) {
+		t.Run(testCase.subtest, func(t *testing.T) {
 			dailyJSON, _, err := collectFixture(t, testCase.mode)
 			if err != nil {
 				t.Fatalf("Collect(%s): %v", testCase.label, err)
 			}
-			compareReport(t, testCase.label, testCase.golden, dailyJSON,
-				document.command(t, strings.TrimPrefix(testCase.label, "daily --mode ")))
+			compareReport(t, testCase.label, testCase.golden, dailyJSON, document.command(t, testCase.subtest))
 		})
 	}
 }
@@ -239,11 +155,13 @@ func TestClaudeSessionsMatchTheGoldens(t *testing.T) {
 	compareReport(t, reportSession, document.Sessions, sessionsJSON, document.command(t, "session"))
 }
 
-// TestClaudeSessionsGoldensCarryTheExpectedSessionSet pins the two session
-// rules a row-count comparison alone would miss: the AgentProgress wrapper is
-// daily-only, and the cross-file requestless duplicate survives exactly once
-// under the larger entry's PATH session id.
-func TestClaudeSessionsGoldensCarryTheExpectedSessionSet(t *testing.T) {
+// TestClaudeGoldensPinTheDuplicateMemberLine keeps the duplicate-member ruling
+// visible at the report level: the fixture's project-b/session-gamma.jsonl
+// carries a line with two unknown `dup` members and no null literal, and
+// ccusage counts it. Both its tokens and the session's activity window must stay
+// counted here, so a regression to the old unconditional-drop rule fails with a
+// named path rather than only inside the entry parser's unit tests.
+func TestClaudeGoldensPinTheDuplicateMemberLine(t *testing.T) {
 	document := loadGoldens(t)
 	report, ok := decodeTree(t, "golden sessions", document.Sessions).(map[string]any)
 	if !ok {
@@ -253,6 +171,8 @@ func TestClaudeSessionsGoldensCarryTheExpectedSessionSet(t *testing.T) {
 	if !ok {
 		t.Fatalf("golden sessions has no sessions array")
 	}
+
+	found := map[string]map[string]any{}
 	names := make([]string, 0, len(rows))
 	for index, row := range rows {
 		object, ok := row.(map[string]any)
@@ -261,11 +181,26 @@ func TestClaudeSessionsGoldensCarryTheExpectedSessionSet(t *testing.T) {
 		}
 		name, _ := object["sessionId"].(string)
 		names = append(names, name)
+		found[name] = object
 	}
 	sort.Strings(names)
-	want := []string{"sess-dup-2", "sess-ocgo-b", "session-alpha", "session-gamma"}
-	if !reflect.DeepEqual(names, want) {
-		t.Fatalf("golden session set is %v, want %v", names, want)
+	wantNames := []string{"sess-dup-2", "sess-ocgo-b", "session-alpha", "session-gamma"}
+	if !reflect.DeepEqual(names, wantNames) {
+		t.Fatalf("golden session set is %v, want %v", names, wantNames)
+	}
+
+	gamma := found["session-gamma"]
+	// 9/1 is the one valid line in that file; the duplicate-member line adds
+	// another 1/1 at 07:00:04. Losing it gives 9/1 and 07:00:00, the shape the
+	// port produced before the isKnownMember gate existed.
+	if got, want := gamma["inputTokens"], float64(10); got != want {
+		t.Fatalf("golden session-gamma inputTokens = %v, want %v (the duplicate-member line must be counted)", got, want)
+	}
+	if got, want := gamma["outputTokens"], float64(2); got != want {
+		t.Fatalf("golden session-gamma outputTokens = %v, want %v (the duplicate-member line must be counted)", got, want)
+	}
+	if got, want := gamma["lastActivity"], "2026-03-10T07:00:04.000Z"; got != want {
+		t.Fatalf("golden session-gamma lastActivity = %v, want %v", got, want)
 	}
 }
 
@@ -375,112 +310,20 @@ func collectFixture(t *testing.T, mode CostMode) (dailyJSON, sessionsJSON []byte
 	})
 }
 
-// compareReport diffs one report against its golden, subtracts the registered
-// divergence and fails on anything left over. A registration that no longer
-// reproduces is a failure too: the table must describe reality, not history.
+// compareReport diffs one report against its golden. Every difference is a
+// failure: there is no exemption list, because a real divergence is fixed in
+// the adapter rather than waived here.
 func compareReport(t *testing.T, label string, golden, port []byte, command goldenCommand) {
 	t.Helper()
 	want := decodeTree(t, label+" golden", golden)
 	got := decodeTree(t, label+" port", port)
-	differences := diffTrees("", want, got, maxCollectedDiffs)
-	if len(differences) >= maxCollectedDiffs {
-		t.Fatalf("%s: the diff walk hit its %d-path cap; the documents are unrelated",
-			label, maxCollectedDiffs)
-	}
-
-	registered := registeredDivergences[label]
-	unexpected, stale := partitionDifferences(differences, registered)
-	if len(unexpected) > 0 {
-		reportDifferences(t, label, unexpected, command, len(registered))
-	}
-	if len(stale) > 0 {
-		var message strings.Builder
-		fmt.Fprintf(&message,
-			"%s: %d registered divergence(s) no longer reproduce — the exemption table is stale:\n",
-			label, len(stale))
-		for _, cell := range stale {
-			fmt.Fprintf(&message, "  %s: golden %s, port %s (cause: %s)\n",
-				cell.path, cell.golden, cell.port, duplicateMemberCause)
-		}
-		fmt.Fprintf(&message,
-			"If the port now matches ccusage here, delete the entry. If the values moved, "+
-				"re-examine the duplicate-member ruling before updating them.\n")
-		t.Error(message.String())
+	if differences := diffTrees("", want, got, maxDiffPaths); len(differences) > 0 {
+		reportDifferences(t, label, differences, command)
 	}
 }
 
-// partitionDifferences splits the measured differences into those a registered
-// cell accounts for and those it does not, and returns the registered cells
-// that never appeared.
-func partitionDifferences(differences []treeDifference, registered []registeredDivergence) (unexpected []treeDifference, stale []registeredDivergence) {
-	used := make([]bool, len(registered))
-	for _, difference := range differences {
-		matched := false
-		for index, cell := range registered {
-			if used[index] || cell.path != difference.path ||
-				cell.golden != difference.want || cell.port != difference.got {
-				continue
-			}
-			used[index] = true
-			matched = true
-			break
-		}
-		if !matched {
-			unexpected = append(unexpected, difference)
-		}
-	}
-	for index, cell := range registered {
-		if !used[index] {
-			stale = append(stale, cell)
-		}
-	}
-	return unexpected, stale
-}
-
-// TestPartitionDifferences pins the exemption machinery in both directions: a
-// difference a registered cell describes is absorbed, and a registered cell
-// that describes nothing is reported stale. Without the second half, a fixed
-// divergence would sit in the table forever and hide the next one at the same
-// path.
-func TestPartitionDifferences(t *testing.T) {
-	registered := []registeredDivergence{
-		{path: "totals.inputTokens", golden: "10", port: "9"},
-		{path: "daily[0].totalCost", golden: "1.5", port: "1.4"},
-	}
-
-	unexpected, stale := partitionDifferences([]treeDifference{
-		{path: "totals.inputTokens", want: "10", got: "9"},
-	}, registered)
-	if len(unexpected) != 0 {
-		t.Fatalf("unexpected = %v, want none: the cell matches exactly", unexpected)
-	}
-	if len(stale) != 1 || stale[0].path != "daily[0].totalCost" {
-		t.Fatalf("stale = %v, want exactly the unmatched daily[0].totalCost cell", stale)
-	}
-
-	// A path that matches but whose values moved is NOT the registered
-	// divergence any more, so it must surface as a real difference.
-	unexpected, stale = partitionDifferences([]treeDifference{
-		{path: "totals.inputTokens", want: "10", got: "8"},
-	}, registered)
-	if len(unexpected) != 1 || unexpected[0].got != "8" {
-		t.Fatalf("unexpected = %v, want the moved totals.inputTokens difference", unexpected)
-	}
-	if len(stale) != 2 {
-		t.Fatalf("stale = %v, want both cells when neither matches", stale)
-	}
-
-	// An unrelated extra difference never gets absorbed.
-	unexpected, _ = partitionDifferences([]treeDifference{
-		{path: "totals.inputTokens", want: "10", got: "9"},
-		{path: "daily[3].modelBreakdowns[0].modelName", want: `"a"`, got: `"b"`},
-	}, registered)
-	if len(unexpected) != 1 || unexpected[0].path != "daily[3].modelBreakdowns[0].modelName" {
-		t.Fatalf("unexpected = %v, want only the unregistered modelName difference", unexpected)
-	}
-}
-
-// TestFieldNameStripsArrayIndices pins the provenance lookup's key extraction.
+// TestFieldNameStripsArrayIndices pins the provenance lookup's key extraction:
+// a diff path ends in an array index about as often as it ends in a field name.
 func TestFieldNameStripsArrayIndices(t *testing.T) {
 	for path, want := range map[string]string{
 		"daily[2].modelBreakdowns[0].cost":      "cost",
@@ -715,17 +558,13 @@ func ruleFor(path string) string {
 // reportDifferences fails the test with the field-level diff and its sources:
 // the command the golden was minted by, and the upstream rule each field's port
 // is supposed to follow.
-func reportDifferences(t *testing.T, label string, differences []treeDifference, command goldenCommand, registeredCount int) {
+func reportDifferences(t *testing.T, label string, differences []treeDifference, command goldenCommand) {
 	t.Helper()
-	shown := differences
-	if len(shown) > maxDiffPaths {
-		shown = shown[:maxDiffPaths]
-	}
 	var message strings.Builder
 	fmt.Fprintf(&message,
-		"%s does not match the ccusage 20.0.33 golden: %d unregistered field difference(s), first %d shown:\n",
-		label, len(differences), len(shown))
-	for _, difference := range shown {
+		"%s does not match the ccusage 20.0.33 golden: %d field difference(s), first %d shown:\n",
+		label, len(differences), maxDiffPaths)
+	for _, difference := range differences {
 		fmt.Fprintf(&message, "  %s\n", difference)
 		fmt.Fprintf(&message, "    rule: %s\n", ruleFor(difference.path))
 	}
@@ -733,8 +572,6 @@ func reportDifferences(t *testing.T, label string, differences []treeDifference,
 	if value, ok := command.Env["CLAUDE_CONFIG_DIR"]; ok {
 		fmt.Fprintf(&message, "  with CLAUDE_CONFIG_DIR=%s\n", value)
 	}
-	fmt.Fprintf(&message,
-		"%d difference(s) are registered under %q (cause: %s); anything else is a regression.\n",
-		registeredCount, label, duplicateMemberCause)
+	fmt.Fprintf(&message, "There is no exemption list: fix the adapter, not the golden.\n")
 	t.Error(message.String())
 }
