@@ -467,3 +467,126 @@ func TestCollectSincePruneRejectsBadTimezone(t *testing.T) {
 		t.Fatalf("Collect priced a --since prune in an unknown timezone")
 	}
 }
+
+// TestCollectRejectsEmptyTimezone pins Options.Timezone's documented contract:
+// the zero value is required, never treated as a fallback zone. Before this
+// check the prune fell back to the system zone while the reports fell back to
+// UTC, so the same collection could attribute a boundary row two ways.
+func TestCollectRejectsEmptyTimezone(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "proj-a", "sess-a", collectNow,
+		collectLine("sess-a", "msg_a", "req_a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 3, 0, nil))
+	for _, timezone := range []string{"", "   "} {
+		if _, _, err := Collect(context.Background(), Options{
+			Timezone: timezone, Roots: collectRoots(root), Now: collectNow,
+		}); err == nil {
+			t.Fatalf("Collect accepted the empty timezone %q", timezone)
+		}
+	}
+}
+
+// TestCollectRejectsInvalidDateBounds pins that --since/--until are validated
+// before they reach the prune and the date filter. An invalid spelling used to
+// pass through compactDateBound and drop every row, returning an empty report
+// with no error; "all" was worse - it reached the lexical date compare and
+// emptied the reports the same way.
+func TestCollectRejectsInvalidDateBounds(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "proj-a", "sess-a", collectNow,
+		collectLine("sess-a", "msg_a", "req_a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 7, 0, nil))
+
+	run := func(t *testing.T, since, until string) (dailyInput, sessionInput float64, err error) {
+		t.Helper()
+		dailyJSON, sessionsJSON, err := Collect(context.Background(), Options{
+			Timezone: "UTC", Since: since, Until: until, Roots: collectRoots(root), Now: collectNow,
+		})
+		if err != nil {
+			return 0, 0, err
+		}
+		return numberField(t, reportTotals(t, collectReport(t, dailyJSON)), "inputTokens"),
+			numberField(t, reportTotals(t, collectReport(t, sessionsJSON)), "inputTokens"), nil
+	}
+
+	t.Run("invalid since spelling", func(t *testing.T) {
+		if _, _, err := run(t, "2026-09-25T00:00:00Z", ""); err == nil {
+			t.Fatalf("Collect accepted the invalid --since bound 2026-09-25T00:00:00Z")
+		}
+	})
+
+	t.Run("invalid until calendar date", func(t *testing.T) {
+		if _, _, err := run(t, "", "20261032"); err == nil {
+			t.Fatalf("Collect accepted the invalid --until bound 20261032")
+		}
+	})
+
+	t.Run("reversed window", func(t *testing.T) {
+		if _, _, err := run(t, "2026-10-30", "2026-10-01"); err == nil {
+			t.Fatalf("Collect accepted a reversed --since/--until window")
+		}
+	})
+
+	t.Run("all disables the since bound", func(t *testing.T) {
+		dailyInput, sessionInput, err := run(t, "all", "")
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		if dailyInput != 7 || sessionInput != 7 {
+			t.Fatalf(`totals = %v daily / %v session inputTokens, want 7/7 ("all" means no bound)`,
+				dailyInput, sessionInput)
+		}
+	})
+}
+
+// TestCollectFullTieResolvesByFileOrder pins the one case the replacement
+// ladder cannot decide. Two entries that tie on every rung - the sidechain flag,
+// the token total and, for the daily chain, the cost - leave the first-seen
+// survivor in place (lib.rs:198-212, daily.rs:582-601). ScanFiles sorts by full
+// path, so "sess-tie-a" is added first and its split is the one reported;
+// putting the other split in that name flips the survivor.
+func TestCollectFullTieResolvesByFileOrder(t *testing.T) {
+	const at = "2026-10-30T12:00:00.000Z"
+	// Same serialized session id, message id, request id, timestamp, model and
+	// reported cost; the token total is 12 either way, only the input/output
+	// split differs. Pinning costUSD equal ties the daily chain's cost rung
+	// (daily.rs:592-599) too, so the whole ladder falls through.
+	reported := 1.5
+	low := collectLine("tie-session", "msg_tie", "req_tie", "claude-sonnet-4-5", at, 12, 0, &reported)
+	high := collectLine("tie-session", "msg_tie", "req_tie", "claude-sonnet-4-5", at, 0, 12, &reported)
+
+	// collectTie writes firstContent to sess-tie-a.jsonl and secondContent to
+	// sess-tie-b.jsonl, then returns the surviving daily and session splits.
+	collectTie := func(t *testing.T, firstContent, secondContent string) (dailyInput, dailyOutput, sessionInput, sessionOutput float64) {
+		t.Helper()
+		root := t.TempDir()
+		writeTranscript(t, root, "proj-a", "sess-tie-a", collectNow, firstContent)
+		writeTranscript(t, root, "proj-a", "sess-tie-b", collectNow, secondContent)
+		dailyJSON, sessionsJSON, err := Collect(context.Background(), Options{
+			Timezone: "UTC", Roots: collectRoots(root), Now: collectNow,
+		})
+		if err != nil {
+			t.Fatalf("Collect: %v", err)
+		}
+		daily := reportRows(t, collectReport(t, dailyJSON), "daily")
+		sessions := reportRows(t, collectReport(t, sessionsJSON), "sessions")
+		if len(daily) != 1 || len(sessions) != 1 {
+			t.Fatalf("rows = %d daily / %d session, want 1/1 (a full tie collapses to one entry)", len(daily), len(sessions))
+		}
+		return numberField(t, daily[0], "inputTokens"), numberField(t, daily[0], "outputTokens"),
+			numberField(t, sessions[0], "inputTokens"), numberField(t, sessions[0], "outputTokens")
+	}
+
+	// sess-tie-a sorts first, so its low-split line is the survivor.
+	dailyIn, dailyOut, sessionIn, sessionOut := collectTie(t, low, high)
+	if dailyIn != 12 || dailyOut != 0 || sessionIn != 12 || sessionOut != 0 {
+		t.Fatalf("forward order: daily %v/%v session %v/%v, want 12/0 and 12/0 (sess-tie-a survives)",
+			dailyIn, dailyOut, sessionIn, sessionOut)
+	}
+
+	// Swapping which split sits in each name flips the survivor: the line in
+	// sess-tie-a is now the high split, and file order alone decides it.
+	dailyIn, dailyOut, sessionIn, sessionOut = collectTie(t, high, low)
+	if dailyIn != 0 || dailyOut != 12 || sessionIn != 0 || sessionOut != 12 {
+		t.Fatalf("swapped names: daily %v/%v session %v/%v, want 0/12 and 0/12 (the first-sorting file holds the high split)",
+			dailyIn, dailyOut, sessionIn, sessionOut)
+	}
+}

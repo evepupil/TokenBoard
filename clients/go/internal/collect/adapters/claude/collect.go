@@ -29,17 +29,22 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 )
 
 // Options configures one collection. Zero values mean "not configured": the
 // caller (the claudecode provider) resolves the real timezone and roots.
 type Options struct {
 	// Timezone is the IANA zone every date is attributed to. It is required:
-	// the zero value is NOT treated as UTC (see DailyOptions / SessionOptions).
+	// the zero value is NOT treated as UTC, and Collect rejects an empty or
+	// whitespace-only value before it prunes or reports anything.
 	Timezone string
 	// Since and Until bound the window in either documented spelling
-	// (YYYY-MM-DD or YYYYMMDD, cli-parser parser.rs:1048); "" leaves that side
-	// open. The provider validates them before calling here.
+	// (YYYY-MM-DD or YYYYMMDD, cli-parser parser.rs:1048); "" or "all" leaves
+	// that side open. Collect validates them with
+	// sessionusage.AssertValidDateFilterRange before they reach the prune or
+	// the reports.
 	Since string
 	Until string
 	// Roots is the resolved config-directory set (ResolveRoots). Empty Dirs is
@@ -71,6 +76,23 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
+	// Timezone is required (Options.Timezone). Rejecting the empty value here
+	// matters because the two consumers pick different fallbacks: the prune
+	// uses the system zone (pruneLocation), the reports use UTC, so an empty
+	// value would attribute a boundary row two ways in one collection.
+	if strings.TrimSpace(opts.Timezone) == "" {
+		return nil, nil, errors.New("claude: Options.Timezone is required and must not be empty")
+	}
+	// Validate --since/--until once, before either the prune or a report sees
+	// them. An unvalidated bound used to empty every row silently: a spelling
+	// like "2026-09-25T00:00:00Z" survives compactDateBound but never compares
+	// equal to a YYYYMMDD date, and "all" sorts above every date. "all" and ""
+	// both normalize to "no bound".
+	sinceBound, untilBound, err := sessionusage.AssertValidDateFilterRange(
+		opts.Since, opts.Until, "--since", "--until")
+	if err != nil {
+		return nil, nil, err
+	}
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -80,9 +102,15 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 		stderr = func(string) {}
 	}
 
-	// ScanFiles sorts by full path, and that order decides which duplicate
-	// wins the dedupe (paths.rs:77). It must not be re-sorted or split across
-	// goroutines.
+	// ScanFiles sorts by full path. The replacement ladder decides the survivor
+	// whenever it finds a difference; only a full tie reaches this order, where
+	// the first-seen entry survives, and the dedupe also reports survivors in
+	// this order (lib.rs:198-212, daily.rs:582-601). It must not be re-sorted or
+	// split across goroutines. The "" projectFilter means no project filter,
+	// which matches production (nothing in TokenBoard passes --project); a
+	// project filter, if one were ever added, would have to filter each entry
+	// before index.Add in streamFile, because upstream filters before dedupe
+	// (lib.rs:173-178).
 	files, err := ScanFiles(opts.Roots, "")
 	if err != nil {
 		return nil, nil, err
@@ -90,7 +118,7 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	// --since drops whole session groups from the file list; --until never
 	// narrows it (paths.rs:117-172). Both report commands prune this way:
 	// run_daily via daily.rs:36 and run_session via load_entries_since.
-	files, err = PruneByMTime(files, compactDateBound(opts.Since), opts.Timezone, now, func(path string) {
+	files, err = PruneByMTime(files, compactDateBound(sinceBound), opts.Timezone, now, func(path string) {
 		stderr("claude: skipping " + path + ": session last written before the --since window")
 	})
 	if err != nil {
@@ -115,28 +143,28 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 
 	dailyJSON = BuildDaily(dailyEntries, DailyOptions{
 		Timezone: opts.Timezone,
-		Since:    opts.Since,
-		Until:    opts.Until,
+		Since:    sinceBound,
+		Until:    untilBound,
 	})
 	sessionsJSON = BuildSessions(sessionEntries, SessionOptions{
 		Timezone: opts.Timezone,
-		Since:    opts.Since,
-		Until:    opts.Until,
+		Since:    sinceBound,
+		Until:    untilBound,
 	})
 	return dailyJSON, sessionsJSON, nil
 }
 
-// compactDateBound normalizes a --since bound to the compact YYYYMMDD form
-// that parse_compact_date reads (date_utils.rs:179-204, 212-230), the way
-// normalize_date_bound compacts the dashed spelling (cli/src/types.rs:82-110).
-// Anything else passes through: an unparsable bound keeps every file, which is
-// PruneByMTime's rule and matches date_range_bounds_ms returning None.
+// compactDateBound strips the dashes from an already-validated --since bound to
+// the compact YYYYMMDD form parse_compact_date reads (date_utils.rs:179-204,
+// 212-230), the way normalize_date_bound compacts the dashed spelling
+// (cli/src/types.rs:82-110). Collect runs the bound through
+// sessionusage.AssertValidDateFilterRange first, so this only has to handle the
+// empty value (no --since) and the two documented spellings.
 func compactDateBound(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
+	if value == "" {
 		return ""
 	}
-	return strings.ReplaceAll(trimmed, "-", "")
+	return strings.ReplaceAll(value, "-", "")
 }
 
 // streamChain reads every kept transcript in discovery order, parses each line
@@ -212,10 +240,9 @@ func streamFile(ctx context.Context, file SessionFile, parse func(string) []Entr
 
 // trimLineEnding drops the \n ReadBytes kept and a trailing \r before it.
 //
-// Upstream does not strip \r: serde_json (and the scanner here) treats it as
-// trailing whitespace, so a CRLF line parses identically either way. Removing
-// it keeps the string the parser sees free of a character that only a Windows
-// transcript carries.
+// encoding/json (like serde_json) skips trailing whitespace, so a CR would be
+// harmless either way; stripping it keeps the parser input free of a character
+// only a Windows transcript carries.
 func trimLineEnding(line []byte) []byte {
 	line = bytes.TrimSuffix(line, []byte("\n"))
 	return bytes.TrimSuffix(line, []byte("\r"))

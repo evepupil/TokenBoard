@@ -48,11 +48,12 @@ type Roots struct {
 type SessionFile struct {
 	Path      string
 	SessionID string
-	// ProjectPath is the project a report attributes this transcript to. It is
-	// NOT the value --project filters on: ccusage filters entries with
-	// extract_project (the first segment after "projects", paths.rs:269-288),
-	// which names the same directory for a plain transcript but differs for
-	// nested layouts. Task 5 adds that filter where entries are parsed.
+	// ProjectPath is the project the session report groups on: the path-derived
+	// value PathSessionParts returns (commands/mod.rs:186-206). It is NOT what
+	// --project filters on. That filter uses extract_project - the first segment
+	// after "projects" (paths.rs:269-288) - and is applied to entries at
+	// lib.rs:173-178 and daily.rs:101-107 only when the flag is given. No
+	// TokenBoard code path passes --project, so no entry-level filter is ported.
 	ProjectPath string
 	MTime       time.Time
 	MTimeKnown  bool
@@ -307,10 +308,16 @@ func isDir(path string) bool {
 // ScanFiles ports usage_files (paths.rs:65-79): every *.jsonl transcript below
 // each root's projects/ directory, sorted by full path.
 //
-// A valid projectFilter is used as a directory shortcut. Anything else — the
-// empty string, ".", "..", or a value with a separator — cannot name one
-// project directory, so the whole tree is scanned; entries are filtered by
-// their project later, where they are parsed (paths.rs:69-75, 248-254).
+// A valid projectFilter narrows the scan to that one project directory. Anything
+// else - the empty string, ".", "..", or a value with a separator - cannot name
+// one project directory, so the whole tree is scanned (paths.rs:69-75,
+// 248-254).
+//
+// ccusage also filters each entry by extract_project after loading it
+// (paths.rs:269-288, applied at lib.rs:173-178 and daily.rs:101-107), but that
+// entry-level filter is NOT ported: no TokenBoard code path passes --project, so
+// it would be unreachable. projectFilter exists only for the directory-shortcut
+// parity tests; it narrows the scan and never filters entries.
 func ScanFiles(roots Roots, projectFilter string) ([]SessionFile, error) {
 	files := []SessionFile{}
 	for _, root := range roots.Dirs {
@@ -321,8 +328,11 @@ func ScanFiles(roots Roots, projectFilter string) ([]SessionFile, error) {
 		}
 		collectJSONLFiles(target, &files)
 	}
-	// This order decides which duplicate wins, so it must be deterministic
-	// (paths.rs:77).
+	// Only a full tie in the replacement ladder reaches this order: the ladder
+	// decides the survivor whenever it finds a difference (lib.rs:198-212,
+	// daily.rs:582-601), and a full tie keeps the first-seen entry, which is the
+	// one this order added first. The dedupe also reports survivors in this
+	// order (paths.rs:77).
 	sort.SliceStable(files, func(left, right int) bool { return files[left].Path < files[right].Path })
 	return files, nil
 }
