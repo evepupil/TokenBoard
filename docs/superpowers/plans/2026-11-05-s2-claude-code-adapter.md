@@ -181,7 +181,8 @@
 8. 1h cache breakdown（`ephemeral_1h_input_tokens`）与无 breakdown 的平面字段；
 9. above-200k 与 models.dev tier 各一；
 10. 无效行：`"usage": {`（带空格）、`version:"v1.2.3"`、空 `sessionId`、`"id":null`、重复键、1 位毫秒。
-11. AgentProgress 包装行（只应影响 daily，不应影响 session 报表）。
+11. AgentProgress 包装行（只应影响 daily，不应影响 session 报表）。**时间戳必须在 `data.message.timestamp`**（`daily.rs:206-227` 的 `DailyAgentProgressMessage`）；放在顶层会让 untagged 反序列化两种形状都不匹配，ccusage 静默丢弃整行（2026-11-05 实测：顶层写法 daily 当天只剩 3 input，正确写法 14 input）。
+12. `costUSD` 自报成本**至少两行**：一行明显偏离计算值（`0.5`），一行恰等于计算价（如 `0.00027`）。只有一行时 `--mode auto` 与 `--mode calculate` 的输出相同，auto 优先取自报值这条规则等于没测（实测：无 costUSD 时两种 mode totalCost 一致，加一行 0.5 后 auto=0.50105、calculate=0.0021）。
 
 **生成配方（钉死，fail-closed）:**
 `CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --single-thread -z UTC -s <fixed> -u <fixed> --mode {auto,calculate}`，
