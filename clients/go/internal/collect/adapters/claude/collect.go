@@ -31,20 +31,23 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
 // Options configures one collection. Zero values mean "not configured": the
 // caller (the claudecode provider) resolves the real timezone and roots.
 type Options struct {
 	// Timezone is the IANA zone every date is attributed to. It is required:
-	// the zero value is NOT treated as UTC, and Collect rejects an empty or
-	// whitespace-only value before it prunes or reports anything.
+	// the zero value is NOT treated as UTC, and Collect rejects an empty,
+	// whitespace-only or unloadable zone before it prunes or reports anything.
 	Timezone string
 	// Since and Until bound the window in either documented spelling
-	// (YYYY-MM-DD or YYYYMMDD, cli-parser parser.rs:1048); "" or "all" leaves
-	// that side open. Collect validates them with
-	// sessionusage.AssertValidDateFilterRange before they reach the prune or
-	// the reports.
+	// (YYYY-MM-DD or YYYYMMDD, cli-parser parser.rs:1048), and Collect
+	// validates them with sessionusage.AssertValidDateFilterRange before they
+	// reach the prune or the reports. "" leaves either side open; Since also
+	// accepts "all" for an open lower bound, while Until rejects it - the
+	// shared validator refuses an "all" upper bound (sessionusage.go:437-444),
+	// the same rule the collector's TypeScript side applies.
 	Since string
 	Until string
 	// Roots is the resolved config-directory set (ResolveRoots). Empty Dirs is
@@ -76,18 +79,23 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	// Timezone is required (Options.Timezone). Rejecting the empty value here
-	// matters because the two consumers pick different fallbacks: the prune
-	// uses the system zone (pruneLocation), the reports use UTC, so an empty
-	// value would attribute a boundary row two ways in one collection.
+	// Timezone is required and must load (Options.Timezone). Rejecting a bad
+	// value here matters because its three consumers otherwise fall back
+	// differently: the prune uses the system zone for an empty value
+	// (pruneLocation) but is not reached at all without --since, and the
+	// reports (sessionusage.FormatDate) silently fall back to UTC for any zone
+	// that fails to load. A typo would therefore reshuffle which day a
+	// midnight-adjacent row lands on, differently in each step.
 	if strings.TrimSpace(opts.Timezone) == "" {
 		return nil, nil, errors.New("claude: Options.Timezone is required and must not be empty")
+	}
+	if _, err := contract.LoadLocation(opts.Timezone); err != nil {
+		return nil, nil, fmt.Errorf("claude: Options.Timezone %q: %w", opts.Timezone, err)
 	}
 	// Validate --since/--until once, before either the prune or a report sees
 	// them. An unvalidated bound used to empty every row silently: a spelling
 	// like "2026-09-25T00:00:00Z" survives compactDateBound but never compares
-	// equal to a YYYYMMDD date, and "all" sorts above every date. "all" and ""
-	// both normalize to "no bound".
+	// equal to a YYYYMMDD date. "all" (lower bound only) and "" mean no bound.
 	sinceBound, untilBound, err := sessionusage.AssertValidDateFilterRange(
 		opts.Since, opts.Until, "--since", "--until")
 	if err != nil {
@@ -110,7 +118,7 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	// which matches production (nothing in TokenBoard passes --project); a
 	// project filter, if one were ever added, would have to filter each entry
 	// before index.Add in streamFile, because upstream filters before dedupe
-	// (lib.rs:173-178).
+	// (lib.rs:175-179).
 	files, err := ScanFiles(opts.Roots, "")
 	if err != nil {
 		return nil, nil, err

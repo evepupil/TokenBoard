@@ -502,7 +502,9 @@ func TestScanFilesAppliesTheProjectFilterAsADirectoryShortcut(t *testing.T) {
 		// (paths.rs:69-75).
 		{"segment", "alpha", []string{alpha}},
 		// Anything else cannot be a single project directory, so the whole
-		// tree is scanned (paths.rs:248-254) and entries are filtered later.
+		// tree is scanned (paths.rs:248-254). ccusage would then filter the
+		// entries by extract_project; that entry-level filter is not ported
+		// (no TokenBoard path passes --project), so this scan keeps them all.
 		// These values would be cleaned into "alpha" by filepath.Join, which
 		// is exactly what must not happen to a shortcut.
 		{"path", "beta/../alpha", []string{alpha, beta}},

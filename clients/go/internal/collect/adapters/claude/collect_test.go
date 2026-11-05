@@ -457,14 +457,23 @@ func TestCollectStreamsLargeTranscript(t *testing.T) {
 	}
 }
 
-func TestCollectSincePruneRejectsBadTimezone(t *testing.T) {
+// TestCollectRejectsUnknownTimezone pins the zone check at the entry point.
+// Without it an unloadable zone is only caught when --since sends the bound
+// through the prune (PruneByMTime's pruneLocation); with no --since the reports
+// silently fall back to UTC (sessionusage.FormatDate), so a typo would shift
+// which day a midnight-adjacent row lands on without any error.
+func TestCollectRejectsUnknownTimezone(t *testing.T) {
 	root := t.TempDir()
 	writeTranscript(t, root, "proj-a", "sess-a", collectNow,
 		collectLine("sess-a", "msg_a", "req_a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 3, 4, nil))
-	if _, _, err := Collect(context.Background(), Options{
-		Timezone: "Not/AZone", Since: "2026-10-01", Roots: collectRoots(root), Now: collectNow,
-	}); err == nil {
-		t.Fatalf("Collect priced a --since prune in an unknown timezone")
+	for name, since := range map[string]string{"without since": "", "with since": "2026-10-01"} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Collect(context.Background(), Options{
+				Timezone: "Not/AZone", Since: since, Roots: collectRoots(root), Now: collectNow,
+			}); err == nil {
+				t.Fatalf("Collect accepted the unknown timezone Not/AZone")
+			}
+		})
 	}
 }
 
@@ -533,6 +542,15 @@ func TestCollectRejectsInvalidDateBounds(t *testing.T) {
 		if dailyInput != 7 || sessionInput != 7 {
 			t.Fatalf(`totals = %v daily / %v session inputTokens, want 7/7 ("all" means no bound)`,
 				dailyInput, sessionInput)
+		}
+	})
+
+	t.Run("all is not accepted as an until bound", func(t *testing.T) {
+		// Only --since has an "all" form: the shared validator refuses an
+		// "all" upper bound (sessionusage.go:437-444), matching the
+		// collector's TypeScript side.
+		if _, _, err := run(t, "", "all"); err == nil {
+			t.Fatalf(`Collect accepted Until: "all"`)
 		}
 	})
 }

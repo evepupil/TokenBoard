@@ -52,7 +52,7 @@ type SessionFile struct {
 	// value PathSessionParts returns (commands/mod.rs:186-206). It is NOT what
 	// --project filters on. That filter uses extract_project - the first segment
 	// after "projects" (paths.rs:269-288) - and is applied to entries at
-	// lib.rs:173-178 and daily.rs:101-107 only when the flag is given. No
+	// lib.rs:175-179 and daily.rs:103-107 only when the flag is given. No
 	// TokenBoard code path passes --project, so no entry-level filter is ported.
 	ProjectPath string
 	MTime       time.Time
@@ -314,7 +314,7 @@ func isDir(path string) bool {
 // 248-254).
 //
 // ccusage also filters each entry by extract_project after loading it
-// (paths.rs:269-288, applied at lib.rs:173-178 and daily.rs:101-107), but that
+// (paths.rs:269-288, applied at lib.rs:175-179 and daily.rs:103-107), but that
 // entry-level filter is NOT ported: no TokenBoard code path passes --project, so
 // it would be unreachable. projectFilter exists only for the directory-shortcut
 // parity tests; it narrows the scan and never filters entries.
