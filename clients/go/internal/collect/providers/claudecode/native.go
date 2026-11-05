@@ -178,13 +178,15 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 		return nil, fmt.Errorf("claudecode: native timezone %q: %w", timezone, err)
 	}
 
+	// The window first goes through the provider-level environment fallbacks, so
+	// a caller that bypasses the CLI still scans the same range the ccusage path
+	// records. The adapter then validates and normalizes it (including the "all"
+	// lower bound); no rule is duplicated here.
+	sinceBound, untilBound := resolveWindowEnv(input.options.Since, input.options.Until, env)
 	dailyJSON, sessionsJSON, err := claude.Collect(ctx, claude.Options{
-		Timezone: timezone,
-		// The raw window, not the env-derived one: claude.Collect validates it
-		// itself (including the "all" lower bound) and the native path must not
-		// grow a second, diverging rule.
-		Since:     input.options.Since,
-		Until:     input.options.Until,
+		Timezone:  timezone,
+		Since:     sinceBound,
+		Until:     untilBound,
 		Roots:     roots,
 		Overrides: prepared.MergedPricingOverrides,
 		Mode:      nativepricing.ModeAuto,
@@ -247,7 +249,3 @@ func resolveNativeRoots(env func(string) string, options Options) (claude.Roots,
 	}
 	return claude.ResolveRoots(env, homeArg)
 }
-
-// var _ = collect.RegisterNative documents that the native provider is handed
-// over from the package's init (register.go), not from this file.
-var _ = collect.RegisterNative

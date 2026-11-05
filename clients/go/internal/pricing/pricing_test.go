@@ -1530,3 +1530,69 @@ func TestPrepareExposesTheMergedOverrideBlock(t *testing.T) {
 		}
 	})
 }
+
+// TestPrepareFallbackExposesOnlyTheOverridesCcusageReads pins M1: on the two
+// write-failure fallbacks the merged ccusage config never reaches disk, so
+// ccusage is pointed at the explicit file (or at nothing) and reads ONLY that
+// file's pricingOverrides. MergedPricingOverrides must therefore collapse to
+// the explicit layer there: keeping the bundled/dynamic rows would make an
+// in-process pricer bill from a layer ccusage never loaded.
+func TestPrepareFallbackExposesOnlyTheOverridesCcusageReads(t *testing.T) {
+	explicit := map[string]any{
+		"defaults": map[string]any{"pricingOverrides": map[string]any{
+			"claude-fallback-only": map[string]any{"inputCostPerToken": 0.002},
+		}},
+	}
+
+	t.Run("dynamic write failure with an explicit config", func(t *testing.T) {
+		parent := t.TempDir()
+		stateFile := filepath.Join(parent, "state-file")
+		writeFile(t, stateFile, "not a directory")
+		path := filepath.Join(parent, "explicit.json")
+		writeJSONFile(t, path, explicit)
+
+		prepared := mustPrepare(t, PrepareInput{
+			Endpoint:       "https://tokenboard.example",
+			StateDir:       stateFile,
+			ExplicitConfig: path,
+			Fetcher: func(*http.Request) (*http.Response, error) {
+				return jsonResponse(t, cataloguePage([]map[string]any{modelRow("gpt-6-astra", nil)}, nil), nil), nil
+			},
+			Stderr: func(string) {},
+		})
+		if prepared.ConfigPath != path {
+			t.Fatalf("configPath = %q, want the explicit file %q", prepared.ConfigPath, path)
+		}
+		if len(prepared.MergedPricingOverrides) != 1 {
+			t.Fatalf("MergedPricingOverrides = %d rows, want only the explicit layer",
+				len(prepared.MergedPricingOverrides))
+		}
+		if _, present := prepared.MergedPricingOverrides["claude-fallback-only"]; !present {
+			t.Fatalf("MergedPricingOverrides = %v, want claude-fallback-only", prepared.MergedPricingOverrides)
+		}
+		// These two would only be visible through a merged file ccusage never got.
+		for _, dropped := range []string{"claude-sonnet-4-5", "gpt-6-astra"} {
+			if _, present := prepared.MergedPricingOverrides[dropped]; present {
+				t.Fatalf("MergedPricingOverrides carries %q, which ccusage cannot read on this fallback", dropped)
+			}
+		}
+	})
+
+	t.Run("bundled write failure without an explicit config", func(t *testing.T) {
+		parent := t.TempDir()
+		stateFile := filepath.Join(parent, "state-file")
+		writeFile(t, stateFile, "not a directory")
+
+		prepared := mustPrepare(t, PrepareInput{
+			StateDir: stateFile,
+			Stderr:   func(string) {},
+		})
+		if prepared.ConfigPath != "" {
+			t.Fatalf("configPath = %q, want none", prepared.ConfigPath)
+		}
+		if len(prepared.MergedPricingOverrides) != 0 {
+			t.Fatalf("MergedPricingOverrides = %d rows, want none: ccusage reads no config here",
+				len(prepared.MergedPricingOverrides))
+		}
+	})
+}

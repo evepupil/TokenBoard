@@ -367,15 +367,25 @@ func reportUnpriced(snapshots []contract.Snapshot, covered map[string]bool, stde
 	}
 }
 
-// buildRangeArgs ports buildRangeArgs: validate the window (rejecting shell
-// metacharacters and a reversed range) and render ccusage's --since/--until.
-func buildRangeArgs(since, until string, env func(string) string) ([]string, error) {
+// resolveWindowEnv applies the provider-level date window fallbacks: an unset
+// --since is TOKENBOARD_SINCE then TOKENBOARD_DEFAULT_SINCE, an unset --until is
+// TOKENBOARD_UNTIL. It does NOT validate or normalize; that stays in
+// sessionusage.AssertValidDateFilterRange so the ccusage path and the native
+// path share one rule.
+func resolveWindowEnv(since, until string, env func(string) string) (string, string) {
 	if since == "" {
 		since = firstNonEmpty(env("TOKENBOARD_SINCE"), env("TOKENBOARD_DEFAULT_SINCE"))
 	}
 	if until == "" {
 		until = env("TOKENBOARD_UNTIL")
 	}
+	return since, until
+}
+
+// buildRangeArgs ports buildRangeArgs: validate the window (rejecting shell
+// metacharacters and a reversed range) and render ccusage's --since/--until.
+func buildRangeArgs(since, until string, env func(string) string) ([]string, error) {
+	since, until = resolveWindowEnv(since, until, env)
 	normalizedSince, normalizedUntil, err := sessionusage.AssertValidDateFilterRange(since, until,
 		"Claude since date", "Claude until date")
 	if err != nil {

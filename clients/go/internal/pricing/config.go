@@ -35,8 +35,14 @@ type PrepareInput struct {
 
 // PreparedConfig is the result the provider consumes.
 type PreparedConfig struct {
-	ConfigPath      string
-	Catalogue       Catalogue
+	ConfigPath string
+	Catalogue  Catalogue
+	// Overrides is the bundled static layer, or the catalogue-derived one when
+	// the dynamic catalogue loaded. It is NOT what an in-process pricer must
+	// bill from: it omits the user's explicit config and the on-disk merge. No
+	// production code reads it today (the Codex rules take ContextPricingModels
+	// and ExplicitOverrideModelIDs instead); it is kept for the native Codex
+	// work in S3.
 	Overrides       map[string]any
 	CoveredModelIDs map[string]bool
 	// ExplicitOverrideModelIDs names the models the user's own config prices.
@@ -147,9 +153,12 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				ConfigPath: fallback,
 				Catalogue:  catalogue,
 				Overrides:  overrides,
-				// Without an explicit config the merged block is the bundled
-				// layer, so the two views are the same map here.
-				MergedPricingOverrides:   mergedOverrides,
+				// The merged file was never written, so ccusage reads either the
+				// explicit file (nil here - this branch requires
+				// explicitConfig == nil) or no config at all. Either way it
+				// loads none of the bundled layer, so neither may the native
+				// path.
+				MergedPricingOverrides:   readPricingOverrides(explicitConfig),
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 				ContextPricingModels:     nil,
@@ -185,11 +194,12 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			ConfigPath: fallback,
 			Catalogue:  catalogue,
 			Overrides:  overrides,
-			// The file could not be written, but the block it would have
-			// carried is still what in-process pricing must use: falling back
-			// to Overrides here would bill a different rate from the explicit
-			// config ccusage is pointed at.
-			MergedPricingOverrides:   mergedOverrides,
+			// The merged file was never written. ccusage was pointed at the
+			// explicit file (or at nothing), so it reads only that file's
+			// overrides - the bundled and dynamic layers never load. An
+			// in-process pricer has to see the same set, or it bills rates
+			// ccusage does not apply.
+			MergedPricingOverrides:   readPricingOverrides(explicitConfig),
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 			ContextPricingModels:     nil,

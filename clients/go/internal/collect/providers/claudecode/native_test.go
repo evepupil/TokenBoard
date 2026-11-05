@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
@@ -222,24 +223,24 @@ func TestNativePricingPrepareErrorIsReturned(t *testing.T) {
 }
 
 // TestNativeCollectPropagatesOverridesAndFailsClosedOnBadConfig pins the
-// pricing hand-off:
+// pricing hand-off at the Prepare boundary:
 //
 //   - the explicit config reaches pricing.Prepare and is merged into the config
-//     this path would use (the merged file is observable in the state dir), so
+//     file this path writes (the merged file is observable in the state dir), so
 //     the input set matches the ccusage path's;
 //   - a config that does not parse fails the collection instead of being
 //     ignored.
 //
-// It deliberately does not assert the priced amount: PreparedConfig.Overrides
-// carries only the bundled/catalogue overrides, not the explicit file's (see
-// the report for that interface fact), so an explicit rate is not what prices
-// this path today.
+// The priced amount is asserted separately, by
+// TestNativeExplicitPricingConfigPricesInProcess: since MergedPricingOverrides
+// is what prices this path, an explicit rate IS what the native pass bills, and
+// that test pins the number.
 func TestNativeCollectPropagatesOverridesAndFailsClosedOnBadConfig(t *testing.T) {
 	root := t.TempDir()
 	claudeHome := filepath.Join(root, "claude")
 	writeNativeSession(t, claudeHome,
 		`{"type":"assistant","timestamp":"2026-03-02T10:00:00.000Z",`+
-			`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":1000000,"output_tokens":1}}}`)
+			`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":100,"output_tokens":1}}}`)
 
 	goodConfig := filepath.Join(root, "good-pricing.json")
 	if err := os.WriteFile(goodConfig, []byte(`{
@@ -654,10 +655,9 @@ func TestNativeRejectsUnloadableTimezone(t *testing.T) {
 func runNative(t *testing.T, options Options, env map[string]string) []contract.Snapshot {
 	t.Helper()
 	options.Env = testEnv(forceRunnerEnv(env))
-	// The switch reads an earlier caller's TOKENBOARD_* variables too, so the
-	// environment carries the date window as well.
-	options.Since = firstNonEmpty(options.Since, options.Env("TOKENBOARD_SINCE"), options.Env("TOKENBOARD_DEFAULT_SINCE"))
-	options.Until = firstNonEmpty(options.Until, options.Env("TOKENBOARD_UNTIL"))
+	// The helper deliberately does NOT resolve TOKENBOARD_SINCE/UNTIL: that
+	// fallback is the provider's job, and a helper that applied it would hide a
+	// provider that forgot (TestNativeAppliesTheProviderWindowEnvironment).
 	if options.Timezone == "" {
 		// Pin the zone: the golden report was minted with -z UTC, and the
 		// machine's own zone must not change which day a row lands on.
@@ -829,4 +829,75 @@ func TestNativeExplicitPricingConfigPricesInProcess(t *testing.T) {
 		t.Fatalf("explicit-config cost = %v, want 11.000011 (the explicit $11/M must price the row)",
 			explicitPriced.CostUSD)
 	}
+}
+
+// TestNativeAppliesTheProviderWindowEnvironment pins M4: the native path must
+// apply the same TOKENBOARD_SINCE / TOKENBOARD_DEFAULT_SINCE / TOKENBOARD_UNTIL
+// fallbacks the ccusage path applies in buildRangeArgs. Without them a caller
+// that reaches the provider without the CLI's own resolution would scan a wider
+// window than the ccusage path records -- a silent difference in what gets
+// uploaded.
+//
+// The window is enforced here through the transcript mtime, which is what the
+// adapter prunes on: the out-of-window file is written with a January mtime, so
+// its 2026-01-01 row only shows up when no --since reached the adapter.
+func TestNativeAppliesTheProviderWindowEnvironment(t *testing.T) {
+	root := t.TempDir()
+	claudeHome := filepath.Join(root, "claude")
+	inWindow := filepath.Join(claudeHome, "projects", "project-a", "new.jsonl")
+	outOfWindow := filepath.Join(claudeHome, "projects", "project-b", "old.jsonl")
+	for path, row := range map[string]string{
+		inWindow:    nativeRowAt(101, "2026-05-22T02:00:00.000Z"),
+		outOfWindow: nativeRowAt(202, "2026-01-01T02:00:00.000Z"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(row+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	january := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(outOfWindow, january, january); err != nil {
+		t.Fatal(err)
+	}
+
+	env := map[string]string{
+		"CLAUDE_CONFIG_DIR": claudeHome,
+		"TOKENBOARD_SINCE":  "20260501",
+	}
+	snapshots := runNative(t, Options{}, env)
+	if len(snapshots) != 1 || snapshots[0].UsageDate != "2026-05-22" || snapshots[0].InputTokens != 101 {
+		t.Fatalf("snapshots = %+v, want only the in-window 2026-05-22 row: TOKENBOARD_SINCE must reach the adapter",
+			snapshots)
+	}
+
+	// The ccusage side resolves the same window; its argv is the evidence.
+	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
+	if _, err := Collect(context.Background(), Options{
+		Timezone:    "UTC",
+		CollectedAt: nativeCollectedAt,
+		StateDir:    t.TempDir(),
+		Env:         testEnv(forceRunnerEnv(env)),
+		Runner:      runner.run,
+	}); err != nil {
+		t.Fatalf("ccusage path: %v", err)
+	}
+	if len(runner.calls) == 0 || !contains(runner.calls[0], "--since") || !contains(runner.calls[0], "20260501") {
+		t.Fatalf("ccusage args = %v, want --since 20260501", runner.calls)
+	}
+
+	// Control: without the variable the same tree yields both rows, so the
+	// single row above is the window and not a scan failure.
+	unbounded := runNative(t, Options{}, map[string]string{"CLAUDE_CONFIG_DIR": claudeHome})
+	if len(unbounded) != 2 {
+		t.Fatalf("snapshots = %+v, want both rows without TOKENBOARD_SINCE", unbounded)
+	}
+}
+
+// nativeRowAt is nativeRow with an explicit timestamp.
+func nativeRowAt(inputTokens int, timestamp string) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,`+
+		`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":%d,"output_tokens":1}}}`,
+		timestamp, inputTokens)
 }
