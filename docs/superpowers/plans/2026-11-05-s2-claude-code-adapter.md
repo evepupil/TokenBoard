@@ -124,7 +124,7 @@
 - Create: `clients/go/internal/collect/adapters/claude/session_test.go`
 
 **Interfaces:**
-- Produces: `func NewCostFunc(overrides map[string]any) (CostFunc, error)`（错误来自 `WithOverrides` 的严格校验；调用方 fail-closed）；`type CostFunc func(model string, u Usage, at time.Time) (cost float64, missing bool)`；`func PopulateCosts(entries []Entry, cost CostFunc) []Entry`（去重**之前**逐条填 `Cost`/`MissingPricing`，复刻 `daily.rs:317-324` 的顺序）；`BuildDaily(entries []Entry, opts DailyOptions) []byte`；`BuildSessions(entries []Entry, opts SessionOptions) []byte`；`type DailyOptions struct{ Timezone string; Since, Until string }`；`type SessionOptions struct{ Timezone string; Since, Until string }`。两个 `[]byte` 都必须是可直接喂 `ccusage.DecodeJSON` 的 JSON。
+- Produces: `func NewCostFunc(overrides map[string]any, mode CostMode) (CostFunc, error)`（错误来自 `WithOverrides` 的严格校验；调用方 fail-closed）；`type CostFunc func(model string, u Usage, at time.Time) (cost float64, missing bool)`；`func PopulateCosts(entries []Entry, cost CostFunc) []Entry`（去重**之前**逐条填 `Cost`/`MissingPricing`，复刻 `daily.rs:317-324` 的顺序）；`BuildDaily(entries []Entry, opts DailyOptions) []byte`；`BuildSessions(entries []Entry, opts SessionOptions) []byte`；`type DailyOptions struct{ Timezone string; Since, Until string }`；`type SessionOptions struct{ Timezone string; Since, Until string }`。两个 `[]byte` 都必须是可直接喂 `ccusage.DecodeJSON` 的 JSON。
 - 输入 `entries`：`Cost`/`Fast`/`IsSynthetic` 已由调用方在去重前填好（成本**先于**去重，见 Task 3 的顺序约束），且已按文件排序序去重（Task 3 daily 模式）。builder 只做累加与排序，**不再重算成本**（重算会与去重的第③级比较口径分叉）。
 
 **精确规则:**
@@ -241,7 +241,8 @@
 - Create: `docs/research/2026-11-05-claude-native-parity.md`
 
 **步骤:**
-- [ ] **Step 1:** 在真机上跑 `go run ./cmd/parity -source claude-code -since <固定窗口> -until <同上>`（native vs 本机 ccusage 20.0.33）：要求 `match`（或逐条记录 `diff` 及原因）。把命令、窗口、结果写入 `docs/research/2026-11-05-claude-native-parity.md`（脱敏）。
+- [ ] **Step 1:** 在真机上跑 `go run ./cmd/parity -source claude-code -since <固定窗口> -until <同上>`（native vs 本机 ccusage 20.0.33，**生产参数、不带 `--offline`**）：要求 `match`（或逐条记录 `diff` 及原因）。把命令、窗口、结果写入 `docs/research/2026-11-05-claude-native-parity.md`（脱敏）。
+  **已知的口径差异**：生产 claude 不传 `--offline`，ccusage 会联网刷新 LiteLLM 价表（`pricing.rs:1002-1038`）；原生侧是冻结语料。2026-11-05 实测共同模型价差为 0，实时表只多出构建期白名单外的模型，所以 diff 若出现，先确认是不是命中这些条目（它们通常已被 models.dev 快照或动态目录覆盖）。
 - [ ] **Step 2:** 用 `bench-collect` 跑 native vs ccusage（single/30d/full 三种场景），把中位数与 RSS 记入同一报告，与 S1 基线对照。
 - [ ] **Step 3:** **仅当** Step 1 全 `match` 且新金样本测试全绿时，另起一个独立提交把 `useNativeClaude = true`；否则保持 `false` 并在报告里写明原因（§10.1 口径闸门）。翻转提交只改这一行。
 - [ ] **Step 4:** CI：`native-pricing` job 增加 claude 适配器的 `-race` 测试；`check-deps.sh` 的说明更新为「原生金样本闸门」。
