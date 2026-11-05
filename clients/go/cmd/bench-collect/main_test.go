@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -402,7 +403,11 @@ func TestRunRejectsInvalidInvocations(t *testing.T) {
 }
 
 // TestRunPrintsJSONAndText drives both output modes end to end, with the native
-// side left to the real registry so S1's notImplemented boundary shows up.
+// side injected so the notImplemented branch is exercised without collecting
+// the developer's own history. The seam is no longer "the real registry is
+// empty": since S2 it holds a native claude-code provider (pinned by
+// TestBenchBinarySeesTheNativeRegistry), so leaving it nil here would run a
+// real collection five times.
 func TestRunPrintsJSONAndText(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	seam := benchInput{
@@ -410,6 +415,9 @@ func TestRunPrintsJSONAndText(t *testing.T) {
 		Timezone: "UTC",
 		CollectCcusage: func(context.Context, roundRequest) (roundResult, error) {
 			return roundResult{WallMs: 1_500, PeakRSSBytes: 1 << 30, RSSSource: rssSourceWait4, Calls: 2}, nil
+		},
+		CollectNative: func(context.Context, roundRequest) (roundResult, error) {
+			return roundResult{}, errNoNativeProvider
 		},
 	}
 
@@ -431,7 +439,7 @@ func TestRunPrintsJSONAndText(t *testing.T) {
 		t.Errorf("ccusage rounds = %d, want 5", len(report.Ccusage.Rounds))
 	}
 	if report.Native.Status != sideNotImplemented {
-		t.Errorf("native status = %q, want %q (S1 ships no native provider)",
+		t.Errorf("native status = %q, want %q when the native seam has no provider",
 			report.Native.Status, sideNotImplemented)
 	}
 	if !report.Ccusage.BytesReadPending {
@@ -544,4 +552,16 @@ func inclusiveDays(t *testing.T, since, until string) int {
 	}
 	days := int(parse(until).Sub(parse(since)).Hours()/24) + 1
 	return days
+}
+
+// TestBenchBinarySeesTheNativeRegistry pins the blank import in main.go. The
+// providers register both seams from their own init(), and Go only runs an
+// imported package's init() when it is linked: without the import this binary
+// compiles, but its native column would read notImplemented for every source
+// because collect.LookupNative sees an empty registry.
+func TestBenchBinarySeesTheNativeRegistry(t *testing.T) {
+	provider, ok := collect.LookupNative(contract.SourceClaudeCode)
+	if !ok || provider == nil {
+		t.Fatalf("collect.LookupNative(%q) = (%v, %v), want the claude-code native provider", contract.SourceClaudeCode, provider, ok)
+	}
 }

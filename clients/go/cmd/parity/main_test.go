@@ -164,23 +164,25 @@ func (p *nativeStubProvider) Collect(context.Context, collect.Options) ([]contra
 	return nil, nil
 }
 
-// TestCompareReportsNativeProviderMissing pins the transitional behavior: the
-// native seam has no provider for a known source (S1), so parity must report
-// notImplemented and must not silently take the ccusage-backed provider from
-// Lookup. The ccusage side still runs, so the operator sees what it produced.
+// TestCompareReportsNativeProviderMissing pins the contract for a source the
+// native seam does not cover: parity reports notImplemented and must not
+// silently take the ccusage-backed provider from Lookup. The ccusage side still
+// runs, so the operator sees what it produced.
+//
+// The lookup is injected rather than taken from the global registry: since S2
+// the registry does hold the claude-code native provider (TestParityBinarySees
+// TheNativeRegistry pins that), and a real one here would collect the
+// developer's own history.
 func TestCompareReportsNativeProviderMissing(t *testing.T) {
 	ccusageStub := &nativeStubProvider{}
 	restore := collect.OverrideProvider(contract.SourceClaudeCode, ccusageStub)
 	defer restore()
 
-	if provider, ok := collect.LookupNative(contract.SourceClaudeCode); ok || provider != nil {
-		t.Fatalf("LookupNative(claude-code) = (%v, %v), want (nil, false) in S1", provider, ok)
-	}
-
 	report, err := runParity(context.Background(), parityInput{
-		Source:   contract.SourceClaudeCode,
-		Timezone: "UTC",
-		Now:      func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
+		Source:       contract.SourceClaudeCode,
+		Timezone:     "UTC",
+		LookupNative: func(contract.Source) (collect.Provider, bool) { return nil, false },
+		Now:          func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
 		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
 			return []contract.Snapshot{snapshotRow("2026-11-01", "claude-sonnet", 100, 10, 1)}, nil
 		},
@@ -420,5 +422,17 @@ func TestRunJSONOutputIsMachineReadable(t *testing.T) {
 	}
 	if report.Status != statusMatch || report.Matched != 1 || report.CcusageSnapshots != 1 {
 		t.Errorf("report = %+v, want a one-row match", report)
+	}
+}
+
+// TestParityBinarySeesTheNativeRegistry pins the blank import in main.go. The
+// providers register both seams from their own init(), and Go only runs an
+// imported package's init() when it is linked: without the import this binary
+// compiles and runs, but every parity report says notImplemented on the native
+// side because the registry it reads is empty.
+func TestParityBinarySeesTheNativeRegistry(t *testing.T) {
+	provider, ok := collect.LookupNative(contract.SourceClaudeCode)
+	if !ok || provider == nil {
+		t.Fatalf("collect.LookupNative(%q) = (%v, %v), want the claude-code native provider", contract.SourceClaudeCode, provider, ok)
 	}
 }

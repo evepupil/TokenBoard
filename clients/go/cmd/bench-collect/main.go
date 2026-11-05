@@ -53,6 +53,11 @@ import (
 	"strings"
 	"time"
 
+	// The providers register both seams (collect.Lookup and
+	// collect.LookupNative) from their own init(); without this blank import
+	// this binary would link only collect (through measure.go) and see an empty
+	// native registry, so the native column would always read notImplemented.
+	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/providers"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"

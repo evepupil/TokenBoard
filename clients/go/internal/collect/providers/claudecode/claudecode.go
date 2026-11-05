@@ -75,6 +75,17 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	if collectedAt == "" {
 		collectedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	}
+	// The switch only chooses the implementation: everything above resolved
+	// identically for both, and the ccusage path below is unchanged.
+	if useNativeClaude {
+		return nativeCollect(ctx, nativeInput{
+			options:     options,
+			env:         env,
+			stderr:      stderr,
+			timezone:    timezone,
+			collectedAt: collectedAt,
+		})
+	}
 	stateDir := strings.TrimSpace(options.StateDir)
 	if stateDir == "" {
 		stateDir = state.ResolveDir(env, homeDir(options))

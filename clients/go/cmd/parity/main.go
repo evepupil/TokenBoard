@@ -28,6 +28,11 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
+	// The providers register both seams (collect.Lookup and
+	// collect.LookupNative) from their own init(); without this blank import
+	// this binary would link only the collect package and see an empty native
+	// registry, reporting every source as notImplemented.
+	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/providers"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
