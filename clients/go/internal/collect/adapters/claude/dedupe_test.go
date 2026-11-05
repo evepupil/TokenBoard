@@ -274,8 +274,9 @@ func TestDedupeMergesDuplicateAcrossFiles(t *testing.T) {
 	// the gateway-style id "ocgo" and both serialize the SAME sessionId, while
 	// the path-derived ids differ because the copies sit in two project
 	// directories. Only the serialized id makes the keys equal - under a
-	// path-first rule the sessions would differ and the non-msg_ timestamp
-	// rule would keep them apart. The survivor is the bigger copy.
+	// path-first rule the session field of the exact key would carry "session-a"
+	// and "session-b" and the two lines would never meet. The survivor is the
+	// bigger copy.
 	first := dedupeEntry(dedupeFixture{
 		messageID: "ocgo", sessionID: "session-a", pathSessionID: "session-a", input: 100, output: 1,
 	})
