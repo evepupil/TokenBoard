@@ -76,7 +76,7 @@
 - 跳过（`lib.rs:668-707`）：`version` 存在但不是 semver 前缀（`\d+\.\d+\.\d` 前缀，`lib.rs:888-908`）；`sessionId`/`requestId`/`message.id`/`message.model` 为空字符串。
 - 时间戳（`date_utils.rs:111-161`）：只接受长度 20/24/25/29；毫秒必须恰 3 位；偏移只接受 `Z` 或 `±HH:MM`（h≤23,m≤59）。其他一律丢行。
 - token：`cache_creation` 存在时 `cacheCreate5m/1h` 取 `ephemeral_*`（`types.rs:41-50`），平面 `cache_creation_input_tokens` 被忽略；否则用平面值记入 5m、1h=0。`speed` 只接受 `standard|fast`，其他字符串 → 丢行（`types.rs:60-65`）。
-- 模型（`lib.rs:535-543`）：`<synthetic>` → `IsSynthetic=true`（token 计入总量、不进 breakdown、不定价）；`fast` → `Fast=true`，显示名加 `-fast` 由 Task 4 处理，定价用**原始**模型名。
+- 模型（`lib.rs:535-543`）：`<synthetic>` → `IsSynthetic=true`（token 计入总量、不进 breakdown、不定价）；`fast` → `Fast=true`，显示名加 `-fast` 由 Task 4 处理，定价用**原始**模型名。显示名还要再过 `resolve_model_name`（`CCUSAGE_MODEL_ALIASES`，`model_aliases.rs:16-30`；`-fast` 后缀对基础模型查别名后再拼回）——本仓库生产路径从不设该变量（实测为空），实现须支持但默认恒等，不能省略这一步当作差异。
 - advisor（`lib.rs:559-598,635-658`、`daily.rs:368-398`）：行内出现 `advisor_message` 时，`message.usage.iterations[]` 中 `type=="advisor_message"` 且 `model` 非空的项各生成一条独立 Entry：`MessageID = "<父id>:advisor:<index>"`、`RequestID` 继承父、`Sidechain`/`SessionID`/`Timestamp` 继承、`ReportedCost=nil`、usage 取该 iteration。
 - `ParseDailyLineEntries`（以及只取父条目的 `ParseDailyLine`）额外接受 `{"sessionId","data":{"message":{...}}}` 包装（`daily.rs:182-227`），且该路径 `version` 视为缺失。
 
