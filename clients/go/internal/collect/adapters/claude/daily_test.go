@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,6 +95,9 @@ func reportObjects(t *testing.T, object map[string]any, key string) []map[string
 	return rows
 }
 
+// requireNumber compares by numeric value only: 0 and -0 are equal here, and
+// the zero sign is pinned separately by requireNegativeZero (see
+// TestEmptyWindowEmitsEmptyArraysAndZeroTotals).
 func requireNumber(t *testing.T, object map[string]any, key string, want float64) {
 	t.Helper()
 	got, ok := object[key].(float64)
@@ -102,6 +106,23 @@ func requireNumber(t *testing.T, object map[string]any, key string, want float64
 	}
 	if math.Abs(got-want) > 1e-9 {
 		t.Fatalf("%q = %v, want %v", key, got, want)
+	}
+}
+
+// requireNegativeZero asserts the JSON literal of object[key] carries the
+// negative sign. encoding/json writes -0.0 as "-0" and +0.0 as "0", so this is
+// the only way the sign of a zero total is observable in the report bytes.
+func requireNegativeZero(t *testing.T, object map[string]any, key string) {
+	t.Helper()
+	number, ok := object[key].(json.Number)
+	if !ok {
+		t.Fatalf("%q = %T, want a json.Number", key, object[key])
+	}
+	if !strings.HasPrefix(number.String(), "-") {
+		t.Fatalf("%q = %s, want a negative zero literal", key, number)
+	}
+	if value, err := number.Float64(); err != nil || value != 0 {
+		t.Fatalf("%q = %s, want a zero literal", key, number)
 	}
 }
 
@@ -390,12 +411,17 @@ func TestResolveModelNameParsesBothForms(t *testing.T) {
 func TestResolveModelNameHandlesTheFastSuffix(t *testing.T) {
 	t.Setenv(modelAliasesEnv, `{"private-alpha":"gpt-5.5","beta":"gamma"}`)
 
+	// A direct hit on the name as written wins before any suffix handling.
+	if got := resolveModelName("beta"); got != "gamma" {
+		t.Fatalf("direct hit = %q, want gamma", got)
+	}
+	// A "-fast" name that is not itself a key is retried as its base, and the
+	// alias gains the suffix back (model_aliases.rs:20-24).
 	if got := resolveModelName("private-alpha-fast"); got != "gpt-5.5-fast" {
 		t.Fatalf("base alias resolution = %q, want gpt-5.5-fast", got)
 	}
-	// A direct hit wins, and the suffix is appended only by the base lookup.
 	if got := resolveModelName("beta-fast"); got != "gamma-fast" {
-		t.Fatalf("direct base lookup = %q, want gamma-fast", got)
+		t.Fatalf("base lookup from a -fast name = %q, want gamma-fast", got)
 	}
 	if got := resolveModelName("unknown-model-fast"); got != "unknown-model-fast" {
 		t.Fatalf("an unmatched name keeps its suffix: got %q", got)
@@ -421,7 +447,8 @@ func TestResolveModelNameIsIdentityWithoutTheVariable(t *testing.T) {
 func TestEmptyWindowEmitsEmptyArraysAndZeroTotals(t *testing.T) {
 	t.Setenv(modelAliasesEnv, "")
 
-	daily := decodeReport(t, BuildDaily(nil, DailyOptions{Timezone: "UTC"}))
+	dailyBytes := BuildDaily(nil, DailyOptions{Timezone: "UTC"})
+	daily := decodeReport(t, dailyBytes)
 	dailyRows, ok := daily["daily"].([]any)
 	if !ok || dailyRows == nil {
 		t.Fatalf("daily = %T (%v), want a non-null empty array", daily["daily"], daily["daily"])
@@ -437,7 +464,8 @@ func TestEmptyWindowEmitsEmptyArraysAndZeroTotals(t *testing.T) {
 		requireNumber(t, dailyTotals, key, 0)
 	}
 
-	sessions := decodeReport(t, BuildSessions(nil, SessionOptions{Timezone: "UTC"}))
+	sessionBytes := BuildSessions(nil, SessionOptions{Timezone: "UTC"})
+	sessions := decodeReport(t, sessionBytes)
 	sessionRows, ok := sessions["sessions"].([]any)
 	if !ok || sessionRows == nil {
 		t.Fatalf("sessions = %T (%v), want a non-null empty array", sessions["sessions"], sessions["sessions"])
@@ -449,6 +477,30 @@ func TestEmptyWindowEmitsEmptyArraysAndZeroTotals(t *testing.T) {
 	if len(sessionTotals) != 6 {
 		t.Fatalf("session totals keys = %v, want the six token/cost keys", sessionTotals)
 	}
+
+	// ccusage prints "totalCost": -0.0 for an empty report because Rust's
+	// Iterator::sum::<f64>() folds from -0.0 (output.rs:110). requireNumber
+	// cannot see that - 0 and -0 compare equal - so the literal's sign is
+	// pinned here.
+	requireNegativeZero(t, numberedTotals(t, dailyBytes), "totalCost")
+	requireNegativeZero(t, numberedTotals(t, sessionBytes), "totalCost")
+}
+
+// numberedTotals re-decodes a report with json.Number so the zero literal's
+// spelling survives, and returns its totals object.
+func numberedTotals(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var decoded map[string]any
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("report is not valid JSON: %v", err)
+	}
+	totals, ok := decoded["totals"].(map[string]any)
+	if !ok {
+		t.Fatalf("totals = %T, want an object", decoded["totals"])
+	}
+	return totals
 }
 
 // TestReportsAreAlphabeticallyKeyed walks the JSON token stream: encoding/json

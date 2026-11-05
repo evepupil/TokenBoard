@@ -52,10 +52,12 @@ type sessionAccumulator struct {
 
 func (s *sessionAccumulator) addEntry(entry Entry) {
 	s.usage.addEntry(entry)
-	// Strictly greater, so a tie keeps the first entry seen
-	// (summary.rs:136-146). The stored session id and project path are the
-	// group key itself, so a tie cannot change them - only the timestamp is
-	// kept here.
+	// Latest replaces on strictly greater, earliest on strictly less
+	// (summary.rs:136-152). On a tie the first entry wins, but nothing about a
+	// tie is observable here: upstream also stores the entry's session id and
+	// project path alongside the latest timestamp, and in this port both are
+	// the group key itself, so only the timestamp differs - and equal
+	// timestamps store the same instant either way.
 	if !s.hasLatest || entry.Timestamp.After(s.latest) {
 		s.latest = entry.Timestamp
 		s.hasLatest = true

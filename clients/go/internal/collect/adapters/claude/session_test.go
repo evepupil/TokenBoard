@@ -6,6 +6,7 @@ package claude
 // the loader output.
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -113,18 +114,29 @@ func TestBuildSessionsFiltersEntriesBeforeGrouping(t *testing.T) {
 }
 
 // TestLastActivityIsMaxTimestampInUTCAndTiesKeepFirst pins format_rfc3339_millis
-// (date_utils.rs:356-368) and the strict-greater replacement in
-// SessionAccumulator::add_entry (summary.rs:136-152): a tie keeps the first
-// entry seen.
+// (date_utils.rs:356-368) on the latest and earliest entries.
+//
+// The tie rule itself (summary.rs:136-152 replaces on strictly greater, so a
+// tie keeps the first entry seen) is NOT observable in this port and the test
+// does not pretend to pin it: upstream stores the winning entry's session id
+// and project path next to its timestamp, while here the group key already
+// holds both - so a tie can only differ in the timestamp, and equal timestamps
+// store the same instant whichever entry wins. The tie case is still present
+// to pin that the first-seen order of a group does not change the output and
+// that a zero-token tie partner changes nothing.
 func TestLastActivityIsMaxTimestampInUTCAndTiesKeepFirst(t *testing.T) {
 	t.Setenv(modelAliasesEnv, "")
-	// 2026-01-03 07:00 in Tokyo with 5ms is 2026-01-02T22:00:00.005Z.
+	// 2026-01-02T22:00:00.005Z is 2026-01-03 07:00 in Tokyo.
 	first := time.Date(2026, 1, 2, 22, 0, 0, 5_000_000, time.UTC)
 	latest := time.Date(2026, 1, 3, 1, 30, 0, 250_000_000, time.UTC)
+	// Costs are powers of two so the float sums are exact in any order; that
+	// keeps the reorder assertion below about the tie rule, not about
+	// summation order.
+	tie := reportEntry(reportFixture{model: "model-b", at: latest, input: 2, cost: 0.125, project: "demo", pathSession: "s"})
 	entries := []Entry{
-		reportEntry(reportFixture{model: "model-a", at: first, input: 1, project: "demo", pathSession: "s"}),
-		reportEntry(reportFixture{model: "model-a", at: latest, input: 1, project: "demo", pathSession: "s"}),
-		reportEntry(reportFixture{model: "model-a", at: latest, input: 1, project: "demo", pathSession: "s"}),
+		reportEntry(reportFixture{model: "model-a", at: first, input: 1, cost: 0.25, project: "demo", pathSession: "s"}),
+		reportEntry(reportFixture{model: "model-a", at: latest, input: 4, cost: 0.5, project: "demo", pathSession: "s"}),
+		tie,
 	}
 
 	report := decodeReport(t, BuildSessions(entries, SessionOptions{Timezone: "Asia/Tokyo"}))
@@ -135,6 +147,23 @@ func TestLastActivityIsMaxTimestampInUTCAndTiesKeepFirst(t *testing.T) {
 	if sessions[0]["lastActivity"] != "2026-01-03T01:30:00.250Z" {
 		t.Fatalf("lastActivity = %v, want UTC milliseconds format", sessions[0]["lastActivity"])
 	}
+	requireNumber(t, sessions[0], "totalCost", 0.875)
+
+	// Reordering the tied pair must not change anything.
+	swapped := decodeReport(t, BuildSessions([]Entry{entries[0], tie, entries[1]}, SessionOptions{Timezone: "Asia/Tokyo"}))
+	if string(mustMarshal(t, swapped)) != string(mustMarshal(t, report)) {
+		t.Fatalf("reordering the tied entries changed the report:\n%s\n%s",
+			mustMarshal(t, report), mustMarshal(t, swapped))
+	}
+}
+
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return data
 }
 
 // TestSessionRowCarriesBreakdownsAndTotals pins the rest of the session row

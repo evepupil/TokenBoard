@@ -78,7 +78,19 @@ func PopulateCosts(entries []Entry, cost CostFunc) []Entry {
 
 // priceUsage is calculate_cost_for_usage_at plus missing_pricing_model_for_usage
 // for one entry (cost.rs:31-75).
+//
+// An absent model is only a dead end where upstream looks one up: Display and
+// Auto consult cost_usd first and never reach the pricing tables (cost.rs:39-43),
+// so a model-less line that stored a cost keeps it. Calculate always computes,
+// and calculate_cost_from_tokens returns 0.0 before it looks anything up when
+// the model is None (cost.rs:99-101) - that short circuit has to happen here,
+// because Corpus.Find("") is not a miss: the fuzzy matcher treats the empty key
+// as contained in every candidate and would price a model-less line from an
+// arbitrary row.
 func priceUsage(corpus nativepricing.Corpus, mode CostMode, model string, usage Usage, at time.Time) (float64, bool) {
+	if mode == nativepricing.ModeDisplay || (mode == nativepricing.ModeAuto && usage.ReportedCost != nil) {
+		return nativepricing.Cost(corpus, model, nativeUsage(usage), at, mode, usage.Fast, false)
+	}
 	if model == "" {
 		return 0, false
 	}
@@ -102,10 +114,10 @@ func nativeUsage(usage Usage) nativepricing.Usage {
 
 // missingPricing is missing_pricing_model_for_usage (cost.rs:48-75) reduced to
 // its boolean: Display never looks a price up, Auto trusts a reported cost, a
-// usage without tokens is never reported, an absent model is never reported,
-// and otherwise the model is missing only when the pricing tables do not know
-// the name. nativepricing.Cost already returns missing=false for the first two
-// cases implicitly, but not for the token total.
+// usage without tokens is never reported, an absent model is never reported
+// (cost.rs:69), and otherwise the model is missing only when the pricing tables
+// do not know the name. Its callers have already excluded the first two cases,
+// but the check is repeated so the function means what upstream's means.
 func missingPricing(corpus nativepricing.Corpus, mode CostMode, model string, usage Usage) bool {
 	if mode == nativepricing.ModeDisplay || (mode == nativepricing.ModeAuto && usage.ReportedCost != nil) {
 		return false

@@ -102,6 +102,20 @@ func TestCostFuncMatchesCcusageMissingPricingRules(t *testing.T) {
 			name: "an absent model is never missing",
 			mode: nativepricing.ModeCalculate, model: "", usage: withTokens,
 		},
+		{
+			name: "auto keeps a reported cost without a model",
+			mode: nativepricing.ModeAuto, model: "", usage: usageWithReported(0.42),
+			wantCost: 0.42,
+		},
+		{
+			name: "display keeps a reported cost without a model",
+			mode: nativepricing.ModeDisplay, model: "", usage: usageWithReported(0.42),
+			wantCost: 0.42,
+		},
+		{
+			name: "calculate ignores the reported cost without a model",
+			mode: nativepricing.ModeCalculate, model: "", usage: usageWithReported(0.42),
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
