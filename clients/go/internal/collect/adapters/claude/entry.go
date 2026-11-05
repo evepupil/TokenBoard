@@ -98,6 +98,22 @@ type Entry struct {
 	IsSynthetic bool
 	ProjectPath string
 	Usage       Usage
+
+	// The three fields below are not parsed from the line either: the caller
+	// fills them from the file path and the pricing pass before Add.
+	//
+	// PathSessionID is the session id derived from the file path
+	// (paths.PathSessionParts). It is NOT the serialized sessionId: the session
+	// report groups by this value (commands/mod.rs:186-206), while dedup uses
+	// SessionID when present and falls back to this (lib.rs:405-411).
+	PathSessionID string
+	// Cost is the entry's already-computed cost. ccusage computes it before
+	// dedup (daily.rs:323-330) because the daily replacement compares it.
+	Cost float64
+	// MissingPricing marks a cost that fell back to zero for want of a price.
+	// Dedup never reads it; it is carried so the report can list unpriced
+	// models without recomputing cost (daily.rs:331-338).
+	MissingPricing bool
 }
 
 // ParseLineEntries parses one transcript line for the session/entry chain and
