@@ -80,7 +80,7 @@
 - advisor（`lib.rs:559-598,635-658`、`daily.rs:368-398`）：行内出现 `advisor_message` 时，`message.usage.iterations[]` 中 `type=="advisor_message"` 且 `model` 非空的项各生成一条独立 Entry：`MessageID = "<父id>:advisor:<index>"`、`RequestID` 继承父、`Sidechain`/`SessionID`/`Timestamp` 继承、`ReportedCost=nil`、usage 取该 iteration。
 - `ParseDailyLineEntries`（以及只取父条目的 `ParseDailyLine`）额外接受 `{"sessionId","data":{"message":{...}}}` 包装（`daily.rs:182-227`），且该路径 `version` 视为缺失。
 
-- [ ] **Step 1: 写失败测试**：表驱动：`TestParseLineRejectsUsageWithSpace`、`TestParseLineNullBlacklistAnyDepth`（含 iterations.model 豁免）、`TestParseLineDuplicateKeysDropped`、`TestParseLineSkipsInvalidVersionAndEmptyIDs`、`TestParseTimestampLengthGate`（1/2/6 位小数、无时区、`v1.2.3` 全拒）、`TestCacheCreationBreakdownWinsOverFlat`、`TestCacheCreationEphemeralFieldsAreU64`（负数/小数/null 的 `ephemeral_*` 必须丢整行）、`TestSyntheticAndFastModelFlags`、`TestAdvisorIterationsBecomeSeparateEntries`、`TestBothEntriesFormsReturnParentAndAdvisorRows`（session 与 daily 两条链都产出父条目 + advisor 行）、`TestParseDailyLineAcceptsAgentProgressWrapper`。
+- [ ] **Step 1: 写失败测试**：表驱动：`TestParseLineRejectsUsageWithSpace`、`TestParseLineNullBlacklistAnyDepth`（含 iterations.model 豁免）、`TestParseLineDuplicateKeysDropped`、`TestParseLineSkipsInvalidVersionAndEmptyIDs`、`TestParseTimestampLengthGate`（1/2/6 位小数、无时区、`v1.2.3` 全拒）、`TestCacheCreationBreakdownWinsOverFlat`、`TestCacheCreationEphemeralFieldsAreU64`（负数/小数/null 的 `ephemeral_*` 必须丢整行）、`TestSyntheticAndFastModelFlags`、`TestAdvisorIterationsBecomeSeparateEntries`、`TestBothEntriesFormsReturnParentAndAdvisorRows`（session 与 daily 两条链都产出父条目 + advisor 行）、`TestBothEntriesFormsRejectTheSameLines`（两条 Entries 链共用同一套校验与清理，被拒行在两条链上都返回空）、`TestParseDailyLineAcceptsAgentProgressWrapper`。
 - [ ] **Step 2: 运行确认失败**；**Step 3: 实现** `entry.go`；**Step 4: 运行通过**。
 - [ ] **Step 5: Commit**：`feat(adapters): port the Claude line parser and its validation gates`
 
@@ -91,15 +91,18 @@
 **Files:**
 - Create: `clients/go/internal/collect/adapters/claude/dedupe.go`
 - Create: `clients/go/internal/collect/adapters/claude/dedupe_test.go`
+- Modify: `clients/go/internal/collect/adapters/claude/entry.go`（只加字段与注释，不改解析行为）
 
 **Interfaces:**
-- Produces: `type Dedupe struct{...}`; `NewDedupe(mode DedupeMode) *Dedupe`（`DedupeEntry`/`DedupeDaily`）; `(*Dedupe) Add(entry Entry) error`（内部决定替换/保留）; `(*Dedupe) Entries() []Entry`（保留者，按首次出现顺序）。内部键类型必须是**结构体**：`struct{ MessageID, RequestID, SessionID, Timestamp string }` 加条件字段，不得用拼接字符串。
+- Consumes: `Entry`，本任务新增三个字段（`entry.go`）：`PathSessionID string`（路径推导的 session id，Task 5 用 `PathSessionParts` 填；**去重用的 session 是** `SessionID` 非空则取 `SessionID`、否则取 `PathSessionID`——`lib.rs:405-411` 的 `loaded_entry_session_id`）、`Cost float64` 与 `MissingPricing bool`（该条目已算好的成本与缺价标记；**必须由调用方在 `Add` 前填好**，daily 替换第③级读 `Cost`，见下方顺序约束）。
+- Produces: `type Dedupe struct{...}`; `func NewDedupe(mode DedupeMode) *Dedupe`（`DedupeEntry`/`DedupeDaily`）; `func (d *Dedupe) Add(entry Entry)`（内部决定替换/保留；**无 error 返回**——ccusage 的去重没有任何失败路径，留一个恒 nil 的 error 只会长出死代码）; `func (d *Dedupe) Entries() []Entry`（保留者，按首次出现顺序）。内部键类型必须是**结构体**：`struct{ MessageID, RequestID, SessionID string; TimestampMs int64 }` 加条件字段，不得用拼接字符串。
 
 **精确规则:**
 - 精确键（`lib.rs:350-375`）：总是含 `message_id`、`request_id`（缺省与空串区分：空串已在 Task 2 丢弃）；`request_id` 缺失时追加 `session_id`，且若 `message_id` 不以 `msg_` 开头再追加 `timestamp`。
 - 两个 sidechain 桶（`lib.rs:377-392`）：`hash("sidechain-replay", mid, sid)` 对**每个有条目的 entry** 建索引；`hash("sidechain-replay-entry", mid, sid)` 只对 `isSidechain==true` 的 entry 建索引。候选是 sidechain 时查前者，候选不是时查后者。
 - sidechain 匹配谓词（`lib.rs:427-440`）：`mid 相同 && (两侧都无 request_id 或 timestamp 相同) && (候选是 sidechain || 已存在者 isSidechain==true)`。**daily 变体**（`daily.rs:486-498`）去掉 timestamp 条件，只比 `mid`、**索引的 session id**、sidechain 条件。
-- 替换优先级（`lib.rs:198-212`）：① sidechain 标记不同 → 已有者是 sidechain 则替换（非 sidechain 胜）；② 总 token 不同（`input+output+cache_create+cache_read`）→ 大者胜；③ **仅 daily** 插入在 ② 与 ④ 之间：`cost` 不同 → 大者胜（`daily.rs:582-601`）；④ 候选有 speed 而既有无 → 替换；⑤ 否则保留既有（first-seen）。
+- 替换优先级（`lib.rs:198-212`）：① sidechain 标记不同 → 已有者是 sidechain 则替换（非 sidechain 胜）；② 总 token 不同（`input+output+cache_create+cache_read`）→ 大者胜；③ **仅 daily** 插入在 ② 与 ④ 之间：`entry.Cost` 不同 → 大者胜（`daily.rs:582-601`）；④ 候选有 speed 而既有无 → 替换；⑤ 否则保留既有（first-seen）。
+- **顺序约束**：ccusage 在 dedupe 之前就为每条 entry 算好 cost（`daily.rs:317-324`），所以 `Entry.Cost` 必须在 `Add` 前填好；本任务只读它，不负责计算（成本计算在 Task 4，接线在 Task 5）。
 - 去重是**全局的**：单次 load 内跨所有文件、所有根；遍历顺序 = 文件排序序 + 行序（`lib.rs:170-182`）。
 - 跨会话副本：同一 `mid` 在另一 session 存活时登记 `session_alias` 路由，使后续 replay 仍能命中存活者（`lib.rs:270-286,474-489`）。
 
@@ -112,14 +115,17 @@
 ### Task 4: 聚合与报表 JSON（daily + session），成本经 nativepricing
 
 **Files:**
+- Create: `clients/go/internal/collect/adapters/claude/cost.go`
 - Create: `clients/go/internal/collect/adapters/claude/daily.go`
 - Create: `clients/go/internal/collect/adapters/claude/session.go`
 - Create: `clients/go/internal/collect/adapters/claude/report.go`
+- Create: `clients/go/internal/collect/adapters/claude/cost_test.go`
 - Create: `clients/go/internal/collect/adapters/claude/daily_test.go`
+- Create: `clients/go/internal/collect/adapters/claude/session_test.go`
 
 **Interfaces:**
-- Produces: `type CostFunc func(model string, u Usage, at time.Time) (cost float64, missing bool)`；`BuildDaily(entries []Entry, opts DailyOptions) []byte`；`BuildSessions(entries []Entry, opts SessionOptions) []byte`；`type DailyOptions struct{ Timezone string; Since, Until string }`；`type SessionOptions struct{ Timezone string; Since, Until string }`。两个 `[]byte` 都必须是可直接喂 `ccusage.DecodeJSON` 的 JSON。
-- 输入 `entries` 已按文件排序序去重（Task 3 daily 模式）。
+- Produces: `func NewCostFunc(overrides map[string]any) (CostFunc, error)`（错误来自 `WithOverrides` 的严格校验；调用方 fail-closed）；`type CostFunc func(model string, u Usage, at time.Time) (cost float64, missing bool)`；`func PopulateCosts(entries []Entry, cost CostFunc) []Entry`（去重**之前**逐条填 `Cost`/`MissingPricing`，复刻 `daily.rs:317-324` 的顺序）；`BuildDaily(entries []Entry, opts DailyOptions) []byte`；`BuildSessions(entries []Entry, opts SessionOptions) []byte`；`type DailyOptions struct{ Timezone string; Since, Until string }`；`type SessionOptions struct{ Timezone string; Since, Until string }`。两个 `[]byte` 都必须是可直接喂 `ccusage.DecodeJSON` 的 JSON。
+- 输入 `entries`：`Cost`/`Fast`/`IsSynthetic` 已由调用方在去重前填好（成本**先于**去重，见 Task 3 的顺序约束），且已按文件排序序去重（Task 3 daily 模式）。builder 只做累加与排序，**不再重算成本**（重算会与去重的第③级比较口径分叉）。
 
 **精确规则:**
 - 分组（`daily.rs:112-145`）：无 `--instances/--project` 时按 `date`（BTreeMap 升序）；日期由 `FormatDate(timestamp, timezone)` 得（`lib.rs:524`）。按 `since/until` 过滤行（`summary.rs:291-305`）。
@@ -143,7 +149,11 @@
 - Produces: `type Options struct{ Timezone, Since, Until string; Roots Roots; Overrides map[string]any; Mode CostMode; Stderr func(string) }`；`Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte, err error)`。`CostMode` 复用 `nativepricing.CostMode`（默认 `ModeAuto`）。
 - **不得**直接产出 Snapshot；provider 负责 `ccusage.DecodeJSON` + `NormalizeCcusageDailyJSON`。
 
-**行为:** 解析根 → 扫描 → `--since` 剪枝（`stderr` 报被剪组）→ 逐文件流式 `ParseDailyLineEntries`（daily 链）与 `ParseLineEntries`（session/entry 链）→ 各自去重 → 成本用 `nativepricing.LoadEmbeddedCorpus()` + `WithOverrides(opts.Overrides)` → `BuildDaily`/`BuildSessions`。空窗口必须返回 `{"daily":[],"totals":{...}}` 形状而不是 nil/错误。`ctx` 取消要快速返回。
+**行为:** 解析根 → 扫描 → `--since` 剪枝（`stderr` 报被剪组）→ 逐文件流式 `ParseDailyLineEntries`（daily 链）与 `ParseLineEntries`（session/entry 链）→ 各自去重 → 成本用 `nativepricing.LoadEmbeddedCorpus()` + `WithOverrides(opts.Overrides)`（**每条链内、去重之前**逐条 `PopulateCosts`）→ `BuildDaily`/`BuildSessions`。空窗口必须返回 `{"daily":[],"totals":{...}}` 形状而不是 nil/错误。`ctx` 取消要快速返回。
+
+**逐行流式读取，不用 `os.ReadFile`**：claude 主目录可能有数 GB 的 transcript，ccusage 的整文件读取在 Go 侧是可控的内存风险。用 `bufio.Reader.ReadBytes('\n')`（`bufio.Scanner` 有 64KiB 行上限，不能用）。行切分语义对齐 `fast.rs:82-99`：以 `\n` 切、末行无换行也算一行、空文件零行。
+
+**读取失败 fail-closed（有意偏差）**：ccusage 的 `let Ok(content) = fs::read(path) else { return empty }`（`lib.rs:507`、`daily.rs:300`）会静默跳过不可读文件；TokenBoard 的采集口径是「真实读取失败必须报错，禁止静默丢数据」（AGENTS.md），所以本实现返回 error。这条偏差必须写在代码注释里，并在 Task 6 的金样本夹具里避开不可读文件（金样本比较的是内容，不是错误路径）。
 
 **两条链都必须消费多条目形式**：ccusage 的 entry loader 同样拆分 advisor iterations（`lib.rs:559-598`），父条目与 advisor 行都算用量，用只取父条目的 `ParseLine`/`ParseDailyLine` 会让 session 报表和 daily 报表同时少计（见 Task 2 的 Interfaces）。
 
@@ -174,8 +184,9 @@
 11. AgentProgress 包装行（只应影响 daily，不应影响 session 报表）。
 
 **生成配方（钉死，fail-closed）:**
-`CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --config packages/collector/ccusage.json -z UTC -s <fixed> -u <fixed> --mode {auto,calculate}`，
-以及 `ccusage claude session --json --offline --config ... -z UTC -s/-u`。
+`CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --single-thread -z UTC -s <fixed> -u <fixed> --mode {auto,calculate}`，
+以及 `ccusage claude session --json --offline --single-thread -z UTC -s/-u`。
+**不带 `--config`**：金样本冻结的是 ccusage「空别名表 + 内置五资产 + builtin 表」的核心语义，带上仓库的动态 collector 配置会让金样本随配置漂移；override 路径由 Task 5 的单测与 Task 9 的影子双跑覆盖。生成器还须验证环境干净：`~/.claude/ccusage.json`、`~/.config/claude/ccusage.json`、`<cwd>/.ccusage/ccusage.json` 都不存在，`CCUSAGE_MODEL_ALIASES` 未设置，否则 exit 1。
 脚本断言 `--version` == `20.0.33`、每个夹具日至少一行、输出非空，否则 exit 1。产物含 `{claudeVersion, command, fixtureSha256, daily, sessions}`。
 
 **测试：** `goldens_test.go` 用 `//go:embed` 读金样本；用适配器跑同一夹具树（`ResolveRoots` → fixture；`ScanFiles` 不剪枝），比较**解析后的 JSON 值**（键序无关）：

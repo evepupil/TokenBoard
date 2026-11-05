@@ -254,7 +254,9 @@ S1 的整分支终审留下七项义务，其中三项已写进代码注释（`c
 - builtin context limits 未移植（`clients/go/internal/nativepricing/builtin.go:27-35`）：ccusage 的三档
   limit 会被 `Corpus.ContextLimits` 的单张合并表压平，移植 `context_limit` 时须补齐三档。
 - `missingPricing` 折叠了 ccusage 的零 token 诊断门（`clients/go/internal/nativepricing/cost.go:122-126`）：
-  适配器须自行补上空 usage 例外与别名解析后的诊断文案。
+  适配器须自行补上空 usage 例外与别名解析后的诊断文案。S2 的 Claude 适配器把这条放在
+  `adapters/claude/cost.go` 的 `NewCostFunc` 里补齐（不修改 `nativepricing`）；S4 的工具适配器仍需
+  各自处理，或届时把该判定上提到 `nativepricing`。
 - `find_exact_with_fallback`（exact + normalized，**无 fuzzy**）未移植：ccusage Rust 侧的
   `adapters/hermes`、`adapters/antigravity` 与 CLI 的 `context_limit` 路径需要它；本仓库的落点是 S4 的
   `internal/collect/adapters/tools/*`（12 个工具适配器）入口，不是 S1 `Cost` 的需求。
