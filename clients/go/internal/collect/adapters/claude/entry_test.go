@@ -293,6 +293,118 @@ func TestParseLineAcceptsUnknownDuplicateMembers(t *testing.T) {
 	})
 }
 
+// TestParseLineDuplicateMembersFollowTheUntaggedVariants pins serde's rule for a
+// duplicate member when the line is null-free. ccusage's line type is an
+// untagged enum tried Direct-then-AgentProgress, and a duplicate fails only the
+// variants that DECLARE that key. Rejecting the line outright would drop rows
+// ccusage counts (lib.rs:727-736 is the gate that picks this path at all).
+func TestParseLineDuplicateMembersFollowTheUntaggedVariants(t *testing.T) {
+	usage := `{"input_tokens":10,"output_tokens":20}`
+	directMessage := `{"id":"msg_1","model":"m","usage":` + usage + `}`
+
+	// A duplicate `iterations` must never cost the line: TokenUsageRaw does not
+	// declare it, so serde skips the member as unknown and the advisor rows come
+	// from a separate pass. This is the shape most likely to appear in real data.
+	t.Run("duplicate iterations is ignored", func(t *testing.T) {
+		line := lineWithUsage(`{"input_tokens":10,"output_tokens":20,"iterations":[{"type":"advisor_message","model":"m2","input_tokens":3,"output_tokens":4}],"iterations":[{"type":"advisor_message","model":"m2","input_tokens":5,"output_tokens":6}]}`)
+		for name, parse := range map[string]func(string) (Entry, bool){"session": ParseLine, "daily": ParseDailyLine} {
+			entry, ok := parse(line)
+			if !ok {
+				t.Fatalf("%s chain rejected a duplicated `iterations` member", name)
+			}
+			if entry.Usage.Input != 10 || entry.Usage.Output != 20 {
+				t.Fatalf("%s parent usage = %d/%d, want 10/20", name, entry.Usage.Input, entry.Usage.Output)
+			}
+		}
+		// The advisor pass re-parses with encoding/json (last duplicate wins), so
+		// it splits the SECOND array; upstream's derived envelope would fail on
+		// the duplicate and split none. Registered residual, over-counting only.
+		if entries := ParseLineEntries(line); len(entries) != 2 {
+			t.Fatalf("ParseLineEntries returned %d entries, want the parent plus one advisor row", len(entries))
+		}
+	})
+
+	// A duplicate root `timestamp` is a Direct-only key, so Direct dies and the
+	// AgentProgress variant - which reads its timestamp from data.message - wins.
+	t.Run("duplicate root timestamp leaves the wrapper variant", func(t *testing.T) {
+		inner := `{"timestamp":"2026-10-30T01:02:03.004Z","message":{"id":"msg_2","model":"m","usage":` + usage + `}}`
+		line := `{"sessionId":"sess-1","timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `","data":{"message":` + inner + `}}`
+		entry, ok := ParseDailyLine(line)
+		if !ok {
+			t.Fatalf("daily chain rejected a duplicated root timestamp on a wrapper-shaped line")
+		}
+		if got, want := entry.Timestamp.Format("2006-01-02T15:04:05.000Z"), "2026-10-30T01:02:03.004Z"; got != want {
+			t.Fatalf("timestamp = %s, want %s (from data.message, i.e. the wrapper variant won)", got, want)
+		}
+		if entry.MessageID != "msg_2" {
+			t.Fatalf("message id = %q, want msg_2", entry.MessageID)
+		}
+	})
+
+	// A duplicate root `data` is an AgentProgress-only key, so the Direct variant
+	// is untouched and wins.
+	t.Run("duplicate root data leaves the direct variant", func(t *testing.T) {
+		line := `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp +
+			`","requestId":"req-1","data":{"x":1},"data":{"x":2},"message":` + directMessage + `}`
+		entry, ok := ParseDailyLine(line)
+		if !ok {
+			t.Fatalf("daily chain rejected a duplicated root data member")
+		}
+		if entry.Usage.Input != 10 || entry.Usage.Output != 20 {
+			t.Fatalf("usage = %d/%d, want the direct variant's 10/20", entry.Usage.Input, entry.Usage.Output)
+		}
+	})
+
+	// isApiErrorMessage is modelled by the session chain's UsageEntry but not by
+	// the daily chain's DailyUsageEntry (daily.rs:171-182), so only the daily
+	// chain ignores it - a duplicate and a wrong type are both harmless there.
+	t.Run("isApiErrorMessage is ignored by daily only", func(t *testing.T) {
+		duplicate := `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp +
+			`","requestId":"req-1","isApiErrorMessage":false,"isApiErrorMessage":true,"message":` + directMessage + `}`
+		wrongType := `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp +
+			`","requestId":"req-1","isApiErrorMessage":"yes","message":` + directMessage + `}`
+		for name, line := range map[string]string{"duplicate": duplicate, "wrong type": wrongType} {
+			if _, ok := ParseDailyLine(line); !ok {
+				t.Fatalf("daily chain rejected %s isApiErrorMessage, which DailyUsageEntry does not model", name)
+			}
+			if _, ok := ParseLine(line); ok {
+				t.Fatalf("session chain accepted %s isApiErrorMessage, which UsageEntry does model", name)
+			}
+		}
+	})
+
+	// sessionId sits on the shared envelope, so both variants model it and a
+	// duplicate kills the line on both chains.
+	t.Run("duplicate root sessionId is fatal on both chains", func(t *testing.T) {
+		line := `{"sessionId":"sess-1","sessionId":"sess-2","timestamp":"` + validTimestamp +
+			`","message":` + directMessage + `}`
+		if _, ok := ParseDailyLine(line); ok {
+			t.Fatalf("daily chain accepted a duplicated root sessionId")
+		}
+		if _, ok := ParseLine(line); ok {
+			t.Fatalf("session chain accepted a duplicated root sessionId")
+		}
+	})
+
+	// Control group: the fields both variants share through message/usage still
+	// reject on both chains.
+	t.Run("duplicate shared message and usage members are fatal", func(t *testing.T) {
+		cases := map[string]string{
+			"duplicate usage":        lineWithMessage(`{"id":"msg_1","model":"m","usage":` + usage + `,"usage":` + usage + `}`),
+			"duplicate input_tokens": lineWithUsage(`{"input_tokens":1,"input_tokens":2,"output_tokens":2}`),
+			"duplicate model":        lineWithMessage(`{"id":"msg_1","model":"m","model":"m2","usage":` + usage + `}`),
+		}
+		for name, line := range cases {
+			if _, ok := ParseDailyLine(line); ok {
+				t.Fatalf("daily chain accepted a duplicated shared member (%s)", name)
+			}
+			if _, ok := ParseLine(line); ok {
+				t.Fatalf("session chain accepted a duplicated shared member (%s)", name)
+			}
+		}
+	})
+}
+
 // TestParseDailyLineRejectsKnownDuplicateInWrapper is the rejecting counterpart
 // for the wrapper kinds: `timestamp` is modelled by kindAgentMessage, so serde's
 // derive fails and the AgentProgress line must be dropped.

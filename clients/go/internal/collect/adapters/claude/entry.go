@@ -175,6 +175,7 @@ func parseLineEntries(line string, daily bool) ([]Entry, bool) {
 		data:     []byte(line),
 		nullScan: strings.Contains(line, nullLiteral),
 		keys:     make([]keySpan, 0, 8),
+		daily:    daily,
 	}
 	var captured lineCapture
 	if !scan.parseObject(kindRoot, target{line: &captured}, false) {
@@ -184,7 +185,7 @@ func parseLineEntries(line string, daily bool) ([]Entry, bool) {
 		return nil, false
 	}
 
-	shape, ok := captured.resolve(daily)
+	shape, ok := captured.resolve(daily, scan.directDup, scan.wrapperDup)
 	if !ok {
 		return nil, false
 	}
@@ -637,9 +638,11 @@ type resolvedLine struct {
 }
 
 // resolve picks the shape the way serde's untagged enum does: the direct shape
-// first, then AgentProgress when the caller allows it (daily.rs:182-187).
-func (c *lineCapture) resolve(daily bool) (resolvedLine, bool) {
-	if c.direct.valid(c) {
+// first, then AgentProgress when the caller allows it (daily.rs:182-187). The
+// duplicate marks are per variant, so a duplicate that kills Direct can still
+// leave AgentProgress available and vice versa.
+func (c *lineCapture) resolve(daily, directDup, wrapperDup bool) (resolvedLine, bool) {
+	if c.direct.valid(c, directDup) {
 		return resolvedLine{
 			timestamp:   c.direct.timestamp.value,
 			message:     &c.direct.message,
@@ -649,7 +652,7 @@ func (c *lineCapture) resolve(daily bool) (resolvedLine, bool) {
 			version:     c.direct.version,
 		}, true
 	}
-	if daily && c.hasData && c.wrapper.valid(c) {
+	if daily && c.hasData && c.wrapper.valid(c, wrapperDup) {
 		return resolvedLine{
 			timestamp:   c.wrapper.timestamp.value,
 			message:     &c.wrapper.message,
@@ -662,8 +665,8 @@ func (c *lineCapture) resolve(daily bool) (resolvedLine, bool) {
 	return resolvedLine{}, false
 }
 
-func (d *directCapture) valid(c *lineCapture) bool {
-	if c.sessionID.bad || d.timestamp.bad || !d.timestamp.present {
+func (d *directCapture) valid(c *lineCapture, duplicate bool) bool {
+	if duplicate || c.sessionID.bad || d.timestamp.bad || !d.timestamp.present {
 		return false
 	}
 	if !d.hasMessage || !d.message.valid() {
@@ -673,8 +676,8 @@ func (d *directCapture) valid(c *lineCapture) bool {
 		!d.isSidechain.bad && !d.isAPIError.bad
 }
 
-func (w *wrapperCapture) valid(c *lineCapture) bool {
-	if c.sessionID.bad || w.timestamp.bad || !w.timestamp.present {
+func (w *wrapperCapture) valid(c *lineCapture, duplicate bool) bool {
+	if duplicate || c.sessionID.bad || w.timestamp.bad || !w.timestamp.present {
 		return false
 	}
 	if !w.hasMessage || !w.message.valid() {
@@ -694,11 +697,17 @@ func (w *wrapperCapture) valid(c *lineCapture) bool {
 //
 // Upstream only runs the strict walk when the line contains a null literal
 // (lib.rs:727-736). A null-free line goes straight to serde_json::from_slice,
-// where the duplicate rule is serde's: a duplicate member of a MODELLED field
-// fails the derive and drops the line, while a duplicate of an unknown field is
-// ignored along with the field. Both halves are reproduced here -
-// isKnownMember gates the reject so an unknown duplicate survives, and the
-// null check stays exactly where upstream has it.
+// where the duplicate rule is serde's, applied PER UNTAGGED VARIANT: ccusage's
+// line enum tries Direct first and AgentProgress second, and a duplicate fails
+// only the variants that model that key. A duplicate of a field only one variant
+// declares therefore drops that variant and lets the other one win; a duplicate
+// of a field NO variant declares is ignored outright.
+//
+// That is why a duplicate here marks a variant (directDup / wrapperDup) instead
+// of failing the scan: failing immediately would reject lines ccusage accepts,
+// which silently under-counts usage. Both capture validators consult their own
+// mark, and the null-triggered scan still fails on the spot because
+// UniqueJsonValue has no notion of variants.
 //
 // Known residual disagreement: advisorUsagesFromLine re-parses the line with
 // encoding/json, whose last-duplicate-wins differs from upstream's advisor
@@ -711,6 +720,15 @@ type scanner struct {
 	nullScan bool
 	keys     []keySpan
 	depth    int
+	// daily selects the daily chain: its DailyUsageEntry does not model
+	// isApiErrorMessage (daily.rs:171-182), so the member is ignored there.
+	daily bool
+	// inWrapper is true while walking the AgentProgress subtree, which decides
+	// which variant a duplicate inside a shared kind (message/usage/...) fails.
+	inWrapper bool
+	// directDup and wrapperDup record that a duplicate invalidated that variant.
+	directDup  bool
+	wrapperDup bool
 }
 
 type keySpan struct{ start, end int }
@@ -745,7 +763,15 @@ func (s *scanner) parseObject(kind objectKind, into target, iterationElement boo
 		return false
 	}
 	s.depth++
+	// Everything below the AgentProgress wrapper belongs to the wrapper variant,
+	// including the message/usage/cache_creation structs it shares with Direct;
+	// the flag decides which variant a duplicate there invalidates.
+	previousWrapper := s.inWrapper
+	if kind == kindWrapperData || kind == kindAgentMessage {
+		s.inWrapper = true
+	}
 	ok := s.parseObjectMembers(kind, into, iterationElement)
+	s.inWrapper = previousWrapper
 	s.depth--
 	return ok
 }
@@ -775,17 +801,15 @@ func (s *scanner) parseObjectMembers(kind objectKind, into target, iterationElem
 		// names, so this is a known, deliberate gap rather than a defect to fix
 		// here; closing it would require decoding every key on the hot path.
 		//
-		// The reject is gated exactly like upstream's two paths: the null-triggered
-		// deep scan (s.nullScan) refuses any duplicate at any depth, and without it
-		// serde's derive refuses only duplicates of a modelled field. An unknown
-		// duplicate in a null-free line is ignored by serde along with its field,
-		// so the line survives and must be counted here too - see isKnownMember.
-		if s.nullScan || isKnownMember(kind, key) {
-			for _, span := range s.keys[base:] {
-				if bytes.Equal(s.data[span.start:span.end], key) {
-					return false
-				}
+		// A duplicate is fatal on the spot only under the null-triggered deep
+		// scan; otherwise it invalidates just the untagged variants that model
+		// the key (markDuplicate), and the line survives when the other variant
+		// still matches - or when no variant models the key at all.
+		if s.duplicateMember(base, key) {
+			if s.nullScan {
+				return false
 			}
+			s.markDuplicate(kind, key)
 		}
 		s.keys = append(s.keys, keySpan{start: start, end: end})
 		s.skipSpace()
@@ -812,8 +836,11 @@ func (s *scanner) parseObjectMembers(kind objectKind, into target, iterationElem
 }
 
 // parseMember is the shared member dispatch every object kind goes through.
-// isKnownMember mirrors its switch: a key this function does not handle is an
-// unknown field to serde, and serde drops unknown fields without complaint.
+// knownChildMember mirrors its switch for the duplicate rule, and the two lists
+// must move together (M-5): a field added here but not there makes its duplicate
+// silently acceptable, which is looser than serde. Closing that properly means
+// deriving both from one table; until then the pairing is a review obligation,
+// not a compile-time guarantee.
 func (s *scanner) parseMember(kind objectKind, key []byte, into target) bool {
 	switch kind {
 	case kindRoot:
@@ -834,6 +861,13 @@ func (s *scanner) parseMember(kind objectKind, key []byte, into target) bool {
 		case keyIs(key, "isSidechain"):
 			return s.parseBoolField(&into.line.direct.isSidechain)
 		case keyIs(key, "isApiErrorMessage"):
+			// The daily chain's DailyUsageEntry does not declare this field
+			// (daily.rs:171-182), so serde ignores the member there: a duplicate or
+			// a wrong-typed value must not cost a daily row. The session chain's
+			// UsageEntry does declare it, so that chain stays strict.
+			if s.daily {
+				return s.skipValue()
+			}
 			return s.parseBoolField(&into.line.direct.isAPIError)
 		case keyIs(key, "data"):
 			return s.parseObjectField(kindWrapperData, target{line: into.line}, &into.line.hasData)
@@ -905,35 +939,84 @@ func (s *scanner) parseMember(kind objectKind, key []byte, into target) bool {
 	return s.skipValue()
 }
 
-// isKnownMember reports whether key names a field of object kind that serde's
-// derive models, i.e. one parseMember dispatches on.
+// duplicateMember reports whether key already appeared in the object that starts
+// at key index base. s.keys is truncated per object, so base bounds the scope.
+func (s *scanner) duplicateMember(base int, key []byte) bool {
+	for _, span := range s.keys[base:] {
+		if bytes.Equal(s.data[span.start:span.end], key) {
+			return true
+		}
+	}
+	return false
+}
+
+// markDuplicate applies serde's per-variant duplicate rule to a duplicate member.
+// A key no variant models changes nothing, which is what makes an unknown
+// duplicate harmless.
 //
-// It exists only for the duplicate-member rule. Serde rejects a duplicate member
-// of a declared field and silently ignores a duplicate of an unknown one, so the
-// two halves of the rule need different answers. Each list is the union over the
-// untagged variants ccusage deserializes a line into (types.rs), which is why
-// kindRoot accepts both the direct shape and the AgentProgress wrapper's `data`.
-//
-// kindGeneric and kindIteration know no members on purpose. The main derive has
-// no `iterations` field at all, so serde skips the whole array as an unknown
-// value; and an iteration object's own members are unknown to that derive too.
-// Advisor rows are built by a SEPARATE pass (advisorUsagesFromLine), which is
-// where iteration-level duplicates are handled - differently from upstream; see
-// the scanner doc comment.
-func isKnownMember(kind objectKind, key []byte) bool {
+// ccusage's line type is an untagged enum (Direct first, AgentProgress second),
+// and serde fails a variant only for a duplicate of a field that variant
+// declares. A key nobody declares - `iterations` is the live example, since
+// TokenUsageRaw has no such field and the advisor array is parsed separately -
+// is dropped by serde like any other unknown member, so its duplication must
+// never cost the line.
+func (s *scanner) markDuplicate(kind objectKind, key []byte) {
 	switch kind {
 	case kindRoot:
-		return keyIsAny(key, "timestamp", "message", "sessionId", "version", "requestId",
-			"costUSD", "isSidechain", "isApiErrorMessage", "data")
+		// sessionId sits on the shared envelope, so both variants model it and a
+		// duplicate fails both. `data` opens the AgentProgress variant only, and
+		// the rest belong to the Direct variant only.
+		switch {
+		case keyIs(key, "sessionId"):
+			s.directDup, s.wrapperDup = true, true
+		case keyIs(key, "data"):
+			s.wrapperDup = true
+		case s.directModelsRootKey(key):
+			s.directDup = true
+		}
+	case kindGeneric, kindIteration:
+		// Nothing here is a declared field: an iteration object's members are
+		// unknown to the main derive.
+	default:
+		if !knownChildMember(kind, key) {
+			return
+		}
+		if s.inWrapper {
+			s.wrapperDup = true
+		} else {
+			s.directDup = true
+		}
+	}
+}
+
+// directModelsRootKey reports whether the Direct variant declares key at the root.
+// isApiErrorMessage is only modelled by the session chain's UsageEntry; the daily
+// chain's DailyUsageEntry omits it (daily.rs:171-182) and must ignore it entirely.
+func (s *scanner) directModelsRootKey(key []byte) bool {
+	if keyIsAny(key, "timestamp", "message", "version", "requestId", "costUSD", "isSidechain") {
+		return true
+	}
+	return !s.daily && keyIs(key, "isApiErrorMessage")
+}
+
+// knownChildMember reports whether a non-root object kind declares key. The
+// message, usage and cache_creation structs are shared by both variants, so the
+// caller decides which variant a duplicate in them invalidates.
+//
+// `iterations` is deliberately absent although parseMember still walks the array:
+// TokenUsageRaw does not declare it, so serde skips the whole member as unknown
+// and the advisor rows come from a separate pass (advisorUsagesFromLine).
+func knownChildMember(kind objectKind, key []byte) bool {
+	switch kind {
 	case kindWrapperData:
-		return keyIsAny(key, "message")
+		return keyIs(key, "message")
 	case kindAgentMessage:
 		return keyIsAny(key, "timestamp", "message", "requestId", "costUSD", "isSidechain")
 	case kindMessage:
 		return keyIsAny(key, "usage", "model", "id")
 	case kindUsage:
 		return keyIsAny(key, "input_tokens", "output_tokens", "cache_creation_input_tokens",
-			"cache_read_input_tokens", "speed", "cache_creation", "iterations")
+			"cache_read_input_tokens", "speed", "cache_creation")
 	case kindCacheCreation:
 		return keyIsAny(key, "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
 	}
