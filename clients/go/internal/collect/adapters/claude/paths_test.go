@@ -181,6 +181,12 @@ func TestResolveRootsUsesConfigDirListAndRejectsAllInvalid(t *testing.T) {
 			{"projects dir", filepath.Join(gamma, "projects"), []string{gamma}},
 			{"tilde", "~/tilde", []string{tilde}},
 			{"not installed", beta, []string{}},
+			// A forwarded list is still split and validated, so a caller that
+			// passes CLAUDE_CONFIG_DIR's raw value cannot smuggle "a,b" in as
+			// one directory name.
+			{"comma list", alpha + "," + filepath.Join(gamma, "projects") + ",~/tilde", []string{alpha, gamma, tilde}},
+			// A missing home is "unavailable", never a hard error.
+			{"comma list with nothing usable", beta + ",/nonexistent/claude", []string{}},
 		} {
 			t.Run(testCase.name, func(t *testing.T) {
 				roots, err := ResolveRoots(env, testCase.home)
@@ -191,6 +197,57 @@ func TestResolveRootsUsesConfigDirListAndRejectsAllInvalid(t *testing.T) {
 			})
 		}
 	})
+}
+
+// The home lookup is home_dir_from_env (ccusage-core/src/home.rs:12-31): HOME,
+// then USERPROFILE, then HOMEDRIVE+HOMEPATH, in that order on every platform.
+// Upstream's own tests assert HOME wins over a Windows-shaped USERPROFILE, so a
+// shell that exports both (Git Bash, MSYS) must resolve the same root ccusage
+// does or parity diffs on a Windows machine.
+func TestLookupHomeMatchesCcusageHomeResolution(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		values map[string]string
+		want   string
+	}{
+		{"home wins over user profile", map[string]string{
+			"HOME": "/home/user", "USERPROFILE": `C:\Users\runner`,
+		}, "/home/user"},
+		{"user profile without home", map[string]string{
+			"HOME": "", "USERPROFILE": `C:\Users\runner`,
+		}, `C:\Users\runner`},
+		// OsString::push concatenates: "C:" + "\Users\runner".
+		{"home drive and path", map[string]string{
+			"HOMEDRIVE": "C:", "HOMEPATH": `\Users\runner`,
+		}, `C:\Users\runner`},
+		{"empty home drive", map[string]string{
+			"HOMEDRIVE": "", "HOMEPATH": `\Users\runner`,
+		}, ""},
+		{"empty home path", map[string]string{
+			"HOMEDRIVE": "C:", "HOMEPATH": "",
+		}, ""},
+		{"nothing set", map[string]string{}, ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := lookupHome(stubEnv(testCase.values)); got != testCase.want {
+				t.Fatalf("lookupHome = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+
+	// End to end: with both variables pointing at real trees, the HOME tree is
+	// the one that becomes a root.
+	home := t.TempDir()
+	homeClaude := filepath.Join(home, ".claude")
+	mkdirAll(t, filepath.Join(homeClaude, "projects"))
+	other := t.TempDir()
+	mkdirAll(t, filepath.Join(other, ".claude", "projects"))
+
+	roots, err := ResolveRoots(stubEnv(map[string]string{"HOME": home, "USERPROFILE": other}), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePaths(t, roots.Dirs, []string{homeClaude})
 }
 
 func TestResolveRootsFallsBackToXdgAndHome(t *testing.T) {
@@ -274,6 +331,14 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 	subagent := filepath.Join(projects, "p", "sess", "subagents", "agent-a.jsonl")
 	notJSONL := filepath.Join(projects, "p", "notes.txt")
 
+	// A sibling pair where the walk order and the sorted order disagree:
+	// ReadDir lists "a" before "a.jsonl", so a depth-first walk yields
+	// p/a/x.jsonl before p/a.jsonl, but "." (0x2E) sorts before "/" (0x2F), so
+	// the required order is the other way round (paths.rs:77). Without the
+	// full-path sort this assertion fails.
+	prefixDirFile := filepath.Join(projects, "p", "a", "x.jsonl")
+	prefixFile := filepath.Join(projects, "p", "a.jsonl")
+
 	// Deep enough that the bounded scanners' depth cap of 8 would miss it:
 	// ccusage recurses without a depth limit (paths.rs:65-79,
 	// common/src/lib.rs:14-46).
@@ -284,7 +349,7 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 	}
 	deepLeaf := filepath.Join(deep, "leaf.jsonl")
 
-	for _, path := range []string{nested, flat, subagent, deepLeaf} {
+	for _, path := range []string{nested, flat, subagent, deepLeaf, prefixDirFile, prefixFile} {
 		writeFixture(t, path, "{}\n")
 	}
 	writeFixture(t, notJSONL, "not a session\n")
@@ -294,6 +359,17 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 		writeFixture(t, filepath.Join(projects, "p", name), "{}\n")
 	}
 
+	// A second root whose files all sort before the first root's: the walk
+	// visits roots in the order they are given, so only the full-path sort can
+	// interleave them. It is passed first on purpose.
+	parent := t.TempDir()
+	earlierRoot := filepath.Join(parent, "aaa")
+	laterRoot := filepath.Join(parent, "bbb")
+	earlier := filepath.Join(earlierRoot, "projects", "p", "z.jsonl")
+	later := filepath.Join(laterRoot, "projects", "p", "a.jsonl")
+	writeFixture(t, earlier, "{}\n")
+	writeFixture(t, later, "{}\n")
+
 	// The file mtime is carried out of the scan so the prune step does not
 	// have to re-stat, and it is the file's own time.
 	flatMtime := mustTime(t, "2026-09-19T12:00:00Z")
@@ -301,15 +377,30 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := ScanFiles(Roots{Dirs: []string{root}}, "")
+	files, err := ScanFiles(Roots{Dirs: []string{laterRoot, earlierRoot, root}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{nested, flat, deepLeaf, subagent}
+	want := []string{nested, flat, subagent, deepLeaf, prefixDirFile, prefixFile, earlier, later}
 	sort.Strings(want)
 	if got := filePaths(files); !reflect.DeepEqual(got, want) {
 		t.Fatalf("paths = %v, want %v", got, want)
+	}
+	// The prefix pair, spelled out: the file sorts before the directory's
+	// transcript, which is the opposite of the order the walk produces.
+	paths := filePaths(files)
+	fileIndex, dirFileIndex := indexOfString(paths, prefixFile), indexOfString(paths, prefixDirFile)
+	if fileIndex < 0 || fileIndex > dirFileIndex {
+		t.Fatalf("%s at %d, %s at %d; want the file before the directory transcript",
+			prefixFile, fileIndex, prefixDirFile, dirFileIndex)
+	}
+	// Roots interleave: the first root given sorts after the files already
+	// emitted, so the full-path sort has to move the second root's file ahead.
+	earlierIndex, laterIndex := indexOfString(paths, earlier), indexOfString(paths, later)
+	if earlierIndex < 0 || laterIndex < 0 || earlierIndex > laterIndex {
+		t.Fatalf("%s at %d, %s at %d; want the earlier root's file first",
+			earlier, earlierIndex, later, laterIndex)
 	}
 	if got := fileByPath(t, files, flat); !got.MTimeKnown || !got.MTime.Equal(flatMtime) {
 		t.Fatalf("flat mtime = %v (known %v), want %v", got.MTime, got.MTimeKnown, flatMtime)
@@ -323,6 +414,8 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 		{nested, "a", "p"},
 		{flat, "b", "p"},
 		{subagent, "sess", "p"},
+		{prefixFile, "a", "p"},
+		{prefixDirFile, "a", "p"},
 		// 15 nested directories below p/deep: the 14th is the session and the
 		// rest is the project.
 		{deepLeaf, deepNames()[14], filepath.Join(deepParts[:len(deepParts)-1]...)},
@@ -371,7 +464,6 @@ func TestScanFilesSortsByFullPathAndSkipsSymlinks(t *testing.T) {
 	})
 }
 
-// deepNames are the directory names the deep fixture nests.
 func fileByPath(t *testing.T, files []SessionFile, path string) SessionFile {
 	t.Helper()
 	for _, file := range files {
@@ -381,6 +473,16 @@ func fileByPath(t *testing.T, files []SessionFile, path string) SessionFile {
 	}
 	t.Fatalf("no scanned file at %s in %v", path, filePaths(files))
 	return SessionFile{}
+}
+
+// indexOfString returns the position of value in paths, or -1 when absent.
+func indexOfString(paths []string, value string) int {
+	for index, path := range paths {
+		if path == value {
+			return index
+		}
+	}
+	return -1
 }
 
 func TestScanFilesAppliesTheProjectFilterAsADirectoryShortcut(t *testing.T) {

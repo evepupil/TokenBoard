@@ -24,7 +24,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
-// millisPerDay is MILLIS_PER_DAY (crates/ccusage-core/src/lib.rs).
+// millisPerDay is MILLIS_PER_DAY (crates/ccusage-core/src/date_utils.rs:8).
 const millisPerDay = 24 * 60 * 60 * 1000
 
 // mtimePruneMarginMs is MTIME_PRUNE_MARGIN_MS (paths.rs:84): the margin
@@ -42,11 +42,17 @@ type Roots struct {
 }
 
 // SessionFile is one discovered transcript. SessionID and ProjectPath come
-// from the path layout; MTime is the file's modification time, and MTimeKnown
-// is false when it could not be read (which keeps the file in a --since scan).
+// from the path layout (PathSessionParts); MTime is the file's modification
+// time, and MTimeKnown is false when it could not be read (which keeps the
+// file in a --since scan).
 type SessionFile struct {
-	Path        string
-	SessionID   string
+	Path      string
+	SessionID string
+	// ProjectPath is the project a report attributes this transcript to. It is
+	// NOT the value --project filters on: ccusage filters entries with
+	// extract_project (the first segment after "projects", paths.rs:269-288),
+	// which names the same directory for a plain transcript but differs for
+	// nested layouts. Task 5 adds that filter where entries are parsed.
 	ProjectPath string
 	MTime       time.Time
 	MTimeKnown  bool
@@ -60,11 +66,27 @@ type SessionFile struct {
 // set but names nothing usable is a hard error rather than a fallback: the
 // user pointed at a specific install.
 //
-// homeDir is the TokenBoard seam: the provider resolves the Claude home itself
-// (readClaudeHome: CLAUDE_CONFIG_DIR, then CLAUDE_HOME, then ~/.claude) and
-// passes it here, where it is the CLAUDE_CONFIG_DIR-equivalent single entry.
-// Unlike a configured variable, a home without projects/ means the tool is not
-// installed, so it yields no roots instead of an error.
+// homeDir is the TokenBoard seam, and it is a contract the provider must
+// honour (Task 7):
+//
+//   - CLAUDE_CONFIG_DIR set → pass homeDir == "" so this function reads the
+//     variable itself. That is the only path that keeps ccusage's comma
+//     splitting, its hard error for an unusable value and its "never fall
+//     back to XDG" rule in one place. Passing the raw value as homeDir
+//     instead would turn a misconfiguration into an empty result.
+//   - Otherwise → pass the resolved Claude home (readClaudeHome's result:
+//     CLAUDE_HOME, else ~/.claude). A home without projects/ means the tool
+//     is not installed, so it yields no roots instead of an error.
+//
+// An explicit home is still split on commas and stripped of a trailing
+// "projects" segment, so a caller that forwards a list cannot smuggle a
+// comma-separated value past the normalisation.
+//
+// Two known, accepted deviations from paths.rs: an empty CLAUDE_CONFIG_DIR (or
+// an empty entry in it) reads as unset here because a func(string) string seam
+// cannot tell "" from an absent variable, while ccusage's env::var returns
+// Ok("") and hard-errors; and an empty XDG_CONFIG_HOME falls back to
+// $HOME/.config instead of producing a relative "claude" path.
 func ResolveRoots(env func(string) string, homeDir string) (Roots, error) {
 	if env == nil {
 		env = os.Getenv
@@ -72,7 +94,7 @@ func ResolveRoots(env func(string) string, homeDir string) (Roots, error) {
 	home := lookupHome(env)
 
 	if explicit := strings.TrimSpace(homeDir); explicit != "" {
-		return Roots{Dirs: validConfigDirs([]string{explicit}, home)}, nil
+		return Roots{Dirs: validConfigDirs(splitConfigList(explicit), home)}, nil
 	}
 
 	if configDir := strings.TrimSpace(env("CLAUDE_CONFIG_DIR")); configDir != "" {
@@ -163,15 +185,26 @@ func expandHomePath(raw, home string) string {
 	return raw
 }
 
-// lookupHome resolves the user's home directory the way Path::home_dir does:
-// USERPROFILE on Windows, HOME everywhere else.
+// lookupHome ports home_dir_from_env (crates/ccusage-core/src/home.rs:12-31):
+// HOME, then USERPROFILE, then HOMEDRIVE+HOMEPATH. The order is the same on
+// every platform — a Windows-shaped test upstream asserts HOME wins — so a
+// shell that exports HOME next to USERPROFILE (Git Bash, MSYS) resolves the
+// same root on both sides. It does not use os.UserHomeDir, which prefers
+// USERPROFILE on Windows and ignores HOMEDRIVE/HOMEPATH.
 func lookupHome(env func(string) string) string {
-	if filepath.Separator == '\\' {
-		if value := env("USERPROFILE"); value != "" {
-			return value
-		}
+	if value := env("HOME"); value != "" {
+		return value
 	}
-	return env("HOME")
+	if value := env("USERPROFILE"); value != "" {
+		return value
+	}
+	drive, path := env("HOMEDRIVE"), env("HOMEPATH")
+	if drive == "" || path == "" {
+		return ""
+	}
+	// OsString::push is plain concatenation, not a path join: "C:" + "\Users\runner"
+	// → "C:\Users\runner". path is absolute, so a join would drop the drive.
+	return drive + path
 }
 
 // joinPath mirrors PathBuf::join, which the upstream code uses for every
