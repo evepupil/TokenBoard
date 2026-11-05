@@ -50,9 +50,17 @@ type routeKey struct {
 }
 
 // dedupeIndex is one bucket member (upstream DedupeIndex, lib.rs:39-45).
+//
+// hasAlias/sessionAlias mirror Option<Arc<str>>: Some("") is a real alias for
+// the empty session id, which is distinct from None. A "" sentinel would read
+// it as "no alias", fall back to the survivor's own session id and silently
+// miss the replay, counting one response twice. That is unreachable while the
+// caller fills PathSessionID (paths.PathSessionParts never yields ""), but it
+// is exactly the state a caller that forgets to fill it lands in.
 type dedupeIndex struct {
 	index        int
-	sessionAlias string // "" means no alias (upstream session_alias: None)
+	hasAlias     bool
+	sessionAlias string // meaningful only when hasAlias (upstream session_alias: Some)
 }
 
 // Dedupe is one load's global dedupe index. It spans every file and every root
@@ -168,9 +176,9 @@ func (d *Dedupe) lookup(exact routeKey, entry Entry, sessionID string, timestamp
 	}
 	for _, indexed := range d.indexes[sidechainKey(bucketRoute, entry.MessageID, sessionID)] {
 		existing := d.entries[indexed.index]
-		indexedSessionID := indexed.sessionAlias
-		if indexedSessionID == "" {
-			indexedSessionID = existing.dedupeSessionID()
+		indexedSessionID := existing.dedupeSessionID()
+		if indexed.hasAlias {
+			indexedSessionID = indexed.sessionAlias
 		}
 		// The bucket key already fixes the session, so this check can only
 		// fail if a key were constructed wrongly; it stays because upstream
@@ -238,7 +246,7 @@ func (d *Dedupe) shouldReplace(candidate, existing Entry) bool {
 func (d *Dedupe) pushIndex(key routeKey, index int) {
 	bucket := d.indexes[key]
 	for _, existing := range bucket {
-		if existing.index == index && existing.sessionAlias == "" {
+		if existing.index == index && !existing.hasAlias {
 			return
 		}
 	}
@@ -258,11 +266,11 @@ func (d *Dedupe) pushNewIndex(key routeKey, index int) {
 func (d *Dedupe) pushAlias(key routeKey, index int, sessionID string) {
 	bucket := d.indexes[key]
 	for _, existing := range bucket {
-		if existing.index == index && existing.sessionAlias == sessionID {
+		if existing.index == index && existing.hasAlias && existing.sessionAlias == sessionID {
 			return
 		}
 	}
-	d.indexes[key] = append(bucket, dedupeIndex{index: index, sessionAlias: sessionID})
+	d.indexes[key] = append(bucket, dedupeIndex{index: index, hasAlias: true, sessionAlias: sessionID})
 }
 
 func exactKey(messageID, requestID, sessionID string, timestampMs int64) routeKey {

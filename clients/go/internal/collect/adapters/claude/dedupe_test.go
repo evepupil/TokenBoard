@@ -268,22 +268,27 @@ func TestDedupeKeyFallsBackToSessionAndTimestampOnlyForNonMsgIDs(t *testing.T) {
 }
 
 func TestDedupeMergesDuplicateAcrossFiles(t *testing.T) {
-	// lib.rs:1309 dedupes_copied_transcripts_with_the_same_serialized_session_id:
-	// two roots holding a copy of one transcript must count once.
-	copied := dedupeEntry(dedupeFixture{
-		messageID: "msg_copy", requestID: "req-copy", sessionID: "session-a", input: 100, output: 1,
+	// lib.rs:1309 dedupes_copied_transcripts_with_the_same_serialized_session_id
+	// (daily.rs:983 is the same case on the daily chain) pins the priority of
+	// loaded_entry_session_id (lib.rs:405-411): both lines are requestless with
+	// the gateway-style id "ocgo" and both serialize the SAME sessionId, while
+	// the path-derived ids differ because the copies sit in two project
+	// directories. Only the serialized id makes the keys equal - under a
+	// path-first rule the sessions would differ and the non-msg_ timestamp
+	// rule would keep them apart. The survivor is the bigger copy.
+	first := dedupeEntry(dedupeFixture{
+		messageID: "ocgo", sessionID: "session-a", pathSessionID: "session-a", input: 100, output: 1,
 	})
-	copied.ProjectPath = "project-a"
-	original := dedupeEntry(dedupeFixture{
-		messageID: "msg_copy", requestID: "req-copy", sessionID: "session-a", input: 200, output: 1,
+	second := dedupeEntry(dedupeFixture{
+		messageID: "ocgo", sessionID: "session-a", pathSessionID: "session-b", input: 200, output: 1,
 	})
-	original.ProjectPath = "project-a"
-	original.PathSessionID = "session-a"
 
-	survivors := dedupeRun(DedupeEntry, copied, original)
-	requireSurvivorCount(t, survivors, 1)
-	if survivors[0].Usage.Input != 200 {
-		t.Errorf("survivor input = %d, want 200", survivors[0].Usage.Input)
+	for _, mode := range []DedupeMode{DedupeEntry, DedupeDaily} {
+		survivors := dedupeRun(mode, first, second)
+		requireSurvivorCount(t, survivors, 1)
+		if survivors[0].Usage.Input != 200 {
+			t.Errorf("mode %d: survivor input = %d, want 200", mode, survivors[0].Usage.Input)
+		}
 	}
 }
 
@@ -353,6 +358,76 @@ func TestDailySidechainMatchIgnoresTimestampEntryMatchRequiresIt(t *testing.T) {
 
 	entrySurvivors := dedupeRun(DedupeEntry, parent, replay)
 	requireSurvivorCount(t, entrySurvivors, 2)
+}
+
+func TestDailyKeepsParentUsageWhenSidechainReplaysWithNewRequestID(t *testing.T) {
+	// daily.rs:681 keeps_parent_daily_usage_when_sidechain_replays_message_with_new_request_id:
+	// the same sequence as the entry-chain case above, on the daily chain.
+	survivors := dedupeRun(DedupeDaily,
+		dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-parent", sessionID: "session-a", output: 10, cacheRead: 20}),
+		dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-sidechain-replay", sessionID: "session-a", sidechain: true, output: 10, cacheRead: 50_000}),
+		dedupeEntry(dedupeFixture{messageID: "msg-sidechain-answer", requestID: "req-sidechain-answer", sessionID: "session-a", sidechain: true, output: 30, cacheRead: 700}),
+	)
+	requireSurvivorCount(t, survivors, 2)
+	if survivors[0].RequestID != "req-parent" || survivors[0].Usage.CacheRead != 20 {
+		t.Errorf("first survivor = %s, want the parent (req-parent, cache read 20)", survivorSignature(survivors[0]))
+	}
+	if survivors[1].MessageID != "msg-sidechain-answer" || survivors[1].Usage.CacheRead != 700 {
+		t.Errorf("second survivor = %s, want msg-sidechain-answer with cache read 700", survivorSignature(survivors[1]))
+	}
+}
+
+func TestEntrySidechainMatchRequestlessNeedsBothSides(t *testing.T) {
+	// lib.rs:427-440: `requestless` is true only when NEITHER side carries a
+	// request id; that is what lets a replay cross timestamps. A stale
+	// implementation that tested the candidate alone would over-merge the
+	// second case.
+	t.Run("both sides requestless cross timestamps", func(t *testing.T) {
+		survivors := dedupeRun(DedupeEntry,
+			dedupeEntry(dedupeFixture{messageID: "ocgo", sessionID: "session-a", output: 10, cacheRead: 20}),
+			dedupeEntry(dedupeFixture{messageID: "ocgo", sessionID: "session-a", sidechain: true, output: 10, cacheRead: 50_000, atMs: dedupeBaseMs + 1000}),
+		)
+		requireSurvivorCount(t, survivors, 1)
+		if survivors[0].Sidechain || survivors[0].Usage.CacheRead != 20 {
+			t.Errorf("survivor = %s, want the parent", survivorSignature(survivors[0]))
+		}
+	})
+
+	t.Run("requestless candidate against a parent with a request id needs the timestamp", func(t *testing.T) {
+		survivors := dedupeRun(DedupeEntry,
+			dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-parent", sessionID: "session-a", output: 10, cacheRead: 20}),
+			dedupeEntry(dedupeFixture{messageID: "msg-parent", sessionID: "session-a", sidechain: true, output: 10, cacheRead: 50_000, atMs: dedupeBaseMs + 1000}),
+		)
+		requireSurvivorCount(t, survivors, 2)
+	})
+
+	t.Run("candidate with a request id against a requestless parent needs the timestamp", func(t *testing.T) {
+		survivors := dedupeRun(DedupeEntry,
+			dedupeEntry(dedupeFixture{messageID: "ocgo", sessionID: "session-a", output: 10, cacheRead: 20}),
+			dedupeEntry(dedupeFixture{messageID: "ocgo", requestID: "req-replay", sessionID: "session-a", sidechain: true, output: 10, cacheRead: 50_000, atMs: dedupeBaseMs + 1000}),
+		)
+		requireSurvivorCount(t, survivors, 2)
+	})
+}
+
+func TestDedupeAliasDistinguishesAnEmptySessionFromNoAlias(t *testing.T) {
+	// Upstream stores session_alias: Option<Arc<str>> (lib.rs:40-43), so an
+	// alias for the empty session id is still an alias. A "" sentinel would
+	// read it as "no alias", fall back to the survivor's own session id and
+	// miss the replay, counting the response twice. A caller that forgets to
+	// fill PathSessionID lands exactly here (dedupeSessionID == "").
+	survivors := dedupeRun(DedupeEntry,
+		// Survivor candidate in the empty session, replaced by the bigger copy.
+		dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-parent", output: 10, cacheRead: 20}),
+		dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-parent", sessionID: "session-a", output: 10, cacheRead: 30}),
+		// The replay arrives in the losing (empty) session and can only be
+		// routed by the "" alias registered before the replacement.
+		dedupeEntry(dedupeFixture{messageID: "msg-parent", requestID: "req-sidechain-replay", sidechain: true, output: 10, cacheRead: 50_000}),
+	)
+	requireSurvivorCount(t, survivors, 1)
+	if survivors[0].SessionID != "session-a" || survivors[0].Usage.CacheRead != 30 {
+		t.Errorf("survivor = %s from %q, want the bigger session-a copy", survivorSignature(survivors[0]), survivors[0].SessionID)
+	}
 }
 
 func TestDedupeSpeedRungReplacesOnlyWhenTokensTie(t *testing.T) {
