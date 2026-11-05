@@ -100,36 +100,57 @@ type Entry struct {
 	Usage       Usage
 }
 
-// ParseLine parses one transcript line for the entry (session) chain.
+// ParseLineEntries parses one transcript line for the session/entry chain and
+// returns the parent entry followed by one entry per advisor iteration
+// (lib.rs:559-600). It returns nil when the line is dropped.
 //
-// The returned Entry is the line's own message. Advisor iterations are split
-// into further entries by parseLineEntries; ParseLine keeps only the parent,
-// which is what the session report needs (each advisor row belongs to the
-// parent's session but carries its own model).
+// Both collector chains must use a multi-entry form: ccusage's entry loader
+// splits advisor iterations too (lib.rs:559-598, the loader behind
+// `claude session`), so a parent-only view would silently under-count every
+// advisor response in both the daily and the session reports.
+func ParseLineEntries(line string) []Entry {
+	entries, _ := parseLineEntries(line, false)
+	return entries
+}
+
+// ParseDailyLineEntries is the daily-chain form of ParseLineEntries. It also
+// accepts the AgentProgress wrapper `{"sessionId", "data": {"message": {...}}}`
+// (daily.rs:182-227), where the wrapper's own timestamp/message move up one
+// level and `version` is treated as absent.
+func ParseDailyLineEntries(line string) []Entry {
+	entries, _ := parseLineEntries(line, true)
+	return entries
+}
+
+// ParseLine returns only the parent entry of a line.
+//
+// WARNING: it drops the advisor entries that ParseLineEntries returns, so a
+// collector chain calling it under-counts advisor usage. Collector code must
+// use ParseLineEntries; this wrapper exists for tests and for callers that only
+// inspect the parent message.
 func ParseLine(line string) (Entry, bool) {
-	entries, ok := parseLineEntries(line, false)
-	if !ok || len(entries) == 0 {
+	entries := ParseLineEntries(line)
+	if len(entries) == 0 {
 		return Entry{}, false
 	}
 	return entries[0], true
 }
 
-// ParseDailyLine parses one transcript line for the daily chain. Unlike
-// ParseLine it also accepts the AgentProgress wrapper
-// `{"sessionId", "data": {"message": {...}}}` (daily.rs:182-227), where the
-// wrapper's own timestamp/message move up one level and `version` is treated
-// as absent.
+// ParseDailyLine returns only the parent entry of a daily-chain line, accepting
+// the AgentProgress wrapper.
+//
+// WARNING: like ParseLine it drops advisor entries; the daily collector chain
+// must use ParseDailyLineEntries.
 func ParseDailyLine(line string) (Entry, bool) {
-	entries, ok := parseLineEntries(line, true)
-	if !ok || len(entries) == 0 {
+	entries := ParseDailyLineEntries(line)
+	if len(entries) == 0 {
 		return Entry{}, false
 	}
 	return entries[0], true
 }
 
-// parseLineEntries returns the parent entry followed by one entry per advisor
-// iteration (lib.rs:559-600, daily.rs:368-398). Callers that bill tokens must
-// use this form: the advisor rows are real usage that ParseLine alone hides.
+// parseLineEntries is the shared implementation behind the two exported
+// wrappers. daily selects whether the AgentProgress wrapper shape is accepted.
 func parseLineEntries(line string, daily bool) ([]Entry, bool) {
 	if !strings.Contains(line, usageMarker) {
 		return nil, false
@@ -535,7 +556,10 @@ func (u *usageCapture) valid() bool {
 	if u.input.bad || u.output.bad || u.cacheCreateIn.bad || u.cacheReadIn.bad || u.speed.bad {
 		return false
 	}
-	return !u.cacheCreation.bad
+	// The ephemeral breakdown fields are u64 too (types.rs:52-58): a negative,
+	// fractional or overflowing value fails the whole line rather than being
+	// zeroed, so their bad flags have to surface here as well.
+	return !u.cacheCreation.bad && !u.cacheCreation.fiveMinutes.bad && !u.cacheCreation.oneHour.bad
 }
 
 type messageCapture struct {
@@ -710,6 +734,12 @@ func (s *scanner) parseObjectMembers(kind objectKind, into target, iterationElem
 			return false
 		}
 		key := s.data[start:end]
+		// Keys are compared as raw bytes. A key written with a JSON unicode
+		// escape (for example "id" for "id") therefore does not match the
+		// blacklist or the duplicate check, while serde unescapes keys before
+		// comparing them. Real Claude Code transcripts never escape object key
+		// names, so this is a known, deliberate gap rather than a defect to fix
+		// here; closing it would require decoding every key on the hot path.
 		for _, span := range s.keys[base:] {
 			if bytes.Equal(s.data[span.start:span.end], key) {
 				return false

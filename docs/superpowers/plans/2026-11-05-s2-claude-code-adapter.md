@@ -66,7 +66,8 @@
 - Create: `clients/go/internal/collect/adapters/claude/entry_test.go`
 
 **Interfaces:**
-- Produces: `type Usage struct{ Input, Output, CacheCreate5m, CacheCreate1h, CacheRead int64; HasCacheCreate bool; ReportedCost *float64; Speed string; Fast bool }`；`type Entry struct{ MessageID, RequestID, SessionID, Model string; Timestamp time.Time; Sidechain bool; IsSynthetic bool; ProjectPath string; Usage Usage }`；`ParseLine(line string) (Entry, bool)`（false=丢弃）；`ParseDailyLine(line string) (Entry, bool)`（接受 AgentProgress 包装）；`validSemverPrefix(s string) bool`；`ParseTimestamp(s string) (time.Time, bool)`。
+- Produces: `type Usage struct{ Input, Output, CacheCreate5m, CacheCreate1h, CacheRead int64; HasCacheCreate bool; ReportedCost *float64; Speed string; Fast bool }`；`type Entry struct{ MessageID, RequestID, SessionID, Model string; Timestamp time.Time; Sidechain bool; IsSynthetic bool; ProjectPath string; Usage Usage }`；**权威（多条目）解析接口**：`ParseLineEntries(line string) []Entry`（session/entry 链，父条目在前、随后是每个 advisor 行；空切片=丢弃）与 `ParseDailyLineEntries(line string) []Entry`（daily 链，额外接受 AgentProgress 包装）；`ParseLine(line string) (Entry, bool)` / `ParseDailyLine(line string) (Entry, bool)` 仅作「只取父条目」的便捷包装（**会丢弃 advisor 行**，collector 两条链都不得使用）；`validSemverPrefix(s string) bool`；`ParseTimestamp(s string) (time.Time, bool)`。
+- 说明：ccusage 的 entry loader 与 daily loader **都会**拆分 advisor iterations（`lib.rs:559-598` 是 `claude session` 走的 loader；`daily.rs:368-398` 是 daily 的），所以两条链都必须消费多条目形式，否则 advisor 用量在两个报表里都会被少计。AgentProgress 包装行例外：上游 advisor 拆分解析的是原始行的**顶层** `message`（`daily.rs:368`），包装行没有顶层 `message`，因此只产出父条目。
 
 **精确规则:**
 - 预过滤：行必须包含**逐字节** `"usage":{`（`lib.rs:509-512`、`daily.rs:302-305`）——`"usage": {` 要被丢弃。
@@ -77,9 +78,9 @@
 - token：`cache_creation` 存在时 `cacheCreate5m/1h` 取 `ephemeral_*`（`types.rs:41-50`），平面 `cache_creation_input_tokens` 被忽略；否则用平面值记入 5m、1h=0。`speed` 只接受 `standard|fast`，其他字符串 → 丢行（`types.rs:60-65`）。
 - 模型（`lib.rs:535-543`）：`<synthetic>` → `IsSynthetic=true`（token 计入总量、不进 breakdown、不定价）；`fast` → `Fast=true`，显示名加 `-fast` 由 Task 4 处理，定价用**原始**模型名。
 - advisor（`lib.rs:559-598,635-658`、`daily.rs:368-398`）：行内出现 `advisor_message` 时，`message.usage.iterations[]` 中 `type=="advisor_message"` 且 `model` 非空的项各生成一条独立 Entry：`MessageID = "<父id>:advisor:<index>"`、`RequestID` 继承父、`Sidechain`/`SessionID`/`Timestamp` 继承、`ReportedCost=nil`、usage 取该 iteration。
-- `ParseDailyLine` 额外接受 `{"sessionId","data":{"message":{...}}}` 包装（`daily.rs:182-227`），且该路径 `version` 视为缺失。
+- `ParseDailyLineEntries`（以及只取父条目的 `ParseDailyLine`）额外接受 `{"sessionId","data":{"message":{...}}}` 包装（`daily.rs:182-227`），且该路径 `version` 视为缺失。
 
-- [ ] **Step 1: 写失败测试**：表驱动：`TestParseLineRejectsUsageWithSpace`、`TestParseLineNullBlacklistAnyDepth`（含 iterations.model 豁免）、`TestParseLineDuplicateKeysDropped`、`TestParseLineSkipsInvalidVersionAndEmptyIDs`、`TestParseTimestampLengthGate`（1/2/6 位小数、无时区、`v1.2.3` 全拒）、`TestCacheCreationBreakdownWinsOverFlat`、`TestSyntheticAndFastModelFlags`、`TestAdvisorIterationsBecomeSeparateEntries`、`TestParseDailyLineAcceptsAgentProgressWrapper`。
+- [ ] **Step 1: 写失败测试**：表驱动：`TestParseLineRejectsUsageWithSpace`、`TestParseLineNullBlacklistAnyDepth`（含 iterations.model 豁免）、`TestParseLineDuplicateKeysDropped`、`TestParseLineSkipsInvalidVersionAndEmptyIDs`、`TestParseTimestampLengthGate`（1/2/6 位小数、无时区、`v1.2.3` 全拒）、`TestCacheCreationBreakdownWinsOverFlat`、`TestCacheCreationEphemeralFieldsAreU64`（负数/小数/null 的 `ephemeral_*` 必须丢整行）、`TestSyntheticAndFastModelFlags`、`TestAdvisorIterationsBecomeSeparateEntries`、`TestBothEntriesFormsReturnParentAndAdvisorRows`（session 与 daily 两条链都产出父条目 + advisor 行）、`TestParseDailyLineAcceptsAgentProgressWrapper`。
 - [ ] **Step 2: 运行确认失败**；**Step 3: 实现** `entry.go`；**Step 4: 运行通过**。
 - [ ] **Step 5: Commit**：`feat(adapters): port the Claude line parser and its validation gates`
 
@@ -142,7 +143,9 @@
 - Produces: `type Options struct{ Timezone, Since, Until string; Roots Roots; Overrides map[string]any; Mode CostMode; Stderr func(string) }`；`Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte, err error)`。`CostMode` 复用 `nativepricing.CostMode`（默认 `ModeAuto`）。
 - **不得**直接产出 Snapshot；provider 负责 `ccusage.DecodeJSON` + `NormalizeCcusageDailyJSON`。
 
-**行为:** 解析根 → 扫描 → `--since` 剪枝（`stderr` 报被剪组）→ 逐文件流式 `ParseDailyLine`（daily 链）与 `ParseLine`（session/entry 链）→ 各自去重 → 成本用 `nativepricing.LoadEmbeddedCorpus()` + `WithOverrides(opts.Overrides)` → `BuildDaily`/`BuildSessions`。空窗口必须返回 `{"daily":[],"totals":{...}}` 形状而不是 nil/错误。`ctx` 取消要快速返回。
+**行为:** 解析根 → 扫描 → `--since` 剪枝（`stderr` 报被剪组）→ 逐文件流式 `ParseDailyLineEntries`（daily 链）与 `ParseLineEntries`（session/entry 链）→ 各自去重 → 成本用 `nativepricing.LoadEmbeddedCorpus()` + `WithOverrides(opts.Overrides)` → `BuildDaily`/`BuildSessions`。空窗口必须返回 `{"daily":[],"totals":{...}}` 形状而不是 nil/错误。`ctx` 取消要快速返回。
+
+**两条链都必须消费多条目形式**：ccusage 的 entry loader 同样拆分 advisor iterations（`lib.rs:559-598`），父条目与 advisor 行都算用量，用只取父条目的 `ParseLine`/`ParseDailyLine` 会让 session 报表和 daily 报表同时少计（见 Task 2 的 Interfaces）。
 
 - [ ] **Step 1: 写失败测试**：`TestCollectEmptyWindowReturnsEmptyReport`、`TestCollectAppliesOverridesToCost`、`TestCollectRespectsContextCancellation`、`TestCollectDailyAndSessionUseDifferentParsers`（AgentProgress 只影响 daily）。
 - [ ] **Step 2: 运行确认失败**；**Step 3: 实现**；**Step 4: 运行通过**；**Step 5: Commit**：`feat(adapters): add the Claude collector entry point`

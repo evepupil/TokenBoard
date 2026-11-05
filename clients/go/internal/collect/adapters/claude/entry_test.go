@@ -335,6 +335,32 @@ func TestParseTimestampLengthGate(t *testing.T) {
 	}
 }
 
+func TestCacheCreationEphemeralFieldsAreU64(t *testing.T) {
+	// ephemeral_5m_input_tokens / ephemeral_1h_input_tokens are u64
+	// (types.rs:52-58), so a negative, fractional or overflowing value fails
+	// the whole line instead of being zeroed.
+	for _, value := range []string{"-1", "1.5", "1e3", "18446744073709551615", `"7"`, "null"} {
+		t.Run(value, func(t *testing.T) {
+			for _, field := range []string{"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"} {
+				line := lineWithUsage(`{"input_tokens":1,"output_tokens":2,"cache_creation":{"` + field + `":` + value + `}}`)
+				entries := ParseLineEntries(line)
+				if len(entries) != 0 {
+					t.Fatalf("%s = %s was accepted (%+v), want the line dropped", field, value, entries[0].Usage)
+				}
+			}
+		})
+	}
+
+	// A valid breakdown still parses.
+	entries := ParseLineEntries(lineWithUsage(`{"input_tokens":1,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":3,"ephemeral_1h_input_tokens":4}}`))
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want one", len(entries))
+	}
+	if entries[0].Usage.CacheCreate5m != 3 || entries[0].Usage.CacheCreate1h != 4 {
+		t.Fatalf("cache creation = %+v, want (3, 4)", entries[0].Usage)
+	}
+}
+
 func TestCacheCreationBreakdownWinsOverFlat(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -515,9 +541,9 @@ func TestAdvisorIterationsBecomeSeparateEntries(t *testing.T) {
 	line := `{"sessionId":"sess-9","version":"2.0.30","timestamp":"` + validTimestamp +
 		`","requestId":"req-9","isSidechain":true,"costUSD":0.5,"message":{"id":"msg_9","model":"claude-sonnet-4-5","usage":` + usage + `}}`
 
-	entries, ok := parseLineEntries(line, false)
-	if !ok {
-		t.Fatalf("ParseLine rejected the line")
+	entries := ParseLineEntries(line)
+	if len(entries) == 0 {
+		t.Fatalf("ParseLineEntries dropped the line")
 	}
 	if len(entries) != 3 {
 		t.Fatalf("got %d entries, want the parent plus two advisors", len(entries))
@@ -578,8 +604,8 @@ func TestAdvisorIterationsBecomeSeparateEntries(t *testing.T) {
 	// A parent without a message id cannot name its advisors.
 	noID := `{"sessionId":"s","timestamp":"` + validTimestamp +
 		`","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","model":"a","input_tokens":3,"output_tokens":4}]}}}`
-	entries, ok = parseLineEntries(noID, false)
-	if !ok {
+	entries = ParseLineEntries(noID)
+	if len(entries) == 0 {
 		t.Fatalf("ParseLine rejected the id-less parent")
 	}
 	if len(entries) != 2 {
@@ -593,8 +619,8 @@ func TestAdvisorIterationsBecomeSeparateEntries(t *testing.T) {
 	// still stands (lib.rs:635-641).
 	malformed := `{"sessionId":"s","timestamp":"` + validTimestamp +
 		`","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","model":"a"}]}}}`
-	entries, ok = parseLineEntries(malformed, false)
-	if !ok {
+	entries = ParseLineEntries(malformed)
+	if len(entries) == 0 {
 		t.Fatalf("ParseLine rejected a line whose iterations lack tokens")
 	}
 	if len(entries) != 1 {
@@ -609,31 +635,31 @@ func TestAdvisorIterationSchemaIsAllOrNothing(t *testing.T) {
 	}
 	// A missing `type` fails the whole envelope, so no advisor row is added but
 	// the parent still stands (lib.rs:621-628, 635-641).
-	entries, ok := parseLineEntries(base(`{"model":"a","input_tokens":3,"output_tokens":4}`), false)
-	if !ok || len(entries) != 1 {
-		t.Fatalf("got %d entries (ok=%v), want the parent only", len(entries), ok)
+	entries := ParseLineEntries(base(`{"model":"a","input_tokens":3,"output_tokens":4}`))
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want the parent only", len(entries))
 	}
 	// A malformed iteration token field discards every advisor row, including
 	// the well-formed ones earlier in the array.
-	entries, ok = parseLineEntries(base(`{"type":"advisor_message","model":"a","input_tokens":1,"output_tokens":2},`+
-		`{"type":"advisor_message","model":"b","input_tokens":"3","output_tokens":4}`), false)
-	if !ok || len(entries) != 1 {
-		t.Fatalf("got %d entries (ok=%v), want the parent only", len(entries), ok)
+	entries = ParseLineEntries(base(`{"type":"advisor_message","model":"a","input_tokens":1,"output_tokens":2},` +
+		`{"type":"advisor_message","model":"b","input_tokens":"3","output_tokens":4}`))
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want the parent only", len(entries))
 	}
 	// A non-array iterations member is ignored, not fatal.
-	entries, ok = parseLineEntries(`{"sessionId":"s","timestamp":"`+validTimestamp+
-		`","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2,"iterations":{"type":"advisor_message","model":"a","input_tokens":3,"output_tokens":4}}}}`, false)
-	if !ok || len(entries) != 1 {
-		t.Fatalf("got %d entries (ok=%v), want the parent only", len(entries), ok)
+	entries = ParseLineEntries(`{"sessionId":"s","timestamp":"` + validTimestamp +
+		`","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2,"iterations":{"type":"advisor_message","model":"a","input_tokens":3,"output_tokens":4}}}}`)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want the parent only", len(entries))
 	}
 
 	// A synthetic parent does not mark its advisors synthetic: the flag tracks
 	// the entry's own model.
 	line := `{"sessionId":"s","timestamp":"` + validTimestamp +
 		`","message":{"id":"msg_1","model":"<synthetic>","usage":{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","model":"claude-opus-4-1","input_tokens":3,"output_tokens":4}]}}}`
-	entries, ok = parseLineEntries(line, false)
-	if !ok || len(entries) != 2 {
-		t.Fatalf("got %d entries (ok=%v), want the parent and one advisor", len(entries), ok)
+	entries = ParseLineEntries(line)
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want the parent and one advisor", len(entries))
 	}
 	if !entries[0].IsSynthetic {
 		t.Fatalf("parent IsSynthetic = false, want the <synthetic> marker")
@@ -673,6 +699,83 @@ func TestParseLinePrefersTheDirectShapeOverTheWrapper(t *testing.T) {
 	}
 	if entry.MessageID != "msg_direct" || entry.Usage.Input != 1 {
 		t.Fatalf("entry = %+v, want the direct interpretation", entry)
+	}
+}
+
+func TestBothEntriesFormsReturnParentAndAdvisorRows(t *testing.T) {
+	// ccusage's entry loader splits advisor iterations as well (lib.rs:559-598,
+	// the loader behind `claude session`), so both collector chains must see
+	// the advisor rows. This pins the exported multi-entry API: a regression to
+	// a parent-only view would under-count advisor usage in both reports.
+	usage := `{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","model":"claude-opus-4-1","input_tokens":30,"output_tokens":40}]}`
+	direct := `{"sessionId":"sess-1","timestamp":"` + validTimestamp +
+		`","requestId":"req-1","message":{"id":"msg_7","model":"claude-sonnet-4-5","usage":` + usage + `}}`
+
+	for _, tc := range []struct {
+		name  string
+		parse func(string) []Entry
+		line  string
+	}{
+		{"session chain", ParseLineEntries, direct},
+		{"daily chain", ParseDailyLineEntries, direct},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := tc.parse(tc.line)
+			if len(entries) != 2 {
+				t.Fatalf("got %d entries, want the parent plus one advisor", len(entries))
+			}
+			if entries[0].Model != "claude-sonnet-4-5" || entries[0].Usage.Input != 1 {
+				t.Fatalf("parent = %+v, want the top-level usage", entries[0])
+			}
+			advisor := entries[1]
+			if advisor.Model != "claude-opus-4-1" || advisor.Usage.Input != 30 || advisor.Usage.Output != 40 {
+				t.Fatalf("advisor = %+v, want the iteration usage", advisor)
+			}
+			if advisor.MessageID != entries[0].MessageID+":advisor:0" {
+				t.Fatalf("advisor MessageID = %q, want %q", advisor.MessageID, entries[0].MessageID+":advisor:0")
+			}
+			if advisor.Usage.ReportedCost != nil {
+				t.Fatalf("advisor ReportedCost = %v, want nil", *advisor.Usage.ReportedCost)
+			}
+		})
+	}
+
+	// The AgentProgress wrapper yields the parent only: upstream's advisor pass
+	// parses the raw line's top-level message (daily.rs:368), which a wrapper
+	// does not have, so its iterations are never split (lib.rs:635-641).
+	wrapped := ParseDailyLineEntries(dailyWrapperLine(`{"timestamp":"` + validTimestamp +
+		`","requestId":"req-2","message":{"id":"msg_8","model":"claude-sonnet-4-5","usage":` + usage + `}}`))
+	if len(wrapped) != 1 || wrapped[0].MessageID != "msg_8" {
+		t.Fatalf("wrapper entries = %+v, want the parent only", wrapped)
+	}
+
+	// The parent-only convenience wrappers expose the parent alone and are not
+	// for collector use; this documents the difference the doc comments warn
+	// about.
+	if entry, ok := ParseLine(direct); !ok || entry.MessageID != "msg_7" {
+		t.Fatalf("ParseLine = %+v, %v; want the parent", entry, ok)
+	}
+	if entry, ok := ParseDailyLine(direct); !ok || entry.MessageID != "msg_7" {
+		t.Fatalf("ParseDailyLine = %+v, %v; want the parent", entry, ok)
+	}
+}
+
+func TestBothEntriesFormsRejectTheSameLines(t *testing.T) {
+	// Both forms share the scanner, so every gate applies to both.
+	for _, line := range []string{
+		`{"sessionId":"s","timestamp":"` + validTimestamp + `","message":{"model":"m","usage": {"input_tokens":1,"output_tokens":2}}}`,
+		`{"sessionId":"s","timestamp":"2026-10-30T12:34:56.7Z","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"sessionId":"","timestamp":"` + validTimestamp + `","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"sessionId":"s","timestamp":"` + validTimestamp + `","message":{"id":null,"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"sessionId":"s","timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`,
+		`{"sessionId":"s","timestamp":"` + validTimestamp + `","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2,"cache_creation":{"ephemeral_5m_input_tokens":-1}}}}`,
+	} {
+		if entries := ParseLineEntries(line); len(entries) != 0 {
+			t.Fatalf("ParseLineEntries accepted a line the gates reject: %d entries", len(entries))
+		}
+		if entries := ParseDailyLineEntries(line); len(entries) != 0 {
+			t.Fatalf("ParseDailyLineEntries accepted a line the gates reject: %d entries", len(entries))
+		}
 	}
 }
 
