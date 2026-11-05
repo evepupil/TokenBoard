@@ -46,6 +46,15 @@ type PreparedConfig struct {
 	// config. The TS side derives the same set with
 	// `new Set(Object.keys(explicitPricingOverrides))`.
 	ExplicitOverrideModelIDs map[string]bool
+	// MergedPricingOverrides is exactly the defaults.pricingOverrides block the
+	// merged ccusage config carries - bundled, dynamic catalogue and the user's
+	// explicit config, with the non-representable entries already dropped. A
+	// consumer that prices in process (the native providers) must use this, not
+	// Overrides: Overrides is only the bundled/dynamic layer, and the explicit
+	// config's rates reach ccusage solely through the merged file. Reading
+	// Overrides there would silently bill a user who set
+	// TOKENBOARD_CCUSAGE_CONFIG differently from the ccusage path.
+	MergedPricingOverrides map[string]any
 	// ContextPricingModels is the catalogue the Codex context-pricing rules may
 	// widen the static table with, and it is nil when the dynamic config could not
 	// be written.
@@ -94,6 +103,11 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 	}
 	merged := mergeCcusageConfig(staticConfig, overrides, explicitConfig,
 		nonRepresentableContextPricingModelIDs(catalogue.Models, overrides))
+	// The override block the merged file carries, which is what an in-process
+	// pricer has to bill from. It differs from overrides whenever an explicit
+	// config is present, and it also lacks the dynamic rows whose long-context
+	// tiers cannot be represented in the ccusage shape.
+	mergedOverrides := readPricingOverrides(merged)
 
 	explicitOverrides := map[string]any{}
 	if explicitConfig != nil {
@@ -130,18 +144,24 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				"TokenBoard model pricing: bundled ccusage config write failed (%s); using %s",
 				err.Error(), describeFallback(fallback)))
 			return PreparedConfig{
-				ConfigPath:               fallback,
-				Catalogue:                catalogue,
-				Overrides:                overrides,
+				ConfigPath: fallback,
+				Catalogue:  catalogue,
+				Overrides:  overrides,
+				// Without an explicit config the merged block is the bundled
+				// layer, so the two views are the same map here.
+				MergedPricingOverrides:   mergedOverrides,
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 				ContextPricingModels:     nil,
 			}, nil
 		}
 		return PreparedConfig{
-			ConfigPath:               bundledPath,
-			Catalogue:                catalogue,
-			Overrides:                overrides,
+			ConfigPath: bundledPath,
+			Catalogue:  catalogue,
+			Overrides:  overrides,
+			// No explicit config: merged is the bundled layer plus its own
+			// non-representable filtering, so this is the same pricing view.
+			MergedPricingOverrides:   mergedOverrides,
 			CoveredModelIDs:          covered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 			ContextPricingModels:     catalogue.Models,
@@ -162,9 +182,14 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			fallbackCovered[modelID] = true
 		}
 		return PreparedConfig{
-			ConfigPath:               fallback,
-			Catalogue:                catalogue,
-			Overrides:                overrides,
+			ConfigPath: fallback,
+			Catalogue:  catalogue,
+			Overrides:  overrides,
+			// The file could not be written, but the block it would have
+			// carried is still what in-process pricing must use: falling back
+			// to Overrides here would bill a different rate from the explicit
+			// config ccusage is pointed at.
+			MergedPricingOverrides:   mergedOverrides,
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 			ContextPricingModels:     nil,
@@ -175,6 +200,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 		ConfigPath:               configPath,
 		Catalogue:                catalogue,
 		Overrides:                overrides,
+		MergedPricingOverrides:   mergedOverrides,
 		CoveredModelIDs:          covered,
 		ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 		ContextPricingModels:     catalogue.Models,

@@ -754,3 +754,79 @@ func renderSnapshot(snapshot contract.Snapshot) string {
 // modelAliasesEnv is the variable the claude report layer reads with
 // os.Getenv; the goldens were minted with it empty.
 const modelAliasesEnv = "CCUSAGE_MODEL_ALIASES"
+
+// TestNativeExplicitPricingConfigPricesInProcess pins the part of the pricing
+// hand-off that only becomes visible once the in-process adapter prices:
+//
+//   - with TOKENBOARD_CCUSAGE_CONFIG naming a rate for the fixture's model, the
+//     native costUSD reflects THAT rate (the explicit config is merged into the
+//     override block the config file carries, and the native pass must read the
+//     same block);
+//   - with no explicit config the same row falls back to the built-in rate.
+//
+// Before MergedPricingOverrides existed, nativeCollect passed
+// prepared.Overrides, which only holds the bundled/catalogue layer: the
+// explicit rate reached ccusage through the merged file and nothing else, so
+// the two paths priced the same row differently the moment the switch flipped.
+func TestNativeExplicitPricingConfigPricesInProcess(t *testing.T) {
+	root := t.TempDir()
+	claudeHome := filepath.Join(root, "claude")
+	// One row of 1,000,000 input tokens with one output token.
+	//
+	// Built-in: claude-sonnet-4-20250514 is $3/M input up to 200k and $6/M
+	// above it, so 200,000x3e-6 + 800,000x6e-6 + 1x15e-6 = 5.400015.
+	//
+	// Explicit: the override prices the model at $11/M input and output, and an
+	// override entry replaces the whole model, so the above-threshold band does
+	// not apply: 1,000,000x11e-6 + 1x11e-6 = 11.000011.
+	//
+	// Both numbers are written out literally rather than derived from each
+	// other: a test that only compared the two runs would still pass if the
+	// override were applied to neither.
+	writeNativeSession(t, claudeHome,
+		`{"type":"assistant","timestamp":"2026-03-02T10:00:00.000Z",`+
+			`"message":{"model":"claude-sonnet-4-20250514",`+
+			`"usage":{"input_tokens":1000000,"output_tokens":1}}}`)
+
+	explicit := filepath.Join(root, "explicit-pricing.json")
+	if err := os.WriteFile(explicit, []byte(`{
+		"defaults": {"pricingOverrides": {
+			"claude-sonnet-4-20250514": {
+				"inputCostPerToken": 0.000011,
+				"outputCostPerToken": 0.000011,
+				"cacheReadInputTokenCost": 0,
+				"cacheCreationInputTokenCost": 0
+			}
+		}}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	collect := func(extra map[string]string) contract.Snapshot {
+		t.Helper()
+		env := map[string]string{"CLAUDE_CONFIG_DIR": claudeHome}
+		for key, value := range extra {
+			env[key] = value
+		}
+		snapshots := runNative(t, Options{}, env)
+		if len(snapshots) != 1 {
+			t.Fatalf("snapshots = %+v, want one row", snapshots)
+		}
+		return snapshots[0]
+	}
+
+	builtin := collect(nil)
+	if builtin.InputTokens != 1_000_000 {
+		t.Fatalf("inputTokens = %d, want 1000000", builtin.InputTokens)
+	}
+	if builtin.CostUSD != 5.400015 {
+		t.Fatalf("built-in cost = %v, want 5.400015 (200k at $3/M, 800k at $6/M, one output token at $15/M)",
+			builtin.CostUSD)
+	}
+
+	explicitPriced := collect(map[string]string{"TOKENBOARD_CCUSAGE_CONFIG": explicit})
+	if explicitPriced.CostUSD != 11.000011 {
+		t.Fatalf("explicit-config cost = %v, want 11.000011 (the explicit $11/M must price the row)",
+			explicitPriced.CostUSD)
+	}
+}

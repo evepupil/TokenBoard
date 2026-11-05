@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -1434,4 +1435,98 @@ func TestCollapsedRepresentativeIsIndependentOfRowOrder(t *testing.T) {
 		t.Fatalf("override depends on row order: forward=%v backward=%v", forward["gpt-9-chat"], backward["gpt-9-chat"])
 	}
 	requireNumber(t, overrideOf(t, forward, "gpt-9-chat"), "maxInputTokens", 400_000)
+}
+
+// TestPrepareExposesTheMergedOverrideBlock pins the difference between the two
+// override views Prepare returns:
+//
+//   - Overrides is the bundled or catalogue layer only, which is what the
+//     Codex context-pricing rules widen from;
+//   - MergedPricingOverrides is exactly the defaults.pricingOverrides block the
+//     merged ccusage config carries, explicit config included, which is what an
+//     in-process pricer must use. Reading Overrides there would silently drop
+//     the user's own rates the moment the native path replaces the subprocess.
+func TestPrepareExposesTheMergedOverrideBlock(t *testing.T) {
+	explicit := map[string]any{
+		"defaults": map[string]any{"pricingOverrides": map[string]any{
+			"claude-merged-only": map[string]any{"inputCostPerToken": 0.001},
+		}},
+	}
+
+	t.Run("static without an explicit config", func(t *testing.T) {
+		prepared := mustPrepare(t, PrepareInput{StateDir: t.TempDir()})
+		if len(prepared.MergedPricingOverrides) == 0 {
+			t.Fatal("MergedPricingOverrides is empty for the bundled static config")
+		}
+		if !reflect.DeepEqual(prepared.MergedPricingOverrides, prepared.Overrides) {
+			t.Fatalf("MergedPricingOverrides and Overrides differ without an explicit config")
+		}
+	})
+
+	t.Run("static with an explicit config", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "explicit.json")
+		writeJSONFile(t, path, explicit)
+		prepared := mustPrepare(t, PrepareInput{StateDir: t.TempDir(), ExplicitConfig: path})
+
+		entry, ok := prepared.MergedPricingOverrides["claude-merged-only"].(map[string]any)
+		if !ok {
+			t.Fatalf("MergedPricingOverrides has no claude-merged-only: %v", prepared.MergedPricingOverrides)
+		}
+		// The config loader keeps JSON numbers as json.Number (UseNumber), so
+		// compare through the textual value.
+		if rate := fmt.Sprint(entry["inputCostPerToken"]); rate != "0.001" {
+			t.Fatalf("explicit inputCostPerToken = %v, want 0.001", entry["inputCostPerToken"])
+		}
+		if _, present := prepared.Overrides["claude-merged-only"]; present {
+			t.Fatal("Overrides must keep its bundled-only meaning; the explicit rate belongs to MergedPricingOverrides")
+		}
+		// The bundled layer is still there: the merged view is a superset, not a
+		// replacement.
+		if _, present := prepared.MergedPricingOverrides["claude-sonnet-4-5"]; !present {
+			t.Fatal("MergedPricingOverrides dropped the bundled overrides")
+		}
+	})
+
+	t.Run("dynamic with an explicit config", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "explicit.json")
+		writeJSONFile(t, path, explicit)
+		prepared := mustPrepare(t, PrepareInput{
+			Endpoint:       "https://tokenboard.example",
+			StateDir:       t.TempDir(),
+			ExplicitConfig: path,
+			Fetcher: func(*http.Request) (*http.Response, error) {
+				return jsonResponse(t, cataloguePage([]map[string]any{modelRow("gpt-6-astra", nil)}, nil), nil), nil
+			},
+		})
+		if _, present := prepared.MergedPricingOverrides["gpt-6-astra"]; !present {
+			t.Fatal("MergedPricingOverrides dropped the catalogue override")
+		}
+		if _, present := prepared.MergedPricingOverrides["claude-merged-only"]; !present {
+			t.Fatal("MergedPricingOverrides dropped the explicit override")
+		}
+		if _, present := prepared.Overrides["claude-merged-only"]; present {
+			t.Fatal("Overrides must not grow the explicit entries")
+		}
+	})
+
+	t.Run("write-failure fallback", func(t *testing.T) {
+		parent := t.TempDir()
+		stateFile := filepath.Join(parent, "state-file")
+		writeFile(t, stateFile, "not a directory")
+		path := filepath.Join(parent, "explicit.json")
+		writeJSONFile(t, path, explicit)
+
+		prepared := mustPrepare(t, PrepareInput{
+			Endpoint:       "https://tokenboard.example",
+			StateDir:       stateFile,
+			ExplicitConfig: path,
+			Fetcher: func(*http.Request) (*http.Response, error) {
+				return jsonResponse(t, cataloguePage([]map[string]any{modelRow("gpt-6-astra", nil)}, nil), nil), nil
+			},
+			Stderr: func(string) {},
+		})
+		if _, present := prepared.MergedPricingOverrides["claude-merged-only"]; !present {
+			t.Fatal("the write-failure fallback must still expose the explicit overrides in MergedPricingOverrides")
+		}
+	})
 }

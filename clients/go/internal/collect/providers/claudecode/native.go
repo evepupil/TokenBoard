@@ -133,7 +133,13 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	if endpoint != "" {
 		pricingStderr = stderr
 	}
-	// The overrides are the only part of the prepared config this path uses.
+	// The merged override block is the only part of the prepared config this
+	// path uses, and it must be MergedPricingOverrides rather than Overrides:
+	// Overrides carries just the bundled/catalogue layer, while the user's
+	// TOKENBOARD_CCUSAGE_CONFIG rates reach ccusage only through the merged
+	// file. Passing Overrides here would bill a machine that set an explicit
+	// config differently from its own ccusage runs.
+	//
 	// ConfigPath is deliberately ignored: it exists to point the ccusage
 	// subprocess at a config file, and the native path never spawns one.
 	prepared, err := pricing.Prepare(pricing.PrepareInput{
@@ -180,7 +186,7 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 		Since:     input.options.Since,
 		Until:     input.options.Until,
 		Roots:     roots,
-		Overrides: prepared.Overrides,
+		Overrides: prepared.MergedPricingOverrides,
 		Mode:      nativepricing.ModeAuto,
 		Stderr:    stderr,
 	})
