@@ -213,7 +213,9 @@
 - `providers/claudecode` 新增未导出常量 `useNativeClaude = false`（编译期开关；翻转是独立提交）。
 - `nativeCollect(ctx, options) ([]contract.Snapshot, error)`：`pricing.Prepare` → `pricing.PreparedConfig.Overrides` → `claude.Collect` → `ccusage.DecodeJSON` → `ccusage.NormalizeCcusageDailyJSON(..., Sessions: sessions, HasSessions: true)`。
 - `Collect()` 按开关分派；`init()` 里 `collect.RegisterNative(contract.SourceClaudeCode, nativeProvider{})` **无条件**执行（parity/bench 必须能跑原生侧，即使默认仍走 ccusage）。
-- `readClaudeHome` 的结果以 `Roots` 传给适配器；hook 模式沿用 `pricing.Prepare(HookMode:true)`（不联网）。
+- 根解析分四支（Task 7 brief 有完整代码）：`CLAUDE_CONFIG_DIR` 设了 → `homeDir=""`；`CLAUDE_HOME` 设了 → `readClaudeHome` 的结果；`Options.HomeDir` 设了 → `<HomeDir>/.claude`；都没设 → `homeDir=""`，交给 `ResolveRoots` 走 ccusage 的 `$XDG_CONFIG_HOME/claude` + `$HOME/.claude` + `home::home_dir`（`paths.rs:38-53`）。
+- hook 模式沿用 `pricing.Prepare(HookMode:true)`（不联网）。
+- `Collect` 必须收到非空 `Timezone`（Task 5 已注明空 Timezone 会让剪枝与日期换算不一致）。
 
 - [ ] **Step 1: 写失败测试**：`TestRegisterNativeAlwaysInstallsTheNativeProvider`、`TestSwitchDefaultsToCcusage`（`useNativeClaude == false`，Collect 走旧路径，用 stub runner 断言调用了 ccusage）、`TestNativeCollectMatchesNormalizePipeline`（用 Task 6 夹具，native → snapshots 与直接 normalize 金样本一致）。
 - [ ] **Step 2: 运行确认失败**；**Step 3: 实现**；**Step 4: 运行通过**；**Step 5: Commit**：`feat(claudecode): wire the native adapter behind an internal switch`
