@@ -269,6 +269,16 @@ type advisorUsage struct {
 // row), and only iterations typed advisor_message with a non-empty model are
 // kept. AgentProgress wrappers have no top-level message, so they yield none -
 // the same asymmetry upstream has (daily.rs:368 parses the raw line).
+//
+// Known residual disagreement: this uses encoding/json, which keeps the LAST of
+// two duplicate members, while upstream's advisor envelope is a derived struct
+// that fails on a duplicate `type` or `model` and then yields no advisor rows at
+// all. The scanner above no longer rejects such a line (an iteration's members
+// are unknown to the main derive), so a line with a duplicated iteration field
+// is accepted here and contributes the parent entry PLUS this pass's advisor
+// rows, where ccusage contributes only the parent. It fires only on malformed
+// input, and its direction is over-counting rather than dropping data, which is
+// why it is registered instead of fixed.
 func advisorUsagesFromLine(line string) []advisorUsage {
 	if !strings.Contains(line, advisorMarker) {
 		return nil
@@ -683,10 +693,18 @@ func (w *wrapperCapture) valid(c *lineCapture) bool {
 // (lib.rs:832-886), with the iterations[].model exemption.
 //
 // Upstream only runs the strict walk when the line contains a null literal
-// (lib.rs:727-736); the duplicate-member rule is enforced unconditionally
-// here, which is the plan's stated rule and a superset of serde's typed
-// duplicate-field rejection. The null check cannot fire without a null
-// literal, so gating it explicitly would not change any outcome.
+// (lib.rs:727-736). A null-free line goes straight to serde_json::from_slice,
+// where the duplicate rule is serde's: a duplicate member of a MODELLED field
+// fails the derive and drops the line, while a duplicate of an unknown field is
+// ignored along with the field. Both halves are reproduced here -
+// isKnownMember gates the reject so an unknown duplicate survives, and the
+// null check stays exactly where upstream has it.
+//
+// Known residual disagreement: advisorUsagesFromLine re-parses the line with
+// encoding/json, whose last-duplicate-wins differs from upstream's advisor
+// pass, which fails on a duplicate `type`/`model` and returns no advisor rows at
+// all. It only fires on malformed input and it over-counts rather than
+// under-counts, so it is registered rather than fixed; see that function.
 type scanner struct {
 	data     []byte
 	pos      int
@@ -756,9 +774,17 @@ func (s *scanner) parseObjectMembers(kind objectKind, into target, iterationElem
 		// comparing them. Real Claude Code transcripts never escape object key
 		// names, so this is a known, deliberate gap rather than a defect to fix
 		// here; closing it would require decoding every key on the hot path.
-		for _, span := range s.keys[base:] {
-			if bytes.Equal(s.data[span.start:span.end], key) {
-				return false
+		//
+		// The reject is gated exactly like upstream's two paths: the null-triggered
+		// deep scan (s.nullScan) refuses any duplicate at any depth, and without it
+		// serde's derive refuses only duplicates of a modelled field. An unknown
+		// duplicate in a null-free line is ignored by serde along with its field,
+		// so the line survives and must be counted here too - see isKnownMember.
+		if s.nullScan || isKnownMember(kind, key) {
+			for _, span := range s.keys[base:] {
+				if bytes.Equal(s.data[span.start:span.end], key) {
+					return false
+				}
 			}
 		}
 		s.keys = append(s.keys, keySpan{start: start, end: end})
@@ -785,6 +811,9 @@ func (s *scanner) parseObjectMembers(kind objectKind, into target, iterationElem
 	}
 }
 
+// parseMember is the shared member dispatch every object kind goes through.
+// isKnownMember mirrors its switch: a key this function does not handle is an
+// unknown field to serde, and serde drops unknown fields without complaint.
 func (s *scanner) parseMember(kind objectKind, key []byte, into target) bool {
 	switch kind {
 	case kindRoot:
@@ -874,6 +903,50 @@ func (s *scanner) parseMember(kind objectKind, key []byte, into target) bool {
 		}
 	}
 	return s.skipValue()
+}
+
+// isKnownMember reports whether key names a field of object kind that serde's
+// derive models, i.e. one parseMember dispatches on.
+//
+// It exists only for the duplicate-member rule. Serde rejects a duplicate member
+// of a declared field and silently ignores a duplicate of an unknown one, so the
+// two halves of the rule need different answers. Each list is the union over the
+// untagged variants ccusage deserializes a line into (types.rs), which is why
+// kindRoot accepts both the direct shape and the AgentProgress wrapper's `data`.
+//
+// kindGeneric and kindIteration know no members on purpose. The main derive has
+// no `iterations` field at all, so serde skips the whole array as an unknown
+// value; and an iteration object's own members are unknown to that derive too.
+// Advisor rows are built by a SEPARATE pass (advisorUsagesFromLine), which is
+// where iteration-level duplicates are handled - differently from upstream; see
+// the scanner doc comment.
+func isKnownMember(kind objectKind, key []byte) bool {
+	switch kind {
+	case kindRoot:
+		return keyIsAny(key, "timestamp", "message", "sessionId", "version", "requestId",
+			"costUSD", "isSidechain", "isApiErrorMessage", "data")
+	case kindWrapperData:
+		return keyIsAny(key, "message")
+	case kindAgentMessage:
+		return keyIsAny(key, "timestamp", "message", "requestId", "costUSD", "isSidechain")
+	case kindMessage:
+		return keyIsAny(key, "usage", "model", "id")
+	case kindUsage:
+		return keyIsAny(key, "input_tokens", "output_tokens", "cache_creation_input_tokens",
+			"cache_read_input_tokens", "speed", "cache_creation", "iterations")
+	case kindCacheCreation:
+		return keyIsAny(key, "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+	}
+	return false
+}
+
+func keyIsAny(key []byte, literals ...string) bool {
+	for _, literal := range literals {
+		if keyIs(key, literal) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseObjectField captures a nested object member. A non-object value marks

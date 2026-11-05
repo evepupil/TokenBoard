@@ -198,15 +198,26 @@ func TestParseLineNullBlacklistAnyDepth(t *testing.T) {
 	}
 }
 
+// TestParseLineDuplicateKeysDropped pins the rejecting half of serde's rule
+// (lib.rs:727-736): a duplicate member of a MODELLED field fails the line's
+// typed deserialization, and any duplicate at all fails once ccusage's
+// null-triggered deep scan is active. The accepting half lives in
+// TestParseLineAcceptsUnknownDuplicateMembers.
 func TestParseLineDuplicateKeysDropped(t *testing.T) {
+	usage := `{"input_tokens":1,"output_tokens":2}`
+	// A null literal anywhere switches ccusage from serde to the any-depth deep
+	// scan, which rejects every duplicate. `extra` is not a blacklisted field,
+	// so the rejection can only come from the duplicate rule.
+	nullTail := `,"extra":null`
 	cases := []struct {
 		name string
 		line string
 	}{
-		{"duplicate top-level key", `{"sessionId":"s","timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`},
-		{"duplicate usage key", lineWithUsage(`{"input_tokens":1,"input_tokens":2,"output_tokens":2}`)},
-		{"duplicate unknown nested key", lineWithMessage(`{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2},"content":[{"text":"a","text":"b"}]}`)},
-		{"duplicate iteration key", lineWithUsage(`{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","type":"advisor_message","model":"m","input_tokens":3,"output_tokens":4}]}`)},
+		{"duplicate known top-level key", `{"sessionId":"s","timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`},
+		{"duplicate known message key", lineWithMessage(`{"id":"msg_1","id":"msg_2","model":"m","usage":{"input_tokens":1,"output_tokens":2}}`)},
+		{"duplicate known usage key", lineWithUsage(`{"input_tokens":1,"input_tokens":2,"output_tokens":2}`)},
+		{"duplicate known key with a null in the line", `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `"` + nullTail + `,"message":{"id":"msg_1","model":"m","usage":` + usage + `}}`},
+		{"duplicate unknown key with a null elsewhere", `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp + `","dup":1,"dup":2` + nullTail + `,"message":{"id":"msg_1","model":"m","usage":` + usage + `}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -218,6 +229,86 @@ func TestParseLineDuplicateKeysDropped(t *testing.T) {
 
 	if _, ok := ParseLine(lineWithUsage(`{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"message","input_tokens":3,"output_tokens":4}]}`)); !ok {
 		t.Fatalf("ParseLine rejected the duplicate-free control line")
+	}
+}
+
+// TestParseLineAcceptsUnknownDuplicateMembers pins the accepting half of the
+// same rule: without a null literal ccusage goes straight to serde, and a
+// duplicate of a field nobody models is ignored along with the field, so the
+// line survives and its tokens must be counted. Rejecting these would silently
+// under-count usage ccusage records.
+func TestParseLineAcceptsUnknownDuplicateMembers(t *testing.T) {
+	// The fixture's req-bad5 shape: two unknown top-level members with the same
+	// name. ccusage 20.0.33 keeps the line (measured: session-gamma's
+	// 2026-03-10 row is 10/2, not 9/1).
+	t.Run("duplicate unknown top-level key", func(t *testing.T) {
+		line := `{"sessionId":"sess-1","version":"2.0.30","timestamp":"` + validTimestamp +
+			`","requestId":"req-bad5","dup":1,"dup":2,"message":{"id":"msg_bad5","model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}`
+		entries := ParseLineEntries(line)
+		if len(entries) != 1 {
+			t.Fatalf("ParseLineEntries returned %d entries, want the single parent entry", len(entries))
+		}
+		if entries[0].Usage.Input != 1 || entries[0].Usage.Output != 1 {
+			t.Fatalf("parent usage = %d/%d, want 1/1", entries[0].Usage.Input, entries[0].Usage.Output)
+		}
+	})
+
+	t.Run("duplicate unknown key inside an unknown object", func(t *testing.T) {
+		line := lineWithMessage(`{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2},"content":[{"text":"a","text":"b"}]}`)
+		if _, ok := ParseLine(line); !ok {
+			t.Fatalf("ParseLine rejected a duplicate member of an unmodelled field")
+		}
+	})
+
+	t.Run("duplicate iteration key", func(t *testing.T) {
+		// An iteration's members are unknown to the main derive, so the line is
+		// accepted. The advisor pass then re-parses it with encoding/json, whose
+		// last-duplicate-wins yields an advisor row where upstream's derived
+		// envelope fails and yields none. That is the registered residual
+		// disagreement documented on advisorUsagesFromLine: accepted, parent
+		// present, and one advisor row over-counted.
+		line := lineWithUsage(`{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","type":"advisor_message","model":"m","input_tokens":3,"output_tokens":4}]}`)
+		entries := ParseLineEntries(line)
+		if len(entries) != 2 {
+			t.Fatalf("ParseLineEntries returned %d entries, want the parent plus the advisor pass's row", len(entries))
+		}
+		if entries[0].Usage.Input != 1 || entries[0].Usage.Output != 2 {
+			t.Fatalf("parent usage = %d/%d, want 1/2", entries[0].Usage.Input, entries[0].Usage.Output)
+		}
+		if entries[1].Usage.Input != 3 || entries[1].Usage.Output != 4 {
+			t.Fatalf("advisor usage = %d/%d, want 3/4", entries[1].Usage.Input, entries[1].Usage.Output)
+		}
+	})
+
+	// The AgentProgress wrapper is a different set of kinds (kindWrapperData and
+	// kindAgentMessage), so its known-member lists are pinned separately. Only the
+	// daily chain accepts the wrapper shape at all (daily.rs:182-227), hence
+	// ParseDailyLine here.
+	t.Run("duplicate unknown key inside the wrapper", func(t *testing.T) {
+		line := `{"sessionId":"sess-1","data":{"dup":1,"dup":2,"message":{"timestamp":"` + validTimestamp +
+			`","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}}}`
+		if _, ok := ParseDailyLine(line); !ok {
+			t.Fatalf("ParseDailyLine rejected a duplicate member of an unmodelled wrapper field")
+		}
+	})
+}
+
+// TestParseDailyLineRejectsKnownDuplicateInWrapper is the rejecting counterpart
+// for the wrapper kinds: `timestamp` is modelled by kindAgentMessage, so serde's
+// derive fails and the AgentProgress line must be dropped.
+func TestParseDailyLineRejectsKnownDuplicateInWrapper(t *testing.T) {
+	wrap := func(inner string) string { return `{"sessionId":"sess-1","data":{"message":` + inner + `}}` }
+	cases := map[string]string{
+		"duplicate agent timestamp": wrap(`{"timestamp":"` + validTimestamp + `","timestamp":"` + validTimestamp + `","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`),
+		"duplicate agent message":   wrap(`{"timestamp":"` + validTimestamp + `","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}},"message":{"id":"msg_2","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`),
+		"duplicate wrapper message": `{"sessionId":"sess-1","data":{"message":{"timestamp":"` + validTimestamp + `","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}}},"message":{"timestamp":"` + validTimestamp + `","message":{"id":"msg_2","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}}}`,
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, ok := ParseDailyLine(line); ok {
+				t.Fatalf("ParseDailyLine accepted a duplicate of a modelled wrapper field")
+			}
+		})
 	}
 }
 
