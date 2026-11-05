@@ -29,14 +29,18 @@
  *      happily discover a user-level config file instead.
  *   2. `--offline` is REQUIRED: without it ccusage fetches the day's live prices
  *      and the goldens drift daily.
- *   3. `--single-thread` keeps the collection order — and therefore the dedupe
- *      index's first-seen order, which decides ties — deterministic.
- *   4. Fixture JSONL must be COMPACT (no space after a colon). ccusage 20.0.33
- *      returns an EMPTY `daily` array when a line is pretty-printed. The single
- *      deliberate exception is the invalid-line fixture in
- *      projects/project-b/session-gamma.jsonl, which writes `"usage": {` on
- *      purpose to prove the line is dropped; this script asserts that it is the
- *      ONLY non-compact line so a stray editor format cannot slip through.
+ *   3. `--single-thread` is pinned for reproducibility. Measurement, not
+ *      source reading: the reports below are identical across runs with it on,
+ *      and a parallel scan is the one thing that could reorder file processing
+ *      and therefore which entry a full dedupe tie keeps. It costs nothing on a
+ *      7-file fixture, so the flag stays rather than being reasoned about.
+ *   4. Fixture JSONL must be COMPACT (no space after a colon). Measured for
+ *      ccusage 20.0.33: a transcript line written with spaces after its colons
+ *      yields an EMPTY `daily` array. The single deliberate exception is the
+ *      invalid-line fixture in projects/project-b/session-gamma.jsonl, which
+ *      writes `"usage": {` on purpose to prove the line is dropped; this script
+ *      asserts that it is the ONLY non-compact line so a stray editor format
+ *      cannot slip through.
  *
  * Usage:
  *   node clients/go/scripts/gen-claude-goldens.mjs
@@ -49,8 +53,8 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -121,9 +125,14 @@ const forbiddenConfigs = [
   join(homedir(), ".claude", "ccusage.json"),
   join(homedir(), ".config", "claude", "ccusage.json"),
   join(repoRoot, ".ccusage", "ccusage.json"),
+  // ccusage looks for .ccusage/ccusage.json relative to the process that runs
+  // it, not to this script, so the directory that really matters is the current
+  // working directory. The child is also pinned to an empty temp cwd below, but
+  // checking here names the offending file instead of silently changing costs.
+  join(process.cwd(), ".ccusage", "ccusage.json"),
   join(fixtureDir, "ccusage.json"),
 ];
-for (const path of forbiddenConfigs) {
+for (const path of new Set(forbiddenConfigs)) {
   if (existsSync(path)) {
     fail(
       `${path} exists; ccusage would apply it and the goldens would not match a ` +
@@ -131,6 +140,11 @@ for (const path of forbiddenConfigs) {
     );
   }
 }
+
+// The child runs in an empty directory so no cwd-relative config can be
+// discovered no matter where this script was invoked from.
+const childCwd = mkdtempSync(join(tmpdir(), "tb-claude-goldens-cwd-"));
+process.on("exit", () => rmSync(childCwd, { recursive: true, force: true }));
 
 if (!existsSync(join(fixtureDir, "projects"))) {
   fail(`fixture tree ${fixtureDir} has no projects/ directory.`);
@@ -233,6 +247,7 @@ function run(argv, label) {
   let stdout;
   try {
     stdout = execFileSync(ccusageBin, argv, {
+      cwd: childCwd,
       env: { ...process.env, CLAUDE_CONFIG_DIR: fixtureDir, CCUSAGE_MODEL_ALIASES: "" },
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
@@ -275,14 +290,45 @@ for (const [label, report, key] of [
   }
 }
 
-// Each fixture date must produce at least one daily row; a date that silently
-// vanished means ccusage dropped every line on it.
-const dailyDates = new Set(dailyAuto.daily.map((row) => row.date));
-const missingDates = [...fixtureDates].filter((date) => !dailyDates.has(date)).sort();
-if (missingDates.length > 0) {
+// Each fixture date must produce at least one daily row, in BOTH modes: a date
+// that silently vanished means ccusage dropped every line on it, and the mode
+// matrix would then be comparing two partially empty reports.
+for (const [label, report] of [
+  ["daily --mode auto", dailyAuto],
+  ["daily --mode calculate", dailyCalculate],
+]) {
+  const dates = new Set(report.daily.map((row) => row.date));
+  const missing = [...fixtureDates].filter((date) => !dates.has(date)).sort();
+  if (missing.length > 0) {
+    fail(
+      `ccusage (${label}) produced no row for these fixture dates: ${missing.join(", ")} — ` +
+        "a dropped line, not a report to freeze.",
+    );
+  }
+}
+
+// Every project directory in the fixture must reach the session report. A
+// project that lost all its entries is the session chain's version of the check
+// above, and it is the only cheap way to notice a whole file being skipped.
+const fixtureProjects = new Set(
+  fixtureFiles
+    .map((relativePath) => relativePath.split("/"))
+    .filter((parts) => parts[0] === "projects" && parts.length >= 3)
+    .map((parts) => parts[1]),
+);
+const sessionProjects = new Set(sessions.sessions.map((row) => row.projectPath));
+const missingProjects = [...fixtureProjects].filter((project) => !sessionProjects.has(project)).sort();
+if (missingProjects.length > 0) {
   fail(
-    `these fixture dates produced no daily row: ${missingDates.join(", ")} — ` +
-      "a dropped line, not a report to freeze.",
+    `the session report has no row for these fixture projects: ${missingProjects.join(", ")} — ` +
+      "every transcript under a project was dropped.",
+  );
+}
+const unexpectedProjects = [...sessionProjects].filter((project) => !fixtureProjects.has(project)).sort();
+if (unexpectedProjects.length > 0) {
+  fail(
+    `the session report invented these project paths: ${unexpectedProjects.join(", ")} — ` +
+      "PathSessionParts would not produce them from this fixture tree.",
   );
 }
 

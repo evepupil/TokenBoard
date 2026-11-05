@@ -18,6 +18,18 @@ package claude
 // `node clients/go/scripts/gen-claude-goldens.mjs`; that script owns the
 // version pin, the clean-environment assertions and the fixture hash. This file
 // never writes them.
+//
+// Registered coverage gaps (accepted, not defects to chase here):
+//
+//   - M-2: every fixture line is well formed, so the corpus only proves the
+//     ACCEPT half of the parser. "A duplicate modelled field must drop the line"
+//     is pinned by entry_test.go, not by a golden.
+//   - M-3: the fixture has no files near the --since window and no --until edge,
+//     so a prune or window regression would not show up here; collect_test.go
+//     owns those.
+//   - M-5: parseMember and knownChildMember are two hand-kept lists. Adding a
+//     field to one without the other silently widens the duplicate rule; the
+//     comment on parseMember says so, but nothing enforces it.
 
 import (
 	"context"
@@ -32,6 +44,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +70,9 @@ const (
 var goldenNow = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 
 // maxDiffPaths caps how many differing paths one failure prints. The first
-// differences are the informative ones; a whole-document dump is not.
+// differences are the informative ones; a whole-document dump is not. The walk
+// collects one past the cap so the message can say "at least" instead of
+// claiming an exact count it did not measure.
 const maxDiffPaths = 10
 
 // Report labels, used for failure messages and command lookups.
@@ -317,7 +332,7 @@ func compareReport(t *testing.T, label string, golden, port []byte, command gold
 	t.Helper()
 	want := decodeTree(t, label+" golden", golden)
 	got := decodeTree(t, label+" port", port)
-	if differences := diffTrees("", want, got, maxDiffPaths); len(differences) > 0 {
+	if differences := diffTrees("", want, got, maxDiffPaths+1); len(differences) > 0 {
 		reportDifferences(t, label, differences, command)
 	}
 }
@@ -560,11 +575,18 @@ func ruleFor(path string) string {
 // is supposed to follow.
 func reportDifferences(t *testing.T, label string, differences []treeDifference, command goldenCommand) {
 	t.Helper()
+	shown := differences
+	count := strconv.Itoa(len(differences))
+	if len(differences) > maxDiffPaths {
+		// The walk stopped at the cap, so the real count is unknown and larger.
+		shown = differences[:maxDiffPaths]
+		count = "at least " + strconv.Itoa(maxDiffPaths+1)
+	}
 	var message strings.Builder
 	fmt.Fprintf(&message,
-		"%s does not match the ccusage 20.0.33 golden: %d field difference(s), first %d shown:\n",
-		label, len(differences), maxDiffPaths)
-	for _, difference := range differences {
+		"%s does not match the ccusage 20.0.33 golden: %s field difference(s), first %d shown:\n",
+		label, count, len(shown))
+	for _, difference := range shown {
 		fmt.Fprintf(&message, "  %s\n", difference)
 		fmt.Fprintf(&message, "    rule: %s\n", ruleFor(difference.path))
 	}
