@@ -232,3 +232,35 @@ func TestPopulateCostsRunsBeforeDedupSoTheCostRungSeesIt(t *testing.T) {
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+// TestMemoizeFindAnswersEveryLookupTheCorpusWould pins the cache to the corpus
+// it memoizes: a priced model, an unpriced model and a model priced only at
+// zero must all answer on repeated calls exactly as Corpus.Find does, because
+// the cost ladder now resolves each model name once per collection and caches
+// both the hit and the miss.
+func TestMemoizeFindAnswersEveryLookupTheCorpusWould(t *testing.T) {
+	corpus, err := nativepricing.LoadEmbeddedCorpus()
+	if err != nil {
+		t.Fatalf("LoadEmbeddedCorpus: %v", err)
+	}
+	find := memoizeFind(corpus)
+	models := []string{
+		pricedModel,
+		unpricedModel,
+		"claude-opus-5.5", // exact-only spelling: answered through the flags
+		"",
+	}
+	for _, model := range models {
+		wantPricing, wantOK := corpus.Find(model)
+		// Twice: the first call populates the cache, the second reads it.
+		for attempt := 0; attempt < 2; attempt++ {
+			gotPricing, gotOK := find(model)
+			if gotOK != wantOK {
+				t.Fatalf("find(%q) attempt %d: ok = %v, want %v", model, attempt, gotOK, wantOK)
+			}
+			if gotPricing != wantPricing {
+				t.Fatalf("find(%q) attempt %d: pricing = %+v, want %+v", model, attempt, gotPricing, wantPricing)
+			}
+		}
+	}
+}

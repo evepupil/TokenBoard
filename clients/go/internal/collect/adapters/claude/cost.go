@@ -17,6 +17,7 @@ package claude
 //     table row, while ccusage returns 0.0 before it ever looks (cost.rs:99-101).
 
 import (
+	"sync"
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
@@ -52,9 +53,44 @@ func NewCostFunc(overrides map[string]any, mode CostMode) (CostFunc, error) {
 	if err != nil {
 		return nil, err
 	}
+	find := memoizeFind(corpus)
 	return func(model string, usage Usage, at time.Time) (float64, bool) {
-		return priceUsage(corpus, mode, model, usage, at)
+		return priceUsage(find, mode, model, usage, at)
 	}, nil
+}
+
+// findModel resolves a model name to its rates, reporting false for a name no
+// table prices.
+type findModel func(model string) (nativepricing.CorpusModel, bool)
+
+// memoizeFind caches Corpus.Find per model name. One transcript repeats the
+// same handful of model ids across tens of thousands of lines, and a miss (or
+// a fuzzy hit) scans all 3423 corpus keys with string matching on every call;
+// the corpus is immutable after construction, so one resolution per distinct
+// name is exact.
+//
+// The mutex keeps the cache safe if a caller ever prices concurrently; the
+// collection itself streams on one goroutine.
+func memoizeFind(corpus nativepricing.Corpus) findModel {
+	type resolution struct {
+		pricing nativepricing.CorpusModel
+		ok      bool
+	}
+	var mutex sync.Mutex
+	cache := make(map[string]resolution, 32)
+	return func(model string) (nativepricing.CorpusModel, bool) {
+		mutex.Lock()
+		hit, seen := cache[model]
+		mutex.Unlock()
+		if seen {
+			return hit.pricing, hit.ok
+		}
+		pricing, ok := corpus.Find(model)
+		mutex.Lock()
+		cache[model] = resolution{pricing: pricing, ok: ok}
+		mutex.Unlock()
+		return pricing, ok
+	}
 }
 
 // PopulateCosts fills Cost and MissingPricing on a copy of entries.
@@ -87,15 +123,29 @@ func PopulateCosts(entries []Entry, cost CostFunc) []Entry {
 // because Corpus.Find("") is not a miss: the fuzzy matcher treats the empty key
 // as contained in every candidate and would price a model-less line from an
 // arbitrary row.
-func priceUsage(corpus nativepricing.Corpus, mode CostMode, model string, usage Usage, at time.Time) (float64, bool) {
+//
+// cost.rs resolves the model once and derives both the cost and the missing
+// flag from that resolution; this function does the same through find, instead
+// of looking the name up a second time for missingPricing.
+func priceUsage(find findModel, mode CostMode, model string, usage Usage, at time.Time) (float64, bool) {
 	if mode == nativepricing.ModeDisplay || (mode == nativepricing.ModeAuto && usage.ReportedCost != nil) {
-		return nativepricing.Cost(corpus, model, nativeUsage(usage), at, mode, usage.Fast, false)
+		// Display bills the reported cost (or zero); Auto prefers it. Neither
+		// touches the pricing tables, so there is nothing to resolve.
+		if usage.ReportedCost == nil {
+			return 0, false
+		}
+		return *usage.ReportedCost, false
 	}
 	if model == "" {
 		return 0, false
 	}
-	cost, _ := nativepricing.Cost(corpus, model, nativeUsage(usage), at, mode, usage.Fast, false)
-	return cost, missingPricing(corpus, mode, model, usage)
+	pricing, priced := find(model)
+	if !priced {
+		// missing_pricing_model_for_usage silences a usage without tokens
+		// (cost.rs:58, 66-68) and reports every other miss.
+		return 0, usageTokenTotal(usage) != 0
+	}
+	return nativepricing.CostFromPricing(nativeUsage(usage), pricing, usage.Fast), false
 }
 
 // nativeUsage maps the parser's usage onto the pricing layer's. Entry.Usage
@@ -110,23 +160,6 @@ func nativeUsage(usage Usage) nativepricing.Usage {
 		CacheRead:     usage.CacheRead,
 		ReportedCost:  usage.ReportedCost,
 	}
-}
-
-// missingPricing is missing_pricing_model_for_usage (cost.rs:48-75) reduced to
-// its boolean: Display never looks a price up, Auto trusts a reported cost, a
-// usage without tokens is never reported, an absent model is never reported
-// (cost.rs:69), and otherwise the model is missing only when the pricing tables
-// do not know the name. Its callers have already excluded the first two cases,
-// but the check is repeated so the function means what upstream's means.
-func missingPricing(corpus nativepricing.Corpus, mode CostMode, model string, usage Usage) bool {
-	if mode == nativepricing.ModeDisplay || (mode == nativepricing.ModeAuto && usage.ReportedCost != nil) {
-		return false
-	}
-	if usageTokenTotal(usage) == 0 {
-		return false
-	}
-	_, priced := corpus.Find(model)
-	return !priced
 }
 
 // usageTokenTotal is total_usage_tokens (utils.rs:14-20): the four buckets,
