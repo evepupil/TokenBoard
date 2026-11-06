@@ -388,7 +388,32 @@ var goOnlyZoneNames = map[string]bool{
 // The offset form exists because Intl accepts it and the TS collector
 // therefore collects under it; refusing the run here would make the two
 // clients disagree on a timezone one of them supports.
+//
+// Resolved locations are cached per exact input: time.LoadLocation re-reads the
+// zone database on every call, and the date formatters call this once per
+// usage entry. The zone database does not change under a running process, and
+// a *time.Location is immutable and safe for concurrent use, so the cache is
+// exact.
 func LoadLocation(name string) (*time.Location, error) {
+	if cached, ok := timezoneLocations.Load(name); ok {
+		resolved := cached.(locationResult)
+		return resolved.location, resolved.err
+	}
+	location, err := resolveLocation(name)
+	timezoneLocations.Store(name, locationResult{location: location, err: err})
+	return location, err
+}
+
+// locationResult carries both LoadLocation outcomes through the cache; a name
+// that failed once fails the same way for the life of the process.
+type locationResult struct {
+	location *time.Location
+	err      error
+}
+
+var timezoneLocations sync.Map
+
+func resolveLocation(name string) (*time.Location, error) {
 	if match := offsetZonePattern.FindStringSubmatch(name); match != nil {
 		hours, _ := strconv.Atoi(match[1])
 		minutes, _ := strconv.Atoi(match[2])

@@ -526,3 +526,36 @@ func TestCostUnavailableSourcesMatchUsageCore(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadLocationCachesResolvedZones pins the cache added for the hot date
+// formatter: the same name must return the same *time.Location, and a name that
+// fails must keep failing rather than being answered from a neighbouring hit.
+func TestLoadLocationCachesResolvedZones(t *testing.T) {
+	first, err := LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("LoadLocation(Asia/Shanghai): %v", err)
+	}
+	second, err := LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("second LoadLocation(Asia/Shanghai): %v", err)
+	}
+	if first != second {
+		t.Fatal("LoadLocation must return the cached *time.Location for a repeated name")
+	}
+	// The offset form goes through the cache too, and its label must survive.
+	offsetFirst, err := LoadLocation("+08:00")
+	if err != nil {
+		t.Fatalf("LoadLocation(+08:00): %v", err)
+	}
+	offsetSecond, err := LoadLocation("+08:00")
+	if err != nil || offsetFirst != offsetSecond {
+		t.Fatalf("offset zone not cached: %v, %v", offsetSecond, err)
+	}
+	// A rejected name is cached as an error, never as the previous hit.
+	if _, err := LoadLocation("+24:00"); err == nil {
+		t.Fatal("LoadLocation(+24:00) must fail")
+	}
+	if _, err := LoadLocation("+24:00"); err == nil {
+		t.Fatal("LoadLocation(+24:00) must keep failing on the cached path")
+	}
+}
