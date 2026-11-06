@@ -175,6 +175,12 @@ func compactDateBound(value string) string {
 	return strings.ReplaceAll(value, "-", "")
 }
 
+// transcriptReadBufferBytes sizes the per-file read buffer. Tool results and
+// pasted content push transcript lines well past bufio's 4 KiB default; a
+// buffer that holds a whole line lets ReadBytes hand it back after one fill,
+// where the default would reassemble it from dozens of fragments.
+const transcriptReadBufferBytes = 256 * 1024
+
 // streamChain reads every kept transcript in discovery order, parses each line
 // with parse, prices and indexes every resulting entry, and returns the dedupe
 // survivors in first-seen order.
@@ -208,7 +214,10 @@ func streamFile(ctx context.Context, file SessionFile, parse func(string) []Entr
 	// cannot lose data, so its error is not worth failing the collection over.
 	defer handle.Close()
 
-	reader := bufio.NewReader(handle)
+	// Transcript lines run to hundreds of kilobytes, far past bufio's 4 KiB
+	// default, so every such line would otherwise be assembled from many fills
+	// and reallocations. The larger buffer moves whole lines in one read.
+	reader := bufio.NewReaderSize(handle, transcriptReadBufferBytes)
 	for {
 		// ReadBytes has no line-length cap (bufio.Scanner's 64 KiB token limit
 		// would drop long transcript lines), and it returns the final
