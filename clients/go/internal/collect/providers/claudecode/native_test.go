@@ -9,8 +9,9 @@ package claudecode
 //   - nativeCollect resolves roots by the four-branch rule, prepares pricing
 //     the same way the ccusage path does but never spawns anything, normalizes
 //     the two reports through the same pipeline, and returns every error as-is;
-//   - hook mode is not wired yet and must say so instead of scanning or
-//     falling back.
+//   - hook mode runs the incremental scan reconciled against an in-process
+//     recompute of the reported window, with no subprocess and no network (the
+//     detailed hook cases live in hook_native_test.go).
 //
 // The end-to-end test drives the committed fixture tree (the same one Task 6's
 // goldens were minted from) and compares the native snapshots with the frozen
@@ -444,12 +445,15 @@ func TestNativeHookModeMakesNoNetworkCall(t *testing.T) {
 		"TOKENBOARD_ENDPOINT":  "https://tokenboard.example/api/v1/ingest",
 		"TOKENBOARD_HOOK_MODE": "1",
 	})
-	_, _ = nativeCollect(context.Background(), nativeInput{
+	_, err := nativeCollect(context.Background(), nativeInput{
 		options:     options,
 		env:         env,
 		timezone:    options.Timezone,
 		collectedAt: options.CollectedAt,
 	})
+	if err != nil {
+		t.Fatalf("hook-mode native collection: %v", err)
+	}
 	if fetcher.calls != 0 {
 		t.Fatalf("hook mode made %d catalogue request(s), want none", fetcher.calls)
 	}
@@ -461,7 +465,7 @@ func TestNativeHookModeMakesNoNetworkCall(t *testing.T) {
 		"TOKENBOARD_ENDPOINT":  "https://tokenboard.example/api/v1/ingest",
 		"TOKENBOARD_HOOK_MODE": "",
 	})
-	_, err := nativeCollect(context.Background(), nativeInput{
+	_, err = nativeCollect(context.Background(), nativeInput{
 		options:     options,
 		env:         outsideHook,
 		timezone:    options.Timezone,
@@ -475,99 +479,83 @@ func TestNativeHookModeMakesNoNetworkCall(t *testing.T) {
 	}
 }
 
-// TestNativeHookModeIsNotWiredYet pins the explicit refusal. With hook mode on
-// the native branch (the code useNativeClaude == true dispatches to) and the
-// registry's native provider (which the parity harness calls regardless of the
-// switch) must both report the gap: no scan, no ccusage fallback.
-func TestNativeHookModeIsNotWiredYet(t *testing.T) {
+// TestNativeHookModeRunsTheReconciledPath pins the replacement of the old
+// not-wired refusal: with hook mode on, the native branch (the code
+// useNativeClaude == true dispatches to) and the registry's native provider
+// (which the parity harness calls regardless of the switch) both run the
+// in-process reconciliation - incremental scan, bounded-window recompute,
+// assertion - and neither spawns ccusage.
+func TestNativeHookModeRunsTheReconciledPath(t *testing.T) {
 	configDir := t.TempDir()
-	// 2026-05-22 matches the stub runner's canned reports below: the ccusage
-	// hook control at the end of the test needs the reconciliation date to line
-	// up with what the stub answers.
 	writeNativeSession(t, configDir,
 		`{"type":"assistant","timestamp":"2026-05-22T02:00:00.000Z",`+
 			`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":5,"output_tokens":1}}}`)
-	env := testEnv(forceRunnerEnv(map[string]string{
+	env := testEnv(map[string]string{
 		"CLAUDE_CONFIG_DIR":    configDir,
 		"TOKENBOARD_HOOK_MODE": "1",
-	}))
-	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-20250514", 1, 2)}
-
-	// The native branch, driven directly: the switch is a constant, so this is
-	// the call useNativeClaude == true makes.
-	options := Options{
-		Timezone:    "UTC",
-		CollectedAt: nativeCollectedAt,
-		StateDir:    t.TempDir(),
-		Env:         env,
-		Runner:      runner.run,
-	}
-	_, err := nativeCollect(context.Background(), nativeInput{
-		options:     options,
-		env:         env,
-		timezone:    options.Timezone,
-		collectedAt: options.CollectedAt,
 	})
-	assertNotWiredError(t, err)
 
-	// The registry seam: nativeProvider.Collect never consults the switch, so
-	// this is what a parity or bench run executes today.
-	provider, ok := collect.LookupNative(contract.SourceClaudeCode)
-	if !ok || provider == nil {
-		t.Fatalf("collect.LookupNative(%q) has no provider", contract.SourceClaudeCode)
-	}
-	_, err = provider.Collect(context.Background(), collect.Options{
-		Timezone: "UTC",
-		StateDir: t.TempDir(),
-		Env:      env,
-	})
-	assertNotWiredError(t, err)
-
-	if len(runner.calls) != 0 {
-		t.Fatalf("ccusage calls = %v, want none", runner.calls)
-	}
-
-	// Control: the same tree outside hook mode produces a row, so the refusal
-	// above is the hook rule rather than an unreadable fixture.
-	outsideHook := testEnv(forceRunnerEnv(map[string]string{"CLAUDE_CONFIG_DIR": configDir}))
-	snapshots, err := nativeCollect(context.Background(), nativeInput{
-		options:     Options{Timezone: "UTC", CollectedAt: nativeCollectedAt, StateDir: t.TempDir()},
-		env:         outsideHook,
-		timezone:    "UTC",
-		collectedAt: nativeCollectedAt,
-	})
-	if err != nil {
-		t.Fatalf("non-hook native collection: %v", err)
-	}
-	if len(snapshots) != 1 {
-		t.Fatalf("snapshots = %+v, want one row outside hook mode", snapshots)
+	// neverRuns builds options whose ccusage seams fail the test if consulted.
+	neverRuns := func(t *testing.T) Options {
+		t.Helper()
+		return Options{
+			Timezone:       "UTC",
+			CollectedAt:    nativeCollectedAt,
+			StateDir:       t.TempDir(),
+			PricingFetcher: failingFetcher(t),
+			Runner: func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+				t.Error("native hook mode must not run ccusage")
+				return nil, errors.New("ccusage must not run")
+			},
+			ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+				t.Error("native hook mode must not resolve a ccusage binary")
+				return ccusage.Binary{}, errors.New("ccusage must not run")
+			},
+		}
 	}
 
-	// And with the switch off, Collect still routes the same hook-mode env to
-	// ccusage: the refusal is the native branch's, not a global change.
-	if _, err := Collect(context.Background(), Options{
-		Timezone:    "UTC",
-		CollectedAt: nativeCollectedAt,
-		StateDir:    t.TempDir(),
-		Env:         env,
-		Runner:      runner.run,
-	}); err != nil {
-		t.Fatalf("ccusage hook path: %v", err)
+	runs := map[string]func(t *testing.T) ([]contract.Snapshot, error){
+		"native branch": func(t *testing.T) ([]contract.Snapshot, error) {
+			options := neverRuns(t)
+			return nativeCollect(context.Background(), nativeInput{
+				options:     options,
+				env:         env,
+				timezone:    options.Timezone,
+				collectedAt: options.CollectedAt,
+			})
+		},
+		"registry provider": func(t *testing.T) ([]contract.Snapshot, error) {
+			provider, ok := collect.LookupNative(contract.SourceClaudeCode)
+			if !ok || provider == nil {
+				t.Fatalf("collect.LookupNative(%q) has no provider", contract.SourceClaudeCode)
+			}
+			// nativeProvider does not accept a runner: it has no ccusage seam
+			// to reach, which is exactly the property under test.
+			return provider.Collect(context.Background(), collect.Options{
+				Timezone: "UTC",
+				StateDir: t.TempDir(),
+				Env:      env,
+			})
+		},
 	}
-	if len(runner.calls) == 0 {
-		t.Fatal("the ccusage hook path must still run ccusage")
-	}
-}
-
-// assertNotWiredError requires the explicit not-wired diagnostic, so a future
-// hook implementation has to update this test on purpose.
-func assertNotWiredError(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("native hook mode must fail explicitly")
-	}
-	if !strings.Contains(err.Error(), "native hook collection is not wired yet") {
-		t.Fatalf("err = %v, want the not-wired message", err)
+	for name, run := range runs {
+		t.Run(name, func(t *testing.T) {
+			snapshots, err := run(t)
+			if err != nil {
+				t.Fatalf("hook-mode native collection: %v", err)
+			}
+			if len(snapshots) != 1 {
+				t.Fatalf("snapshots = %+v, want the recompute's row", snapshots)
+			}
+			snapshot := snapshots[0]
+			// SessionCount is built by the adapter's session report, so a
+			// non-zero value proves the in-process recompute ran rather than a
+			// cached row being echoed back.
+			if snapshot.UsageDate != "2026-05-22" || snapshot.Model != "claude-sonnet-4-20250514" ||
+				snapshot.InputTokens != 5 || snapshot.TotalTokens != 6 || snapshot.SessionCount != 1 {
+				t.Fatalf("snapshot = %+v, want the 2026-05-22 recompute row", snapshot)
+			}
+		})
 	}
 }
 

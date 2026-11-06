@@ -13,7 +13,6 @@ package claudecode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +22,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/claude"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
@@ -113,13 +113,6 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	}
 
 	hookMode := env("TOKENBOARD_HOOK_MODE") == "1"
-	// Hook mode is not wired yet (Task 8 owns it). Refusing here is the whole
-	// contract: a full scan from a notifier would read the entire history on
-	// every prompt, and a ccusage fallback would hide the gap. The refusal comes
-	// after the catalogue load because every network decision it needs (the
-	// cache freshness, the offline rule) is taken inside pricing.Prepare, whose
-	// HookMode is derived from this same value below; the cost pass still never
-	// sees hook mode, which the stub-fetcher test pins.
 
 	stateDir := strings.TrimSpace(input.options.StateDir)
 	if stateDir == "" {
@@ -158,9 +151,6 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 		}
 		return nil, err
 	}
-	if hookMode {
-		return nil, errors.New("claudecode: native hook collection is not wired yet")
-	}
 
 	roots, err := resolveNativeRoots(env, input.options)
 	if err != nil {
@@ -176,6 +166,20 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	// fail outright.
 	if _, err := contract.LoadLocation(timezone); err != nil {
 		return nil, fmt.Errorf("claudecode: native timezone %q: %w", timezone, err)
+	}
+
+	if hookMode {
+		return nativeCollectHook(ctx, nativeHookInput{
+			env:         env,
+			stderr:      stderr,
+			timezone:    timezone,
+			collectedAt: collectedAt,
+			stateDir:    stateDir,
+			homeDir:     input.options.HomeDir,
+			roots:       roots,
+			overrides:   prepared.MergedPricingOverrides,
+			covered:     prepared.CoveredModelIDs,
+		})
 	}
 
 	// The window first goes through the provider-level environment fallbacks, so
@@ -248,4 +252,150 @@ func resolveNativeRoots(env func(string) string, options Options) (claude.Roots,
 		homeArg = ""
 	}
 	return claude.ResolveRoots(env, homeArg)
+}
+
+// nativeHookInput is the resolved state the hook branch needs. Everything in it
+// is already validated by nativeCollect: the timezone loads, the roots resolved
+// and the pricing is prepared in hook (offline) mode.
+type nativeHookInput struct {
+	env         func(string) string
+	stderr      func(string)
+	timezone    string
+	collectedAt string
+	stateDir    string
+	// homeDir is Options.HomeDir: the fallback path below must resolve the
+	// Claude home exactly as the ccusage hook path did.
+	homeDir   string
+	roots     claude.Roots
+	overrides map[string]any
+	covered   map[string]bool
+}
+
+// nativeCollectHook is the hook-mode half of the native path.
+//
+// It keeps the exact incremental machinery the ccusage hook path uses
+// (sessioncursor.CollectHookIncremental: scan, cursor, cache,
+// ChangedDates/ChangedKeys/RangeArgs) and reconciles its result against a full
+// in-process recompute of the reported window. The two halves see the same
+// tree: the scan is handed every resolved root's projects/ directory and the
+// recompute is handed the same roots, so a key the parser saw and the report
+// does not return means the two layers disagree - a hard error, never a
+// silently unuploaded row.
+//
+// No subprocess and no network: ccusage is not involved at all, and pricing was
+// prepared with HookMode: true (cache/static only) before this function ran.
+func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.Snapshot, error) {
+	// SessionDirs, not SessionsDir, carries the roots: a comma-separated
+	// CLAUDE_CONFIG_DIR or an XDG-configured install has more than one, and a
+	// single joined path would point the scan at a directory that does not
+	// exist while the recompute reads them all. An empty dirs list leaves
+	// SessionDirs empty, and sessioncursor then falls back to SessionsDir - the
+	// same single-directory behaviour the ccusage hook path always had.
+	sessionDirs := make([]string, 0, len(input.roots.Dirs))
+	for _, dir := range input.roots.Dirs {
+		sessionDirs = append(sessionDirs, filepath.Join(dir, "projects"))
+	}
+	incremental, err := sessioncursor.CollectHookIncremental(sessioncursor.HookInput{
+		Source:      contract.SourceClaudeCode,
+		SessionsDir: filepath.Join(readClaudeHome(input.env, input.homeDir), "projects"),
+		SessionDirs: sessionDirs,
+		StateDir:    input.stateDir,
+		CursorName:  CursorName,
+		Stderr:      input.stderr,
+		Timezone:    input.timezone,
+		CollectedAt: input.collectedAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !incremental.Changed {
+		return []contract.Snapshot{}, nil
+	}
+
+	var snapshots []contract.Snapshot
+	if len(incremental.RangeArgs) > 0 {
+		since, until, err := parseHookRangeArgs(incremental.RangeArgs)
+		if err != nil {
+			return nil, err
+		}
+		dailyJSON, sessionsJSON, err := claude.Collect(ctx, claude.Options{
+			Timezone:  input.timezone,
+			Since:     since,
+			Until:     until,
+			Roots:     input.roots,
+			Overrides: input.overrides,
+			Mode:      nativepricing.ModeAuto,
+			Stderr:    input.stderr,
+		})
+		if err != nil {
+			return nil, err
+		}
+		daily, err := ccusage.DecodeJSON(dailyJSON)
+		if err != nil {
+			return nil, err
+		}
+		sessions, err := ccusage.DecodeJSON(sessionsJSON)
+		if err != nil {
+			return nil, err
+		}
+		snapshots, err = ccusage.NormalizeCcusageDailyJSON(daily, ccusage.NormalizeOptions{
+			Source:      contract.SourceClaudeCode,
+			Timezone:    input.timezone,
+			CollectedAt: input.collectedAt,
+			Sessions:    sessions,
+			HasSessions: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		// Not relaxed, not wrapped: the strings the parser proved exist must all
+		// be in the recompute's answer.
+		if err := sessioncursor.AssertHookReconciliationSnapshots(
+			"Claude", incremental.ChangedDates, incremental.ChangedKeys, snapshots); err != nil {
+			return nil, err
+		}
+	}
+	cached := sessioncursor.SnapshotsOf(incremental.CachedSnapshots, input.collectedAt)
+	merged := sessioncursor.MergeSnapshots(append(snapshots, cached...))
+	reportUnpriced(merged, input.covered, input.stderr)
+	return merged, nil
+}
+
+// parseHookRangeArgs turns the incremental window into claude.Options bounds.
+//
+// The shape is fixed by sessioncursor.buildDateRangeArgs:
+// ["--since", YYYYMMDD, "--until", YYYYMMDD]. Anything else is a contract
+// break, and treating it as "no window" would silently turn a hook run into a
+// full-history scan - so every deviation, including the otherwise-acceptable
+// dashed spelling and the open "all" bound, is an error.
+func parseHookRangeArgs(args []string) (string, string, error) {
+	if len(args) != 4 || args[0] != "--since" || args[2] != "--until" {
+		return "", "", fmt.Errorf(
+			"claudecode: unexpected hook range args %v; want [--since YYYYMMDD --until YYYYMMDD]", args)
+	}
+	since, until := args[1], args[3]
+	if !isCompactDate(since) || !isCompactDate(until) {
+		return "", "", fmt.Errorf(
+			"claudecode: hook range args %v: dates must be compact YYYYMMDD", args)
+	}
+	normalizedSince, normalizedUntil, err := sessionusage.AssertValidDateFilterRange(
+		since, until, "Claude hook --since", "Claude hook --until")
+	if err != nil {
+		return "", "", fmt.Errorf("claudecode: hook range args %v: %w", args, err)
+	}
+	return normalizedSince, normalizedUntil, nil
+}
+
+// isCompactDate is the YYYYMMDD test the range sender guarantees. The calendar
+// validity is AssertValidDateFilterRange's job.
+func isCompactDate(value string) bool {
+	if len(value) != 8 {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
