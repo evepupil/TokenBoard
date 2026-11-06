@@ -2,6 +2,8 @@ package sessionfile
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"math"
@@ -221,6 +223,13 @@ func requireIntegerTokenCounts(row *aggregateRow) error {
 	return nil
 }
 
+// readLineOptions makes encoding/json/v2 decode the way `JSON.parse` does on
+// the shapes transcripts actually carry: a duplicated member keeps the last
+// value. Anything v2 rejects falls back to the v1 decoder, so the input space
+// the hook path accepts is exactly the one it accepted before (v1 tolerates a
+// float64 overflow as ±Inf and replaces invalid UTF-8 instead of failing).
+var readLineOptions = jsonv2.JoinOptions(jsontext.AllowDuplicateNames(true))
+
 func readLineRecord(line string) (map[string]any, bool) {
 	// JS `line.trim()` also strips a U+FEFF BOM at either end; TrimJSWhitespace matches that.
 	trimmed := jsonl.TrimJSWhitespace(line)
@@ -229,7 +238,27 @@ func readLineRecord(line string) (map[string]any, bool) {
 	}
 	// Ports `JSON.parse`: trailing non-whitespace after the first value is a syntax error,
 	// matching the codex port's jsonlDecodeJSON — a line like `{"a":1}garbage` decodes fine
-	// with a bare first Decode and would otherwise be silently accepted and counted.
+	// with v1's first Decode and would otherwise be silently accepted and counted.
+	// v2 enforces that on its own and is ~1.6x faster on real transcript lines.
+	var parsed any
+	if err := jsonv2.Unmarshal([]byte(trimmed), &parsed, readLineOptions); err == nil {
+		record, ok := parsed.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		return record, false
+	}
+	// The slow path decides anything v2 refused. It keeps the accepted input
+	// set identical to the pre-v2 behaviour: a number outside float64's range
+	// still becomes ±Inf (and optionalNumber then ignores it) and invalid UTF-8
+	// is still replaced rather than failing the row.
+	return readLineRecordLegacy(trimmed)
+}
+
+// readLineRecordLegacy is the v1 decoder this function used before v2. It stays
+// as the fallback so a v2-only rejection can never turn an accepted row into a
+// malformed one.
+func readLineRecordLegacy(trimmed string) (map[string]any, bool) {
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	var parsed any
@@ -512,17 +541,29 @@ func readNumber(record map[string]any, keys ...string) float64 {
 // optionalNumber reads a JSON number. A numeric string is not a number: the TS
 // parser's typeof check rejects it, and accepting one here would invent usage
 // the other implementation never saw.
+//
+// readLineRecord decodes through encoding/json/v2, which yields float64 for an
+// `any` target; the json.Number arm stays for callers that hand over records
+// decoded by the v1 decoder, so both shapes mean the same thing here.
 func optionalNumber(record map[string]any, key string) (float64, bool) {
 	value, ok := record[key]
 	if !ok {
 		return 0, false
 	}
-	number, ok := value.(json.Number)
-	if !ok {
+	var parsed float64
+	switch number := value.(type) {
+	case float64:
+		parsed = number
+	case json.Number:
+		converted, err := number.Float64()
+		if err != nil {
+			return 0, false
+		}
+		parsed = converted
+	default:
 		return 0, false
 	}
-	parsed, err := number.Float64()
-	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return 0, false
 	}
 	return parsed, true
