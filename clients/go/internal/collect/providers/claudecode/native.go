@@ -284,6 +284,30 @@ type nativeHookInput struct {
 //
 // No subprocess and no network: ccusage is not involved at all, and pricing was
 // prepared with HookMode: true (cache/static only) before this function ran.
+//
+// Known limitations inherited from this design, all of them deliberate:
+//
+//   - Multi-root cursors are keyed by the path relative to each root
+//     (sessioncursor/scan.go:209-216 dedupes on that key), so two roots holding
+//     the same relative path - a copy or a backup of a config directory - are
+//     tracked as one file and the second copy's later changes are never
+//     scanned. This is the shared sessioncursor contract (Codex behaves the
+//     same way), not something this provider can fix; a first scan still reads
+//     the whole tree through the recompute, so nothing is under-counted on the
+//     first run and the server's five-key upsert keeps the repeat from
+//     double-counting.
+//   - The scan is wider than the ccusage hook ever was: ResolveRoots expands a
+//     comma-separated CLAUDE_CONFIG_DIR, strips "~", reads a CLAUDE_HOME list
+//     and walks both $XDG_CONFIG_HOME/claude and $HOME/.claude in the default
+//     branch, where ccusage silently collected nothing. The direction is
+//     "reports real usage that used to be dropped", which matches the non-hook
+//     native path - but `shadow-dual-run --hook` will report the difference as
+//     a diff on a multi-root or XDG-configured machine.
+//   - A file whose mtime predates the window while its content is inside it
+//     (restored by `cp -p` or `rsync -t`) makes claude.Collect prune the whole
+//     session group, so the reconciliation assertion fails on every hook run
+//     until the mtime is refreshed. The ccusage path has exactly the same
+//     behaviour; this port did not change it.
 func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.Snapshot, error) {
 	// SessionDirs, not SessionsDir, carries the roots: a comma-separated
 	// CLAUDE_CONFIG_DIR or an XDG-configured install has more than one, and a
@@ -313,11 +337,15 @@ func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.S
 	}
 
 	var snapshots []contract.Snapshot
-	if len(incremental.RangeArgs) > 0 {
-		since, until, err := parseHookRangeArgs(incremental.RangeArgs)
-		if err != nil {
-			return nil, err
-		}
+	// The decision lives in hookRecomputeWindow so the "dates changed but the
+	// args are malformed" shape can be tested directly: sessioncursor produces
+	// both fields from the same date set today, so the test cannot build that
+	// shape through CollectHookIncremental.
+	since, until, recompute, err := hookRecomputeWindow(incremental)
+	if err != nil {
+		return nil, err
+	}
+	if recompute {
 		dailyJSON, sessionsJSON, err := claude.Collect(ctx, claude.Options{
 			Timezone:  input.timezone,
 			Since:     since,
@@ -359,6 +387,27 @@ func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.S
 	merged := sessioncursor.MergeSnapshots(append(snapshots, cached...))
 	reportUnpriced(merged, input.covered, input.stderr)
 	return merged, nil
+}
+
+// hookRecomputeWindow decides whether the incremental result requires a window
+// recompute, and with which bounds.
+//
+// The guard is ChangedDates, not RangeArgs. Today sessioncursor produces both
+// from the same date set (buildDateRangeArgs is only a rendering of it), so the
+// two conditions are equivalent - but RangeArgs is derived data. If a future
+// sessioncursor ever built the args differently, an empty RangeArgs beside a
+// non-empty ChangedDates would skip the recompute AND the reconciliation
+// assertion, leaving parsed usage silently unuploaded. Keying off the fact
+// instead, and parsing the rendering, turns that shape into an error.
+func hookRecomputeWindow(incremental sessioncursor.HookIncrementalResult) (since, until string, recompute bool, err error) {
+	if len(incremental.ChangedDates) == 0 {
+		return "", "", false, nil
+	}
+	since, until, err = parseHookRangeArgs(incremental.RangeArgs)
+	if err != nil {
+		return "", "", false, err
+	}
+	return since, until, true, nil
 }
 
 // parseHookRangeArgs turns the incremental window into claude.Options bounds.

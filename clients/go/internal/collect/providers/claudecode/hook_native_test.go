@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -371,18 +372,23 @@ func TestHookNativeWindowReachesTheRecompute(t *testing.T) {
 }
 
 // TestHookNativeScansEveryResolvedRoot pins the SessionDirs hand-off: the
-// incremental scan must cover exactly the roots the recompute reads. A
-// comma-separated CLAUDE_CONFIG_DIR used to leave the scan pointed at a single
-// nonexistent path while the recompute read both roots.
+// incremental scan must cover exactly the roots the recompute reads.
+//
+// The second root's row deliberately sits on a DIFFERENT date from the first.
+// The recompute always reads every root, so an assertion that only counted
+// snapshots would still pass if the scan looked at the first root alone - the
+// double-check is the cursor: the second root's file must be tracked, which is
+// the only evidence that the scan visited it. Missing that entry is a permanent
+// silent gap (the file's later changes would never enter ChangedDates, so they
+// would never be uploaded and never be reported as an error).
 func TestHookNativeScansEveryResolvedRoot(t *testing.T) {
 	root := t.TempDir()
 	rootA := filepath.Join(root, "root-a")
 	rootB := filepath.Join(root, "root-b")
 	writeHookSession(t, rootA, "project-a", "a.jsonl",
 		nativeRowAt(11, "2026-05-22T02:00:00.000Z"))
-	writeHookSession(t, rootB, "project-b", "b.jsonl", fmt.Sprintf(
-		`{"type":"assistant","timestamp":"2026-05-22T02:00:00.000Z",`+
-			`"message":{"model":"claude-haiku-4-5","usage":{"input_tokens":22,"output_tokens":1}}}`))
+	writeHookSession(t, rootB, "project-b", "b.jsonl",
+		nativeRowAt(22, "2026-05-25T02:00:00.000Z"))
 	stateDir := filepath.Join(root, "state")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -394,15 +400,33 @@ func TestHookNativeScansEveryResolvedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshots) != 2 {
-		t.Fatalf("snapshots = %+v, want one row from each root", snapshots)
+
+	// The cursor is the load-bearing half of this test, so it is checked first:
+	// it proves the scan itself walked the second root. Snapshot equality alone
+	// would not, because the recompute always reads every root and can mask a
+	// single-root scan.
+	cursor, err := sessioncursor.Read(filepath.Join(stateDir, CursorName), "claude-code")
+	if err != nil {
+		t.Fatal(err)
 	}
-	byModel := map[string]int64{}
+	for _, key := range []string{"project-a/a.jsonl", "project-b/b.jsonl"} {
+		if _, ok := cursor.Files[key]; !ok {
+			keys := make([]string, 0, len(cursor.Files))
+			for cursorKey := range cursor.Files {
+				keys = append(keys, cursorKey)
+			}
+			sort.Strings(keys)
+			t.Fatalf("cursor has no entry for %s: the incremental scan did not cover every resolved root; tracked = %v",
+				key, keys)
+		}
+	}
+
+	byDate := map[string]int64{}
 	for _, snapshot := range snapshots {
-		byModel[snapshot.Model] = snapshot.InputTokens
+		byDate[snapshot.UsageDate] = snapshot.InputTokens
 	}
-	if byModel["claude-sonnet-4-20250514"] != 11 || byModel["claude-haiku-4-5"] != 22 {
-		t.Fatalf("snapshots = %+v, want both roots' rows", snapshots)
+	if len(byDate) != 2 || byDate["2026-05-22"] != 11 || byDate["2026-05-25"] != 22 {
+		t.Fatalf("snapshots = %+v, want the rows from both roots (2026-05-22 and 2026-05-25)", snapshots)
 	}
 }
 
@@ -437,4 +461,108 @@ func TestHookNativeRejectsUnloadableTimezone(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "native timezone") {
 		t.Fatalf("err = %v, want the unloadable-timezone error", err)
 	}
+}
+
+// TestHookNativeRecomputeWindowGuard pins the guard that decides whether the
+// window is recomputed.
+//
+// sessioncursor derives ChangedDates and RangeArgs from one date set, so the
+// mismatched shapes below cannot be produced through CollectHookIncremental and
+// hookRecomputeWindow is exercised directly. The shapes are worth pinning
+// because they are exactly the future drift the guard defends against: dates
+// that changed while the args came out empty (or malformed) must be an error,
+// never a silent skip of the recompute and its assertion.
+func TestHookNativeRecomputeWindowGuard(t *testing.T) {
+	dates := []string{"2026-05-22"}
+
+	t.Run("no changed dates skips the recompute", func(t *testing.T) {
+		since, until, recompute, err := hookRecomputeWindow(sessioncursor.HookIncrementalResult{})
+		if err != nil {
+			t.Fatalf("err = %v, want none for the cached-only shape", err)
+		}
+		if recompute || since != "" || until != "" {
+			t.Fatalf("recompute = %v since = %q until = %q, want the cached-only shape to skip the recompute",
+				recompute, since, until)
+		}
+	})
+
+	t.Run("changed dates with a valid window recomputes", func(t *testing.T) {
+		since, until, recompute, err := hookRecomputeWindow(sessioncursor.HookIncrementalResult{
+			ChangedDates: dates,
+			RangeArgs:    []string{"--since", "20260522", "--until", "20260525"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !recompute || since != "20260522" || until != "20260525" {
+			t.Fatalf("recompute = %v since = %q until = %q", recompute, since, until)
+		}
+	})
+
+	for name, args := range map[string][]string{
+		"empty args":  {},
+		"nil args":    nil,
+		"short args":  {"--since", "20260522"},
+		"bogus flags": {"--from", "20260522", "--to", "20260525"},
+	} {
+		t.Run("changed dates with "+name+" fails closed", func(t *testing.T) {
+			_, _, _, err := hookRecomputeWindow(sessioncursor.HookIncrementalResult{
+				ChangedDates: dates,
+				RangeArgs:    args,
+			})
+			if err == nil {
+				t.Fatalf("RangeArgs %v beside %d changed date(s) must fail: skipping the recompute would leave parsed usage unuploaded",
+					args, len(dates))
+			}
+		})
+	}
+}
+
+// TestHookNativeScansTheXdgRoot pins the default branch of the root switch:
+// with no CLAUDE_CONFIG_DIR and no CLAUDE_HOME, the scan must still find the
+// tree ResolveRoots resolves through $XDG_CONFIG_HOME, which readClaudeHome
+// alone would miss.
+func TestHookNativeScansTheXdgRoot(t *testing.T) {
+	root := t.TempDir()
+	xdg := filepath.Join(root, "xdg")
+	writeHookSession(t, filepath.Join(xdg, "claude"), "project-a", "sess.jsonl",
+		hookRowAt(37, "2026-05-22T02:00:00.000Z"))
+	// An empty projects/ under $HOME/.claude is a valid second root that holds
+	// no transcripts; ResolveRoots keeps both.
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err := runNativeHook(t, Options{StateDir: stateDir}, hookNativeEnv(map[string]string{
+		"HOME":            home,
+		"XDG_CONFIG_HOME": xdg,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 1 || snapshots[0].UsageDate != "2026-05-22" || snapshots[0].InputTokens != 37 {
+		t.Fatalf("snapshots = %+v, want the XDG root's row", snapshots)
+	}
+
+	// The cursor entry proves the scan walked the XDG tree rather than the
+	// recompute finding it on its own.
+	cursor, err := sessioncursor.Read(filepath.Join(stateDir, CursorName), "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cursor.Files["project-a/sess.jsonl"]; !ok {
+		t.Fatalf("cursor has no entry for the XDG root's file: %+v", cursor.Files)
+	}
+}
+
+// hookRowAt builds an assistant row with an explicit model and timestamp.
+func hookRowAt(inputTokens int, timestamp string) string {
+	return fmt.Sprintf(`{"type":"assistant","timestamp":%q,`+
+		`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":%d,"output_tokens":1}}}`,
+		timestamp, inputTokens)
 }
