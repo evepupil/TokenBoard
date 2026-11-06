@@ -182,8 +182,9 @@ func TestCompareReportsNativeProviderMissing(t *testing.T) {
 		Source:       contract.SourceClaudeCode,
 		Timezone:     "UTC",
 		LookupNative: func(contract.Source) (collect.Provider, bool) { return nil, false },
+		Prepare:      offlinePrepare,
 		Now:          func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return []contract.Snapshot{snapshotRow("2026-11-01", "claude-sonnet", 100, 10, 1)}, nil
 		},
 	})
@@ -253,8 +254,9 @@ func TestRunParityConsumesTheNativeSeam(t *testing.T) {
 		Source:       contract.SourceClaudeCode,
 		Timezone:     "UTC",
 		LookupNative: func(contract.Source) (collect.Provider, bool) { return native, true },
+		Prepare:      offlinePrepare,
 		Now:          func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return ccusageRows, nil
 		},
 	})
@@ -293,7 +295,8 @@ func TestRunWithCleanMatchExitsZero(t *testing.T) {
 			LookupNative: func(contract.Source) (collect.Provider, bool) {
 				return &paritySeamStub{snapshots: rows}, true
 			},
-			CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+			Prepare: offlinePrepare,
+			CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 				return rows, nil
 			},
 			Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
@@ -320,7 +323,8 @@ func TestRunWithDiffExitsOne(t *testing.T) {
 		LookupNative: func(contract.Source) (collect.Provider, bool) {
 			return &paritySeamStub{snapshots: native}, true
 		},
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		Prepare: offlinePrepare,
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return ccusageRows, nil
 		},
 		Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
@@ -340,7 +344,8 @@ func TestRunWithNotImplementedExitsZero(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runWith([]string{"-source", "claude-code"}, &stdout, &stderr, parityInput{
 		LookupNative: func(contract.Source) (collect.Provider, bool) { return nil, false },
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		Prepare:      offlinePrepare,
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return []contract.Snapshot{snapshotRow("2026-11-01", "claude-sonnet", 100, 10, 1)}, nil
 		},
 		Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
@@ -366,7 +371,8 @@ func TestRunWithEmptyComparisonExitsZero(t *testing.T) {
 		LookupNative: func(contract.Source) (collect.Provider, bool) {
 			return &paritySeamStub{}, true
 		},
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		Prepare: offlinePrepare,
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return nil, nil
 		},
 		Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
@@ -408,7 +414,8 @@ func TestRunJSONOutputIsMachineReadable(t *testing.T) {
 		LookupNative: func(contract.Source) (collect.Provider, bool) {
 			return &paritySeamStub{snapshots: rows}, true
 		},
-		CollectCcusage: func(context.Context, contract.Source, string, string, string, string) ([]contract.Snapshot, error) {
+		Prepare: offlinePrepare,
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
 			return rows, nil
 		},
 		Now: func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },

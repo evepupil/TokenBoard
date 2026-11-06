@@ -4,9 +4,20 @@
 //
 // The native side comes from collect.LookupNative, never from collect.Lookup:
 // every Lookup provider for a ccusage-backed source execs ccusage itself, so
-// using it here would compare ccusage with itself and always pass. In S1 the
-// native registry is empty, so every source reports notImplemented on the
-// native side while the ccusage side still runs.
+// using it here would compare ccusage with itself and always pass. Sources with
+// no native provider (everything but claude-code so far) report notImplemented
+// on the native side while the ccusage side still runs.
+//
+// # Pricing
+//
+// Both sides price from the same merged ccusage config. Production points
+// ccusage at the file pricing.Prepare writes (through
+// TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG) and hands the native adapter that file's
+// defaults.pricingOverrides block, so a comparison that let ccusage fall back to
+// its built-in catalogue would report every model TokenBoard overrides as a
+// difference. One temporary state directory per comparison carries both: parity
+// prepares the config in it, passes the resulting path to ccusage as --config,
+// and gives the native provider the same directory to prepare from.
 //
 // This command is deliberately absent from .goreleaser.yaml: it is dev-only and
 // is not part of the released client.
@@ -19,6 +30,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,6 +47,7 @@ import (
 	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/providers"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
 // errUsage marks an error caused by the invocation itself (an invalid source
@@ -107,6 +120,15 @@ type parityReport struct {
 	OnlyInCcusage    []parityKey       `json:"onlyInCcusage,omitempty"`
 	ValueDiffs       []parityValueDiff `json:"valueDiffs,omitempty"`
 	LiveWrite        []parityKey       `json:"liveWrite,omitempty"`
+	// PricingConfig is the merged ccusage config both sides priced from, so a
+	// reader of the evidence can confirm the comparison ran under one
+	// configuration rather than two.
+	PricingConfig string `json:"pricingConfig,omitempty"`
+	// PricingSource names where the TokenBoard catalogue came from: network,
+	// cache or the bundled static file. It says nothing about ccusage itself —
+	// the claude-code path passes no --offline, so ccusage may still refresh its
+	// own price sources over the network, exactly as production does.
+	PricingSource string `json:"pricingSource,omitempty"`
 }
 
 // parityInput is one comparison's inputs. The function seams exist so tests can
@@ -120,11 +142,32 @@ type parityInput struct {
 	// LookupNative resolves the native side; nil means collect.LookupNative.
 	LookupNative func(contract.Source) (collect.Provider, bool)
 	// CollectCcusage gathers the ccusage side; nil means exec the binary.
-	CollectCcusage func(ctx context.Context, source contract.Source, bin, since, until, timezone string) ([]contract.Snapshot, error)
+	CollectCcusage func(ctx context.Context, request ccusageRequest) ([]contract.Snapshot, error)
+	// Prepare resolves the merged pricing config; nil means pricing.Prepare.
+	Prepare func(pricing.PrepareInput) (pricing.PreparedConfig, error)
+	// PricingFetcher replaces the catalogue HTTP client inside Prepare; nil
+	// means the real one. Tests inject it to prove the run makes the same
+	// network call production makes without reaching the network.
+	PricingFetcher func(request *http.Request) (*http.Response, error)
+	// Env resolves configuration; nil means parityEnv.
+	Env func(string) string
 	// Now is the comparison clock; nil means time.Now.
 	Now func() time.Time
 	// Stderr receives native-side diagnostics; nil discards them.
 	Stderr io.Writer
+}
+
+// ccusageRequest is one ccusage-side collection: the window, the binary, and
+// the pricing config the native side is reading.
+type ccusageRequest struct {
+	Source   contract.Source
+	Bin      string
+	Since    string
+	Until    string
+	Timezone string
+	// ConfigPath is the merged ccusage config, passed as --config. Empty means
+	// no flag, matching ccusage.ConfigArgs when neither config variable is set.
+	ConfigPath string
 }
 
 func main() {
@@ -241,9 +284,61 @@ func runParity(ctx context.Context, input parityInput) (parityReport, error) {
 		}
 		collectCcusage = execCcusage
 	}
+
+	env := input.Env
+	if env == nil {
+		env = parityEnv
+	}
+
+	// One state directory for the whole comparison, so both sides price from the
+	// same merged ccusage config. The ccusage side gets the prepared path as
+	// --config; the native provider prepares with this same directory
+	// (collect.Options.StateDir) and therefore reads the same
+	// defaults.pricingOverrides block. Both also share the catalogue cache this
+	// preparation may write, so the native side does not refetch what parity just
+	// fetched.
+	stateDir, err := os.MkdirTemp("", "tokenboard-parity-")
+	if err != nil {
+		return report, fmt.Errorf("parity state directory: %w", err)
+	}
+	defer os.RemoveAll(stateDir)
+
+	prepare := input.Prepare
+	if prepare == nil {
+		prepare = pricing.Prepare
+	}
+	endpoint := strings.TrimSpace(env("TOKENBOARD_ENDPOINT"))
+	prepared, err := prepare(pricing.PrepareInput{
+		Endpoint: endpoint,
+		StateDir: stateDir,
+		// Parity compares the full-preview path on both sides, the same way
+		// parityEnv strips TOKENBOARD_HOOK_MODE from the native side.
+		HookMode:       false,
+		ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
+		Fetcher:        input.PricingFetcher,
+		// Same rule as the providers: the catalogue narration only belongs on
+		// the console when a server is configured.
+		Stderr: pricingDiagnostics(input.Stderr, endpoint),
+	})
+	if err != nil {
+		// Neither an empty comparison nor a run without --config: two sides
+		// pricing from different configurations cannot be evidence, so the run
+		// fails instead of measuring something else.
+		return report, fmt.Errorf("pricing config: %w", err)
+	}
+	report.PricingConfig = prepared.ConfigPath
+	report.PricingSource = prepared.Catalogue.Source
+
 	// The ccusage side runs even when the native side is missing: the operator
 	// wants to see what production would collect from this machine.
-	ccusageRows, err := collectCcusage(ctx, input.Source, input.CcusageBin, normalizedSince, normalizedUntil, timezone)
+	ccusageRows, err := collectCcusage(ctx, ccusageRequest{
+		Source:     input.Source,
+		Bin:        input.CcusageBin,
+		Since:      normalizedSince,
+		Until:      normalizedUntil,
+		Timezone:   timezone,
+		ConfigPath: prepared.ConfigPath,
+	})
 	if err != nil {
 		return report, fmt.Errorf("ccusage side: %w", err)
 	}
@@ -261,7 +356,15 @@ func runParity(ctx context.Context, input parityInput) (parityReport, error) {
 		return report, nil
 	}
 
-	nativeRows, err := collectNative(ctx, nativeProvider, timezone, normalizedSince, normalizedUntil, input.Stderr)
+	nativeRows, err := collectNative(ctx, nativeRequest{
+		provider: nativeProvider,
+		stateDir: stateDir,
+		timezone: timezone,
+		since:    normalizedSince,
+		until:    normalizedUntil,
+		env:      env,
+		stderr:   input.Stderr,
+	})
 	if err != nil {
 		return report, fmt.Errorf("native side: %w", err)
 	}
@@ -274,35 +377,53 @@ func runParity(ctx context.Context, input parityInput) (parityReport, error) {
 	comparison.Timezone = report.Timezone
 	comparison.NativeSnapshots = report.NativeSnapshots
 	comparison.CcusageSnapshots = report.CcusageSnapshots
+	comparison.PricingConfig = report.PricingConfig
+	comparison.PricingSource = report.PricingSource
 	return comparison, nil
 }
 
-// collectNative runs the native provider with an isolated state directory and
-// hook mode stripped. Parity compares the full-preview path on both sides, and
-// a comparison must never write the machine's real cursors.
-func collectNative(
-	ctx context.Context,
-	provider collect.Provider,
-	timezone, since, until string,
-	stderr io.Writer,
-) ([]contract.Snapshot, error) {
-	stateDir, err := os.MkdirTemp("", "tokenboard-parity-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(stateDir)
-	return provider.Collect(ctx, collect.Options{
-		Timezone: timezone,
-		Since:    since,
-		Until:    until,
-		StateDir: stateDir,
+// nativeRequest is what one native collection runs with. stateDir is the run's
+// single temporary state directory, shared with the ccusage side's prepared
+// pricing config.
+type nativeRequest struct {
+	provider collect.Provider
+	stateDir string
+	timezone string
+	since    string
+	until    string
+	env      func(string) string
+	stderr   io.Writer
+}
+
+// collectNative runs the native provider against the run's shared state
+// directory with hook mode stripped. Parity compares the full-preview path on
+// both sides, and a comparison must never write the machine's real cursors —
+// the shared directory is a throwaway one, not the configured state directory.
+func collectNative(ctx context.Context, request nativeRequest) ([]contract.Snapshot, error) {
+	return request.provider.Collect(ctx, collect.Options{
+		Timezone: request.timezone,
+		Since:    request.since,
+		Until:    request.until,
+		StateDir: request.stateDir,
 		Stderr: func(line string) {
-			if stderr != nil {
-				fmt.Fprintf(stderr, "native: %s\n", line)
+			if request.stderr != nil {
+				fmt.Fprintf(request.stderr, "native: %s\n", line)
 			}
 		},
-		Env: parityEnv,
+		Env: request.env,
 	})
+}
+
+// pricingDiagnostics returns the preparation's diagnostic sink. A run without
+// an endpoint fetches nothing, so it narrates nothing — the providers apply the
+// same rule. A nil writer discards the lines.
+func pricingDiagnostics(w io.Writer, endpoint string) func(string) {
+	if w == nil || endpoint == "" {
+		return nil
+	}
+	return func(line string) {
+		fmt.Fprintf(w, "pricing: %s\n", line)
+	}
 }
 
 // parityEnv strips hook mode: an ambient TOKENBOARD_HOOK_MODE belongs to a
@@ -484,12 +605,8 @@ func parityFieldDiffs(nativeRow, ccusageRow contract.Snapshot) []parityFieldDiff
 
 // execCcusage runs the ccusage binary for a source and normalizes its daily and
 // session reports, mirroring the shape each provider uses.
-func execCcusage(
-	ctx context.Context,
-	source contract.Source,
-	bin, since, until, timezone string,
-) ([]contract.Snapshot, error) {
-	binary := strings.TrimSpace(bin)
+func execCcusage(ctx context.Context, request ccusageRequest) ([]contract.Snapshot, error) {
+	binary := strings.TrimSpace(request.Bin)
 	if binary == "" {
 		binary = defaultCcusageBin()
 	}
@@ -502,15 +619,15 @@ func execCcusage(
 	}
 
 	rangeArgs := []string{}
-	if since != "" {
-		rangeArgs = append(rangeArgs, "--since", since)
+	if request.Since != "" {
+		rangeArgs = append(rangeArgs, "--since", request.Since)
 	}
-	if until != "" {
-		rangeArgs = append(rangeArgs, "--until", until)
+	if request.Until != "" {
+		rangeArgs = append(rangeArgs, "--until", request.Until)
 	}
 	commandOptions := ccusage.CommandOptions{TimeoutMs: ccusageTimeoutMs}
 
-	dailyArgs, err := ccusageReportArgs(source, "daily", rangeArgs, timezone)
+	dailyArgs, err := ccusageReportArgs(request.Source, "daily", rangeArgs, request.Timezone, request.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +641,7 @@ func execCcusage(
 		return []contract.Snapshot{}, nil
 	}
 
-	sessionArgs, err := ccusageReportArgs(source, "session", rangeArgs, timezone)
+	sessionArgs, err := ccusageReportArgs(request.Source, "session", rangeArgs, request.Timezone, request.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -534,8 +651,8 @@ func execCcusage(
 	}
 
 	return ccusage.NormalizeCcusageDailyJSON(daily, ccusage.NormalizeOptions{
-		Source:      source,
-		Timezone:    timezone,
+		Source:      request.Source,
+		Timezone:    request.Timezone,
 		CollectedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		Sessions:    sessions,
 		HasSessions: true,
@@ -558,7 +675,12 @@ func hasCcusageSide(source contract.Source) bool {
 // ccusageReportArgs builds the invocation for one report, matching the
 // provider's flags: Claude and the twelve tool sources take `[--]breakdown`
 // and `--single-thread`, Codex additionally runs `--offline`.
-func ccusageReportArgs(source contract.Source, report string, rangeArgs []string, timezone string) ([]string, error) {
+//
+// The `--config` pair goes last, exactly where the providers append it through
+// ccusage.ConfigArgs, and an empty path adds no flag at all — ccusage then
+// falls back to its built-in pricing, which is what production does when no
+// config was prepared.
+func ccusageReportArgs(source contract.Source, report string, rangeArgs []string, timezone, configPath string) ([]string, error) {
 	var args []string
 	switch source {
 	case contract.SourceClaudeCode:
@@ -579,6 +701,9 @@ func ccusageReportArgs(source contract.Source, report string, rangeArgs []string
 	args = append(args, rangeArgs...)
 	if timezone != "" {
 		args = append(args, "--timezone", timezone)
+	}
+	if path := strings.TrimSpace(configPath); path != "" {
+		args = append(args, "--config", path)
 	}
 	return args, nil
 }
@@ -604,6 +729,9 @@ func ccusageBinaryName() string {
 func writeTextReport(w io.Writer, report parityReport) {
 	fmt.Fprintf(w, "parity source=%s window=%s timezone=%s\n",
 		report.Source, displayWindow(report.Since, report.Until), report.Timezone)
+	if report.PricingConfig != "" {
+		fmt.Fprintf(w, "pricingConfig: %s (%s catalogue)\n", report.PricingConfig, report.PricingSource)
+	}
 	if report.Status == statusNotImplemented {
 		fmt.Fprintln(w, "native: notImplemented (no native provider for this source yet)")
 	} else {

@@ -15,6 +15,10 @@ func writeTextReport(w io.Writer, report benchReport) {
 	fmt.Fprintf(w, "bench-collect source=%s scenario=%s window=%s timezone=%s rounds=%d\n",
 		report.Source, report.Scenario, report.Window.String(), report.Timezone, report.Rounds)
 	fmt.Fprintf(w, "ccusage bin=%s platform=%s\n", report.CcusageBin, report.Platform)
+	if report.CcusageConfigPath != "" {
+		fmt.Fprintf(w, "pricing config=%s (%s catalogue) ccusageNetwork=%t\n",
+			report.CcusageConfigPath, report.PricingSource, report.CcusageNetworkAllowed)
+	}
 	writeSideReport(w, report.Ccusage)
 	writeSideReport(w, report.Native)
 	if report.Ccusage.BytesReadPending || report.Native.BytesReadPending {

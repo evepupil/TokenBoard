@@ -245,7 +245,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 	rangeArgs := []string{"--since", "20261103", "--until", "20261103"}
 	tz := []string{"--timezone", "Asia/Shanghai"}
 
-	claude, err := ccusageCalls(contract.SourceClaudeCode, day, "Asia/Shanghai")
+	claude, err := ccusageCalls(contract.SourceClaudeCode, day, "Asia/Shanghai", "")
 	if err != nil {
 		t.Fatalf("claude-code: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 	}
 	assertCalls(t, "claude-code", claude, wantClaude)
 
-	codex, err := ccusageCalls(contract.SourceCodex, day, "Asia/Shanghai")
+	codex, err := ccusageCalls(contract.SourceCodex, day, "Asia/Shanghai", "")
 	if err != nil {
 		t.Fatalf("codex: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 	}
 	assertCalls(t, "codex", codex, wantCodex)
 
-	kimi, err := ccusageCalls(contract.SourceKimi, day, "Asia/Shanghai")
+	kimi, err := ccusageCalls(contract.SourceKimi, day, "Asia/Shanghai", "")
 	if err != nil {
 		t.Fatalf("kimi: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 
 	// ccusage has no `gemini-cli` subcommand; the tool family maps the source
 	// to `gemini`. Getting this wrong exits 2 on every run.
-	gemini, err := ccusageCalls(contract.SourceGeminiCLI, day, "Asia/Shanghai")
+	gemini, err := ccusageCalls(contract.SourceGeminiCLI, day, "Asia/Shanghai", "")
 	if err != nil {
 		t.Fatalf("gemini-cli: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 	}
 
 	// The full scenario passes no date filter at all.
-	full, err := ccusageCalls(contract.SourceClaudeCode, collectWindow{}, "Asia/Shanghai")
+	full, err := ccusageCalls(contract.SourceClaudeCode, collectWindow{}, "Asia/Shanghai", "")
 	if err != nil {
 		t.Fatalf("full: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestCcusageCallsMatchTheProviderFlags(t *testing.T) {
 	}
 
 	// Sources with no ccusage side cannot be benchmarked on the ccusage path.
-	if _, err := ccusageCalls(contract.SourceOpenCode, day, "Asia/Shanghai"); err == nil {
+	if _, err := ccusageCalls(contract.SourceOpenCode, day, "Asia/Shanghai", ""); err == nil {
 		t.Error("ccusageCalls(opencode) = nil error, want a usage error")
 	}
 }

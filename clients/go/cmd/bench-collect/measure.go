@@ -4,11 +4,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
@@ -23,6 +26,15 @@ type roundRequest struct {
 	Window   collectWindow
 	Timezone string
 	Scenario scenario
+	// StateDir is the run's single temporary state directory. The ccusage side
+	// is pointed at the merged config inside it and the native side prepares
+	// from the same directory, so both sides of the comparison price from one
+	// configuration.
+	StateDir string
+	// ConfigPath is the merged ccusage config the run prepared, passed as
+	// --config. Empty means no flag, matching ccusage.ConfigArgs when neither
+	// config variable is set.
+	ConfigPath string
 }
 
 // roundResult is one round's measurement.
@@ -62,7 +74,7 @@ func collectCcusageRound(ctx context.Context, request roundRequest) (roundResult
 	if err := assertUsableBinary(request.Bin); err != nil {
 		return roundResult{}, err
 	}
-	calls, err := ccusageCalls(request.Source, request.Window, request.Timezone)
+	calls, err := ccusageCalls(request.Source, request.Window, request.Timezone, request.ConfigPath)
 	if err != nil {
 		return roundResult{}, err
 	}
@@ -125,28 +137,44 @@ func runCcusageOnce(ctx context.Context, bin string, args []string) (roundResult
 	}, nil
 }
 
-// collectNativeRound runs the registered native provider in-process. S1 has
-// none, which is errNoNativeProvider, not a failure.
+// lookupNativeProvider is collect.LookupNative, replaceable by a test so a
+// round can be exercised without running a real provider over the machine's own
+// history.
+var lookupNativeProvider = collect.LookupNative
+
+// collectNativeRound runs the registered native provider in-process. A source
+// with no native provider is errNoNativeProvider, not a failure.
+//
+// The state directory comes from the run, not from a fresh os.MkdirTemp here:
+// it is the directory the ccusage side's --config lives in, so the provider's
+// own pricing preparation resolves the same catalogue and writes to the same
+// place. It is still a throwaway directory — a benchmark must never move the
+// machine's own cursors — and the hook scenario resets the cursor before each
+// round so every round sees a cold scan.
 func collectNativeRound(ctx context.Context, request roundRequest) (roundResult, error) {
-	provider, ok := collect.LookupNative(request.Source)
+	provider, ok := lookupNativeProvider(request.Source)
 	if !ok || provider == nil {
 		return roundResult{}, errNoNativeProvider
 	}
-	stateDir, err := os.MkdirTemp("", "tokenboard-bench-")
-	if err != nil {
-		return roundResult{}, err
+	if strings.TrimSpace(request.StateDir) == "" {
+		return roundResult{}, errors.New("bench-collect: native round has no state directory")
 	}
-	defer os.RemoveAll(stateDir)
 
 	hookMode := request.Scenario == scenarioHook
+	if hookMode {
+		// The previous round's cursor lives here. Without this reset the second
+		// round onward would measure the warm-cursor path under the hook
+		// scenario's name.
+		if err := resetHookCursor(request.StateDir, request.Source); err != nil {
+			return roundResult{}, err
+		}
+	}
 	start := time.Now()
-	// The native provider writes a real cursor into this throwaway state
-	// directory: a benchmark must never move the machine's own hook cursors.
-	_, err = provider.Collect(ctx, collect.Options{
+	_, err := provider.Collect(ctx, collect.Options{
 		Timezone: request.Timezone,
 		Since:    isoDate(request.Window.Since),
 		Until:    isoDate(request.Window.Until),
-		StateDir: stateDir,
+		StateDir: request.StateDir,
 		// An ambient TOKENBOARD_HOOK_MODE belongs to a notifier and would
 		// silently measure the incremental path under another scenario's name.
 		Env: func(key string) string {
@@ -172,6 +200,28 @@ func collectNativeRound(ctx context.Context, request roundRequest) (roundResult,
 	}, nil
 }
 
+// resetHookCursor removes the source's hook cursor files from a benchmark state
+// directory before a hook round, so every round measures a cold cursor scan.
+// Only the unscoped file and its per-scope variants are touched, all inside a
+// directory this run created: a missing file is fine, an unreadable directory
+// is an error.
+func resetHookCursor(stateDir string, source contract.Source) error {
+	pattern, ok := hookCursorPattern(source)
+	if !ok {
+		return fmt.Errorf("bench-collect: %s installs no hook cursor to reset", source)
+	}
+	paths, err := filepath.Glob(filepath.Join(stateDir, pattern))
+	if err != nil {
+		return fmt.Errorf("bench-collect: reset hook cursor in %s: %w", stateDir, err)
+	}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("bench-collect: reset hook cursor %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
 // ccusageCalls builds the invocations one collection performs, mirroring the
 // providers: Claude runs `daily --breakdown` and `session`, both with
 // `--single-thread` and never `--offline` (that flag prices from ccusage's
@@ -180,10 +230,13 @@ func collectNativeRound(ctx context.Context, request roundRequest) (roundResult,
 // `<tool> daily` and `<tool> session` and use the subcommand-name map from the
 // contract, which is where `gemini-cli` becomes `gemini`.
 //
+// The `--config` pair goes last, exactly where the providers append it through
+// ccusage.ConfigArgs, and an empty path adds no flag at all.
+//
 // The table duplicates the providers on purpose: this harness must not import
 // the code it is meant to measure out of, but a provider flag change has to be
 // mirrored here. cmd/parity carries the same table for the same reason.
-func ccusageCalls(source contract.Source, window collectWindow, timezone string) ([][]string, error) {
+func ccusageCalls(source contract.Source, window collectWindow, timezone, configPath string) ([][]string, error) {
 	if !hasCcusagePath(source) {
 		return nil, fmt.Errorf("%w: %s has no ccusage path; bench-collect measures ccusage-backed sources",
 			errUsage, source)
@@ -211,9 +264,30 @@ func ccusageCalls(source contract.Source, window collectWindow, timezone string)
 		if timezone != "" {
 			args = append(args, "--timezone", timezone)
 		}
+		if path := strings.TrimSpace(configPath); path != "" {
+			args = append(args, "--config", path)
+		}
 		calls = append(calls, args)
 	}
 	return calls, nil
+}
+
+// ccusageNetworkAllowed reports whether the source's ccusage invocations may
+// reach the network for pricing, which is exactly whether they pass --offline.
+func ccusageNetworkAllowed(source contract.Source) bool {
+	return source != contract.SourceCodex
+}
+
+// pricingDiagnostics returns the preparation's diagnostic sink. A run without
+// an endpoint fetches nothing, so it narrates nothing: the providers apply the
+// same rule. A nil writer discards the lines.
+func pricingDiagnostics(w io.Writer, endpoint string) func(string) {
+	if w == nil || endpoint == "" {
+		return nil
+	}
+	return func(line string) {
+		fmt.Fprintf(w, "bench-collect: pricing: %s\n", line)
+	}
 }
 
 // hasCcusagePath reports whether the ccusage binary answers for a source. The

@@ -4,9 +4,9 @@
 // docs/superpowers/specs/2026-11-03-native-usage-sources-design.md.
 //
 // The ccusage side execs the pinned binary; the native side runs
-// collect.LookupNative in-process. S1 of the native pricing engine registers no
-// native provider, so this run is a ccusage baseline: the native column reports
-// notImplemented, and the report never treats that as a win.
+// collect.LookupNative in-process. A source with no native provider reports
+// notImplemented in the native column, and the report never treats that as a
+// win.
 //
 // # Peak RSS of the ccusage child
 //
@@ -37,6 +37,23 @@
 // measurement fails, it fails closed to "unavailable" rather than reporting a
 // wrong number.
 //
+// # Pricing
+//
+// Both sides run under the same merged ccusage config, because they have to
+// measure the same workload. Production points ccusage at the file
+// pricing.Prepare writes (through TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG) and hands
+// the native adapter that file's defaults.pricingOverrides block; a benchmark
+// where ccusage prices from its built-in catalogue and the native side from the
+// merged one would compare two different jobs. One temporary state directory
+// per run carries both, and the report names the config so a reader can tell
+// what was measured.
+//
+// The report also records whether the ccusage side was allowed to reach the
+// network for pricing. For claude-code it is: production passes no --offline,
+// so ccusage may refresh its own price sources, while the native side prices
+// from the frozen corpus. That is a property of the comparison, not a bug, and
+// the report says so instead of letting a reader assume otherwise.
+//
 // This command is deliberately absent from .goreleaser.yaml: it is dev-only and
 // is not part of the released client.
 package main
@@ -48,6 +65,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
@@ -60,6 +78,7 @@ import (
 	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/providers"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
@@ -164,8 +183,20 @@ type benchReport struct {
 	Rounds     int           `json:"rounds"`
 	CcusageBin string        `json:"ccusageBin"`
 	Platform   string        `json:"platform"`
-	Ccusage    sideReport    `json:"ccusage"`
-	Native     sideReport    `json:"native"`
+	// CcusageConfigPath is the merged pricing config both sides ran under, so
+	// the numbers describe one workload rather than two.
+	CcusageConfigPath string `json:"ccusageConfigPath,omitempty"`
+	// PricingSource names where the TokenBoard catalogue came from: network,
+	// cache or the bundled static file.
+	PricingSource string `json:"pricingSource,omitempty"`
+	// CcusageNetworkAllowed says whether the ccusage invocations may reach the
+	// network for pricing. claude-code and the twelve tool sources pass no
+	// --offline (production does not either), so their costs can reflect a live
+	// price refresh while the native side prices from the frozen corpus; Codex
+	// always runs --offline.
+	CcusageNetworkAllowed bool       `json:"ccusageNetworkAllowed"`
+	Ccusage               sideReport `json:"ccusage"`
+	Native                sideReport `json:"native"`
 	// Regression is true when the native side is slower than the ccusage side
 	// it replaces. Regressions names each one; the text report prints them, so
 	// a slower native side is never hidden behind its better memory numbers.
@@ -195,6 +226,19 @@ type benchInput struct {
 	// StateDir is where the hook cursor lives; nil resolves it from the
 	// environment the way the CLI does.
 	StateDir func() string
+	// Prepare resolves the merged pricing config; nil means pricing.Prepare.
+	Prepare func(pricing.PrepareInput) (pricing.PreparedConfig, error)
+	// PricingFetcher replaces the catalogue HTTP client inside Prepare; nil
+	// means the real one. Tests inject it to prove the run makes the same
+	// network call production makes without reaching the network.
+	PricingFetcher func(request *http.Request) (*http.Response, error)
+	// Env resolves configuration for the pricing preparation; nil means the
+	// process environment. The native round keeps its own hook-mode override, so
+	// an ambient TOKENBOARD_HOOK_MODE never reaches the pricing decision here
+	// (HookMode is false regardless).
+	Env func(string) string
+	// Stderr receives the pricing preparation's narration; nil discards it.
+	Stderr io.Writer
 }
 
 func main() {
@@ -246,6 +290,9 @@ func runWith(args []string, stdout, stderr io.Writer, input benchInput) int {
 	input.Scenario = parsedScenario
 	input.Rounds = *rounds
 	input.CcusageBin = strings.TrimSpace(*ccusageBin)
+	if input.Stderr == nil {
+		input.Stderr = stderr
+	}
 
 	report, err := runBench(context.Background(), input)
 	if err != nil {
@@ -348,22 +395,65 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		collectNative = collectNativeRound
 	}
 
+	// One state directory for the whole run. The ccusage side is pointed at the
+	// merged pricing config inside it, and the native provider prepares from the
+	// same directory, so both sides of the comparison price from one
+	// configuration instead of two. The directory is throwaway: a benchmark must
+	// never move the machine's own cursors or rewrite its pricing cache.
+	stateDir, err := os.MkdirTemp("", "tokenboard-bench-")
+	if err != nil {
+		return benchReport{}, fmt.Errorf("bench state directory: %w", err)
+	}
+	defer os.RemoveAll(stateDir)
+
+	env := input.Env
+	if env == nil {
+		env = os.Getenv
+	}
+	prepare := input.Prepare
+	if prepare == nil {
+		prepare = pricing.Prepare
+	}
+	prepared, err := prepare(pricing.PrepareInput{
+		Endpoint: strings.TrimSpace(env("TOKENBOARD_ENDPOINT")),
+		StateDir: stateDir,
+		// The benchmark measures the full-scenario paths, not a notifier's
+		// incremental one, so the catalogue is never restricted to the cache.
+		HookMode:       false,
+		ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
+		Fetcher:        input.PricingFetcher,
+		// Same rule as the providers: the catalogue narration only belongs on
+		// the console when a server is configured.
+		Stderr: pricingDiagnostics(input.Stderr, strings.TrimSpace(env("TOKENBOARD_ENDPOINT"))),
+	})
+	if err != nil {
+		// Measuring without the merged config would time a command no client
+		// runs, so the run fails instead of reporting numbers for another
+		// workload.
+		return benchReport{}, fmt.Errorf("pricing config: %w", err)
+	}
+
 	request := roundRequest{
-		Source:   input.Source,
-		Bin:      bin,
-		Window:   window,
-		Timezone: timezone,
-		Scenario: input.Scenario,
+		Source:     input.Source,
+		Bin:        bin,
+		Window:     window,
+		Timezone:   timezone,
+		Scenario:   input.Scenario,
+		StateDir:   stateDir,
+		ConfigPath: prepared.ConfigPath,
 	}
 
 	report := benchReport{
-		Source:     string(input.Source),
-		Scenario:   string(input.Scenario),
-		Timezone:   timezone,
-		Window:     window,
-		Rounds:     input.Rounds,
-		CcusageBin: bin,
-		Platform:   runtime.GOOS + "/" + runtime.GOARCH,
+		Source:                string(input.Source),
+		Scenario:              string(input.Scenario),
+		Timezone:              timezone,
+		Window:                window,
+		Rounds:                input.Rounds,
+		CcusageBin:            bin,
+		Platform:              runtime.GOOS + "/" + runtime.GOARCH,
+		CcusageConfigPath:     prepared.ConfigPath,
+		PricingSource:         prepared.Catalogue.Source,
+		CcusageNetworkAllowed: ccusageNetworkAllowed(input.Source),
 	}
 
 	ccusageRounds, err := measureRounds(ctx, collectCcusage, request, input.Rounds)
@@ -377,7 +467,7 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 	case errors.Is(nativeErr, errNoNativeProvider):
 		report.Native = sideReport{Kind: sideNative, Status: sideNotImplemented}
 		report.Notes = append(report.Notes,
-			"native: notImplemented — S1 registers no native provider for this source, so this run is a ccusage baseline")
+			"native: notImplemented — no in-process provider is registered for this source, so this run is a ccusage baseline")
 	case nativeErr != nil:
 		return report, fmt.Errorf("native side: %w", nativeErr)
 	default:
@@ -390,6 +480,12 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 	}
 	report.Notes = append(report.Notes,
 		"ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs")
+	report.Notes = append(report.Notes,
+		"both sides ran under the merged pricing config at "+report.CcusageConfigPath)
+	if report.CcusageNetworkAllowed {
+		report.Notes = append(report.Notes,
+			"ccusage runs without --offline, exactly as production does, so its prices may include a live refresh while the native side bills from the frozen corpus; the flags, not the prices, are what this comparison holds constant")
+	}
 	report.Notes = append(report.Notes,
 		"bytesRead is pending until the S2 adapter read counter lands")
 	report.markRegressions()

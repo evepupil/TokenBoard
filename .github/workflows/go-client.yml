@@ -260,6 +260,9 @@ jobs:
   # `baseline-test` regenerates the older contract/pricing goldens, so neither
   # exercises this generator. Without a gate here a change to the generator
   # could ship a corpus whose pins no longer match what it produces.
+  # This job also gates the native Claude adapter tests (goldens, entry,
+  # dedupe, cost and report), which compare fixture output against committed
+  # golden snapshots. The generator itself is tested separately below.
   native-pricing:
     name: native pricing engine
     runs-on: ubuntu-latest
@@ -287,6 +290,10 @@ jobs:
       - name: native pricing tests
         working-directory: clients/go
         run: go test ./internal/nativepricing/... -race
+
+      - name: native Claude adapter tests
+        working-directory: clients/go
+        run: go test ./internal/collect/adapters/claude/... -race -count=1
 
       - name: native pricing generator tests
         run: node --test clients/go/scripts/fetch-native-pricing.test.mjs
