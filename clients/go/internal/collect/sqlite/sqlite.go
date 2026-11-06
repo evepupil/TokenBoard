@@ -20,6 +20,8 @@ import (
 	"context"
 	dbsql "database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -367,15 +369,23 @@ func marshalRow(row map[string]any) ([]byte, error) {
 
 // ParseJSONRows reads the `sqlite3 -json` document shape: nothing at all for
 // an empty result, a JSON array otherwise.
+//
+// The v2 decoder handles the document and is measurably faster on the wide row
+// sets the OpenCode and Antigravity queries return; anything it refuses falls
+// back to the v1 decoder so the accepted input set does not change (v1 ignores
+// trailing content after the first value, for example).
 func ParseJSONRows(stdout, dbFile, label string) ([]map[string]any, error) {
 	trimmed := strings.TrimSpace(stdout)
 	if trimmed == "" {
 		return []map[string]any{}, nil
 	}
-	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	var parsed any
-	if err := decoder.Decode(&parsed); err != nil {
-		return nil, fmt.Errorf("Invalid %s SQLite JSON output from %s: %s", label, dbFile, err.Error())
+	if err := jsonv2.Unmarshal([]byte(trimmed), &parsed, jsonRowsOptions); err != nil {
+		parsed = nil
+		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		if legacyErr := decoder.Decode(&parsed); legacyErr != nil {
+			return nil, fmt.Errorf("Invalid %s SQLite JSON output from %s: %s", label, dbFile, legacyErr.Error())
+		}
 	}
 	items, ok := parsed.([]any)
 	if !ok {
@@ -391,6 +401,10 @@ func ParseJSONRows(stdout, dbFile, label string) ([]map[string]any, error) {
 	}
 	return rows, nil
 }
+
+// jsonRowsOptions reproduces the v1 decoder's duplicate rule on the document
+// shape: the last member wins rather than the decode failing.
+var jsonRowsOptions = jsonv2.JoinOptions(jsontext.AllowDuplicateNames(true))
 
 // DatabaseMtimeMs is the latest mtime across a SQLite database and its WAL
 // sidecars. A database in WAL mode commits into `-wal` first and only updates
