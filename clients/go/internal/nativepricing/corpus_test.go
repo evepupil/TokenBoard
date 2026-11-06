@@ -634,3 +634,21 @@ func TestCorpusDataFilesAreTracked(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizePricingKeyReturnsTheInputUnchangedWithoutSeparators pins the
+// allocation-free fast path: the fuzzy scan normalizes every corpus key on
+// every miss, so a value with no '.' or '@' must be handed back as-is.
+func TestNormalizePricingKeyReturnsTheInputUnchangedWithoutSeparators(t *testing.T) {
+	plain := "claude-sonnet-4-5"
+	if got := normalizePricingKey(plain); got != plain {
+		t.Fatalf("normalizePricingKey(%q) = %q", plain, got)
+	}
+	// A separator-free value must not be copied: equal content is not enough
+	// evidence on its own, so pin identity through a mutable buffer.
+	buffer := []byte("claude-opus-4-6")
+	value := string(buffer)
+	copy(buffer, []byte("xxxxxxxxxxxxxxx"))
+	if got := normalizePricingKey(value); got != "claude-opus-4-6" {
+		t.Fatalf("normalizePricingKey returned %q, want the untouched input", got)
+	}
+}

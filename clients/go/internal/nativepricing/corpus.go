@@ -400,9 +400,21 @@ func normalizedModelsDevModelID(modelID string) string {
 
 // normalizePricingKey mirrors normalized_pricing_key: only '.' and '@' become
 // '-'. '/' and '_' are meaningful and stay as they are.
+//
+// The fuzzy scan calls this once per corpus entry per lookup, so it replaces
+// only bytes: strings.NewReplacer would build its matcher on every call, and
+// its byte-level replacement is the same '.'/'@' swap this loop performs.
 func normalizePricingKey(value string) string {
-	replacer := strings.NewReplacer(".", "-", "@", "-")
-	return replacer.Replace(value)
+	if !strings.ContainsAny(value, ".@") {
+		return value
+	}
+	normalized := []byte(value)
+	for index := range normalized {
+		if normalized[index] == '.' || normalized[index] == '@' {
+			normalized[index] = '-'
+		}
+	}
+	return string(normalized)
 }
 
 // modelsDevModalities mirrors ModelsDevModalities. A nil list is "absent"; a
