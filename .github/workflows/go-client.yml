@@ -291,10 +291,15 @@ jobs:
         working-directory: clients/go
         run: go test ./internal/nativepricing/... -race
 
+      # The Claude adapter is the in-process replacement for ccusage claude:
+      # race-detect its parser, pricing pass, dedupe and report builders, and
+      # its provider-side registration/roots/hook seam.
       - name: native Claude adapter tests
         working-directory: clients/go
-        run: go test ./internal/collect/adapters/claude/... -race -count=1
+        run: go test ./internal/collect/adapters/claude/... ./internal/collect/providers/claudecode/... -race -count=1
 
+      # The goldens are the other half of the gate: pin the generator's assets
+      # and schema so a stale corpus cannot pass by comparing against itself.
       - name: native pricing generator tests
         run: node --test clients/go/scripts/fetch-native-pricing.test.mjs
 

@@ -241,13 +241,19 @@ S1 的整分支终审留下七项义务，其中三项已写进代码注释（`c
 **S2 必须处理**
 
 - `Find` 没有 memoization（ccusage 有 `find_cache`，`clients/go/internal/nativepricing/find.go:53`）：把
-  `collect.LookupNative` 接进热路径前必须先决策。
+  `collect.LookupNative` 接进热路径前必须先决策。**S2 已落地**：`adapters/claude/cost.go` 的
+  `memoizeFind` 在每次 collection 建一个按模型名缓存的 finder（`f60ddf3`），`internal/nativepricing`
+  本身仍不缓存。
 - `parityEnv`（`clients/go/cmd/parity/main.go:306`）只剥离 `TOKENBOARD_HOOK_MODE`；S2 起的原生 provider
   子进程必须沿用 `internal/ccusage.ScrubCredentialEnv`（`clients/go/internal/ccusage/credentials.go:45`）
-  的同一名单，即 AGENTS.md「ccusage 子进程环境必须剥离凭据」这条跨端不变量。
+  的同一名单，即 AGENTS.md「ccusage 子进程环境必须剥离凭据」这条跨端不变量。**S2 复核结论**：
+  原生 provider 完全 in-process，不 spawn ccusage，因此 parity 的 `execCcusage` 子进程仍是唯一
+  需要脱敏的路径，沿用该名单即可；`parityEnv` 保持只剥离 hook mode。
 - `Cost` 的 `at time.Time` 形参在 S1 无效（`clients/go/internal/nativepricing/cost.go:128-130`）：S2 用它
   接 DeepSeek 时段定价。
 - parity 的 ccusage 侧目前比较 raw normalize 输出（无 codex corrections、无动态定价）：S2 扩展。
+  S2 已改：`cmd/parity` 通过 `pricing.Prepare` 共享同一份 merged config（`f113539`），两侧现在比较
+  的是一致定价口径下的输出；codex 扩展推迟到 S3。
 
 **S4 必须处理**
 

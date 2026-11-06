@@ -11,6 +11,14 @@
 # The goldens are the contract the Go client's ccusage layer (M4) is written
 # against, so they are pinned before that layer exists rather than after.
 #
+# Native side: claude-code also has an in-process adapter whose goldens are
+# minted from the same binary by scripts/gen-claude-goldens.mjs and compared by
+# internal/collect/adapters/claude/goldens_test.go. Those are the native golden
+# gate — they must be re-minted (and reviewed) whenever this script's goldens
+# change, because both sides are supposed to answer with the same numbers.
+# This script still guards the binary itself, which is what production runs
+# until useNativeClaude flips (docs/research/2026-11-05-claude-native-parity.md).
+#
 # Usage:
 #   scripts/check-deps.sh                      # verify against the goldens
 #   scripts/check-deps.sh --update             # re-mint goldens after review
