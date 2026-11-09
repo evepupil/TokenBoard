@@ -3,6 +3,7 @@ package copilot
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -296,7 +297,12 @@ func TestCopilotFailedFileIsSkippedWithADebugLine(t *testing.T) {
 	writeOTel(t, home,
 		`{"type":"span","traceId":"t1","spanId":"s1","endTime":[1775934000,0],"attributes":{"gen_ai.operation.name":"chat","gen_ai.response.model":"m","gen_ai.usage.input_tokens":1}}`,
 	)
-	// A session-state events.jsonl that cannot be opened (mode 0).
+	// A session-state events.jsonl that cannot be opened (mode 0). POSIX
+	// permission bits are the only portable way to produce that fixture;
+	// Windows ignores them, so the case is POSIX-only.
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0 does not make a file unreadable on Windows")
+	}
 	blocked := writeFixtureFile(t, home, "session-state/s/events.jsonl", "{\"type\":\"session.shutdown\"}\n")
 	if err := os.Chmod(blocked, 0); err != nil {
 		t.Fatal(err)

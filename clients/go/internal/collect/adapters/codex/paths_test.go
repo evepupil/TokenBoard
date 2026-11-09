@@ -46,8 +46,8 @@ func TestHomePathsSplitsEnvListAndKeepsZeroHomes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != "/home/u/.codex" {
-		t.Fatalf("HomePaths(unset) = %v, want [/home/u/.codex]", got)
+	if want := filepath.Join("/home/u", ".codex"); len(got) != 1 || got[0] != want {
+		t.Fatalf("HomePaths(unset) = %v, want [%s]", got, want)
 	}
 
 	if _, err := HomePaths(envMap(map[string]string{}), func() (string, error) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -122,7 +123,9 @@ func TestCopilotCheckpointWithoutTotalProducesNoSnapshot(t *testing.T) {
 func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	content := `{"type":"session.shutdown","id":"s","timestamp":"2026-04-15T09:52:27.352Z","data":{"modelMetrics":{"m":{"usage":{"inputTokens":1}}}}}`
 	root := t.TempDir()
-	named := writeFixtureFile(t, root, "trimmed  /events.jsonl", content)
+	// Leading spaces: Windows strips trailing spaces from directory names, so
+	// the name has to trim on the other side to stay portable.
+	named := writeFixtureFile(t, root, "  trimmed/events.jsonl", content)
 	usage, err := parseSessionStateFile(named, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +135,12 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	}
 
 	// A file directly inside a directory whose name trims to empty yields
-	// nothing, without reading the file.
+	// nothing, without reading the file. A whitespace-only directory name
+	// cannot exist on Windows (trailing spaces are stripped), so the fixture
+	// is POSIX-only.
+	if runtime.GOOS == "windows" {
+		t.Skip("a whitespace-only directory name cannot be created on Windows")
+	}
 	blank := writeFixtureFile(t, filepath.Join(root, "  "), "events.jsonl", content)
 	usage, err = parseSessionStateFile(blank, 0)
 	if err != nil {

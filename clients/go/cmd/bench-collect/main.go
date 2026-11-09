@@ -384,16 +384,7 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		bin = defaultCcusageBin()
 	}
 	collectCcusage := input.CollectCcusage
-	if collectCcusage == nil {
-		if err := assertUsableBinary(bin); err != nil {
-			return benchReport{}, err
-		}
-		collectCcusage = collectCcusageRound
-	}
 	collectNative := input.CollectNative
-	if collectNative == nil {
-		collectNative = collectNativeRound
-	}
 
 	// One state directory for the whole run. The ccusage side is pointed at the
 	// merged pricing config inside it, and the native provider prepares from the
@@ -431,6 +422,18 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		// runs, so the run fails instead of reporting numbers for another
 		// workload.
 		return benchReport{}, fmt.Errorf("pricing config: %w", err)
+	}
+	// The binary check runs after the pricing preparation so a configuration
+	// failure is what a run reports first; it only applies to the side that
+	// actually execs ccusage.
+	if collectCcusage == nil {
+		if err := assertUsableBinary(bin); err != nil {
+			return benchReport{}, err
+		}
+		collectCcusage = collectCcusageRound
+	}
+	if collectNative == nil {
+		collectNative = collectNativeRound
 	}
 
 	request := roundRequest{

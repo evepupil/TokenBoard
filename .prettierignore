@@ -9,3 +9,17 @@ clients/go/testdata/ccusage-golden/
 # fail that guard; `litellm.json` is also written with a fixed canonical layout
 # and its digest is recorded in the generator.
 clients/go/internal/nativepricing/data/
+
+# Row-level goldens minted by clients/go/scripts/gen-*-goldens.mjs. Each
+# generator re-emits its file in a fixed layout and compares it byte for byte
+# (gen-claude-goldens.mjs also records a sha256 of the fixture tree), so
+# reformatting them here would make every drift check fail.
+clients/go/internal/collect/adapters/claude/goldens/
+clients/go/internal/collect/adapters/codex/goldens/
+clients/go/internal/collect/adapters/tools/goldens/
+clients/go/internal/collect/providers/ccusagetool/copilot-goldens/
+
+# The tool adapters' committed fixture trees. gen-tool-goldens.mjs rewrites and
+# byte-compares every file from its own definitions; reflowing them here would
+# report drift on every check-deps.sh run.
+clients/go/testdata/tool-goldens-fixtures/
