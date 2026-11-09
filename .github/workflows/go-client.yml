@@ -320,15 +320,17 @@ jobs:
         working-directory: clients/go
         run: go test ./internal/collect/adapters/codex/... ./internal/collect/providers/codex/... -race -count=1
 
-      # The eleven ccusage tool adapters carry frozen `daily` and `session`
-      # reports under goldens/tool-reports.json, minted by gen-tool-goldens.mjs
+      # The ccusage tool adapters carry frozen `daily` and `session` reports:
+      # eleven under goldens/tool-reports.json, minted by gen-tool-goldens.mjs
       # from ccusage 20.0.33 over the committed fixture trees in
-      # clients/go/testdata/tool-goldens-fixtures. The `deps` job re-mints them
-      # with --check; this step is the other half, comparing the Go ports against
-      # those frozen documents row by row.
+      # clients/go/testdata/tool-goldens-fixtures, and copilot under
+      # copilot-goldens/copilot-reports.json, minted by gen-copilot-goldens.mjs.
+      # Copilot's goldens use the tree upstream's copilot_cli__* snapshots use.
+      # The `deps` job re-mints all of them with --check; this step is the other
+      # half, comparing the Go ports against those frozen documents row by row.
       - name: native tool adapter tests
         working-directory: clients/go
-        run: go test ./internal/collect/adapters/tools/... ./internal/collect/providers/ccusagetool/... -race -count=1
+        run: go test ./internal/collect/adapters/tools/... ./internal/collect/adapters/copilot/... ./internal/collect/providers/ccusagetool/... -race -count=1
 
       # Costs are compared bit for bit against ccusage, and on arm64 Go fuses
       # `a*b + c` into FMADDD where Rust rounds the product first - a 1 ULP
@@ -339,7 +341,7 @@ jobs:
       - name: arm64 pricing code has no fused multiply-add
         working-directory: clients/go
         run: |
-          for pkg in ./internal/nativepricing ./internal/collect/adapters/claude ./internal/collect/adapters/codex ./internal/collect/adapters/tools; do
+          for pkg in ./internal/nativepricing ./internal/collect/adapters/claude ./internal/collect/adapters/codex ./internal/collect/adapters/tools ./internal/collect/adapters/copilot; do
             fused=$(GOOS=darwin GOARCH=arm64 go build -gcflags='-S' "$pkg" 2>&1 | grep -c FMADDD || true)
             if [ "$fused" -ne 0 ]; then
               echo "$pkg compiles $fused fused multiply-adds (FMADDD); route the product through nativepricing.Product" >&2

@@ -159,13 +159,20 @@ fi
 # re-mint with gen-codex-goldens.mjs (no flag) and review the diff.
 CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-codex-goldens.mjs" --check || status=1
 
-# The eleven ccusage tool adapters carry the same kind of frozen reports, minted
+# The twelve ccusage tool adapters carry the same kind of frozen reports, minted
 # by gen-tool-goldens.mjs over the committed fixture trees under
 # clients/go/testdata/tool-goldens-fixtures. --check verifies the committed
 # fixture trees against the generator's definitions and re-mints every report in
 # memory: a drifted fixture and a drifted report both fail here, and this gate
 # never writes.
 CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-tool-goldens.mjs" --check || status=1
+
+# The copilot adapter's goldens (the twelfth tool adapter) come from
+# gen-copilot-goldens.mjs over the fixture tree upstream's own CLI snapshots use.
+# --check re-hashes that tree, re-mints both reports under --mode auto and
+# calculate, and re-derives the committed copilot_cli__* upstream snapshots from
+# the same binary, so a drift between the two sources of truth fails here too.
+CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-copilot-goldens.mjs" --check || status=1
 
 if [[ $status -ne 0 ]]; then
   echo "check-deps: a native adapter golden drifted — review the diff, then re-mint it after review." >&2
