@@ -1,0 +1,170 @@
+package copilot
+
+import (
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
+	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
+)
+
+// This file ports load_entries and load_entries_inner (loader.rs:22-125, 434-521):
+// reading every source file, the reconciliation, the OTel suppression and the
+// conversion into the shared tools.Entry every tool report is built from.
+
+// LoadInput is what Load reads besides the files: the shared options and the
+// window, in both of the forms copilot needs (the string comparison the report
+// filter uses and the millisecond bounds the reconciliation uses).
+type LoadInput struct {
+	Options tools.Options
+	Since   string
+	Until   string
+	// SinceMs and UntilMs are tools.DateRangeBoundsMs(Since, Until, timezone):
+	// the half-open window the session-state reconciliation narrows itself by.
+	SinceMs *int64
+	UntilMs *int64
+}
+
+// Load is load_entries (loader.rs:22-36): every Copilot row, priced, dated in
+// the report timezone and sorted by timestamp. The string window is not
+// applied here - the caller filters by Date, as filter_loaded_entries_by_date
+// does (loader.rs:34).
+func Load(input LoadInput) ([]tools.Entry, error) {
+	o := input.Options
+	sources, err := SourcePaths(o)
+	if err != nil {
+		return nil, err
+	}
+	ceiling := timeNowMillis()
+	parsed := make([]SourceUsage, len(sources))
+	failures := make([]error, len(sources))
+	// Files are read in parallel but keep their discovery order, so the merge
+	// below is the serial one.
+	var group sync.WaitGroup
+	for index, source := range sources {
+		group.Add(1)
+		go func(index int, source SourceFile) {
+			defer group.Done()
+			usage, err := readSourceFile(source, ceiling)
+			parsed[index], failures[index] = usage, err
+		}(index, source)
+	}
+	group.Wait()
+
+	otelEntries := []Entry{}
+	sessionStateEntries := []Entry{}
+	creditSnapshots := []CreditSnapshot{}
+	for index, source := range sources {
+		if err := failures[index]; err != nil {
+			// A failed file only loses its own rows (loader.rs:54-68).
+			kind := "OTEL"
+			if source.Kind == KindSessionState {
+				kind = "session-state"
+			}
+			if o.Debug != nil {
+				o.Debug("Failed to read Copilot " + kind + " file " + source.Path + ": " + err.Error())
+			}
+			continue
+		}
+		switch source.Kind {
+		case KindOtel:
+			otelEntries = append(otelEntries, parsed[index].Entries...)
+		case KindSessionState:
+			sessionStateEntries = append(sessionStateEntries, parsed[index].Entries...)
+			creditSnapshots = append(creditSnapshots, parsed[index].CreditSnapshots...)
+		}
+	}
+
+	otelSessions := map[string]bool{}
+	for _, entry := range otelEntries {
+		otelSessions[entry.SessionID] = true
+	}
+	reconciliation := Reconcile(ReconcileInput{
+		Entries:        sessionStateEntries,
+		Snapshots:      creditSnapshots,
+		OTelEntries:    otelEntries,
+		SinceMs:        input.SinceMs,
+		UntilMs:        input.UntilMs,
+		SkippedSession: func(sessionID string) bool { return otelSessions[sessionID] },
+	})
+	// OpenTelemetry rows record every model call, so sessions that have them
+	// are left to that source rather than to the coarser credit totals.
+	kept := otelEntries[:0]
+	for _, entry := range otelEntries {
+		after, suppressed := reconciliation.OTelAfter[otelKey(entry.SessionID, entry.Model)]
+		if !suppressed || entry.Timestamp > after {
+			kept = append(kept, entry)
+		}
+	}
+
+	merged := make([]Entry, 0, len(reconciliation.Intervals)+len(kept)+len(reconciliation.Gaps))
+	merged = append(merged, reconciliation.Intervals...)
+	merged = append(merged, kept...)
+	merged = append(merged, reconciliation.Gaps...)
+	entries := make([]tools.Entry, 0, len(merged))
+	for _, entry := range merged {
+		entries = append(entries, usageEntryToLoaded(entry, input.Options))
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Timestamp < entries[j].Timestamp })
+	return entries, nil
+}
+
+// readSourceFile is read_source_file (loader.rs:434-442).
+func readSourceFile(source SourceFile, ceiling int64) (SourceUsage, error) {
+	switch source.Kind {
+	case KindOtel:
+		entries, err := parseOtelFile(source.Path, ceiling)
+		if err != nil {
+			return SourceUsage{}, err
+		}
+		return SourceUsage{Entries: entries}, nil
+	default:
+		return parseSessionStateFile(source.Path)
+	}
+}
+
+// usageEntryToLoaded is usage_entry_to_loaded (loader.rs:458-521). Pricing
+// goes through nativepricing.Cost with the entry's timestamp (find_at), the
+// mode, and the reported cost a credit gap carries; the extra total tokens
+// join the output bucket for the bill only, never in the stored usage.
+func usageEntryToLoaded(entry Entry, o tools.Options) tools.Entry {
+	at := tools.PriceAt(entry.Timestamp)
+	costUsage := nativepricing.Usage{
+		Input:         int64(entry.Input),
+		Output:        int64(entry.Output) + int64(entry.Extra),
+		CacheCreate5m: int64(entry.CacheCreation),
+		CacheRead:     int64(entry.CacheRead),
+		ReportedCost:  entry.CostUSD,
+	}
+	cost, missing := nativepricing.Cost(o.Corpus, entry.Model, costUsage, at, o.Mode, false, false)
+	var messageCount *uint64
+	if entry.RequestCount > 0 {
+		count := entry.RequestCount
+		messageCount = &count
+	}
+	return tools.Entry{
+		Timestamp: entry.Timestamp,
+		Date:      tools.FormatDateTZ(entry.Timestamp, o.Timezone),
+		Model:     entry.Model,
+		Usage: tools.Usage{
+			Input:         entry.Input,
+			Output:        entry.Output,
+			CacheCreation: entry.CacheCreation,
+			CacheRead:     entry.CacheRead,
+			Extra:         entry.Extra,
+		},
+		CostUSD:        cost,
+		ReportedCost:   entry.CostUSD,
+		SessionID:      entry.SessionID,
+		MessageID:      entry.DedupKey,
+		ProjectPath:    "GitHub Copilot CLI",
+		MessageCount:   messageCount,
+		MissingPricing: missing,
+	}
+}
+
+// timeNowMillis is utc_now in epoch milliseconds.
+func timeNowMillis() int64 {
+	return time.Now().UnixMilli()
+}
