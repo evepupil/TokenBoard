@@ -20,6 +20,13 @@ const (
 	maxWalkEntries = 100_000
 )
 
+// IsDirectory reports whether path names a directory (the keep predicate the
+// Rust adapters give collect_files_with_extension callers resolving roots).
+func IsDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func CollectFiles(root string, accept func(name string) bool) []string {
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {

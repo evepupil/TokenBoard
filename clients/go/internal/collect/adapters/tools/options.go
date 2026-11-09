@@ -34,6 +34,19 @@ func (o Options) debugf(line string) {
 	}
 }
 
+// EnvLookup returns the probe, defaulting to the process environment. It is
+// exported for an adapter in its own package (copilot) that reads a tool's
+// environment the same way.
+func (o Options) EnvLookup() func(string) (string, bool) {
+	return o.envLookup()
+}
+
+// Home returns the user's home directory through the HomeDir override or
+// home_dir, exported alongside EnvLookup.
+func (o Options) Home() (string, error) {
+	return o.homeDir()
+}
+
 // envLookup returns the probe, defaulting to the process environment.
 func (o Options) envLookup() func(string) (string, bool) {
 	if o.Env != nil {
