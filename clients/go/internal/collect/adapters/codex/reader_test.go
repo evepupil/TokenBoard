@@ -272,3 +272,31 @@ func TestClassifyLineTreatsInputOnlyAsSkip(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifyLineNeverPanicsOnATruncatedLine pins json_string_value_matches
+// (parser.rs:771-775): Rust reads the closing quote with `line.get`, which is
+// None past the end, so a line cut right after a type value ("…"token_count")
+// classifies without crashing. An index read would panic inside the collector
+// goroutine and take the whole sync down.
+func TestClassifyLineNeverPanicsOnATruncatedLine(t *testing.T) {
+	values := []string{"token_count", "turn_context", "event_msg", "compacted", "thread_settings_applied", "token_usage_record"}
+	for _, value := range values {
+		for cut := len(value) - 1; cut <= len(value)+2; cut++ {
+			full := `{"type":"` + value + `"}`
+			line := []byte(full)[:len(`{"type":"`)+cut]
+			func() {
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						t.Fatalf("ClassifyLine(%q) panicked: %v", line, recovered)
+					}
+				}()
+				ClassifyLine(line)
+			}()
+		}
+	}
+	// The exact shape that used to index past the end: the value is complete
+	// and the closing quote is the byte that is missing.
+	if got := ClassifyLine([]byte(`{"type":"token_count`)); got != Skip {
+		t.Fatalf("ClassifyLine(truncated) = %v, want Skip", got)
+	}
+}

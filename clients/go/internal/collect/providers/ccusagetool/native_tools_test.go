@@ -9,13 +9,17 @@ package ccusagetool
 import (
 	"context"
 	"encoding/json"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
@@ -33,6 +37,24 @@ func TestRegisterNativeInstallsEveryToolProvider(t *testing.T) {
 		ccusageProvider, ok := collect.Lookup(source)
 		if !ok || ccusageProvider == nil {
 			t.Fatalf("collect.Lookup(%q) has no ccusage provider", source)
+		}
+	}
+}
+
+// TestEveryToolSourceReachesANativeAdapter pins production reachability, not
+// just registration: an adapter that registers itself from its own init()
+// (copilot does) only runs when some NON-TEST file imports it. A
+// `_test.go`-only import keeps this test green while every production build
+// answers `tools: no native adapter for "copilot"`. import_test.go carries the
+// blank imports; this asserts the result.
+func TestEveryToolSourceReachesANativeAdapter(t *testing.T) {
+	for _, source := range contract.CcusageToolSources() {
+		command, ok := contract.CcusageToolCommand(source)
+		if !ok {
+			t.Fatalf("CcusageToolCommand(%q) has no command", source)
+		}
+		if !tools.HasNativeAdapter(command) {
+			t.Fatalf("%s has no native adapter reachable from this package's non-test imports", command)
 		}
 	}
 }
@@ -264,4 +286,37 @@ func itoa(value int) string {
 
 func commandOptionsWith(ampDir string) ccusage.CommandOptions {
 	return ccusage.CommandOptions{Env: []string{"AMP_DATA_DIR=" + ampDir, "HOME=" + ampDir}, TimeoutMs: 30000}
+}
+
+// TestCopilotAdapterIsImportedFromAProductionFile guards the registration
+// path: copilot's adapter registers from its own init(), so the import that
+// makes it reachable must live in a non-test file. A _test.go import would
+// keep every other test green while production binaries answered
+// `tools: no native adapter for "copilot"` once the native switch flips.
+func TestCopilotAdapterIsImportedFromAProductionFile(t *testing.T) {
+	const target = "internal/collect/adapters/copilot"
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, spec := range file.Imports {
+			if path, err := strconv.Unquote(spec.Path.Value); err == nil && strings.HasSuffix(path, target) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no non-test file of providers/ccusagetool imports " + target +
+			"; the copilot adapter would not register in a production build")
+	}
 }

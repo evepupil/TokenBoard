@@ -33,6 +33,7 @@
  *
  * Usage:
  *   node clients/go/scripts/gen-native-pricing-goldens.mjs
+ *   node clients/go/scripts/gen-native-pricing-goldens.mjs --check   # drift gate, no write
  *   CCUSAGE_BIN=/path/to/ccusage node clients/go/scripts/gen-native-pricing-goldens.mjs
  *
  * Output: clients/go/internal/nativepricing/goldens/cost-cases.json
@@ -56,6 +57,13 @@ const ccusageBin = process.env.CCUSAGE_BIN || join(process.env.HOME ?? '', '.tok
 
 /** The binary this corpus was frozen against (Corpus doc comment, corpus.go). */
 const expectedVersion = '20.0.33'
+
+const checkOnly = process.argv.includes('--check')
+const unknownArgs = process.argv.slice(2).filter((arg) => arg !== '--check')
+if (unknownArgs.length > 0) {
+  console.error(`gen-native-pricing-goldens: unknown arguments: ${unknownArgs.join(' ')} (only --check is accepted)`)
+  process.exit(1)
+}
 
 // ---------------------------------------------------------------------------
 // Fixture cases.
@@ -602,9 +610,35 @@ const document = {
   cases: goldens
 }
 
-mkdirSync(dirname(goldensPath), { recursive: true })
-writeFileSync(goldensPath, JSON.stringify(document, null, 2) + '\n')
+const rendered = JSON.stringify(document, null, 2) + '\n'
 rmSync(workDir, { recursive: true, force: true })
+
+// --check is the CI drift gate: ccusage is re-run and its answer compared
+// against the committed file byte for byte. It never writes, so a drifted
+// ccusage cannot silently replace the anchor of the pricing parity chain.
+if (checkOnly) {
+  let committed
+  try {
+    committed = readFileSync(goldensPath, 'utf8')
+  } catch {
+    console.error(`gen-native-pricing-goldens: --check: missing golden ${relative(repoRoot, goldensPath)}`)
+    process.exit(1)
+  }
+  if (committed !== rendered) {
+    console.error(
+      `gen-native-pricing-goldens: --check: ${relative(repoRoot, goldensPath)} drifted from ccusage ${actualVersion}.\n` +
+        '  Review the change with the script run without --check, then commit the re-minted goldens.'
+    )
+    process.exit(1)
+  }
+  console.log(
+    `gen-native-pricing-goldens: --check: ccusage ${actualVersion} still produces the committed ${goldens.length} cases.`
+  )
+  process.exit(0)
+}
+
+mkdirSync(dirname(goldensPath), { recursive: true })
+writeFileSync(goldensPath, rendered)
 
 console.log(`gen-native-pricing-goldens: ccusage ${actualVersion}`)
 console.log(`gen-native-pricing-goldens: wrote ${goldens.length} cases to ${relative(repoRoot, goldensPath)}`)

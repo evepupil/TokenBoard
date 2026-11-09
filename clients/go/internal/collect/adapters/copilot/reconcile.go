@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
-	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 )
 
 // This file ports the reconciliation half of loader.rs (:127-432): turning the
@@ -360,7 +359,11 @@ func creditGapEntries(snapshots []CreditSnapshot, attributed map[string]uint64,
 // creditGapEntry is credit_gap_entry (loader.rs:359-377). One AIU is one
 // GitHub AI credit, billed at $0.01, so nano / 1e11 is dollars.
 func creditGapEntry(snapshot CreditSnapshot, nanoAiu uint64) Entry {
-	cost := nativepricing.Product(float64(nanoAiu), 1e-11)
+	// Rust divides (`nano_aiu as f64 / 1e11`, loader.rs:374). A reciprocal
+	// multiplication is not the same double: 5_000_000_000/1e11 is
+	// 0x3fa999999999999a while x*1e-11 lands one ulp low, which would leak
+	// into snapshotHash.
+	cost := float64(nanoAiu) / 1e11
 	return Entry{
 		Timestamp:     snapshot.Timestamp,
 		TimestampText: tools.FormatRFC3339Millis(snapshot.Timestamp),

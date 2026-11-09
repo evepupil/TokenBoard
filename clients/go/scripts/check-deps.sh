@@ -159,6 +159,13 @@ fi
 # re-mint with gen-codex-goldens.mjs (no flag) and review the diff.
 CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-codex-goldens.mjs" --check || status=1
 
+# The native pricing engine's cost goldens are re-derived from the same pinned
+# ccusage and the shipped config (packages/collector/ccusage.json). --check
+# re-mints them in memory and compares the committed bytes; a changed config or
+# a drift in ccusage's own answer fails here instead of leaving the pricing
+# parity anchor stale.
+CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-native-pricing-goldens.mjs" --check || status=1
+
 # The twelve ccusage tool adapters carry the same kind of frozen reports, minted
 # by gen-tool-goldens.mjs over the committed fixture trees under
 # clients/go/testdata/tool-goldens-fixtures. --check verifies the committed

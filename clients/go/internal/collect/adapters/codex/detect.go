@@ -164,11 +164,13 @@ func codexLineTypeFlags(line []byte) lineTypeFlags {
 	}
 }
 
-// jsonStringValueMatches is json_string_value_matches (parser.rs:790-796): the
+// jsonStringValueMatches is json_string_value_matches (parser.rs:771-775): the
 // value bytes followed by the closing quote, so "token_count_extra" does not
-// match "token_count".
+// match "token_count". The closing quote is read past the end as a miss, the
+// way Rust's `line.get` answers None, so a line truncated right after a
+// complete value cannot index out of range.
 func jsonStringValueMatches(line []byte, start int, value string) bool {
-	if start+len(value) > len(line) {
+	if start+len(value) >= len(line) {
 		return false
 	}
 	return string(line[start:start+len(value)]) == value && line[start+len(value)] == '"'

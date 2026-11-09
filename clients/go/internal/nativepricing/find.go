@@ -32,24 +32,41 @@ func (c Corpus) FindExact(model string) (CorpusModel, bool) {
 	return pricing, ok
 }
 
-// FindExactWithFallback is find_exact_with_fallback (pricing.rs:1501-1533):
-// exact, then an exact-only id under another spelling, then the normalized
-// key index - and never a fuzzy match. The embedded models.dev stage is part
-// of the merged Models table here, so no extra fallback pass is needed (the
-// live models.dev map is disabled whenever ccusage runs offline, which the
-// collector always does).
+// FindExactWithFallback is find_exact_with_fallback (pricing.rs:1501-1522):
+// primary exact, models.dev exact, then find_exact_normalized per stage
+// (pricing.rs:1524-1543). Never a fuzzy match. The live models.dev map is
+// disabled whenever ccusage runs offline, which the collector always does.
 //
-// The normalized index is built per call: a lookup that misses the exact key
-// scans the table once and stops at the second normalized match to report
-// ambiguity. Tool adapters only reach this on a miss, so the linear scan is
-// bounded by the rare prefix-candidate case.
+// The stages are walked separately rather than over the merged table because
+// find_exact_normalized's two halves depend on the stage: the exact-only
+// spelling branch only exists where the map's exact_only set is non-empty
+// (models.dev - ccusage's primary set is empty), and the normalized-key index
+// is built per map, so a primary key and a models.dev key that share a
+// spelling make it name neither entry within that map.
 func (c Corpus) FindExactWithFallback(model string) (CorpusModel, bool) {
-	if pricing, ok := c.Models[model]; ok {
+	if pricing, ok := c.findExact(model, primaryStage); ok {
 		return pricing, true
 	}
-	if c.isExactOnlyLookup(model) {
+	if pricing, ok := c.findExact(model, modelsDevStage); ok {
+		return pricing, true
+	}
+	// Primary first, exactly as find_exact_normalized answers it; a primary
+	// miss falls through to the models.dev stage's own answer.
+	for _, which := range []stage{primaryStage, modelsDevStage} {
+		if pricing, ok := c.findExactNormalized(model, which); ok {
+			return pricing, true
+		}
+	}
+	return CorpusModel{}, false
+}
+
+// findExactNormalized is find_exact_normalized (pricing.rs:1524-1543) inside
+// one stage: an exact-only id under another spelling, else the stage's
+// normalized-key index.
+func (c Corpus) findExactNormalized(model string, which stage) (CorpusModel, bool) {
+	if which == modelsDevStage && c.isExactOnlyLookup(model) {
 		if id, ok := c.exactOnlyIDSpelledBy(model); ok {
-			pricing, found := c.Models[id]
+			pricing, found := c.findExact(id, which)
 			return pricing, found
 		}
 		return CorpusModel{}, false
@@ -60,7 +77,7 @@ func (c Corpus) FindExactWithFallback(model string) (CorpusModel, bool) {
 		found bool
 	)
 	for key, pricing := range c.Models {
-		if normalizePricingKey(key) != normalized {
+		if !which.holds(pricing) || normalizePricingKey(key) != normalized {
 			continue
 		}
 		if found {

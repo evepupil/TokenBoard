@@ -185,7 +185,7 @@ func firstNonEmpty(current, next string) string {
 // source reported a total larger than the named buckets, the remainder goes to
 // output if the output bucket is empty, otherwise to extra.
 func ApplyTotalFallback(usage *Usage, total uint64) {
-	known := usage.Input + usage.Output + usage.CacheCreation + usage.CacheRead + usage.Extra
+	known := usage.Total()
 	missing := SaturatingSubU64(total, known)
 	if missing == 0 {
 		return

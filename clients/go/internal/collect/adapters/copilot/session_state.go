@@ -252,7 +252,11 @@ func sessionStateDedupKey(sessionID, eventID string, hasID bool, timestampText, 
 // then strip one `-1m-internal` or `-1m` suffix, longest first.
 func normalizeCopilotModel(model string) string {
 	trimmed := trimRustSpace(model)
-	return stripSuffix(stripSuffix(trimmed, "-1m-internal"), "-1m")
+	if stripped, ok := cutSuffix(trimmed, "-1m-internal"); ok {
+		return stripped
+	}
+	stripped, _ := cutSuffix(trimmed, "-1m")
+	return stripped
 }
 
 func boolText(value bool) string {

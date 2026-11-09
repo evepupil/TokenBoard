@@ -392,3 +392,21 @@ func TestTotalsSumInEntryOrder(t *testing.T) {
 		t.Fatalf("totals cost = %v, want the raw sum", totals.Cost)
 	}
 }
+
+// TestUsageTotalSaturatesLikeRust pins total_tokens (types.rs:115-121): the
+// bucket sum saturates instead of wrapping, and the fallback's "known" count
+// uses the same saturated total, so a source reporting u64::MAX across several
+// buckets still prints u64::MAX rather than a small wrapped number.
+func TestUsageTotalSaturatesLikeRust(t *testing.T) {
+	usage := Usage{Input: math.MaxUint64 - 5, Output: 100, CacheCreation: 1, CacheRead: 1, Extra: 1}
+	if got := usage.Total(); got != math.MaxUint64 {
+		t.Fatalf("Total() = %d, want saturation to MaxUint64", got)
+	}
+	ApplyTotalFallback(&usage, math.MaxUint64)
+	if got := usage.Total(); got != math.MaxUint64 {
+		t.Fatalf("Total() after fallback = %d, want MaxUint64", got)
+	}
+	if usage.Output != 100 {
+		t.Fatalf("output = %d, want the known count to saturate (no fallback room)", usage.Output)
+	}
+}

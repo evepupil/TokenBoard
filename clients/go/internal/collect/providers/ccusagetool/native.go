@@ -26,6 +26,10 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
+	// The copilot adapter registers itself from its init(); this import is
+	// what puts that registration into every production build. A _test.go
+	// import would not (TestCopilotAdapterIsImportedFromAProductionFile).
+	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/copilot"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
@@ -118,9 +122,12 @@ func (runner *nativeToolRunner) toolEnvLookup() func(string) (string, bool) {
 
 // Run implements ccusage.CommandRunner.
 func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string, options ccusage.CommandOptions) (any, error) {
-	// The subprocess path bounds the run by killing the child at TimeoutMs;
-	// here the budget becomes a deadline on the scan, which the adapters honour
-	// between files via the context they are handed.
+	// The subprocess path bounds the run by killing the child at TimeoutMs.
+	// Here the same budget becomes a context deadline, but the adapters' loader
+	// signature (func(Options) ([]Entry, error)) cannot observe it: LoadCommand
+	// checks it before and after the load only, so an over-budget scan finishes
+	// before the deadline is noticed. The run still fails with
+	// nativeTimeoutError; it just cannot stop mid-scan.
 	var budgetCtx context.Context
 	if options.TimeoutMs > 0 {
 		var cancel context.CancelFunc

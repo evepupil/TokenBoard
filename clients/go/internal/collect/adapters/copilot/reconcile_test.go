@@ -618,3 +618,18 @@ func TestCopilotRawWindowConvertsInTheReportTimezone(t *testing.T) {
 func floatNear(got float64, want float64) bool {
 	return math.Abs(got-want) < 1e-9
 }
+
+// TestCopilotCreditGapCostIsADivision pins credit_gap_entry's arithmetic
+// (loader.rs:374, `nano_aiu as f64 / 1e11`): the dollars are a division, not a
+// multiply by the reciprocal. The two differ in the last bit for 38% of small
+// nano values, and that bit reaches snapshotHash.
+func TestCopilotCreditGapCostIsADivision(t *testing.T) {
+	for _, nano := range []uint64{5_000_000_000, 11_000_000_000, 107_200_000_000, 9_999_999_999} {
+		got := *creditGapEntry(CreditSnapshot{}, nano).CostUSD
+		want := float64(nano) / 1e11
+		if math.Float64bits(got) != math.Float64bits(want) {
+			t.Fatalf("cost(%d) = %v (0x%x), want the division's %v (0x%x)",
+				nano, got, math.Float64bits(got), want, math.Float64bits(want))
+		}
+	}
+}

@@ -75,12 +75,14 @@ func RustSpace(r rune) bool {
 	return false
 }
 
-// stripSuffix is Rust's str::strip_suffix.
-func stripSuffix(value, suffix string) string {
+// cutSuffix is Rust's str::strip_suffix: the remainder and whether the suffix
+// was present, so a caller can chain `strip_suffix(a).or_else(|| strip_suffix(b))`
+// without stripping twice.
+func cutSuffix(value, suffix string) (string, bool) {
 	if strings.HasSuffix(value, suffix) {
-		return value[:len(value)-len(suffix)]
+		return value[:len(value)-len(suffix)], true
 	}
-	return value
+	return value, false
 }
 
 // decodeJSONLineStrict decodes one JSONL line and rejects trailing content, as

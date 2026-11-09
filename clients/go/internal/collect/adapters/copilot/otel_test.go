@@ -1,6 +1,8 @@
 package copilot
 
 import (
+	"encoding/json"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -242,8 +244,9 @@ func TestCopilotModelSuffixNormalization(t *testing.T) {
 		" claude-opus-4.7-1m-internal ": "claude-opus-4.7",
 		"claude-opus-4.6-1m":            "claude-opus-4.6",
 		"gpt-5.4":                       "gpt-5.4",
-		// Only one suffix is stripped, longest first: `-1m-internal` then the
-		// trailing `-1m` is left in place.
+		// Only ONE suffix is stripped (strip_suffix().or_else(), parser.rs:633-640):
+		// `-1m-internal` hits first and the leftover `-1m` stays.
+		"x-1m-1m-internal": "x-1m",
 		"x-1m-internal-1m": "x-1m-internal",
 	}
 	for input, want := range cases {
@@ -278,5 +281,21 @@ func TestCopilotOtelPrefilterSkipsLinesWithoutAttributes(t *testing.T) {
 	)
 	if len(entries) != 1 || entries[0].DedupKey != "t3:s3" {
 		t.Fatalf("entries = %+v, want only t3:s3", entries)
+	}
+}
+
+// TestCopilotTimestampFromPartsRejectsOverflow pins timestamp_from_parts
+// (parser.rs:798-812): Rust chains checked_mul(1000) and checked_add, so a
+// parts pair whose sum leaves u64 answers None and the record falls back to
+// the next timestamp source. Only the multiply was guarded here, so a
+// seconds value at the boundary plus real nanos wrapped to a tiny millis.
+func TestCopilotTimestampFromPartsRejectsOverflow(t *testing.T) {
+	// seconds*1000 fits, but adding nanos/1e6 overflows u64.
+	if _, ok := timestampFromParts([]any{json.Number("18446744073709551"), json.Number("999999999")}); ok {
+		t.Fatal("an overflowing parts pair must not produce a timestamp")
+	}
+	// The boundary that DOES fit keeps working: i64::MAX milliseconds.
+	if millis, ok := timestampFromParts([]any{json.Number("9223372036854775"), json.Number("807000000")}); !ok || millis != math.MaxInt64 {
+		t.Fatalf("boundary parts = %d/%v, want i64::MAX (checked_add succeeds)", millis, ok)
 	}
 }

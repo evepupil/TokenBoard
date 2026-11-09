@@ -37,9 +37,13 @@ type Usage struct {
 	Extra         uint64
 }
 
-// Total is input + output + cache creation + cache read + extra.
+// Total is total_tokens (types.rs:115-121): input + output + cache creation +
+// cache read + extra, saturating like Rust's saturating_add chain. A plain sum
+// would wrap below the true total once the buckets pass u64's range, which the
+// report prints as totalTokens.
 func (u Usage) Total() uint64 {
-	return u.Input + u.Output + u.CacheCreation + u.CacheRead + u.Extra
+	return SaturatingAddU64(SaturatingAddU64(SaturatingAddU64(SaturatingAddU64(u.Input, u.Output),
+		u.CacheCreation), u.CacheRead), u.Extra)
 }
 
 // Entry is one priced record. Date is the entry's local-time calendar day under

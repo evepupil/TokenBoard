@@ -586,11 +586,16 @@ func timestampFromParts(value any) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
+	// checked_mul / checked_add (parser.rs:809): either step leaving u64
+	// answers None instead of wrapping to a tiny millis.
 	if seconds > (1<<64-1)/1000 {
 		return 0, false
 	}
-	millis := seconds*1000 + nanos/1_000_000
-	return clampMillis(millis), true
+	scaled := seconds * 1000
+	if scaled > 1<<64-1-nanos/1_000_000 {
+		return 0, false
+	}
+	return clampMillis(scaled + nanos/1_000_000), true
 }
 
 // timestampFromScalar is timestamp_from_scalar (parser.rs:813-825): the unit is

@@ -78,3 +78,29 @@ func TestFindExactWithFallbackExactOnlySpelling(t *testing.T) {
 		t.Fatalf("exact-only lookup = %+v/%v", pricing, ok)
 	}
 }
+
+// TestFindExactWithFallbackAmbiguityIsPerStage pins find_exact_with_fallback's
+// two-stage walk (pricing.rs:1501-1543): the primary map and the models.dev
+// map each build their own normalized-key index, so a primary key and a
+// models.dev key that share a spelling are NOT ambiguous with each other. A
+// global index over the merged table would answer miss here.
+func TestFindExactWithFallbackAmbiguityIsPerStage(t *testing.T) {
+	corpus := Corpus{Models: map[string]CorpusModel{
+		"claude-3-5-haiku": {Input: 8e-7, Source: SourceLiteLLM},
+		"claude-3.5-haiku": {Input: 8e-7, Source: SourceModelsDev},
+	}}
+	if pricing, ok := corpus.FindExactWithFallback("claude@3.5.haiku"); !ok || pricing.Source != SourceLiteLLM {
+		t.Fatalf("spelled lookup = %+v/%v, want the primary entry", pricing, ok)
+	}
+	// Two keys inside ONE stage remain ambiguous, and the walk then falls
+	// through to the other stage's answer.
+	ambiguous := Corpus{Models: map[string]CorpusModel{
+		"a.b":       {Input: 1, Source: SourceLiteLLM},
+		"a-b":       {Input: 2, Source: SourceBuiltin},
+		"z-a-b":     {Input: 3},
+		"qux-1.2.3": {Input: 4, Source: SourceModelsDev},
+	}}
+	if _, ok := ambiguous.FindExactWithFallback("a@b"); ok {
+		t.Fatal("a spelling two primary keys share must miss")
+	}
+}
