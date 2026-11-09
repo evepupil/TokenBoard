@@ -1,7 +1,7 @@
 package ccusagetool
 
-// The in-process report source for the twelve ccusage tool sources (S4a; the
-// copilot adapter lands with S4b). This is the same seam as the Codex adapter
+// The in-process report source for the twelve ccusage tool sources (S4a, plus
+// the copilot adapter in S4b). This is the same seam as the Codex adapter
 // (providers/codex/native.go): the provider pipeline above it is unchanged and
 // only the step that ran `ccusage <tool> daily|session --json` is replaced with
 // the native adapter's report.
@@ -81,8 +81,12 @@ type nativeToolRunner struct {
 	// variables (AMP_DATA_DIR, …) the way the ccusage subprocess would: from
 	// the process environment, with a non-empty provider value winning. A
 	// set-but-empty variable keeps its "zero roots" meaning through LookupEnv.
-	envFn   func(string) string
-	pricing map[string]nativeToolPricing
+	envFn func(string) string
+	// overrides are test-only data-directory values that win over both envFn
+	// and the process environment (the copilot goldens point COPILOT_HOME at
+	// their fixture tree this way, even when the maintainer's shell sets it).
+	overrides map[string]string
+	pricing   map[string]nativeToolPricing
 }
 
 type nativeToolPricing struct {
@@ -102,6 +106,9 @@ func newNativeToolRunner(prepared pricing.PreparedConfig, homeDir string, env fu
 // the subprocess would inherit it.
 func (runner *nativeToolRunner) toolEnvLookup() func(string) (string, bool) {
 	return func(key string) (string, bool) {
+		if value, overridden := runner.overrides[key]; overridden {
+			return value, true
+		}
 		if value := runner.envFn(key); value != "" {
 			return value, true
 		}
@@ -128,7 +135,7 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := runner.pricingFor(call.command, call.report)
+	resolved, err := runner.pricingFor(call)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +149,12 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	if runner.homeDir != "" {
 		opts.HomeDir = func() (string, error) { return runner.homeDir, nil }
 	}
-	entries, err := tools.LoadCommand(ctx, call.command, opts)
+	// The window reaches the adapters that narrow themselves (the copilot
+	// reconciliation, loader.rs:81-91); the report filter below still applies
+	// the same bounds to the rows.
+	sinceMs, untilMs := tools.DateRangeBoundsMs(call.since, call.until, call.timezone)
+	entries, err := tools.LoadCommandInWindow(ctx, call.command, opts,
+		&tools.Window{Since: call.since, Until: call.until, SinceMs: sinceMs, UntilMs: untilMs})
 	if err != nil {
 		if budgetCtx != nil && budgetCtx.Err() == context.DeadlineExceeded {
 			return nil, nativeTimeoutError(options.TimeoutMs, args)
@@ -211,6 +223,8 @@ type nativeToolCall struct {
 	since    string
 	until    string
 	timezone string
+	// mode is the --mode override; empty means the config's mode applies.
+	mode string
 }
 
 // parseNativeToolArgs parses the argument list the provider builds. Unknown
@@ -250,9 +264,14 @@ func parseNativeToolArgs(args []string) (nativeToolCall, error) {
 				call.until = value
 			case "--timezone":
 				call.timezone = value
+			case "--mode":
+				if value != "auto" && value != "calculate" && value != "display" {
+					return nativeToolCall{}, fmt.Errorf("ccusage tool native report: unsupported mode %q", value)
+				}
+				call.mode = value
 			}
-			// --config and --mode are resolved from the prepared config, which
-			// is the same file the subprocess path would have read.
+			// --config is resolved from the prepared config, which is the same
+			// file the subprocess path would have read.
 		default:
 			return nativeToolCall{}, fmt.Errorf("ccusage tool native report: unknown argument %q", arg)
 		}
@@ -263,13 +282,18 @@ func parseNativeToolArgs(args []string) (nativeToolCall, error) {
 	return call, nil
 }
 
-// pricingFor resolves the corpus and cost mode for one report's scope.
-func (runner *nativeToolRunner) pricingFor(command, report string) (nativeToolPricing, error) {
-	key := command + "\x00" + report
+// pricingFor resolves the corpus and cost mode for one invocation. A --mode
+// flag on the command line beats the config's (ccusage's CLI overrides the
+// config file), so it is part of the cache key.
+func (runner *nativeToolRunner) pricingFor(call nativeToolCall) (nativeToolPricing, error) {
+	key := call.command + "\x00" + call.report + "\x00" + call.mode
 	if cached, ok := runner.pricing[key]; ok {
 		return cached, nil
 	}
-	scope := runner.prepared.ResolveScope(pricing.Scope{Agent: command, Report: report})
+	scope := runner.prepared.ResolveScope(pricing.Scope{Agent: call.command, Report: call.report})
+	if call.mode != "" {
+		scope.Mode = call.mode
+	}
 	corpus, err := nativepricing.LoadEmbeddedCorpus()
 	if err != nil {
 		return nativeToolPricing{}, err
@@ -306,12 +330,6 @@ func nativeTimeoutError(timeoutMs int, args []string) error {
 
 func init() {
 	for _, source := range contract.CcusageToolSources() {
-		// copilot has no native adapter until S4b; registering it now would
-		// make a parity run fail with a missing-adapter error instead of
-		// reporting the source as not implemented.
-		if source == contract.SourceCopilot {
-			continue
-		}
 		collect.RegisterNative(source, nativeProvider{source: source})
 	}
 }

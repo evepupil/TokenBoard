@@ -20,19 +20,13 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
-// TestRegisterNativeInstallsEveryToolProviderExceptCopilot pins the registry
-// seam: RegisterNative answers for every tool source with an adapter, and
-// copilot reports not-implemented until S4b registers it. A silently missing
-// registration would make a parity run compare ccusage against itself.
-func TestRegisterNativeInstallsEveryToolProviderExceptCopilot(t *testing.T) {
+// TestRegisterNativeInstallsEveryToolProvider pins the registry seam:
+// RegisterNative answers for every one of the twelve tool sources (copilot
+// included since S4b). A silently missing registration would make a parity run
+// compare ccusage against itself.
+func TestRegisterNativeInstallsEveryToolProvider(t *testing.T) {
 	for _, source := range contract.CcusageToolSources() {
 		provider, ok := collect.LookupNative(source)
-		if source == contract.SourceCopilot {
-			if ok {
-				t.Fatalf("copilot has no native adapter until S4b, but RegisterNative answered")
-			}
-			continue
-		}
 		if !ok || provider == nil {
 			t.Fatalf("collect.LookupNative(%q) = (%v, %v), want the native provider", source, provider, ok)
 		}
