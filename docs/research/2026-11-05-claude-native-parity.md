@@ -458,8 +458,9 @@ CI/文档）加一轮 Codex 只读审查（8 条发现，无 Critical）。所�
 - **hook 对账在 `-fast` / 模型别名 / `<synthetic>` 行上会永久失败**：增量解析用原始
   `message.model`，重算走适配器的后缀/别名映射，精确键断言失败并保留 pending。这是 TS 侧
   同样存在的共享缺陷（先于 S2），修复要改 cursor/对账契约并两侧同时验证。
-- **DeepSeek 时段定价未实现**：`nativepricing` 没有 `FindAt`，`Cost` 的 `at` 形参被忽略。
-  影响所有含 deepseek 模型行的成本（claude 路径同样），归属 S1/S3，需补语料资产与冻结输入定义。
+- ~~**DeepSeek 时段定价未实现**：`nativepricing` 没有 `FindAt`，`Cost` 的 `at` 形参被忽略。~~
+  **2026-11-10 订正：已实现**（`internal/nativepricing/pricing_at.go`；`adapters/claude/cost.go`
+  在 DeepSeek 排程键上走 `FindAt`，与 `pricing.rs:1458-1483` 对应）。本节原表述已过期。
 - 非法代理项转义（`\ud800`）仍被 `encoding/json` 替换为 U+FFFD 而非整行拒绝；畸形输入。
 - 扫描层不设单行长度/递归深度上限（刻意与 ccusage 一致；共享 `sessionscan` 已有上限，适配器没有）。
 - parity/bench/shadow 的文本与 JSON 输出会打印本机绝对路径（仅开发工具，无凭据）。
@@ -489,3 +490,56 @@ CI/文档）加一轮 Codex 只读审查（8 条发现，无 Critical）。所�
 说明 native 现在解析的是与 ccusage 相同的 6 层作用域和同一个 mode。
 （命令：`cd clients/go && CLAUDE_CONFIG_DIR=<fixture> go run ./cmd/parity -source claude-code
 -since 2026-02-25 -until 2026-03-31 -json`，配置经 `TOKENBOARD_CCUSAGE_CONFIG` 传入。）
+
+## 9. 2026-11-10 复跑（当前工作树，S5 前的口径复核）
+
+前八节的数据取自 `feat/native-usage-sources` 早期提交（2026-11-05–11-07）。此后 nativepricing
+的查找语义（`FindExact` 只读主表、`FindExactWithFallback` 逐表走）与工具族饱和处理都改过，
+所以这次用当前工作树重跑一遍，确认 §3 的归因结构没有变化。
+
+**口径**：
+
+- 代码：`d482e34` + 工作树改动（`sessionusage` 的 JS 日期范围门、copilot 严格行解码与
+  `CandidateSets` 外提；均不触及 claude 路径）。
+- ccusage：20.0.33（`node_modules/.pnpm/@ccusage+ccusage-darwin-x64@20.0.33/…/bin/ccusage`）。
+- 命令：`/tmp/tb-parity -source claude-code -since 2026-10-25 -until 2026-11-08 -ccusage-bin <bin> -json`，
+  `--timezone Asia/Shanghai`，`pricingSource: static`（未配置 endpoint，48 条 bundled override）。
+- 参照：同窗口同 config 的 `ccusage claude daily --json --breakdown --offline --single-thread`
+  （164 个 `<date>|<model>` 键）。
+
+**结果**
+
+```json
+{ "status": "diff", "nativeSnapshots": 164, "ccusageSnapshots": 164,
+  "matched": 47, "pricingSource": "static" }
+```
+
+- `valueDiffs: 117`，`onlyInNative: 0`，`onlyInCcusage: 0`，`liveWrite: 0`；
+  117 条的 `fields` **全部只有 `costUsd`**（`field sets: Counter({('costUsd',): 117})`）。
+- 三路归因（对 117 条逐条比对 `--offline` 值）：
+
+| 分类 | 条数 | 说明 |
+|---|---:|---|
+| `native == ccusage(--offline)`（逐位相同） | **72** | native 复刻的是冻结/离线语义，这两侧同源 |
+| `--offline` 为 0 而 native > 0 | **45** | 模型不在 ccusage 内置表；native 按 `ModeAuto` 取行内 `costUSD`，ccusage 在线用实时价重算 |
+| 两个不同值（非三方） | **0** | 上一轮 §3.1 的 6 条 `deepseek-v4-flash` 差异在本轮未复现 |
+
+- 涉及 24 个模型，全部集中在代理/网关别名族：`DeepSeek-V4.1-Flash`(15)、
+  `deepseek-v4.1-flash`(15)、`deepseek-ai/deepseek-v4.1-flash`(14)、`group/auto-dfmodel`(13)、
+  `deepseek-v4.1-flash-1017`(12)、`deepseek_for_coding`(8)、`GLM-5.3-Flash`(5)、
+  `deepseek-ai/DeepSeek-V4.1-Flash-1017`(5)、`DeepSeek-Flash`(5)、`self-dploy/DeepSeek-V4.1-Flash`(4)、
+  `stepfun-ai/step-5-preview`(4)、`DeepSeek-V4-Flash`(4)，其余 12 个各 1–2 条。
+- stderr 一行：`native: Skipped 5681 Claude session files last written before the --since window`
+  （窗口过滤生效，与 ccusage 的 `--since` 语义一致）。
+
+**结论（与规格 §2 G2 对齐）**
+
+G2 明确把 parity 基准定义为「冻结语料（20.0.33 构建期快照）+ 服务端下发的 override」，并说明
+「与线上 ccusage 逐字节一致」在定义上不可达、预期差异只落在未被目录覆盖的模型上。本轮数据正是
+这个结构的又一次实测：**语义层（token、日期归属、模型名、sessionCount）164/164 一致**，
+117 条成本差异逐条可归因（72 条就是 ccusage 自己在离线口径下的答案，45 条是未覆盖模型上两种
+口径各自的正确结果）。
+
+因此 §10.1.4 的「全 match」对 claude 不可满足，它不是 claude 的翻转闸门；claude 的闸门应读作
+「全部非成本字段一致 + 每条成本差异可归因到冻结语料口径」，本轮已满足。§6.1「`useNativeClaude`
+保持 false」的结论仍然成立，因为翻转属于 S5 的一次独立决策，不以本节为自动授权。
