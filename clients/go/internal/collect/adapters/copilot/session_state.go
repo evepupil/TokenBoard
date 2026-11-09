@@ -1,7 +1,6 @@
 package copilot
 
 import (
-	"encoding/json"
 	"math"
 	"path/filepath"
 	"strconv"
@@ -62,114 +61,41 @@ func ptrFloat(value float64) *float64 { return &value }
 // reads event by event: only session.shutdown and session.usage_checkpoint
 // count, a missing type, timestamp or parseable timestamp skips the line, and a
 // line that is not JSON is skipped the way jsonl::records skips it.
-func parseSessionStateFile(path string) (SourceUsage, error) {
+func parseSessionStateFile(path string, ceiling int64) (SourceUsage, error) {
 	parsed := SourceUsage{}
 	sessionID, ok := sessionIDFromPath(path)
 	if !ok {
 		return parsed, nil
 	}
-	return parseSessionStateContent(path, sessionID, &parsed)
+	return parseSessionStateContent(path, sessionID, ceiling, &parsed)
 }
 
-func parseSessionStateContent(path, sessionID string, parsed *SourceUsage) (SourceUsage, error) {
+func parseSessionStateContent(path, sessionID string, ceiling int64, parsed *SourceUsage) (SourceUsage, error) {
 	prefilter := func(line []byte) bool {
 		return containsBytes(line, []byte(shutdownEvent)) || containsBytes(line, []byte(usageCheckpointEvent))
 	}
 	err := scanJSONL(path, prefilter, decodeSessionStateEvent, func(value any) {
-		visitSessionStateEvent(parsed, sessionID, value)
+		visitSessionStateEvent(parsed, sessionID, ceiling, value)
 	})
 	return *parsed, err
 }
 
-// decodeSessionStateEvent is CopilotSessionStateEvent's Deserialize: a field
-// declared with a value type but written in another JSON kind fails serde, and
-// the line drops.
+// decodeSessionStateEvent is CopilotSessionStateEvent's Deserialize
+// (parser.rs:164-181). Every declared field is read through a lenient
+// deserializer (jsonl::non_empty_string / jsonl::lenient_object), so an
+// unexpectedly typed field never fails the line: strings become nil when they
+// are not strings, and the nested objects are carried raw for
+// visitSessionStateEvent to read the same way. Unknown fields are ignored, as
+// serde ignores them (the upstream fixtures carry `"cost"` inside `requests`).
 func decodeSessionStateEvent(line []byte) (any, bool) {
 	value, ok := tools.DecodeJSONLine(line)
 	if !ok {
 		return nil, false
 	}
-	event, ok := value.(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	for _, key := range []string{"type", "id", "timestamp"} {
-		if field, present := event[key]; present && field != nil {
-			if _, isString := field.(string); !isString {
-				return nil, false
-			}
-		}
-	}
-	if data, present := event["data"]; present && data != nil {
-		object, isObject := data.(map[string]any)
-		if !isObject {
-			return nil, false
-		}
-		if !fieldsMatchNames(object, []any{"totalNanoAiu"}, nil) {
-			return nil, false
-		}
-		if metrics, present := object["modelMetrics"]; present && metrics != nil {
-			models, isObject := metrics.(map[string]any)
-			if !isObject {
-				return nil, false
-			}
-			for _, raw := range models {
-				metric, isObject := raw.(map[string]any)
-				if !isObject {
-					return nil, false
-				}
-				if usage, present := metric["usage"]; present && usage != nil {
-					usageObject, isObject := usage.(map[string]any)
-					if !isObject {
-						return nil, false
-					}
-					if !fieldsMatchNames(usageObject, []any{"inputTokens", "outputTokens",
-						"cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}, []string{"cost"}) {
-						return nil, false
-					}
-				}
-				if requests, present := metric["requests"]; present && requests != nil {
-					requestsObject, isObject := requests.(map[string]any)
-					if !isObject {
-						return nil, false
-					}
-					if !fieldsMatchNames(requestsObject, []any{"count"}, []string{"cost"}) {
-						return nil, false
-					}
-				}
-				if !fieldsMatchNames(metric, []any{"totalNanoAiu"}, []string{"usage", "requests"}) {
-					return nil, false
-				}
-			}
-		}
-	}
 	return value, true
 }
 
-// fieldsMatchNames checks the named fields of a typed object: a numeric field
-// must be a JSON number when present (lenient_f64, Option<f64> or u64), and
-// other must be a JSON object when present (lenient_object with an Option<T>
-// target).
-func fieldsMatchNames(object map[string]any, numbers []any, objects []string) bool {
-	for _, name := range numbers {
-		key, _ := name.(string)
-		if field, present := object[key]; present && field != nil {
-			if _, isNumber := field.(json.Number); !isNumber {
-				return false
-			}
-		}
-	}
-	for _, key := range objects {
-		if field, present := object[key]; present && field != nil {
-			if _, isObject := field.(map[string]any); !isObject {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func visitSessionStateEvent(parsed *SourceUsage, sessionID string, value any) {
+func visitSessionStateEvent(parsed *SourceUsage, sessionID string, ceiling int64, value any) {
 	event, ok := tools.LenientObject(value)
 	if !ok {
 		return
@@ -187,11 +113,14 @@ func visitSessionStateEvent(parsed *SourceUsage, sessionID string, value any) {
 	if !ok {
 		return
 	}
+	// A string that does not parse falls back to the file's mtime, as
+	// format_rfc3339_millis does on a None instant.
 	timestamp, ok := tools.ParseTSTimestamp(timestampText)
 	if !ok {
-		return
+		timestamp = ceiling
 	}
 	data, _ := tools.LenientObject(event["data"])
+
 	sessionTotal, _ := lenientOptionalF64(data["totalNanoAiu"])
 	sessionNano, sessionHasTotal := nanoAiu(sessionTotal)
 	eventID, hasID := tools.NonEmptyString(event["id"])

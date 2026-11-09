@@ -65,6 +65,10 @@ func SourcePaths(o tools.Options) ([]SourceFile, error) {
 		// Only <session-state>/<dir>/events.jsonl counts: the session id is the
 		// parent directory name, and deeper layouts belong to nested tooling.
 		if entries, err := os.ReadDir(filepath.Join(root, "session-state")); err == nil {
+			// Sorted: os.ReadDir's order is a filesystem order, and the merge
+			// downstream (the tie order of equal-timestamp snapshots) depends
+			// on it.
+			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 			for _, entry := range entries {
 				if !entry.IsDir() {
 					continue

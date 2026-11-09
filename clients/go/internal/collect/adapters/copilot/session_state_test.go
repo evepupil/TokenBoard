@@ -123,7 +123,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	content := `{"type":"session.shutdown","id":"s","timestamp":"2026-04-15T09:52:27.352Z","data":{"modelMetrics":{"m":{"usage":{"inputTokens":1}}}}}`
 	root := t.TempDir()
 	named := writeFixtureFile(t, root, "trimmed  /events.jsonl", content)
-	usage, err := parseSessionStateFile(named)
+	usage, err := parseSessionStateFile(named, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	// A file directly inside a directory whose name trims to empty yields
 	// nothing, without reading the file.
 	blank := writeFixtureFile(t, filepath.Join(root, "  "), "events.jsonl", content)
-	usage, err = parseSessionStateFile(blank)
+	usage, err = parseSessionStateFile(blank, 0)
 	if err != nil {
 		t.Fatalf("a blank session directory must not be an error: %v", err)
 	}
@@ -173,7 +173,7 @@ func eventsFor(t *testing.T, session string, lines []string) (usage SourceUsage)
 
 func eventsAt(t *testing.T, path string) SourceUsage {
 	t.Helper()
-	usage, err := parseSessionStateFile(path)
+	usage, err := parseSessionStateFile(path, 0)
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
@@ -190,22 +190,41 @@ func ptrString(value *uint64) string {
 	return string(out)
 }
 
-// TestCopilotSessionStateRejectsStructurallyInvalidEvents pins the typed-event
-// gate (parser.rs:165-226): a session.shutdown whose `data` is not an object, or
-// whose `data.totalNanoAiu` is not a number, fails serde and the whole line is
-// skipped - unlike a missing field, which defaults.
-func TestCopilotSessionStateRejectsStructurallyInvalidEvents(t *testing.T) {
+// TestCopilotSessionStateDropsOnlyNonStringFields pins the lenient typed-event
+// gate (parser.rs:164-226): every declared field goes through a lenient
+// deserializer, so a wrongly typed `type` or `id` still drops the line
+// (non_empty_string), while a non-object `data`, a string `totalNanoAiu`, an
+// array `modelMetrics` and an unknown `cost` field inside `requests` are all
+// tolerated - serde ignores unknown fields and lenient_object turns a
+// non-object into None, so the shutdown survives with no credits.
+func TestCopilotSessionStateDropsOnlyNonStringFields(t *testing.T) {
 	usage := eventsFor(t, "session-1", []string{
 		`{"type":"session.shutdown","id":"data-is-string","timestamp":"2026-04-15T09:52:27.352Z","data":"session.shutdown"}`,
 		`{"type":"session.shutdown","id":"total-is-string","timestamp":"2026-04-15T09:52:28.352Z","data":{"totalNanoAiu":"12"}}`,
 		`{"type":"session.shutdown","id":"model-metrics-is-array","timestamp":"2026-04-15T09:52:29.352Z","data":{"modelMetrics":[]}}`,
 		`{"type":"42","timestamp":"2026-04-15T09:52:30.352Z","data":{}}`,
+		`{"type":"session.shutdown","id":7,"timestamp":"2026-04-15T09:52:30.852Z","data":{}}`,
 		`{"type":"session.shutdown","id":"kept","timestamp":"2026-04-15T09:52:31.352Z","data":{"totalNanoAiu":12}}`,
+		`{"type":"session.shutdown","id":"cost-ignored","timestamp":"2026-04-15T09:52:32.352Z","data":{"totalNanoAiu":12,"modelMetrics":{"gpt-5.4":{"totalNanoAiu":12,"usage":{"inputTokens":10,"cost":999},"requests":{"count":1,"cost":999}}}}}`,
 	})
-	if len(usage.CreditSnapshots) != 1 {
-		t.Fatalf("snapshots = %+v, want only the well-formed shutdown", usage.CreditSnapshots)
+	got := []string{}
+	for _, snapshot := range usage.CreditSnapshots {
+		got = append(got, snapshot.DedupKey+"="+ptrString(snapshot.TotalNanoAiu))
 	}
-	if usage.CreditSnapshots[0].DedupKey != "credits:session-1:kept" {
-		t.Fatalf("snapshot = %+v", usage.CreditSnapshots[0])
+	want := []string{
+		"credits:session-1:data-is-string=<nil>",
+		"credits:session-1:total-is-string=<nil>",
+		"credits:session-1:model-metrics-is-array=<nil>",
+		// A numeric id falls back to the content key, as Rust's
+		// `event.id.as_deref()` does on a None.
+		"credits:session-1:true:1776246750852:None=<nil>",
+		"credits:session-1:kept=12",
+		"credits:session-1:cost-ignored=12",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("snapshots =\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+	if len(usage.Entries) != 1 || usage.Entries[0].Input != 10 || usage.Entries[0].Model != "gpt-5.4" {
+		t.Fatalf("entries = %+v, want the one gpt-5.4 usage record", usage.Entries)
 	}
 }

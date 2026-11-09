@@ -21,6 +21,9 @@ const unattributedModel = "unknown"
 // ReconcileInput is everything reconcile_session_state_entries and
 // credit_gap_entries read.
 type ReconcileInput struct {
+	// Timezone is the report --timezone, which date_range_bounds_ms resolves the
+	// since/until bounds in.
+	Timezone string
 	// Entries are the session-state model snapshots of every file, in discovery
 	// order.
 	Entries []Entry
@@ -28,6 +31,10 @@ type ReconcileInput struct {
 	Snapshots []CreditSnapshot
 	// OTelEntries are the OTel calls; only their timestamps matter here.
 	OTelEntries []Entry
+	// Since and Until are the raw --since/--until bounds as the date-range
+	// helpers take them ("" is absent).
+	Since string
+	Until string
 	// SinceMs and UntilMs are the --since/--until window as epoch
 	// milliseconds, UntilMs exclusive (date_range_bounds_ms). nil is
 	// unbounded.
@@ -70,13 +77,23 @@ func otelKey(sessionID, model string) string {
 // minus pricing and the OTel row filter, which the loader applies.
 func Reconcile(input ReconcileInput) Reconciliation {
 	attributed := map[string]uint64{}
+	// load_entries_inner hands date_range_bounds_ms the RAW Option<&str>
+	// bounds (loader.rs:81-85), so a partial spelling such as "202601" narrows
+	// nothing here, unlike the lexicographic report filter.
+	sinceMs, untilMs := tools.DateRangeBoundsMs(input.Since, input.Until, input.Timezone)
+	if input.SinceMs != nil {
+		sinceMs = input.SinceMs
+	}
+	if input.UntilMs != nil {
+		untilMs = input.UntilMs
+	}
 	intervals, otelAfter := reconcileSessionStateEntries(sessionStateEntries(input.Entries),
-		otelCallTimestamps(input.OTelEntries), input.SinceMs, input.UntilMs, attributed)
+		otelCallTimestamps(input.OTelEntries), sinceMs, untilMs, attributed)
 	skipped := input.SkippedSession
 	if skipped == nil {
 		skipped = func(string) bool { return false }
 	}
-	gaps := creditGapEntries(input.Snapshots, attributed, skipped, input.SinceMs, input.UntilMs)
+	gaps := creditGapEntries(input.Snapshots, attributed, skipped, sinceMs, untilMs)
 	return Reconciliation{Intervals: intervals, OTelAfter: otelAfter, AttributedNano: attributed, Gaps: gaps}
 }
 

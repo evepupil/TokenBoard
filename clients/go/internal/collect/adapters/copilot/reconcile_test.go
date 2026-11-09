@@ -570,33 +570,51 @@ func TestCopilotCreditGapCalculateModeHasNoCost(t *testing.T) {
 	}
 }
 
-// TestCopilotSessionEntriesDedupedByKey pins deduplicate_session_entries
-// (loader.rs:379-395): per dedup key the latest timestamp wins, duplicates at
-// the same timestamp keep the first occurrence's order.
-func TestCopilotSessionEntriesDedupedByKey(t *testing.T) {
-	same := shutdownEntry(t, "s", "shutdown-1", "2026-04-15T09:52:27.352Z", 10, 20, 0, 0, 0, 0, 0)
-	result := Reconcile(ReconcileInput{Entries: []Entry{same, same, shutdownEntry(t, "s", "shutdown-2", "2026-04-15T09:53:27.352Z", 30, 40, 0, 0, 0, 0, 0)}})
-	if len(result.Intervals) != 2 || result.Intervals[1].Input != 20 {
-		t.Fatalf("intervals = %+v, want the duplicate collapsed before differencing", result.Intervals)
+// TestCopilotRawWindowConvertsInTheReportTimezone pins loader.rs:81-85: the
+// reconciliation turns its string bounds into milliseconds in the REPORT
+// timezone, not the host's. 2026-01-03T10:00Z and 12:00Z are 2026-01-04 02:00
+// and 04:00 in Pacific/Auckland (UTC+13 in January). --since 20260104 therefore
+// keeps the checkpoint and reports its 01-04 gap, while --until 20260103 ends
+// at 2026-01-04T00:00 Auckland = 2026-01-03T11:00Z and drops it for a host that
+// resolves the same spelling to 01-04T00:00Z (the UTCMs case below, the host
+// zone in CI), which would keep it.
+func TestCopilotRawWindowConvertsInTheReportTimezone(t *testing.T) {
+	snapshots := []CreditSnapshot{
+		shutdownSnapshot(t, "s", "shutdown-1", "2026-01-03T10:00:00.000Z", credits(30)),
+		checkpointSnapshot(t, "s", "checkpoint-1", "2026-01-03T12:00:00.000Z", 50),
 	}
+	entries := []Entry{usageShutdown(t, "s", "shutdown-1", "2026-01-03T10:00:00.000Z", 10*nanoPerCredit)}
+	auckland := Reconcile(ReconcileInput{
+		Entries: entries, Snapshots: snapshots, Since: "20260104", Timezone: "Pacific/Auckland",
+	})
+	requireRows(t, creditRows(auckland, "Pacific/Auckland"), []string{"2026-01-04 unknown 0 20"})
 
-	// A re-export of the same key with a later timestamp replaces the earlier
-	// copy, so the kept snapshot is the latest one.
-	earlier := shutdownEntry(t, "s", "k", "2026-04-15T09:00:00.000Z", 5, 0, 0, 0, 0, 0, 0)
-	later := shutdownEntry(t, "s", "k", "2026-04-15T09:10:00.000Z", 50, 0, 0, 0, 0, 0, 0)
-	replaced := Reconcile(ReconcileInput{Entries: []Entry{later, earlier}})
-	if len(replaced.Intervals) != 1 || replaced.Intervals[0].Input != 50 {
-		t.Fatalf("intervals = %+v, want the latest copy of the key kept", replaced.Intervals)
+	utcEnd := msAt(t, "2026-01-04T00:00:00.000Z")
+	if bound := Reconcile(ReconcileInput{
+		Entries: entries, Snapshots: snapshots, UntilMs: &utcEnd,
+	}); len(bound.Gaps) != 2 || bound.Gaps[1].DedupKey != "credits:s:checkpoint-1" {
+		t.Fatalf("gaps against the UTC end bound = %+v, want the 01-04 checkpoint", bound.Gaps)
 	}
-	// At equal timestamps the later occurrence in discovery order is kept.
-	tie := later
-	tie.Input = 60
-	tied := Reconcile(ReconcileInput{Entries: []Entry{later, tie}})
-	if len(tied.Intervals) != 1 || tied.Intervals[0].Input != 60 {
-		t.Fatalf("intervals = %+v, want the later copy at an equal timestamp", tied.Intervals)
+	earlier := Reconcile(ReconcileInput{
+		Entries: entries, Snapshots: snapshots, Until: "20260103", Timezone: "Pacific/Auckland",
+	})
+	if len(earlier.Gaps) != 1 || earlier.Gaps[0].DedupKey != "credits:s:shutdown-1" {
+		t.Fatalf("gaps = %+v, want only the pre-window 01-03 shutdown gap", earlier.Gaps)
+	}
+	partial := Reconcile(ReconcileInput{
+		Entries: []Entry{
+			shutdownEntry(t, "s", "a", "2026-01-01T00:00:00.000Z", 10, 0, 0, 0, 0, 0, 0),
+			shutdownEntry(t, "s", "b", "2026-01-11T00:00:00.000Z", 20, 0, 0, 0, 0, 0, 0),
+		},
+		Since: "202601", Timezone: "Pacific/Auckland",
+	})
+	if len(partial.Intervals) != 2 {
+		t.Fatalf("partial since: intervals = %+v, want both (no millisecond bound)", partial.Intervals)
 	}
 }
 
-func floatNear(left, right float64) bool {
-	return math.Abs(left-right) < 1e-12*math.Max(1, math.Abs(right))
+// floatNear compares two costs at the 1e-9 absolute precision the fixtures'
+// decimal amounts need.
+func floatNear(got float64, want float64) bool {
+	return math.Abs(got-want) < 1e-9
 }

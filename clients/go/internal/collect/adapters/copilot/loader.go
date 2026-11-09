@@ -18,12 +18,18 @@ import (
 // filter uses and the millisecond bounds the reconciliation uses).
 type LoadInput struct {
 	Options tools.Options
-	Since   string
-	Until   string
+	// Since and Until are the string window the report filter compares dates
+	// with (filter_loaded_entries_by_date); the reconciliation reads them too
+	// (loader.rs:81-85). An absent bound is the empty string.
+	Since string
+	Until string
 	// SinceMs and UntilMs are tools.DateRangeBoundsMs(Since, Until, timezone):
 	// the half-open window the session-state reconciliation narrows itself by.
 	SinceMs *int64
 	UntilMs *int64
+	// Now replaces utc_now - the timestamp an OTel record whose file has no
+	// readable mtime falls back to. Zero means time.Now(); tests pin it.
+	Now time.Time
 }
 
 // Load is load_entries (loader.rs:22-36): every Copilot row, priced, dated in
@@ -36,7 +42,11 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	ceiling := timeNowMillis()
+	now := input.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	ceiling := now.UnixMilli()
 	parsed := make([]SourceUsage, len(sources))
 	failures := make([]error, len(sources))
 	// Files are read in parallel but keep their discovery order, so the merge
@@ -84,8 +94,11 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 		Entries:        sessionStateEntries,
 		Snapshots:      creditSnapshots,
 		OTelEntries:    otelEntries,
+		Since:          input.Since,
+		Until:          input.Until,
 		SinceMs:        input.SinceMs,
 		UntilMs:        input.UntilMs,
+		Timezone:       input.Options.Timezone,
 		SkippedSession: func(sessionID string) bool { return otelSessions[sessionID] },
 	})
 	// OpenTelemetry rows record every model call, so sessions that have them
@@ -120,7 +133,7 @@ func readSourceFile(source SourceFile, ceiling int64) (SourceUsage, error) {
 		}
 		return SourceUsage{Entries: entries}, nil
 	default:
-		return parseSessionStateFile(source.Path)
+		return parseSessionStateFile(source.Path, ceiling)
 	}
 }
 
@@ -138,11 +151,26 @@ func usageEntryToLoaded(entry Entry, o tools.Options) tools.Entry {
 		ReportedCost:  entry.CostUSD,
 	}
 	cost, missing := nativepricing.Cost(o.Corpus, entry.Model, costUsage, at, o.Mode, false, false)
+	// Copilot uses missing_pricing_model_for_usage (cost.rs:48-59): quiet under
+	// --mode display and under auto when the entry reports its cost (a credit
+	// gap does), quiet for an entry without tokens, and otherwise a miss on the
+	// static lookup Find - not the timestamped one. A credit gap ("unknown",
+	// zero tokens) therefore never reaches unpricedModels.
+	if o.Mode == nativepricing.ModeDisplay || (o.Mode == nativepricing.ModeAuto && entry.CostUSD != nil) ||
+		costUsage.Input+costUsage.Output+costUsage.CacheCreate5m+costUsage.CacheRead == 0 {
+		missing = false
+	} else if _, ok := o.Corpus.Find(entry.Model); ok {
+		missing = false
+	}
 	var messageCount *uint64
 	if entry.RequestCount > 0 {
 		count := entry.RequestCount
 		messageCount = &count
 	}
+	// The session accumulator reads the entry's own timestamp for
+	// lastActivity/firstActivity (copilot's report passes
+	// include_session_metadata=true, loader.rs:509 + report.rs).
+
 	return tools.Entry{
 		Timestamp: entry.Timestamp,
 		Date:      tools.FormatDateTZ(entry.Timestamp, o.Timezone),
@@ -161,10 +189,7 @@ func usageEntryToLoaded(entry Entry, o tools.Options) tools.Entry {
 		ProjectPath:    "GitHub Copilot CLI",
 		MessageCount:   messageCount,
 		MissingPricing: missing,
+		LastActivity:   entry.Timestamp,
+		FirstActivity:  entry.Timestamp,
 	}
-}
-
-// timeNowMillis is utc_now in epoch milliseconds.
-func timeNowMillis() int64 {
-	return time.Now().UnixMilli()
 }

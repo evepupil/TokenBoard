@@ -239,11 +239,14 @@ func TestCopilotReportShapeMatchesFocusedSnapshot(t *testing.T) {
 	}
 	// session-a: see below. The gap-free session-b is credited by its shutdown
 	// alone, and the OTel-only session-c keeps its own date.
-	// OTel's 2 calls outnumber the 1 + 2 the shutdowns report (the later
-	// shutdown restores the earlier breakdown), so OTel replaces the intervals
-	// and session-a contributes only its two OTel rows.
+	// session-a's intervals are the 2026-01-02 shutdown (its `requests.cost`
+	// is an unknown field serde ignores, so the line counts) and the
+	// 2026-01-03 shutdown after it. OTel's 2 calls do NOT outnumber the 3
+	// requests they report, so the intervals stand and the two OTel rows are
+	// suppressed (otel_after = the latest shutdown).
 	want := []string{
-		"2026-01-03 in=163 out=94 cacheRead=20 cacheCreate=30 models=claude-opus-4.6",
+		"2026-01-02 in=70 out=50 cacheRead=10 cacheCreate=20 models=claude-opus-4.6",
+		"2026-01-03 in=93 out=44 cacheRead=10 cacheCreate=10 models=claude-opus-4.6",
 		"2026-02-01 in=65 out=30 cacheRead=10 cacheCreate=15 models=gpt-5.4",
 		// OTel-only session: its own date by endTime.
 		"2026-02-02 in=7 out=8 cacheRead=0 cacheCreate=0 models=gpt-5.4",
@@ -255,8 +258,8 @@ func TestCopilotReportShapeMatchesFocusedSnapshot(t *testing.T) {
 
 // TestCopilotSessionReportShape pins the focused-monthly-and-session snapshot's
 // session shape: rows keyed by sessionId, messageCount from the request counts,
-// and no lastActivity/firstActivity/projectPath (copilot's report passes
-// include_session_metadata=false, report.rs:11-16).
+// and lastActivity/firstActivity/projectPath (copilot's report passes
+// include_session_metadata=true, report.rs:11-16).
 func TestCopilotSessionReportShape(t *testing.T) {
 	home := t.TempDir()
 	writeEvents(t, home, "session-a",
@@ -277,10 +280,11 @@ func TestCopilotSessionReportShape(t *testing.T) {
 	if row["sessionId"] != "session-a" || row["messageCount"] != uint64(3) || row["inputTokens"] != uint64(150) {
 		t.Fatalf("session row = %v, want session-a with 3 requests and 150 input tokens", row)
 	}
-	for _, key := range []string{"lastActivity", "firstActivity", "projectPath"} {
-		if _, present := row[key]; present {
-			t.Fatalf("copilot session rows must not carry %s: %v", key, row)
-		}
+	if row["lastActivity"] != "2026-01-03T01:20:00.000Z" || row["firstActivity"] != "2026-01-02T01:20:00.000Z" {
+		t.Fatalf("session row times = %v..%v", row["firstActivity"], row["lastActivity"])
+	}
+	if row["projectPath"] != "GitHub Copilot CLI" {
+		t.Fatalf("session row projectPath = %v", row["projectPath"])
 	}
 }
 
@@ -335,5 +339,22 @@ func TestCopilotEmptyHomeProducesNoEntries(t *testing.T) {
 	}})
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("Load = (%v, %v), want no entries and no error", entries, err)
+	}
+}
+
+// TestCopilotSessionStateUnreadableTimeFallsBackToTheFileTime pins parser.rs's
+// timestamp fallthrough: an event whose timestamp cannot be parsed is dated at
+// the file's mtime, not dropped.
+func TestCopilotSessionStateUnreadableTimeFallsBackToTheFileTime(t *testing.T) {
+	// The line carries the event name the prefilter looks for and the rest of
+	// its fields; the timestamp string alone is unreadable.
+	path := writeFixtureFile(t, t.TempDir(), "session-x/events.jsonl",
+		`{"type":"session.shutdown","id":"session.shutdown","timestamp":"yesterday","data":{"modelMetrics":{"m":{"usage":{"inputTokens":5}}}}}`+"\n")
+	usage, err := parseSessionStateFile(path, 1_700_000_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage.Entries) != 1 || usage.Entries[0].Timestamp != 1_700_000_000_000 {
+		t.Fatalf("entries = %+v, want the mtime fallback", usage.Entries)
 	}
 }
