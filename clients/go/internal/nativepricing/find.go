@@ -27,43 +27,44 @@ func (s stage) holds(pricing CorpusModel) bool {
 
 // FindExact is PricingMap::find_exact (pricing.rs:1484-1486): one map hit, no
 // aliases, no normalized spellings, no fuzzy stages.
-func (c Corpus) FindExact(model string) (CorpusModel, bool) {
-	pricing, ok := c.Models[model]
-	return pricing, ok
-}
-
-// FindExactWithFallback is find_exact_with_fallback (pricing.rs:1501-1522):
-// primary exact, models.dev exact, then find_exact_normalized per stage
-// (pricing.rs:1524-1543). Never a fuzzy match. The live models.dev map is
-// disabled whenever ccusage runs offline, which the collector always does.
 //
-// The stages are walked separately rather than over the merged table because
-// find_exact_normalized's two halves depend on the stage: the exact-only
-// spelling branch only exists where the map's exact_only set is non-empty
-// (models.dev - ccusage's primary set is empty), and the normalized-key index
-// is built per map, so a primary key and a models.dev key that share a
-// spelling make it name neither entry within that map.
-func (c Corpus) FindExactWithFallback(model string) (CorpusModel, bool) {
-	if pricing, ok := c.findExact(model, primaryStage); ok {
-		return pricing, true
-	}
-	if pricing, ok := c.findExact(model, modelsDevStage); ok {
-		return pricing, true
-	}
-	// Primary first, exactly as find_exact_normalized answers it; a primary
-	// miss falls through to the models.dev stage's own answer.
-	for _, which := range []stage{primaryStage, modelsDevStage} {
-		if pricing, ok := c.findExactNormalized(model, which); ok {
-			return pricing, true
-		}
-	}
-	return CorpusModel{}, false
+// The map is the PRIMARY one. ccusage's find_exact is a method on the primary
+// PricingMap (LiteLLM plus the builtin table); the embedded models.dev snapshot
+// is a separate map that only find_exact_with_fallback and the fuzzy stages
+// consult. Both of FindExact's callers - kilo's provider-qualified candidate
+// and openclaw's decorated display name - ask that primary question, so a
+// models.dev-only key must miss here or the qualified name would enter a
+// candidate chain ccusage never adds.
+func (c Corpus) FindExact(model string) (CorpusModel, bool) {
+	return c.findExact(model, primaryStage)
 }
 
-// findExactNormalized is find_exact_normalized (pricing.rs:1524-1543) inside
-// one stage: an exact-only id under another spelling, else the stage's
-// normalized-key index.
+// FindExactWithFallback is find_exact_with_fallback (pricing.rs:1501-1516):
+// each map's find_exact_normalized answers in full - exact key, exact-only
+// spelling, normalized-key index (pricing.rs:1518-1533) - and only then is the
+// next map consulted. The live models.dev map is disabled whenever ccusage runs
+// offline, which the collector always does.
+//
+// The walk is per map rather than one exact-then-normalized pass over the
+// merged table because find_exact_normalized's two halves depend on the stage:
+// the exact-only spelling branch only exists where the map's exact_only set is
+// non-empty (models.dev - ccusage's primary set is empty), and the
+// normalized-key index is built per map, so a primary key and a models.dev key
+// that share a spelling make it name neither entry within that map.
+func (c Corpus) FindExactWithFallback(model string) (CorpusModel, bool) {
+	if pricing, ok := c.findExactNormalized(model, primaryStage); ok {
+		return pricing, true
+	}
+	return c.findExactNormalized(model, modelsDevStage)
+}
+
+// findExactNormalized is find_exact_normalized (pricing.rs:1518-1533) inside
+// one map: the exact key, then an exact-only id under another spelling, then
+// the map's normalized-key index.
 func (c Corpus) findExactNormalized(model string, which stage) (CorpusModel, bool) {
+	if pricing, ok := c.findExact(model, which); ok {
+		return pricing, true
+	}
 	if which == modelsDevStage && c.isExactOnlyLookup(model) {
 		if id, ok := c.exactOnlyIDSpelledBy(model); ok {
 			pricing, found := c.findExact(id, which)
@@ -71,17 +72,24 @@ func (c Corpus) findExactNormalized(model string, which stage) (CorpusModel, boo
 		}
 		return CorpusModel{}, false
 	}
-	normalized := normalizePricingKey(model)
+	return c.normalizedIndexIn(which, normalizePricingKey(model))
+}
+
+// normalizedIndexIn is find_exact_normalized's normalized-key index
+// (pricing.rs:1535-1548) for one table: the one key whose normalized spelling
+// equals the request's. A second key with the same spelling makes it name
+// neither. ccusage builds the index once per map; the scan below answers the
+// same question per call, and the callers only reach it on an exact miss.
+func (c Corpus) normalizedIndexIn(which stage, spelling string) (CorpusModel, bool) {
 	var (
 		match CorpusModel
 		found bool
 	)
 	for key, pricing := range c.Models {
-		if !which.holds(pricing) || normalizePricingKey(key) != normalized {
+		if !which.holds(pricing) || normalizePricingKey(key) != spelling {
 			continue
 		}
 		if found {
-			// A second key with the same spelling makes it name neither entry.
 			return CorpusModel{}, false
 		}
 		match, found = pricing, true

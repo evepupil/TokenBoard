@@ -89,3 +89,23 @@ gofmt -l × go vet  → 干净
 ## 6. 撮要
 
 S4a 的 11 个工具来源适配器通过金样本（44/44）、单元测试全线与定向真机 parity 验证。无未修复的 Critical 或 Important 缺陷。下一步：S4b（copilot 适配器）。
+
+## 7. 2026-11-10 复审④（6 维度 agent + Codex）
+
+范围为 S1 定价引擎、Claude/Codex、11 个工具来源、copilot、接线/CI/文档与当时未提交改动。
+Claude/Codex 维度与未提交改动自审均无缺陷。已修复且各有可触发输入：
+
+| 缺陷 | Rust 依据 | 修复与证据 |
+|------|-----------|------------|
+| `Corpus.FindExact` 读合并表，kilo 的 provider 前缀候选与 openclaw 的装饰名会看到 models.dev 独有键（真实语料 1799 个带 `/` 的键，如 `deepinfra/inkling`：9.5e-7 vs 主表裸名 1.0888e-6） | `pricing.rs:1484-1486`（方法在 primary map 上）、`kilo/src/parser.rs:243-258`、`openclaw/src/parser.rs:382` | 改为只读 primary；`TestFindExactReadsThePrimaryMapOnly` |
+| 工具适配器 u64→int64 裸转，`Output+Extra` 或单桶超 2^63-1 变负→费用 0 | `cost.rs:143-152`（u64 计数） | 新增 `tools.TokenCount`，pricing.go 与 droid/codebuff/goose/hermes/openclaw/zcode 统一使用；`TestPriceEntrySaturatesCountsPastInt64` |
+| `saturatingAdd` 跳过负数，与 u64 饱和语义不符 | `cost.rs:126` | 负数 operand 饱和到 MaxInt64；`TestCost_saturatesInsteadOfWrapping` 补断言 |
+| amp 整文件经 string 解码，非法 UTF-8 被替换为 U+FFFD 后保留 | `amp/src/parser.rs:96`（`from_slice` 拒绝非 UTF-8） | `utf8.Valid` 门；`TestAmpDropsAFileThatIsNotUTF8` |
+| kimi `timestamp_from_seconds` 在 2^63 边界依赖 float→int 未定义转换 | `kimi/src/parser.rs:277-286`（`as i64` 饱和） | 显式钳制；`TestKimiSecondsToMillisSaturatesAtTheBound` |
+
+被证伪的审查项（不改）：gemini「total 缺口应进 extra」（`parser.rs:460-462` 由 `total − 各桶` 重算，
+repo 已如此，`TestGeminiReportExtraIsRecomputedFromTotal` 钉住）；gemini `HasTotal` 比较（Go 已判
+`HasTotal`）；主表模糊扫描「应排除 exact-only 候选」（LiteLLM loader 不填 `exact_only`，
+`pricing.rs:1598` 对主表是空集，Go 现有行为正确）。
+
+覆盖缺口：`gen-claude-goldens.mjs` 现补 `--check` 并接入 `check-deps.sh`，四个生成器的漂移门同构。

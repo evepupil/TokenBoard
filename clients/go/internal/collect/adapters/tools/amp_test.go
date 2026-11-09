@@ -232,6 +232,22 @@ var _ = os.Getenv
 // read (parser.rs:95-98): a thread file with a second JSON value or junk after
 // the object fails the parse and contributes no entries. A streaming decoder
 // that stops after the first value would count it.
+// TestAmpDropsAFileThatIsNotUTF8 pins from_slice's byte-level contract
+// (parser.rs:96): a document with a stray byte fails to deserialize, so the
+// whole thread yields nothing. Decoding through a string would replace the byte
+// with U+FFFD and keep the messages - usage included.
+func TestAmpDropsAFileThatIsNotUTF8(t *testing.T) {
+	root := t.TempDir()
+	writeAmpThread(t, root, "stray.json", "{\"id\":\"t\",\"message\":\"bad\xff\",\"messages\":[{\"role\":\"assistant\",\"timestamp\":\"2026-01-02T03:04:05Z\",\"model\":\"gpt-5.5\",\"usage\":{\"inputTokens\":10}}]}")
+	entries, err := LoadAmp(ampOptions(t, root, nativepricing.ModeAuto))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %+v, want none from a file that is not UTF-8", entries)
+	}
+}
+
 func TestAmpRejectsTrailingGarbage(t *testing.T) {
 	root := t.TempDir()
 	writeAmpThread(t, root, "trailing.json", `{"id":"t","messages":[{"role":"assistant","timestamp":"2026-01-02T03:04:05Z","model":"gpt-5.5","usage":{"inputTokens":10}}]} {"id":"u"}`)

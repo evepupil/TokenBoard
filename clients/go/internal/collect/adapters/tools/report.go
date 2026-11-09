@@ -2,6 +2,7 @@ package tools
 
 import (
 	"sort"
+	"unicode/utf8"
 )
 
 // includeSessionMetadata is the set of tool sources whose Rust adapter passes
@@ -34,6 +35,11 @@ func Summarize(entries []Entry, kind ReportKind) ([]Row, Totals) {
 	order := []string{}
 	index := map[string]*Row{}
 	latest := map[string]bool{}
+	// firstSet marks a row whose firstActivity is already the minimum. Rust keeps
+	// it in an Option (summary.rs:137), so zero - and a negative timestamp - are
+	// values like any other; `> 0` as the sentinel would let 0 and negatives
+	// never win the minimum and print the next timestamp, or 1970, instead.
+	firstSet := map[string]bool{}
 	for _, entry := range entries {
 		key := reportKey(entry, kind)
 		row, ok := index[key]
@@ -58,7 +64,8 @@ func Summarize(entries []Entry, kind ReportKind) ([]Row, Totals) {
 				row.ProjectPath = entry.ProjectPath
 			}
 			row.Version = firstNonEmpty(row.Version, entry.Version)
-			if entry.FirstActivity > 0 && (row.FirstActivity == 0 || entry.FirstActivity < row.FirstActivity) {
+			if !firstSet[key] || entry.FirstActivity < row.FirstActivity {
+				firstSet[key] = true
 				row.FirstActivity = entry.FirstActivity
 			}
 		}
@@ -74,8 +81,86 @@ func Summarize(entries []Entry, kind ReportKind) ([]Row, Totals) {
 		})
 		rows = append(rows, row)
 	}
+	if kind == Monthly {
+		// Every adapter's Monthly branch summarises the daily rows and folds
+		// THOSE into month rows (amp/report.rs:31-41 via
+		// summarize_summaries_by_bucket, summary.rs:178-206), so the month's
+		// float sum is over daily rows, not over the raw entries, and a model
+		// first enters modelsUsed on the earliest day that used it.
+		rows = summarizeByBucket(rows)
+	}
 	sortSummaries(rows)
 	return rows, totalsOf(rows)
+}
+
+// summarizeByBucket is summarize_summaries_by_bucket with BucketKind::Monthly
+// (summary.rs:178-206) over rows already carrying a "YYYY-MM-DD" date:
+// aggregate_summaries (summary.rs:208-291) folds each month's daily rows into
+// one row, and the caller re-sorts.
+func summarizeByBucket(daily []Row) []Row {
+	// summarize_summaries_by_bucket reads a BTreeMap, so the month is folded from
+	// the days in key order; arrival order would change modelsUsed and the
+	// float sum.
+	days := append([]Row(nil), daily...)
+	sortSummaries(days)
+	order := []string{}
+	index := map[string]*Row{}
+	for _, day := range days {
+		key := reportKeyForDate(day.Key)
+		row, ok := index[key]
+		if !ok {
+			row = &Row{Key: key}
+			index[key] = row
+			order = append(order, key)
+		}
+		row.Usage = addUsage(row.Usage, day.Usage)
+		row.Cost = addFloat(row.Cost, day.Cost)
+		row.Credits = addOptional(row.Credits, day.Credits)
+		row.MessageCount = addOptionalCount(row.MessageCount, day.MessageCount)
+		row.ModelsUsed = append(row.ModelsUsed, day.ModelsUsed...)
+		for _, breakdown := range day.Breakdowns {
+			mergeBreakdown(row, breakdown)
+		}
+	}
+	rows := make([]Row, 0, len(order))
+	for _, key := range order {
+		row := *index[key]
+		row.ModelsUsed = dedupeModels(row.ModelsUsed)
+		sort.SliceStable(row.Breakdowns, func(i, j int) bool {
+			return row.Breakdowns[i].Cost > row.Breakdowns[j].Cost
+		})
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// mergeBreakdown folds one daily model breakdown into the month row, in first
+// appearance order (aggregate_summaries:258-286).
+func mergeBreakdown(row *Row, breakdown Breakdown) {
+	for index := range row.Breakdowns {
+		target := &row.Breakdowns[index]
+		if target.Model == breakdown.Model {
+			target.Usage = addUsage(target.Usage, breakdown.Usage)
+			target.Cost = addFloat(target.Cost, breakdown.Cost)
+			target.Missing = target.Missing || breakdown.Missing
+			return
+		}
+	}
+	row.Breakdowns = append(row.Breakdowns, breakdown)
+}
+
+// dedupeModels keeps the first occurrence of each model name.
+func dedupeModels(models []string) []string {
+	seen := map[string]bool{}
+	out := models[:0]
+	for _, model := range models {
+		if seen[model] {
+			continue
+		}
+		seen[model] = true
+		out = append(out, model)
+	}
+	return out
 }
 
 // totalsOf is totals_json (output.rs:79-121): the block is a fold over the
@@ -101,17 +186,27 @@ func TotalsFromRows(rows []Row) Totals {
 	return totalsOf(rows)
 }
 
+// reportKey is the per-entry grouping key: the local date, or the session id.
+// Monthly has no entry-level key: its rows are folded from the daily rows
+// afterwards (summarizeByBucket).
 func reportKey(entry Entry, kind ReportKind) string {
-	switch kind {
-	case Session:
+	if kind == Session {
 		return entry.SessionID
-	case Monthly:
-		if len(entry.Date) >= 7 {
-			return entry.Date[:7]
-		}
-		return entry.Date
 	}
 	return entry.Date
+}
+
+// reportKeyForDate is summarize_summaries_by_bucket's month key: the first
+// seven bytes of the date, or the whole date when it is shorter or the
+// boundary splits a character (summary.rs:189's `date.get(..7).unwrap_or`).
+func reportKeyForDate(date string) string {
+	if len(date) < 7 {
+		return date
+	}
+	if len(date) > 7 && !utf8.RuneStart(date[7]) {
+		return date
+	}
+	return date[:7]
 }
 
 // sortSummaries is sort_summaries (summary.rs:307-315): period keys ascending

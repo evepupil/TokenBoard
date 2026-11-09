@@ -106,6 +106,33 @@ func TestCopilotIntervalsDifferencing(t *testing.T) {
 	}
 }
 
+// TestCopilotOTelKeyKeepsDistinctPairsDistinct pins the shape of the OTel map's
+// key against Rust's (String, String) tuple (loader.rs:140-154). A joined key
+// lets a session id that carries the separator name another pair's slot, so two
+// sessions' OTel rows would suppress or replace each other's intervals. Both
+// halves are read from Copilot's JSON as arbitrary strings.
+func TestCopilotOTelKeyKeepsDistinctPairsDistinct(t *testing.T) {
+	if otelKey("a", "b\x00c") == otelKey("a\x00b", "c") {
+		t.Fatal("otelKey must not let a separator inside a value name another pair")
+	}
+	if got := otelKey("left\x00", "right"); got == otelKey("left", "\x00right") {
+		t.Fatalf("otelKey(%q) collides", got)
+	}
+}
+
+// TestCopilotAttributedKeyKeepsDistinctPairsDistinct pins AttributedNano's key
+// against Rust's HashMap<(String, i64), u64> (loader.rs:236-252). A joined key
+// would let a session id whose tail spells a number, e.g. "-5", name another
+// session's shutdown and move its credits into the wrong gap.
+func TestCopilotAttributedKeyKeepsDistinctPairsDistinct(t *testing.T) {
+	if attributedKey("s-5", 0) == attributedKey("s", -5) {
+		t.Fatal("attributedKey must not let a session id name another pair")
+	}
+	if attributedKey("a", 1) == attributedKey("a", 2) {
+		t.Fatal("attributedKey must keep distinct timestamps apart")
+	}
+}
+
 // TestCopilotDiffDropsBeyondLatestVisible mirrors latest_visible and the drop
 // conditions (loader.rs:224-258): a snapshot at or after --until is not
 // visible, so every interval from it on is dropped; the last visible snapshot
@@ -124,7 +151,7 @@ func TestCopilotDiffDropsBeyondLatestVisible(t *testing.T) {
 	if len(result.Intervals) != 1 || result.Intervals[0].Input != 20 {
 		t.Fatalf("intervals = %+v, want only the 20-token interval on 01-03", result.Intervals)
 	}
-	if after, ok := result.OTelAfter["s\x00test-model"]; !ok || after != msAt(t, "2026-01-03T00:00:00.000Z") {
+	if after, ok := result.OTelAfter[otelKey("s", "test-model")]; !ok || after != msAt(t, "2026-01-03T00:00:00.000Z") {
 		t.Fatalf("otelAfter = %v, want the last visible shutdown", result.OTelAfter)
 	}
 }

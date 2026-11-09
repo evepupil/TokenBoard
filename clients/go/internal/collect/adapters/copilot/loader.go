@@ -133,7 +133,7 @@ func readSourceFile(source SourceFile, ceiling int64) (SourceUsage, error) {
 		}
 		return SourceUsage{Entries: entries}, nil
 	default:
-		return parseSessionStateFile(source.Path, ceiling)
+		return parseSessionStateFile(source.Path)
 	}
 }
 
@@ -144,10 +144,10 @@ func readSourceFile(source SourceFile, ceiling int64) (SourceUsage, error) {
 func usageEntryToLoaded(entry Entry, o tools.Options) tools.Entry {
 	at := tools.PriceAt(entry.Timestamp)
 	costUsage := nativepricing.Usage{
-		Input:         int64(entry.Input),
-		Output:        int64(entry.Output) + int64(entry.Extra),
-		CacheCreate5m: int64(entry.CacheCreation),
-		CacheRead:     int64(entry.CacheRead),
+		Input:         tools.TokenCount(entry.Input),
+		Output:        tools.TokenCount(tools.SaturatingAddU64(entry.Output, entry.Extra)),
+		CacheCreate5m: tools.TokenCount(entry.CacheCreation),
+		CacheRead:     tools.TokenCount(entry.CacheRead),
 		ReportedCost:  entry.CostUSD,
 	}
 	cost, missing := nativepricing.Cost(o.Corpus, entry.Model, costUsage, at, o.Mode, false, false)

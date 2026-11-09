@@ -88,8 +88,8 @@ func Lookup(source contract.Source) (Provider, bool) {
 // nativeRegistry maps a source to its native (in-process) pricing provider.
 // It is deliberately separate from registry: registry's providers mostly shell
 // out to ccusage, and a parity harness that took the "native" side from it
-// would compare ccusage with itself. S2+ register real native providers here
-// one source at a time.
+// would compare ccusage with itself. Provider packages register their native
+// implementation from an init() or from the package that owns the seam.
 var nativeRegistry = map[contract.Source]Provider{}
 
 // RegisterNative installs a native provider for a source, called from S2+
@@ -99,11 +99,10 @@ func RegisterNative(source contract.Source, provider Provider) {
 	nativeRegistry[source] = provider
 }
 
-// LookupNative returns the native (in-process) provider for a source. In S1
-// every source yields (nil, false): the registry is empty by design, so a
-// caller comparing native against ccusage must report the source as
-// "not implemented" instead of silently collecting it with the ccusage-backed
-// Lookup provider.
+// LookupNative returns the native (in-process) provider for a source. A source
+// nothing registered yields (nil, false), so a caller comparing native against
+// ccusage must report it as "not implemented" instead of silently collecting it
+// with the ccusage-backed Lookup provider.
 func LookupNative(source contract.Source) (Provider, bool) {
 	provider, ok := nativeRegistry[source]
 	return provider, ok

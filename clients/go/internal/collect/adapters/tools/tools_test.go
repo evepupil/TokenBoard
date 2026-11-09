@@ -236,6 +236,49 @@ func TestSummarizeDropsEmptyEntriesAndSortsBreakdowns(t *testing.T) {
 	}
 }
 
+// TestSummarizeFirstActivityIsTheTrueMinimum pins SessionAccumulator's
+// Option<TimestampMs> earliest (summary.rs:137, 161-166): zero and negative
+// timestamps are values, not "unset", so an entry dated 0 makes firstActivity
+// 0 and an entry dated before 1970 beats a later one. A `> 0` sentinel would
+// silently report the next timestamp instead.
+// TestPriceEntrySaturatesCountsPastInt64 pins the u64 -> int64 handoff
+// (cost.rs:143-152 bills u64 counts): two buckets that each fit int64 but sum
+// past it must still bill. A raw int64 conversion wraps negative, which
+// tieredCost reads as no tokens and bills at zero.
+func TestPriceEntrySaturatesCountsPastInt64(t *testing.T) {
+	corpus := nativepricing.Corpus{Models: map[string]nativepricing.CorpusModel{
+		"model": {Input: 1e-9, Output: 1e-9, CacheRead: 1e-9, CacheCreate: 1e-9,
+			FastMultiplier: 1, FlexMultiplier: 1},
+	}}
+	entry := Entry{Usage: Usage{Output: math.MaxInt64, Extra: math.MaxInt64}}
+	PriceEntry(corpus, &entry, []string{"model"}, time.Time{}, nativepricing.ModeCalculate, LookupFind)
+	if entry.CostUSD <= 0 || math.IsInf(entry.CostUSD, 0) || math.IsNaN(entry.CostUSD) {
+		t.Fatalf("cost = %v, want the saturating count billed", entry.CostUSD)
+	}
+	if entry.MissingPricing {
+		t.Fatal("a priced model must not be reported missing")
+	}
+}
+
+func TestSummarizeFirstActivityIsTheTrueMinimum(t *testing.T) {
+	entries := []Entry{
+		{Timestamp: 1_000, SessionID: "s", Model: "m", Usage: Usage{Input: 1}, LastActivity: 1_000, FirstActivity: 1_000},
+		{Timestamp: 2_000, SessionID: "s", Model: "m", Usage: Usage{Input: 1}, LastActivity: 2_000, FirstActivity: 0},
+		{Timestamp: 3_000, SessionID: "s", Model: "m", Usage: Usage{Input: 1}, LastActivity: 3_000, FirstActivity: -5_000},
+	}
+	rows, _ := Summarize(entries, Session)
+	if rows[0].FirstActivity != -5_000 {
+		t.Fatalf("firstActivity = %d, want the negative minimum", rows[0].FirstActivity)
+	}
+	zeroOnly := []Entry{
+		{Timestamp: 1_000, SessionID: "z", Model: "m", Usage: Usage{Input: 1}, LastActivity: 1_000, FirstActivity: 0},
+		{Timestamp: 2_000, SessionID: "z", Model: "m", Usage: Usage{Input: 1}, LastActivity: 2_000, FirstActivity: 1_000},
+	}
+	if got, _ := Summarize(zeroOnly, Session); got[0].FirstActivity != 0 {
+		t.Fatalf("firstActivity = %d, want 0 rather than the next timestamp", got[0].FirstActivity)
+	}
+}
+
 func TestSummarizeSessionRowsCarryMetadata(t *testing.T) {
 	entries := []Entry{
 		{Timestamp: 1_000, Model: "m", Usage: Usage{Input: 5}, SessionID: "s", ProjectPath: "proj",
@@ -408,5 +451,48 @@ func TestUsageTotalSaturatesLikeRust(t *testing.T) {
 	}
 	if usage.Output != 100 {
 		t.Fatalf("output = %d, want the known count to saturate (no fallback room)", usage.Output)
+	}
+}
+
+// TestSummarizeMonthAddsUpTheDaysNotTheEntries pins summarize_summaries_by_bucket
+// (summary.rs:178-206) over summarize_entries' daily pass (amp/report.rs:31-41,
+// qwen/report.rs:24-31): a month's row is the sum of its daily rows, in date
+// order, not a fold over the raw entries. Float addition is not associative, so
+// the two orders differ in the last bit, and a model first seen on the later
+// day must still be listed after one first seen on the earlier day.
+//
+// No runner reaches Monthly today (parseNativeToolArgs accepts daily and
+// session only), so this pins the ported function's contract for the module
+// documented as the shared report layer.
+func TestSummarizeMonthAddsUpTheDaysNotTheEntries(t *testing.T) {
+	tiny := math.Pow(2, -53)
+	// Entries arrive newest-day-first, so a fold in arrival order would list a
+	// before b. Rust summarises the days into a BTreeMap and folds that, so the
+	// month sees 01-01 (b) before 01-02 (a).
+	entries := []Entry{
+		{Date: "2026-01-02", Model: "a", CostUSD: tiny},
+		{Date: "2026-01-01", Model: "b", CostUSD: 1},
+		{Date: "2026-01-02", Model: "a", CostUSD: tiny},
+	}
+	rows, totals := Summarize(entries, Monthly)
+	if len(rows) != 1 || rows[0].Key != "2026-01" {
+		t.Fatalf("rows = %+v, want one January row", rows)
+	}
+	// The daily row for 01-02 carries tiny+tiny = 2^-52; adding that to 1
+	// rounds up, while folding the two raw entries into 1 does not.
+	if rows[0].Cost != 1+2*tiny {
+		t.Fatalf("cost = %v, want the day-by-day sum %v", rows[0].Cost, 1+2*tiny)
+	}
+	if got := strings.Join(rows[0].ModelsUsed, ","); got != "b,a" {
+		t.Fatalf("modelsUsed = %q, want the date-ordered first appearance", got)
+	}
+	if got := rows[0].Breakdowns; len(got) != 2 || got[0].Model != "b" || got[1].Model != "a" {
+		t.Fatalf("breakdowns = %+v, want cost-descending b then a", got)
+	}
+	if got := rows[0].Breakdowns[1].Cost; got != 2*tiny {
+		t.Fatalf("a breakdown cost = %v, want the day's two tokens", got)
+	}
+	if totals.Cost != 1+2*tiny {
+		t.Fatalf("totals = %+v", totals)
 	}
 }

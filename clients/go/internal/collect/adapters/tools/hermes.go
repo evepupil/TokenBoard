@@ -414,10 +414,10 @@ func hermesCost(o Options, row hermesSessionRow, candidates []string) float64 {
 // is what calculate_hermes_cost bills (parser.rs:194-200).
 func hermesPricingUsage(row hermesSessionRow) nativepricing.Usage {
 	return nativepricing.Usage{
-		Input:         int64(row.usage.Input),
-		Output:        int64(row.usage.Output) + int64(row.usage.Extra),
-		CacheCreate5m: int64(row.usage.CacheCreation),
-		CacheRead:     int64(row.usage.CacheRead),
+		Input:         TokenCount(row.usage.Input),
+		Output:        TokenCount(SaturatingAddU64(row.usage.Output, row.usage.Extra)),
+		CacheCreate5m: TokenCount(row.usage.CacheCreation),
+		CacheRead:     TokenCount(row.usage.CacheRead),
 	}
 }
 

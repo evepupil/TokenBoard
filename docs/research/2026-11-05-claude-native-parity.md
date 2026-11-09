@@ -20,7 +20,7 @@ go run ./cmd/parity -source claude-code \
 ```
 
 - 窗口：`2026-09-25 → 2026-11-05`（42 天），时区 `Asia/Shanghai`（`sessionusage.LocalTimezone()`）。
-- `cmd/parity` **不传 `--offline`** 给 ccusage（生产同；见 `ccusageReportArgs`，`cmd/parity/main.go:683`），
+- `cmd/parity` **不传 `--offline`** 给 ccusage（生产同；见 `ccusageReportArgs`，`clients/go/cmd/parity/main.go`），
   且从 `f113539` 起 ccusage 侧通过 `--config <prepared.ConfigPath>` 与原生侧使用同一份
   merged pricing config（`pricing.Prepare`，临时 state dir）。这保证 diff 不是由「一侧读 bundled
   overrides，另一侧读内置表」造成的假差异。
@@ -110,7 +110,7 @@ ccusage --offline: 801.5373286600038         ← 与 native 逐位相同
 ```
 
 `ccusage --offline` 单日命令与完整窗口离线 map 的值一致；证据见
-`clients/go/cmd/parity/main.go:683`（`--offline` 只有 codex 侧固定传入）与
+`ccusageReportArgs`（`clients/go/cmd/parity/main.go`；`--offline` 只有 codex 侧固定传入）与
 本次 `ccusage claude daily --offline` 的 stdout。
 
 ### 3.2 差异集中在代理网关模型名

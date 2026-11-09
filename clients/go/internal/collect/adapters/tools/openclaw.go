@@ -473,10 +473,10 @@ func openclawPriceEntry(o Options, entry *Entry) {
 		entry.CostUSD = 0
 		if pricing, ok := o.Corpus.FindAt(pricingModel, entry.Timestamp); ok {
 			entry.CostUSD = nativepricing.CostFromPricing(nativepricing.Usage{
-				Input:         int64(entry.Usage.Input),
-				Output:        int64(entry.Usage.Output),
-				CacheCreate5m: int64(entry.Usage.CacheCreation),
-				CacheRead:     int64(entry.Usage.CacheRead),
+				Input:         TokenCount(entry.Usage.Input),
+				Output:        TokenCount(entry.Usage.Output),
+				CacheCreate5m: TokenCount(entry.Usage.CacheCreation),
+				CacheRead:     TokenCount(entry.Usage.CacheRead),
 			}, pricing, false)
 		}
 	}

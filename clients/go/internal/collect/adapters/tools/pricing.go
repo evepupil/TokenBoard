@@ -47,10 +47,10 @@ func LookupFindExactWithFallback(corpus nativepricing.Corpus, model string, _ ti
 // (missing_pricing_model_for_usage's empty-usage exception, cost.rs:48-71).
 func PriceEntry(corpus nativepricing.Corpus, entry *Entry, candidates []string, at time.Time, mode nativepricing.CostMode, lookup LookupFunc) {
 	usage := nativepricing.Usage{
-		Input:         int64(entry.Usage.Input),
-		Output:        int64(entry.Usage.Output) + int64(entry.Usage.Extra),
-		CacheCreate5m: int64(entry.Usage.CacheCreation),
-		CacheRead:     int64(entry.Usage.CacheRead),
+		Input:         TokenCount(entry.Usage.Input),
+		Output:        TokenCount(SaturatingAddU64(entry.Usage.Output, entry.Usage.Extra)),
+		CacheCreate5m: TokenCount(entry.Usage.CacheCreation),
+		CacheRead:     TokenCount(entry.Usage.CacheRead),
 		ReportedCost:  entry.ReportedCost,
 	}
 	if mode == nativepricing.ModeDisplay {

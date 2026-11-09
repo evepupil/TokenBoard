@@ -258,11 +258,17 @@ func addTerms(first float64, rest ...float64) float64 {
 // Negative counts are skipped: ccusage's counters are unsigned and cannot carry
 // one, and dropping it keeps a damaged negative from shrinking the context into
 // the short band.
+//
+// A negative value is a u64 count past 2^63-1 read as a signed number (raw
+// transcript numbers are the only caller that can produce one): Rust's operand
+// is u64, so such a value stands for u64::MAX and saturates the sum rather than
+// vanishing. Dropping it would understate the context and may pick the wrong
+// long-context tier.
 func saturatingAdd(values ...int64) int64 {
 	total := int64(0)
 	for _, value := range values {
-		if value <= 0 {
-			continue
+		if value < 0 {
+			return math.MaxInt64
 		}
 		if total > math.MaxInt64-value {
 			return math.MaxInt64

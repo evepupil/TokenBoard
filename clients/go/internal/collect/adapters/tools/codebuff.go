@@ -526,10 +526,10 @@ func codebuffEntry(o Options, record codebuffRecord) Entry {
 // the provider prefix.
 func priceCodebuff(entry *Entry, provider string, o Options) {
 	usage := nativepricing.Usage{
-		Input:         int64(entry.Usage.Input),
-		Output:        int64(entry.Usage.Output) + int64(entry.Usage.Extra),
-		CacheCreate5m: int64(entry.Usage.CacheCreation),
-		CacheRead:     int64(entry.Usage.CacheRead),
+		Input:         TokenCount(entry.Usage.Input),
+		Output:        TokenCount(SaturatingAddU64(entry.Usage.Output, entry.Usage.Extra)),
+		CacheCreate5m: TokenCount(entry.Usage.CacheCreation),
+		CacheRead:     TokenCount(entry.Usage.CacheRead),
 	}
 	// Rust passes Some(entry.timestamp) to calculate_cost_for_usage_at, even for
 	// the epoch instant, so the lookup is find_at rather than the static table.

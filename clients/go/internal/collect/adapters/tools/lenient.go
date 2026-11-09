@@ -105,6 +105,19 @@ func SaturatingAddU64(left, right uint64) uint64 {
 	return sum
 }
 
+// TokenCount hands a u64 token count to the int64 pricing engine. The adapter
+// counts in u64 like Rust, and nativepricing bills int64: a raw conversion of a
+// count past 2^63-1 wraps negative, which tieredCost reads as "no tokens" and
+// bills at zero (and the missing-pricing total check reads as empty). Rust's
+// u64 counter has no such wrap, so clamping keeps the bill on the high side
+// instead of dropping it.
+func TokenCount(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
+}
+
 // SaturatingSubU64 subtracts without underflowing.
 func SaturatingSubU64(left, right uint64) uint64 {
 	if right > left {

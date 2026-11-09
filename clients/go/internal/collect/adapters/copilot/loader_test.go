@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -172,6 +173,23 @@ func TestCopilotExtraTokensJoinOutputForPricing(t *testing.T) {
 	}, pricing, false)
 	if entry.CostUSD != wantCost {
 		t.Fatalf("cost = %v, want %v (extra folded into output)", entry.CostUSD, wantCost)
+	}
+}
+
+// TestCopilotExtraTokensJoinOutputForPricing pins what the count side does with
+// a total above u64's range. Rust folds the two u64 counters with
+// saturating_add (loader.rs:471-475), so a 2^64-1 total beside any output is
+// billed as u64::MAX; a signed int64 sum wraps negative instead, which
+// tieredCost reads as "no tokens" and bills at zero.
+func TestCopilotExtraTokensJoinOutputForPricingCountsSaturateLikeRust(t *testing.T) {
+	entry := usageEntryToLoaded(Entry{
+		Timestamp: msAt(t, "2026-01-02T00:00:00.000Z"),
+		Model:     "claude-opus-4-6",
+		Output:    1,
+		Extra:     math.MaxUint64,
+	}, tools.Options{Timezone: "UTC", Mode: nativepricing.ModeAuto, Corpus: loaderCorpus(t)})
+	if entry.CostUSD <= 0 || math.IsInf(entry.CostUSD, 0) || math.IsNaN(entry.CostUSD) {
+		t.Fatalf("cost = %v, want the saturating count billed at a positive finite cost", entry.CostUSD)
 	}
 }
 
@@ -348,19 +366,22 @@ func TestCopilotEmptyHomeProducesNoEntries(t *testing.T) {
 	}
 }
 
-// TestCopilotSessionStateUnreadableTimeFallsBackToTheFileTime pins parser.rs's
-// timestamp fallthrough: an event whose timestamp cannot be parsed is dated at
-// the file's mtime, not dropped.
-func TestCopilotSessionStateUnreadableTimeFallsBackToTheFileTime(t *testing.T) {
-	// The line carries the event name the prefilter looks for and the rest of
-	// its fields; the timestamp string alone is unreadable.
+// TestCopilotSessionStateUnreadableTimeDropsTheLine pins parser.rs:256-258:
+// a session-state event whose timestamp does not parse is skipped. Only the OTel
+// parser dates an entry at the file's mtime; dating this one at "now" would put
+// its tokens on today and, with no id, mint a new dedupe key on every run.
+func TestCopilotSessionStateUnreadableTimeDropsTheLine(t *testing.T) {
 	path := writeFixtureFile(t, t.TempDir(), "session-x/events.jsonl",
-		`{"type":"session.shutdown","id":"session.shutdown","timestamp":"yesterday","data":{"modelMetrics":{"m":{"usage":{"inputTokens":5}}}}}`+"\n")
-	usage, err := parseSessionStateFile(path, 1_700_000_000_000)
+		`{"type":"session.shutdown","id":"shutdown-bad","timestamp":"yesterday","data":{"modelMetrics":{"m":{"usage":{"inputTokens":5},"totalNanoAiu":7}}}}`+"\n"+
+			`{"type":"session.shutdown","id":"shutdown-ok","timestamp":"2026-01-02T03:04:05.000Z","data":{"modelMetrics":{"m":{"usage":{"inputTokens":1},"totalNanoAiu":2}}}}`+"\n")
+	usage, err := parseSessionStateFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(usage.Entries) != 1 || usage.Entries[0].Timestamp != 1_700_000_000_000 {
-		t.Fatalf("entries = %+v, want the mtime fallback", usage.Entries)
+	if len(usage.Entries) != 1 || !strings.Contains(usage.Entries[0].DedupKey, ":shutdown-ok:") {
+		t.Fatalf("entries = %+v, want only the readable event", usage.Entries)
+	}
+	if len(usage.CreditSnapshots) != 1 || usage.CreditSnapshots[0].DedupKey != "credits:session-x:shutdown-ok" {
+		t.Fatalf("snapshots = %+v, want only the readable event", usage.CreditSnapshots)
 	}
 }

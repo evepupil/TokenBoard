@@ -75,8 +75,11 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	if collectedAt == "" {
 		collectedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	}
-	// The switch only chooses the implementation: everything above resolved
-	// identically for both, and the ccusage path below is unchanged.
+	// The switch chooses the whole implementation, not just the report source:
+	// everything above resolved identically for both, but the native path runs
+	// its own state dir, hook mode, locking and pending handling instead of the
+	// ccusage path below. Flipping the constant is a reviewed commit with the
+	// parity evidence for ALL of that, not a one-line swap.
 	if useNativeClaude {
 		return nativeCollect(ctx, nativeInput{
 			options:     options,

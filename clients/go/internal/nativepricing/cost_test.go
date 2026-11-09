@@ -157,6 +157,11 @@ func TestCost_saturatesInsteadOfWrapping(t *testing.T) {
 	if got := saturatingAdd(1, 2, 3); got != 6 {
 		t.Fatalf("saturatingAdd(1,2,3) = %d, want 6", got)
 	}
+	// A negative operand is a u64 count past 2^63-1 read signed. Rust adds it
+	// as u64, so it saturates; dropping it would understate the context.
+	if got := saturatingAdd(-1, 5); got != math.MaxInt64 {
+		t.Fatalf("saturatingAdd(-1,5) = %d, want saturation", got)
+	}
 
 	// The tier is picked by the whole context, so a saturating sum must stay
 	// above the threshold instead of wrapping negative (which would silently

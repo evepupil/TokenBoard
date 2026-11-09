@@ -2,7 +2,6 @@ package copilot
 
 import (
 	"sort"
-	"strconv"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 )
@@ -53,29 +52,44 @@ type Reconciliation struct {
 	// OTelAfter is, per (session, model), the time after which OTel rows are
 	// reported: the latest shutdown through --until, or the shutdown before the
 	// intervals OTel replaces. Without an entry every OTel row counts.
-	OTelAfter map[string]int64
+	OTelAfter map[otelPair]int64
 	// AttributedNano is, per (session, shutdown timestamp), the credits the
 	// model breakdowns reported at that shutdown, every shutdown included.
-	AttributedNano map[string]uint64
+	AttributedNano map[attributedPair]uint64
 	// Gaps are the cost-only entries for credits no model breakdown accounts
 	// for.
 	Gaps []Entry
 }
 
 // attributedKey is the AttributedNano key: session and shutdown timestamp.
-func attributedKey(sessionID string, timestamp int64) string {
-	return sessionID + "\x00" + strconv.FormatInt(timestamp, 10)
+func attributedKey(sessionID string, timestamp int64) attributedPair {
+	return attributedPair{sessionID: sessionID, timestamp: timestamp}
 }
 
 // otelKey is the OTelAfter key: session and model.
-func otelKey(sessionID, model string) string {
-	return sessionID + "\x00" + model
+func otelKey(sessionID, model string) otelPair {
+	return otelPair{sessionID: sessionID, model: model}
+}
+
+// attributedPair is one (session, shutdown) cell of Rust's
+// HashMap<(String, i64), u64>. A struct keeps two distinct pairs distinct where
+// a joined string would not: both halves are JSON strings read from Copilot's
+// own files, so a separator inside one value could name another pair's slot.
+type attributedPair struct {
+	sessionID string
+	timestamp int64
+}
+
+// otelPair is one (session, model) cell of Rust's HashMap<(String, String), _>.
+type otelPair struct {
+	sessionID string
+	model     string
 }
 
 // Reconcile is load_entries_inner's reconciliation stage (loader.rs:81-114)
 // minus pricing and the OTel row filter, which the loader applies.
 func Reconcile(input ReconcileInput) Reconciliation {
-	attributed := map[string]uint64{}
+	attributed := map[attributedPair]uint64{}
 	// load_entries_inner hands date_range_bounds_ms the RAW Option<&str>
 	// bounds (loader.rs:81-85), so a partial spelling such as "202601" narrows
 	// nothing here, unlike the lexicographic report filter.
@@ -113,8 +127,8 @@ func sessionStateEntries(entries []Entry) []Entry {
 
 // OtelCallTimestamps is otel_call_timestamps (loader.rs:140-154): OTel call
 // timestamps per (session, model), sorted.
-func otelCallTimestamps(entries []Entry) map[string][]int64 {
-	calls := map[string][]int64{}
+func otelCallTimestamps(entries []Entry) map[otelPair][]int64 {
+	calls := map[otelPair][]int64{}
 	for _, entry := range entries {
 		key := otelKey(entry.SessionID, entry.Model)
 		calls[key] = append(calls[key], entry.Timestamp)
@@ -164,11 +178,11 @@ func otelReplacementStart(entries []Entry, sorted []int, calls []int64) int {
 
 // reconcileSessionStateEntries is reconcile_session_state_entries
 // (loader.rs:199-268).
-func reconcileSessionStateEntries(entries []Entry, otelCalls map[string][]int64,
-	sinceMs, untilMs *int64, attributed map[string]uint64) ([]Entry, map[string]int64) {
+func reconcileSessionStateEntries(entries []Entry, otelCalls map[otelPair][]int64,
+	sinceMs, untilMs *int64, attributed map[attributedPair]uint64) ([]Entry, map[otelPair]int64) {
 	entries = deduplicateSessionEntries(entries)
-	grouped := map[string][]int{}
-	keys := []string{}
+	grouped := map[otelPair][]int{}
+	keys := []otelPair{}
 	for index, entry := range entries {
 		key := otelKey(entry.SessionID, entry.Model)
 		if _, present := grouped[key]; !present {
@@ -176,9 +190,16 @@ func reconcileSessionStateEntries(entries []Entry, otelCalls map[string][]int64,
 		}
 		grouped[key] = append(grouped[key], index)
 	}
-	sort.Strings(keys)
+	// Rust sorts HashMap keys (loader.rs:222), i.e. the (session, model) tuples
+	// by their fields; the same order keeps the output deterministic.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].sessionID != keys[j].sessionID {
+			return keys[i].sessionID < keys[j].sessionID
+		}
+		return keys[i].model < keys[j].model
+	})
 	intervalIndices := []Entry{}
-	otelAfter := map[string]int64{}
+	otelAfter := map[otelPair]int64{}
 	for _, key := range keys {
 		sorted := grouped[key]
 		sort.SliceStable(sorted, func(i, j int) bool {
@@ -255,7 +276,7 @@ func reconcileSessionStateEntries(entries []Entry, otelCalls map[string][]int64,
 // stays unexplained at every later snapshot is reported, dated at the first
 // snapshot from which it stays. Checkpoints before a shutdown are already part
 // of that shutdown's total.
-func creditGapEntries(snapshots []CreditSnapshot, attributed map[string]uint64,
+func creditGapEntries(snapshots []CreditSnapshot, attributed map[attributedPair]uint64,
 	skippedSessions func(string) bool, sinceMs, untilMs *int64) []Entry {
 	seen := map[string]bool{}
 	sessions := map[string][]CreditSnapshot{}

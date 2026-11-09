@@ -353,8 +353,8 @@ func gooseCost(o Options, entry Entry, provider string) float64 {
 // what calculate_goose_cost bills (parser.rs:177-181).
 func goosePricingUsage(entry Entry) nativepricing.Usage {
 	return nativepricing.Usage{
-		Input:  int64(entry.Usage.Input),
-		Output: int64(entry.Usage.Output) + int64(entry.Usage.Extra),
+		Input:  TokenCount(entry.Usage.Input),
+		Output: TokenCount(SaturatingAddU64(entry.Usage.Output, entry.Usage.Extra)),
 	}
 }
 

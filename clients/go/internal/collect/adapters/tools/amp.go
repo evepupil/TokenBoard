@@ -4,12 +4,14 @@ package tools
 // rust/adapters/amp/src/{paths,parser,loader}.rs.
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // ampDefaultDataDir is the default root (paths.rs:26).
@@ -52,8 +54,14 @@ func isDirectory(path string) bool {
 // parseAmpThread is read_thread_file (parser.rs:96-116): a whole file is one
 // JSON object; any decode failure or a missing id yields no entries.
 func parseAmpThread(content []byte, o Options) ([]Entry, error) {
+	// serde_json::from_slice rejects a document that is not UTF-8, so a file
+	// with a stray byte is dropped. Decoding through a string would replace it
+	// with U+FFFD and keep the file.
+	if !utf8.Valid(content) {
+		return nil, nil
+	}
 	var thread any
-	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.UseNumber()
 	if err := decoder.Decode(&thread); err != nil {
 		return nil, err

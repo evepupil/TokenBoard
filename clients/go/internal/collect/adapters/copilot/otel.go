@@ -48,37 +48,38 @@ func decodeOtelRecord(value any) (otelRecord, bool) {
 		return otelRecord{}, false
 	}
 	record := otelRecord{raw: raw}
-	type field struct {
+	// Every declared member is read. Type, name, the ids, the body fields and
+	// spanContext are Option<Value>, which serde reads whatever the value is,
+	// null included (parser.rs:22-53); attributes is Option<Map>, whose typed
+	// read refuses any non-object, null included. Rejecting a line serde would
+	// keep hides real usage; keeping one serde would drop lets a rejected row
+	// name a trace that suppresses another row.
+	declared := []struct {
 		name string
 		dest *any
-		kind func(any) bool
-	}
-	declared := []field{
-		{"type", &record.Type, isJSONString},
-		{"name", &record.Name, isJSONString},
-		{"spanId", &record.SpanID, isJSONString},
-		{"traceId", &record.TraceID, isJSONString},
-		{"duration", &record.Dur, isJSONString},
-		{"kind", &record.Kind, isJSONString},
-		{"body", &record.Body, isJSONString},
-		{"_body", &record.UBody, isJSONString},
-		{"spanContext", &record.SpanCtx, isJSONObject},
-		{"startTime", &record.Start, isTimestampValue},
-		{"endTime", &record.End, isTimestampValue},
-		{"hrTime", &record.HRTime, isTimestampValue},
-		{"_hrTime", &record.UHRTime, isTimestampValue},
-		{"time", &record.Time, isTimestampValue},
-		{"timestamp", &record.TS, isTimestampValue},
-		{"observedTimestamp", &record.ObsTS, isTimestampValue},
-		{"timeUnixNano", &record.UnixNs, isTimestampValue},
+	}{
+		{"type", &record.Type},
+		{"name", &record.Name},
+		{"spanId", &record.SpanID},
+		{"traceId", &record.TraceID},
+		{"duration", &record.Dur},
+		{"kind", &record.Kind},
+		{"body", &record.Body},
+		{"_body", &record.UBody},
+		{"spanContext", &record.SpanCtx},
+		{"startTime", &record.Start},
+		{"endTime", &record.End},
+		{"hrTime", &record.HRTime},
+		{"_hrTime", &record.UHRTime},
+		{"time", &record.Time},
+		{"timestamp", &record.TS},
+		{"observedTimestamp", &record.ObsTS},
+		{"timeUnixNano", &record.UnixNs},
 	}
 	for _, entry := range declared {
 		value, present := raw[entry.name]
-		if !present || value == nil {
+		if !present {
 			continue
-		}
-		if !entry.kind(value) {
-			return otelRecord{}, false
 		}
 		*entry.dest = value
 	}
@@ -91,13 +92,6 @@ func decodeOtelRecord(value any) (otelRecord, bool) {
 	}
 	return record, true
 }
-
-// isTimestampValue accepts the shapes Option<Value> accepts, i.e. anything.
-func isTimestampValue(any) bool { return true }
-
-func isJSONString(value any) bool { _, ok := value.(string); return ok }
-
-func isJSONObject(value any) bool { _, ok := value.(map[string]any); return ok }
 
 // otelUsageSource is CopilotUsageSource (parser.rs:95-101). The numeric order
 // is the class ladder of to_candidate (parser.rs:407-416).

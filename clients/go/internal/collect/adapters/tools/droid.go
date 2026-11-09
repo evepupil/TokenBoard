@@ -221,10 +221,10 @@ func droidEntry(o Options, record droidRecord) Entry {
 // (pricing_timestamp = None), while a locked one bills with find_at.
 func priceDroid(entry *Entry, record droidRecord, o Options) {
 	usage := nativepricing.Usage{
-		Input:         int64(entry.Usage.Input),
-		Output:        int64(entry.Usage.Output) + int64(entry.Usage.Extra),
-		CacheCreate5m: int64(entry.Usage.CacheCreation),
-		CacheRead:     int64(entry.Usage.CacheRead),
+		Input:         TokenCount(entry.Usage.Input),
+		Output:        TokenCount(SaturatingAddU64(entry.Usage.Output, entry.Usage.Extra)),
+		CacheCreate5m: TokenCount(entry.Usage.CacheCreation),
+		CacheRead:     TokenCount(entry.Usage.CacheRead),
 	}
 	at := time.Time{}
 	if record.pricingSet {

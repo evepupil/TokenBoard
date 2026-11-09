@@ -358,6 +358,12 @@ func kimiSecondsToMillis(seconds float64) (int64, bool) {
 	if millis < math.MinInt64 || millis > math.MaxInt64 {
 		return 0, false
 	}
+	// i64::MAX as f64 rounds up to 2^63, so the bound above admits that value
+	// and Rust's `as i64` saturates it; Go's float-to-int conversion is
+	// implementation-defined there, so the clamp is explicit.
+	if millis >= math.MaxInt64 {
+		return math.MaxInt64, true
+	}
 	return int64(millis), true
 }
 

@@ -348,15 +348,15 @@ func zcodeCost(o Options, rawModel string, providerID *string, usage Usage, star
 	isZai := zcodeIsZaiProvider(providerID) ||
 		(providerID == nil && zcodeIsZaiModel(zcodeASCIILower(rawModel)))
 	costUsage := nativepricing.Usage{
-		Input:         int64(usage.Input),
-		Output:        int64(SaturatingAddU64(usage.Output, usage.Extra)),
-		CacheCreate5m: int64(usage.CacheCreation),
-		CacheRead:     int64(usage.CacheRead),
+		Input:         TokenCount(usage.Input),
+		Output:        TokenCount(SaturatingAddU64(usage.Output, usage.Extra)),
+		CacheCreate5m: TokenCount(usage.CacheCreation),
+		CacheRead:     TokenCount(usage.CacheRead),
 	}
 	if isZai {
 		// Z.ai exposes new content as a cache-creation bucket for display but
 		// bills it at the model's standard input rate (parser.rs:75-93).
-		costUsage.Input = int64(SaturatingAddU64(usage.Input, usage.CacheCreation))
+		costUsage.Input = TokenCount(SaturatingAddU64(usage.Input, usage.CacheCreation))
 		costUsage.CacheCreate5m = 0
 	}
 	pricingModel, ok := zcodePricingModel(o.Corpus, rawModel, providerID)

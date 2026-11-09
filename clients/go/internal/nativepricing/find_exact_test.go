@@ -19,6 +19,27 @@ func exactTestCorpus() Corpus {
 	}}
 }
 
+// TestFindExactReadsThePrimaryMapOnly pins PricingMap::find_exact's receiver
+// (pricing.rs:1484-1486): the embedded models.dev snapshot is a separate map,
+// so a key only it prices is not an exact hit. kilo gates its
+// provider-qualified candidate on this call (parser.rs:243-258) and openclaw
+// its decorated display name (parser.rs:382); a models.dev key answering here
+// would put a candidate in the chain ccusage never adds, and the row would
+// bill at a different rate.
+func TestFindExactReadsThePrimaryMapOnly(t *testing.T) {
+	corpus := Corpus{Models: map[string]CorpusModel{
+		"deepinfra/inkling": {Input: 9.5e-7, Source: SourceModelsDev},
+		"inkling":           {Input: 1.0888e-6, Source: SourceModelsDev},
+		"gpt-5":             {Input: 5, Source: SourceLiteLLM},
+	}}
+	if _, ok := corpus.FindExact("deepinfra/inkling"); ok {
+		t.Fatal("FindExact answered a models.dev-only key")
+	}
+	if pricing, ok := corpus.FindExact("gpt-5"); !ok || pricing.Input != 5 {
+		t.Fatalf("FindExact(gpt-5) = %+v/%v, want the primary row", pricing, ok)
+	}
+}
+
 func TestFindExactOnlyHitsExactKeys(t *testing.T) {
 	corpus := exactTestCorpus()
 	if pricing, ok := corpus.FindExact("gpt-5"); !ok || pricing.Input != 5 {
@@ -54,16 +75,57 @@ func TestFindExactWithFallbackDoesNotFuzzyMatch(t *testing.T) {
 	}
 }
 
-func TestFindExactWithFallbackAmbiguousSpellingMisses(t *testing.T) {
+// TestFindExactWithFallbackFinishesThePrimaryMapFirst pins the per-map walk
+// find_exact_with_fallback performs (pricing.rs:1501-1516): the primary map's
+// find_exact_normalized runs to completion - exact key, exact-only spelling,
+// normalized-key index - before the embedded models.dev map is asked anything.
+// Hoisting both exact lookups above the normalized index would let a
+// models.dev key beat the primary map's normalized hit for the same spelling,
+// which is the one place the two tables can disagree on a price.
+func TestFindExactWithFallbackFinishesThePrimaryMapFirst(t *testing.T) {
+	corpus := Corpus{Models: map[string]CorpusModel{
+		"claude-3-7-sonnet": {Input: 3e-06, Source: SourceLiteLLM},
+		"claude-3.7-sonnet": {Input: 2.5e-06, Source: SourceModelsDev},
+	}}
+	pricing, ok := corpus.FindExactWithFallback("claude-3.7-sonnet")
+	if !ok || pricing.Source != SourceLiteLLM || pricing.Input != 3e-06 {
+		t.Fatalf("lookup = %+v/%v, want the primary map's normalized hit", pricing, ok)
+	}
+}
+
+// TestFindExactWithFallbackAmbiguousSpellingFallsToTheLaterStage records what
+// ccusage answers for a spelling two primary keys share while the models.dev
+// map prices it exactly: find_exact_normalized's normalized-key index returns
+// None for the ambiguous spelling and find_exact_with_fallback does not ask the
+// primary map again, so it moves on to the models.dev map, whose exact entry
+// answers (pricing.rs:1501-1516, 1519-1532). Testing only the primary ambiguous
+// case passes even when that index step is missing, which is why the second
+// half carries its own models.dev row.
+func TestFindExactWithFallbackAmbiguousSpellingFallsToTheLaterStage(t *testing.T) {
 	// "a.b" and "a-b" both normalize to "a-b", so the spelling names neither
-	// entry (pricing.rs:1535-1548).
+	// primary entry (pricing.rs:1535-1548).
 	corpus := exactTestCorpus()
 	if _, ok := corpus.FindExactWithFallback("a@b"); ok {
-		t.Fatal("an ambiguous normalized spelling must miss")
+		t.Fatal("an ambiguous primary spelling with no models.dev row must miss")
 	}
 	// The exact entry still answers for its own spelling.
 	if pricing, ok := corpus.FindExactWithFallback("a-b"); !ok || pricing.Input != 4 {
 		t.Fatalf("exact lookup = %+v/%v", pricing, ok)
+	}
+
+	ambiguous := exactTestCorpus()
+	ambiguous.Models["b.c"] = CorpusModel{Input: 9, Source: SourceModelsDev}
+	ambiguous.Models["b-c"] = CorpusModel{Input: 10, Source: SourceModelsDev}
+	if pricing, ok := ambiguous.FindExactWithFallback("b.c"); !ok || pricing.Input != 9 {
+		t.Fatalf("lookup = %+v/%v, want the models.dev map's exact entry", pricing, ok)
+	}
+	// A primary key and a models.dev key sharing a spelling are ambiguous only
+	// once the walk reaches the models.dev map: the primary key answers first.
+	primaryWins := exactTestCorpus()
+	primaryWins.Models["a-b"] = CorpusModel{Input: 4, Source: SourceLiteLLM}
+	primaryWins.Models["a@b"] = CorpusModel{Input: 11, Source: SourceModelsDev}
+	if pricing, ok := primaryWins.FindExactWithFallback("a@b"); !ok || pricing.Input != 11 {
+		t.Fatalf("lookup = %+v/%v, want the models.dev key for its own spelling", pricing, ok)
 	}
 }
 

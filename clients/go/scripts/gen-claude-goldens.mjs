@@ -44,6 +44,7 @@
  *
  * Usage:
  *   node clients/go/scripts/gen-claude-goldens.mjs
+ *   node clients/go/scripts/gen-claude-goldens.mjs --check   # drift gate, no write
  *   CCUSAGE_BIN=/path/to/ccusage node clients/go/scripts/gen-claude-goldens.mjs
  *
  * Output: clients/go/internal/collect/adapters/claude/goldens/claude-reports.json
@@ -75,6 +76,13 @@ const fixtureDir = join(
 )
 const goldensDir = join(repoRoot, 'clients', 'go', 'internal', 'collect', 'adapters', 'claude', 'goldens')
 const goldensPath = join(goldensDir, 'claude-reports.json')
+
+const checkOnly = process.argv.includes('--check')
+const unknownArgs = process.argv.slice(2).filter((arg) => arg !== '--check')
+if (unknownArgs.length > 0) {
+  console.error(`gen-claude-goldens: unknown arguments: ${unknownArgs.join(' ')} (only --check is accepted)`)
+  process.exit(1)
+}
 
 const ccusageBin = process.env.CCUSAGE_BIN || join(homedir(), '.tokenboard', 'bin', 'ccusage')
 
@@ -404,8 +412,29 @@ function recordedCommand(mode, argv) {
   }
 }
 
+const encoded = JSON.stringify(document, null, 2) + '\n'
+if (checkOnly) {
+  // Re-mint in memory and compare the committed bytes, the way the codex, tool,
+  // copilot and pricing gates do: a drifted fixture or a ccusage output change
+  // fails CI instead of leaving these goldens stale.
+  if (!existsSync(goldensPath)) {
+    console.error(
+      `gen-claude-goldens: --check: missing golden ${relative(repoRoot, goldensPath)}; run without --check to mint it.`
+    )
+    process.exit(1)
+  }
+  if (readFileSync(goldensPath, 'utf8') !== encoded) {
+    console.error(
+      `gen-claude-goldens: --check: the committed goldens no longer match ccusage ${expectedVersion} over this fixture; ` +
+        'review the diff, then re-mint without --check.'
+    )
+    process.exit(1)
+  }
+  console.log(`gen-claude-goldens: --check: ccusage ${expectedVersion} still produces the committed claude goldens.`)
+  process.exit(0)
+}
 mkdirSync(goldensDir, { recursive: true })
-writeFileSync(goldensPath, JSON.stringify(document, null, 2) + '\n')
+writeFileSync(goldensPath, encoded)
 
 console.log(`gen-claude-goldens: ccusage ${expectedVersion}`)
 console.log(`gen-claude-goldens: fixture ${relative(repoRoot, fixtureDir)} (${fixtureFiles.length} files)`)

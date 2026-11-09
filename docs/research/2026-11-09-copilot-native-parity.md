@@ -137,3 +137,11 @@ reconcile 纯函数覆盖 8 类 credit gap（有 OTel 跳过、全 shutdown 跳�
 | 完成标准 4（provider 接线 + 12 源注册测试） | `TestRegisterNativeInstallsEveryToolProvider` 通过 |
 | 完成标准 5（本文） | 本文件 |
 | `useNativeTools` | 未翻转（保持 `false`） |
+
+## 复审④（2026-11-10）
+
+| 缺陷 | Rust 依据 | 修复与证据 |
+|------|-----------|------------|
+| session-state 事件时间戳解析失败时用 ceiling 当时间戳继续处理（虚造 today 行、无 id 时每次运行铸新去重键） | `copilot/src/parser.rs:256-258`（`else { continue }`） | 丢弃该行，ceiling 参数删除；`TestCopilotSessionStateUnreadableTimeDropsTheLine` |
+| OTel 声明字段按 Go JSON 类型判严格（`"kind":9` 之类整行丢弃），serde 的 `Option<Value>` 接受任意值 | `copilot/src/parser.rs:22-53` | 除 `attributes`（`Option<Map>`）外一律接受；`TestCopilotOtelDeclaredMembersAcceptSerdeShapes` |
+| `usageEntryToLoaded` 的 int64 相加溢出、missing-pricing 漏 `Extra`、复合键字符串拼接、firstActivity `> 0` 哨兵 | `loader.rs:471-475`、`cost.rs:48-59`、`loader.rs:140-268`、`summary.rs:137` | `tools.TokenCount` 饱和、`Usage.Total()` 判空、`otelPair`/`attributedPair` 结构体键、`firstSet` 标记 |

@@ -284,6 +284,27 @@ func TestCopilotOtelPrefilterSkipsLinesWithoutAttributes(t *testing.T) {
 	}
 }
 
+// TestCopilotOtelDeclaredMembersAcceptSerdeShapes pins CopilotRecord's field
+// types (parser.rs:22-53): every declared member except attributes is
+// Option<Value>, which serde reads whatever the value is - a numeric `kind` or
+// a null `body` does not make the line fail. attributes is Option<Map>, so a
+// non-object there does drop the line. Rejecting a line serde keeps loses the
+// usage it carries; keeping one serde drops lets its trace suppress another
+// row's usage.
+func TestCopilotOtelDeclaredMembersAcceptSerdeShapes(t *testing.T) {
+	entries := otelFixture(t,
+		// Option<Value> members with non-string values still parse.
+		`{"type":"span","name":null,"spanId":"s1","traceId":"t1","kind":9,"duration":3,"body":null,"endTime":[1775934001,0],"attributes":{"gen_ai.operation.name":"chat","gen_ai.response.model":"m","gen_ai.usage.input_tokens":1}}`,
+		// attributes is Option<Map>, so a scalar there fails the line.
+		`{"type":"span","spanId":"s2","traceId":"t2","endTime":[1775934002,0],"attributes":9}`,
+		// ...but null is None, not a type error.
+		`{"type":"span","spanId":"s3","traceId":"t3","attributes":null}`,
+	)
+	if len(entries) != 1 || entries[0].DedupKey != "t1:s1" {
+		t.Fatalf("entries = %+v, want only t1:s1 kept", entries)
+	}
+}
+
 // TestCopilotTimestampFromPartsRejectsOverflow pins timestamp_from_parts
 // (parser.rs:798-812): Rust chains checked_mul(1000) and checked_add, so a
 // parts pair whose sum leaves u64 answers None and the record falls back to

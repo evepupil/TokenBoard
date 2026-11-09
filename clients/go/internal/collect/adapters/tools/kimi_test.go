@@ -5,6 +5,7 @@ package tools
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -252,6 +253,20 @@ func TestKimiBadLinesAreSkipped(t *testing.T) {
 // kimi_root_from_wire_path (parser.rs:132-165): the config.json sits at the
 // discovered root for both layouts, and an unreadable or model-less config falls
 // back to kimi-for-coding.
+// TestKimiSecondsToMillisSaturatesAtTheBound pins timestamp_from_seconds'
+// bounds (parser.rs:277-286): i64::MAX as f64 rounds up to 2^63, so the bound
+// admits exactly 2^63 milliseconds and Rust's `as i64` saturates it. Go's float
+// to int conversion is implementation-defined there, so the answer is pinned.
+func TestKimiSecondsToMillisSaturatesAtTheBound(t *testing.T) {
+	limit := math.Pow(2, 63)
+	if got, ok := kimiSecondsToMillis(limit / 1000); !ok || got != math.MaxInt64 {
+		t.Fatalf("kimiSecondsToMillis = (%d, %v), want i64::MAX", got, ok)
+	}
+	if _, ok := kimiSecondsToMillis(math.Nextafter(limit/1000, math.Inf(1))); ok {
+		t.Fatal("a millisecond count past the bound must be rejected")
+	}
+}
+
 func TestKimiConfigRootDerivedFromDepth(t *testing.T) {
 	t.Run("both layouts read the root config", func(t *testing.T) {
 		root := t.TempDir()

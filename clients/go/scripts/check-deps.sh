@@ -153,6 +153,12 @@ if [[ $status -ne 0 ]]; then
   exit 1
 fi
 
+# The claude adapter's goldens come from the same version of ccusage over the
+# committed claude-fixture tree. --check re-mints both reports in memory and
+# compares the committed bytes, so a fixture edit or a ccusage output change on
+# the claude path fails here like it does for every other native adapter.
+CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-claude-goldens.mjs" --check || status=1
+
 # The codex adapter's frozen reports come from the same version of ccusage over
 # a committed fixture tree. --check re-mints them in memory and compares the
 # committed bytes, so this gate never writes: after a deliberate ccusage bump,

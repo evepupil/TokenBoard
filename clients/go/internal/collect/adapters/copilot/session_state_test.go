@@ -126,7 +126,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	// Leading spaces: Windows strips trailing spaces from directory names, so
 	// the name has to trim on the other side to stay portable.
 	named := writeFixtureFile(t, root, "  trimmed/events.jsonl", content)
-	usage, err := parseSessionStateFile(named, 0)
+	usage, err := parseSessionStateFile(named)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 		t.Skip("a whitespace-only directory name cannot be created on Windows")
 	}
 	blank := writeFixtureFile(t, filepath.Join(root, "  "), "events.jsonl", content)
-	usage, err = parseSessionStateFile(blank, 0)
+	usage, err = parseSessionStateFile(blank)
 	if err != nil {
 		t.Fatalf("a blank session directory must not be an error: %v", err)
 	}
@@ -181,7 +181,7 @@ func eventsFor(t *testing.T, session string, lines []string) (usage SourceUsage)
 
 func eventsAt(t *testing.T, path string) SourceUsage {
 	t.Helper()
-	usage, err := parseSessionStateFile(path, 0)
+	usage, err := parseSessionStateFile(path)
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}

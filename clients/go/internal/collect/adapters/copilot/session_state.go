@@ -61,21 +61,21 @@ func ptrFloat(value float64) *float64 { return &value }
 // reads event by event: only session.shutdown and session.usage_checkpoint
 // count, a missing type, timestamp or parseable timestamp skips the line, and a
 // line that is not JSON is skipped the way jsonl::records skips it.
-func parseSessionStateFile(path string, ceiling int64) (SourceUsage, error) {
+func parseSessionStateFile(path string) (SourceUsage, error) {
 	parsed := SourceUsage{}
 	sessionID, ok := sessionIDFromPath(path)
 	if !ok {
 		return parsed, nil
 	}
-	return parseSessionStateContent(path, sessionID, ceiling, &parsed)
+	return parseSessionStateContent(path, sessionID, &parsed)
 }
 
-func parseSessionStateContent(path, sessionID string, ceiling int64, parsed *SourceUsage) (SourceUsage, error) {
+func parseSessionStateContent(path, sessionID string, parsed *SourceUsage) (SourceUsage, error) {
 	prefilter := func(line []byte) bool {
 		return containsBytes(line, []byte(shutdownEvent)) || containsBytes(line, []byte(usageCheckpointEvent))
 	}
 	err := scanJSONL(path, prefilter, decodeSessionStateEvent, func(value any) {
-		visitSessionStateEvent(parsed, sessionID, ceiling, value)
+		visitSessionStateEvent(parsed, sessionID, value)
 	})
 	return *parsed, err
 }
@@ -95,7 +95,7 @@ func decodeSessionStateEvent(line []byte) (any, bool) {
 	return value, true
 }
 
-func visitSessionStateEvent(parsed *SourceUsage, sessionID string, ceiling int64, value any) {
+func visitSessionStateEvent(parsed *SourceUsage, sessionID string, value any) {
 	event, ok := tools.LenientObject(value)
 	if !ok {
 		return
@@ -113,11 +113,13 @@ func visitSessionStateEvent(parsed *SourceUsage, sessionID string, ceiling int64
 	if !ok {
 		return
 	}
-	// A string that does not parse falls back to the file's mtime, as
-	// format_rfc3339_millis does on a None instant.
+	// An unreadable timestamp drops the line (parser.rs:256-258). Only the OTel
+	// parser falls back to the file's mtime; a session-state event dated "now"
+	// would land its tokens on today and, without an id, mint a fresh dedupe key
+	// on every run.
 	timestamp, ok := tools.ParseTSTimestamp(timestampText)
 	if !ok {
-		timestamp = ceiling
+		return
 	}
 	data, _ := tools.LenientObject(event["data"])
 

@@ -271,9 +271,9 @@ jobs:
   # on a maintainer machine (recipes in their script headers); nothing in this
   # job detects a stale golden except the adapter tests failing against it -
   # which the two native adapter test steps above make sure happens. The
-  # `deps` job additionally runs gen-codex-goldens.mjs --check against the
-  # pnpm-installed ccusage, so a ccusage output change cannot leave the codex
-  # goldens stale unnoticed.
+  # `deps` job runs every generator's --check (claude, codex, tools, copilot,
+  # native pricing) against the pnpm-installed ccusage, so a ccusage output
+  # change cannot leave any of them stale unnoticed.
   native-pricing:
     name: native pricing engine
     runs-on: ubuntu-latest

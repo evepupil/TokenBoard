@@ -4,9 +4,10 @@
 //
 // The native side comes from collect.LookupNative, never from collect.Lookup:
 // every Lookup provider for a ccusage-backed source execs ccusage itself, so
-// using it here would compare ccusage with itself and always pass. Sources with
-// no native provider (everything but claude-code so far) report notImplemented
-// on the native side while the ccusage side still runs.
+// using it here would compare ccusage with itself and always pass. A source the
+// build registers no native provider for reports notImplemented on the native
+// side while the ccusage side still runs; today all fourteen ccusage-backed
+// sources (claude-code, codex and the twelve tool sources) register one.
 //
 // # Pricing
 //
@@ -237,8 +238,9 @@ func runWith(args []string, stdout, stderr io.Writer, input parityInput) int {
 	} else {
 		writeTextReport(stdout, report)
 	}
-	// notImplemented is not a failure: S1 ships no native provider, and the
-	// operator asked for the boundary, not an error. empty likewise exits 0:
+	// notImplemented is not a failure: the source has no native provider in this
+	// build, and the operator asked for the boundary, not an error. empty
+	// likewise exits 0:
 	// both sides agreeing on zero rows is not a difference. A diff exits 1; a
 	// clean match (live-write rows included) exits 0.
 	if report.Status == statusDiff {
@@ -248,8 +250,8 @@ func runWith(args []string, stdout, stderr io.Writer, input parityInput) int {
 }
 
 // runParity performs one comparison. A missing native provider is a report,
-// not an error: S1 ships none, and the operator still wants the ccusage side's
-// output.
+// not an error: the operator asked for the boundary and still wants the
+// ccusage side's output.
 func runParity(ctx context.Context, input parityInput) (parityReport, error) {
 	report := parityReport{Source: string(input.Source)}
 	if !contract.IsValidSource(string(input.Source)) {
