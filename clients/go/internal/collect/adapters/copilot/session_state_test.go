@@ -189,3 +189,23 @@ func ptrString(value *uint64) string {
 	out, _ := json.Marshal(*value)
 	return string(out)
 }
+
+// TestCopilotSessionStateRejectsStructurallyInvalidEvents pins the typed-event
+// gate (parser.rs:165-226): a session.shutdown whose `data` is not an object, or
+// whose `data.totalNanoAiu` is not a number, fails serde and the whole line is
+// skipped - unlike a missing field, which defaults.
+func TestCopilotSessionStateRejectsStructurallyInvalidEvents(t *testing.T) {
+	usage := eventsFor(t, "session-1", []string{
+		`{"type":"session.shutdown","id":"data-is-string","timestamp":"2026-04-15T09:52:27.352Z","data":"session.shutdown"}`,
+		`{"type":"session.shutdown","id":"total-is-string","timestamp":"2026-04-15T09:52:28.352Z","data":{"totalNanoAiu":"12"}}`,
+		`{"type":"session.shutdown","id":"model-metrics-is-array","timestamp":"2026-04-15T09:52:29.352Z","data":{"modelMetrics":[]}}`,
+		`{"type":"42","timestamp":"2026-04-15T09:52:30.352Z","data":{}}`,
+		`{"type":"session.shutdown","id":"kept","timestamp":"2026-04-15T09:52:31.352Z","data":{"totalNanoAiu":12}}`,
+	})
+	if len(usage.CreditSnapshots) != 1 {
+		t.Fatalf("snapshots = %+v, want only the well-formed shutdown", usage.CreditSnapshots)
+	}
+	if usage.CreditSnapshots[0].DedupKey != "credits:session-1:kept" {
+		t.Fatalf("snapshot = %+v", usage.CreditSnapshots[0])
+	}
+}

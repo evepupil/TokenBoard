@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"encoding/json"
 	"math"
 	"path/filepath"
 	"strconv"
@@ -74,113 +75,205 @@ func parseSessionStateContent(path, sessionID string, parsed *SourceUsage) (Sour
 	prefilter := func(line []byte) bool {
 		return containsBytes(line, []byte(shutdownEvent)) || containsBytes(line, []byte(usageCheckpointEvent))
 	}
-	err := scanJSONL(path, prefilter, func(value any) {
-		event, ok := tools.LenientObject(value)
-		if !ok {
-			return
-		}
-		eventType, _ := tools.NonEmptyString(event["type"])
-		isShutdown := false
-		switch eventType {
-		case shutdownEvent:
-			isShutdown = true
-		case usageCheckpointEvent:
-		default:
-			return
-		}
-		timestampText, ok := tools.NonEmptyString(event["timestamp"])
-		if !ok {
-			return
-		}
-		timestamp, ok := tools.ParseTSTimestamp(timestampText)
-		if !ok {
-			return
-		}
-		data, _ := tools.LenientObject(event["data"])
-		sessionTotal, _ := lenientOptionalF64(data["totalNanoAiu"])
-		sessionNano, sessionHasTotal := nanoAiu(sessionTotal)
-		eventID, hasID := tools.NonEmptyString(event["id"])
-		snapshotKey := func(total *uint64) string {
-			if hasID {
-				return "credits:" + sessionID + ":" + eventID
-			}
-			return "credits:" + sessionID + ":" + boolText(isShutdown) + ":" +
-				strconv.FormatInt(timestamp, 10) + ":" + debugOptionU64(total)
-		}
-		if !isShutdown {
-			// A checkpoint without a total carries nothing to reconcile.
-			if sessionHasTotal {
-				total := sessionNano
-				parsed.CreditSnapshots = append(parsed.CreditSnapshots, CreditSnapshot{
-					Timestamp:    timestamp,
-					SessionID:    sessionID,
-					IsShutdown:   false,
-					TotalNanoAiu: &total,
-					DedupKey:     snapshotKey(&total),
-				})
-			}
-			return
-		}
-		modelsReportCredits := true
-		metrics, _ := tools.LenientObject(data["modelMetrics"])
-		for model, raw := range metrics {
-			metric, ok := tools.LenientObject(raw)
-			if !ok {
-				metric = map[string]any{}
-			}
-			name := normalizeCopilotModel(model)
-			requestCount := uint64(0)
-			if requests, ok := tools.LenientObject(metric["requests"]); ok {
-				requestCount = tools.LenientU64(requests["count"])
-			}
-			usageObject, ok := tools.LenientObject(metric["usage"])
-			if !ok {
-				continue
-			}
-			input := tools.LenientU64(usageObject["inputTokens"])
-			output := tools.LenientU64(usageObject["outputTokens"])
-			cacheRead := tools.LenientU64(usageObject["cacheReadTokens"])
-			cacheWrite := tools.LenientU64(usageObject["cacheWriteTokens"])
-			reasoning := tools.LenientU64(usageObject["reasoningTokens"])
-			if name == "" || (input == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 &&
-				reasoning == 0 && requestCount == 0) {
-				continue
-			}
-			modelTotal, _ := lenientOptionalF64(metric["totalNanoAiu"])
-			modelNano, modelHasNano := nanoAiu(modelTotal)
-			modelsReportCredits = modelsReportCredits && modelHasNano
-			timestampText := tools.FormatRFC3339Millis(timestamp)
-			dedupKey := sessionStateDedupKey(sessionID, eventID, hasID, timestampText, name,
-				input, output, cacheRead, cacheWrite, reasoning, requestCount)
-			parsed.Entries = append(parsed.Entries, Entry{
-				Timestamp:     timestamp,
-				TimestampText: timestampText,
-				SessionID:     sessionID,
-				Model:         name,
-				Input:         tools.SaturatingSubU64(input, tools.SaturatingAddU64(cacheRead, cacheWrite)),
-				Output:        output,
-				CacheCreation: cacheWrite,
-				CacheRead:     cacheRead,
-				Reasoning:     reasoning,
-				RequestCount:  requestCount,
-				NanoAiu:       modelNano,
-				DedupKey:      dedupKey,
-			})
-		}
-		var total *uint64
-		if sessionHasTotal && modelsReportCredits {
-			value := sessionNano
-			total = &value
-		}
-		parsed.CreditSnapshots = append(parsed.CreditSnapshots, CreditSnapshot{
-			Timestamp:    timestamp,
-			SessionID:    sessionID,
-			IsShutdown:   true,
-			TotalNanoAiu: total,
-			DedupKey:     snapshotKey(total),
-		})
+	err := scanJSONL(path, prefilter, decodeSessionStateEvent, func(value any) {
+		visitSessionStateEvent(parsed, sessionID, value)
 	})
 	return *parsed, err
+}
+
+// decodeSessionStateEvent is CopilotSessionStateEvent's Deserialize: a field
+// declared with a value type but written in another JSON kind fails serde, and
+// the line drops.
+func decodeSessionStateEvent(line []byte) (any, bool) {
+	value, ok := tools.DecodeJSONLine(line)
+	if !ok {
+		return nil, false
+	}
+	event, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	for _, key := range []string{"type", "id", "timestamp"} {
+		if field, present := event[key]; present && field != nil {
+			if _, isString := field.(string); !isString {
+				return nil, false
+			}
+		}
+	}
+	if data, present := event["data"]; present && data != nil {
+		object, isObject := data.(map[string]any)
+		if !isObject {
+			return nil, false
+		}
+		if !fieldsMatchNames(object, []any{"totalNanoAiu"}, nil) {
+			return nil, false
+		}
+		if metrics, present := object["modelMetrics"]; present && metrics != nil {
+			models, isObject := metrics.(map[string]any)
+			if !isObject {
+				return nil, false
+			}
+			for _, raw := range models {
+				metric, isObject := raw.(map[string]any)
+				if !isObject {
+					return nil, false
+				}
+				if usage, present := metric["usage"]; present && usage != nil {
+					usageObject, isObject := usage.(map[string]any)
+					if !isObject {
+						return nil, false
+					}
+					if !fieldsMatchNames(usageObject, []any{"inputTokens", "outputTokens",
+						"cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}, []string{"cost"}) {
+						return nil, false
+					}
+				}
+				if requests, present := metric["requests"]; present && requests != nil {
+					requestsObject, isObject := requests.(map[string]any)
+					if !isObject {
+						return nil, false
+					}
+					if !fieldsMatchNames(requestsObject, []any{"count"}, []string{"cost"}) {
+						return nil, false
+					}
+				}
+				if !fieldsMatchNames(metric, []any{"totalNanoAiu"}, []string{"usage", "requests"}) {
+					return nil, false
+				}
+			}
+		}
+	}
+	return value, true
+}
+
+// fieldsMatchNames checks the named fields of a typed object: a numeric field
+// must be a JSON number when present (lenient_f64, Option<f64> or u64), and
+// other must be a JSON object when present (lenient_object with an Option<T>
+// target).
+func fieldsMatchNames(object map[string]any, numbers []any, objects []string) bool {
+	for _, name := range numbers {
+		key, _ := name.(string)
+		if field, present := object[key]; present && field != nil {
+			if _, isNumber := field.(json.Number); !isNumber {
+				return false
+			}
+		}
+	}
+	for _, key := range objects {
+		if field, present := object[key]; present && field != nil {
+			if _, isObject := field.(map[string]any); !isObject {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func visitSessionStateEvent(parsed *SourceUsage, sessionID string, value any) {
+	event, ok := tools.LenientObject(value)
+	if !ok {
+		return
+	}
+	eventType, _ := tools.NonEmptyString(event["type"])
+	isShutdown := false
+	switch eventType {
+	case shutdownEvent:
+		isShutdown = true
+	case usageCheckpointEvent:
+	default:
+		return
+	}
+	timestampText, ok := tools.NonEmptyString(event["timestamp"])
+	if !ok {
+		return
+	}
+	timestamp, ok := tools.ParseTSTimestamp(timestampText)
+	if !ok {
+		return
+	}
+	data, _ := tools.LenientObject(event["data"])
+	sessionTotal, _ := lenientOptionalF64(data["totalNanoAiu"])
+	sessionNano, sessionHasTotal := nanoAiu(sessionTotal)
+	eventID, hasID := tools.NonEmptyString(event["id"])
+	snapshotKey := func(total *uint64) string {
+		if hasID {
+			return "credits:" + sessionID + ":" + eventID
+		}
+		return "credits:" + sessionID + ":" + boolText(isShutdown) + ":" +
+			strconv.FormatInt(timestamp, 10) + ":" + debugOptionU64(total)
+	}
+	if !isShutdown {
+		// A checkpoint without a total carries nothing to reconcile.
+		if sessionHasTotal {
+			total := sessionNano
+			parsed.CreditSnapshots = append(parsed.CreditSnapshots, CreditSnapshot{
+				Timestamp:    timestamp,
+				SessionID:    sessionID,
+				IsShutdown:   false,
+				TotalNanoAiu: &total,
+				DedupKey:     snapshotKey(&total),
+			})
+		}
+		return
+	}
+	modelsReportCredits := true
+	metrics, _ := tools.LenientObject(data["modelMetrics"])
+	for model, raw := range metrics {
+		metric, ok := tools.LenientObject(raw)
+		if !ok {
+			metric = map[string]any{}
+		}
+		name := normalizeCopilotModel(model)
+		requestCount := uint64(0)
+		if requests, ok := tools.LenientObject(metric["requests"]); ok {
+			requestCount = tools.LenientU64(requests["count"])
+		}
+		usageObject, ok := tools.LenientObject(metric["usage"])
+		if !ok {
+			continue
+		}
+		input := tools.LenientU64(usageObject["inputTokens"])
+		output := tools.LenientU64(usageObject["outputTokens"])
+		cacheRead := tools.LenientU64(usageObject["cacheReadTokens"])
+		cacheWrite := tools.LenientU64(usageObject["cacheWriteTokens"])
+		reasoning := tools.LenientU64(usageObject["reasoningTokens"])
+		if name == "" || (input == 0 && output == 0 && cacheRead == 0 && cacheWrite == 0 &&
+			reasoning == 0 && requestCount == 0) {
+			continue
+		}
+		modelTotal, _ := lenientOptionalF64(metric["totalNanoAiu"])
+		modelNano, modelHasNano := nanoAiu(modelTotal)
+		modelsReportCredits = modelsReportCredits && modelHasNano
+		timestampText := tools.FormatRFC3339Millis(timestamp)
+		dedupKey := sessionStateDedupKey(sessionID, eventID, hasID, timestampText, name,
+			input, output, cacheRead, cacheWrite, reasoning, requestCount)
+		parsed.Entries = append(parsed.Entries, Entry{
+			Timestamp:     timestamp,
+			TimestampText: timestampText,
+			SessionID:     sessionID,
+			Model:         name,
+			Input:         tools.SaturatingSubU64(input, tools.SaturatingAddU64(cacheRead, cacheWrite)),
+			Output:        output,
+			CacheCreation: cacheWrite,
+			CacheRead:     cacheRead,
+			Reasoning:     reasoning,
+			RequestCount:  requestCount,
+			NanoAiu:       modelNano,
+			DedupKey:      dedupKey,
+		})
+	}
+	var total *uint64
+	if sessionHasTotal && modelsReportCredits {
+		value := sessionNano
+		total = &value
+	}
+	parsed.CreditSnapshots = append(parsed.CreditSnapshots, CreditSnapshot{
+		Timestamp:    timestamp,
+		SessionID:    sessionID,
+		IsShutdown:   true,
+		TotalNanoAiu: total,
+		DedupKey:     snapshotKey(total),
+	})
 }
 
 const (

@@ -3,12 +3,11 @@ package copilot
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"strings"
-
-	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 )
 
 // This file ports adapters/common/src/jsonl.rs: a file is read line by line,
@@ -20,9 +19,11 @@ import (
 const jsonlBufferBytes = 64 * 1024
 
 // scanJSONL reads path line by line. Lines accepted by prefilter are decoded
-// with DecodeJSONLine and handed to visit when they decode; a file that cannot
-// be opened or read is an error, while a bad line is not.
-func scanJSONL(path string, prefilter func([]byte) bool, visit func(value any)) error {
+// and handed to visit when they decode; a file that cannot be opened or read is
+// an error, while a bad line is not. decode is the line's Deserialize: it
+// returns the value to visit, or false for a line this reader cannot own.
+func scanJSONL(path string, prefilter func([]byte) bool, decode func(line []byte) (any, bool),
+	visit func(value any)) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -32,7 +33,7 @@ func scanJSONL(path string, prefilter func([]byte) bool, visit func(value any)) 
 	for {
 		line, readErr := readJSONLLine(reader)
 		if len(line) > 0 && prefilter(line) {
-			if value, ok := tools.DecodeJSONLine(line); ok {
+			if value, ok := decode(line); ok {
 				visit(value)
 			}
 		}
@@ -60,10 +61,11 @@ func containsBytes(line, needle []byte) bool {
 
 // trimRustSpace is Rust's str::trim: Unicode White_Space on both ends.
 func trimRustSpace(value string) string {
-	return strings.TrimFunc(value, isRustSpace)
+	return strings.TrimFunc(value, RustSpace)
 }
 
-func isRustSpace(r rune) bool {
+// RustSpace is Rust's char::is_whitespace: the Unicode White_Space property.
+func RustSpace(r rune) bool {
 	switch r {
 	case '\t', '\n', '\v', '\f', '\r', ' ', 0x85, 0xA0, 0x1680,
 		0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
@@ -79,4 +81,19 @@ func stripSuffix(value, suffix string) string {
 		return value[:len(value)-len(suffix)]
 	}
 	return value
+}
+
+// decodeJSONLineStrict decodes one JSONL line and rejects trailing content, as
+// serde_json::from_slice does.
+func decodeJSONLineStrict(line []byte) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, false
+	}
+	return value, true
 }
