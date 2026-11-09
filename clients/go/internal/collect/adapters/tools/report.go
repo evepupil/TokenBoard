@@ -8,9 +8,10 @@ import (
 // include_session_metadata=true to agent_summary_json, which emits
 // lastActivity/firstActivity/projectPath on session rows. The three rich
 // sources (qwen/report.rs:14, openclaw/report.rs:14, zcode/report.rs:14) pass
-// `kind == AgentReportKind::Session`; the other eight of the twelve pass false.
+// `kind == AgentReportKind::Session`, and copilot (copilot/report.rs:11-16)
+// does too; the other eight of the twelve pass false.
 var richSessionMetadataSources = map[string]bool{
-	"qwen": true, "openclaw": true, "zcode": true,
+	"qwen": true, "openclaw": true, "zcode": true, "copilot": true,
 }
 
 // RichSessionMetadata reports whether command's session rows carry
@@ -203,7 +204,7 @@ func ApplyTotalFallback(usage *Usage, total uint64) {
 // sessionMetadata selects whether session rows carry
 // lastActivity/firstActivity/projectPath (agent_summary_json's
 // include_session_metadata, agent_report.rs:27-46). Only the three rich
-// sources (qwen, openclaw, zcode) set it: their Rust adapters pass
+// sources (qwen, openclaw, zcode, copilot set it): their Rust adapters pass
 // `kind == AgentReportKind::Session`; the other eight of the twelve pass
 // false, so their session rows keep only the shared fields.
 func ReportJSON(rows []Row, totals Totals, kind ReportKind, sessionMetadata bool) map[string]any {
