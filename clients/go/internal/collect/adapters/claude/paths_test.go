@@ -119,9 +119,12 @@ func TestResolveRootsUsesConfigDirListAndRejectsAllInvalid(t *testing.T) {
 
 		env := homeEnv(home, map[string]string{
 			// Spaces around entries, an empty piece, a trailing comma, a
-			// duplicate and a path that ends in "projects" all appear.
+			// duplicate and a path that ends in "projects" all appear. The
+			// last entry spells alpha again with a separator and a "." segment:
+			// upstream dedupes on PathBuf equality, which compares components,
+			// not the raw string.
 			"CLAUDE_CONFIG_DIR": " " + alpha + " , " + beta + " ,~/tilde," +
-				filepath.Join(gamma, "projects") + "," + alpha + " ",
+				filepath.Join(gamma, "projects") + "," + alpha + " ," + alpha + string(filepath.Separator) + "." + " ",
 		})
 
 		roots, err := ResolveRoots(env, "")

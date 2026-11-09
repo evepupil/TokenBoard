@@ -160,6 +160,15 @@ type Corpus struct {
 	// Counts records how many models each embedded source resolved, so tests can
 	// pin the snapshot contents against the generator's recorded numbers.
 	Counts map[string]int
+	// DevThresholds is the models.dev snapshot's own long-context boundary per
+	// entry id, kept separately because the merged Models table loses it for
+	// rows that already published above bands through another source
+	// (see LongContextSplitThreshold).
+	DevThresholds map[string]int64
+	// overrideFields is every pricingOverrides record exactly as parsed, so
+	// FindAt can re-apply it after the DeepSeek schedule overwrote the rates
+	// (pricing.rs:1469-1482).
+	overrideFields map[string]overrideFields
 }
 
 // LoadEmbeddedCorpus parses the corpus embedded in the binary. Every failure is
@@ -222,10 +231,18 @@ func loadCorpus(fsys fs.FS) (Corpus, error) {
 	}
 	applyLongContextRates(models, dev.models)
 
+	devThresholds := map[string]int64{}
+	for model, pricing := range dev.models {
+		if pricing.LongContextThreshold != nil {
+			devThresholds[model] = *pricing.LongContextThreshold
+		}
+	}
+
 	return Corpus{
 		Models:         models,
 		ExactOnlyNames: dev.exactOnlyNames,
 		ContextLimits:  contextLimits,
+		DevThresholds:  devThresholds,
 		Counts: map[string]int{
 			countLitellm:   litellmCount,
 			countModelsDev: len(dev.models),

@@ -12,12 +12,26 @@
 # against, so they are pinned before that layer exists rather than after.
 #
 # Native side: claude-code also has an in-process adapter whose goldens are
-# minted from the same binary by scripts/gen-claude-goldens.mjs and compared by
-# internal/collect/adapters/claude/goldens_test.go. Those are the native golden
-# gate — they must be re-minted (and reviewed) whenever this script's goldens
-# change, because both sides are supposed to answer with the same numbers.
+# minted by scripts/gen-claude-goldens.mjs and compared by
+# internal/collect/adapters/claude/goldens_test.go. That is a separate gate over
+# a separate invocation: it runs WITHOUT --config (adapter parity, so every
+# overridden model would otherwise mismatch) while this script passes the
+# shipped packages/collector/ccusage.json. Re-mint those goldens when the
+# adapter's parsing or pricing semantics change, and these when ccusage's own
+# JSON output changes; a change to one set does not imply the other. Both are
+# meant to be minted from ccusage 20.0.33 by the same version, but not
+# necessarily the same executable file (this script prefers
+# node_modules/.bin/ccusage, the generator ~/.tokenboard/bin/ccusage).
 # This script still guards the binary itself, which is what production runs
 # until useNativeClaude flips (docs/research/2026-11-05-claude-native-parity.md).
+#
+# The codex adapter's row-level goldens get the same gate through their own
+# generator: gen-codex-goldens.mjs --check re-mints in memory from the committed
+# fixture tree and fails on any drift from goldens/codex-reports.json, in both
+# verify and --update mode (this gate never writes those files). That keeps the
+# frozen rows honest in CI without writing files (CI runs this script against
+# the pnpm-installed ccusage; the fixture-hash half of the gate lives in the Go
+# test).
 #
 # Usage:
 #   scripts/check-deps.sh                      # verify against the goldens
@@ -98,8 +112,13 @@ canonicalize() {
 }
 
 run_ccusage() {
-  CLAUDE_CONFIG_DIR="$work_dir/claude" "$ccusage_bin" "$@" \
-    --config "$config_path" -z UTC -s 20260428 -u 20260429
+  # CCUSAGE_BIN can point at any binary; strip the collector credentials before
+  # exec, the same four keys the collector itself removes (AGENTS.md
+  # "跨端协议不变量").
+  CLAUDE_CONFIG_DIR="$work_dir/claude" env \
+    -u TOKENBOARD_UPLOAD_TOKEN -u TOKENBOARD_PAIRING_CODE \
+    -u TOKENBOARD_RELEASE_BASE_URL -u TOKENBOARD_REPO_URL \
+    "$ccusage_bin" "$@" --config "$config_path" -z UTC -s 20260428 -u 20260429
 }
 
 status=0
@@ -131,6 +150,25 @@ done
 
 if [[ $status -ne 0 ]]; then
   echo "check-deps: shape drift is a breaking change for the collector — review it before updating the goldens." >&2
+  exit 1
+fi
+
+# The codex adapter's frozen reports come from the same version of ccusage over
+# a committed fixture tree. --check re-mints them in memory and compares the
+# committed bytes, so this gate never writes: after a deliberate ccusage bump,
+# re-mint with gen-codex-goldens.mjs (no flag) and review the diff.
+CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-codex-goldens.mjs" --check || status=1
+
+# The eleven ccusage tool adapters carry the same kind of frozen reports, minted
+# by gen-tool-goldens.mjs over the committed fixture trees under
+# clients/go/testdata/tool-goldens-fixtures. --check verifies the committed
+# fixture trees against the generator's definitions and re-mints every report in
+# memory: a drifted fixture and a drifted report both fail here, and this gate
+# never writes.
+CCUSAGE_BIN="$ccusage_bin" node "$repo_root/clients/go/scripts/gen-tool-goldens.mjs" --check || status=1
+
+if [[ $status -ne 0 ]]; then
+  echo "check-deps: a native adapter golden drifted — review the diff, then re-mint it after review." >&2
   exit 1
 fi
 if [[ $update -eq 0 ]]; then

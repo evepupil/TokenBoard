@@ -14,7 +14,8 @@
 
 - 三种成本模式（`auto`/`calculate`/`display`）——S1 的 `Cost` 只实现 `calculate` 口径；
   模式选择在 S2/S3 适配器层。
-- DeepSeek V4 的按时段定价——S1 的 `Cost` 预留 `at time.Time` 形参但忽略它，S2 接入。
+- DeepSeek V4 的按时段定价——S1 的 `Cost` 预留 `at time.Time` 形参但忽略它；`FindAt` 与时区/时段
+  费率资产推迟到 S3。注意这是定价引擎层的缺口：claude 路径里出现的 deepseek 模型同样受影响。
 - 日期/时区归属、sessionCount、pro-rata 分摊——S2/S3/S4 适配器层。
 - `check-deps.sh` 门禁改造为原生契约金样本——S5。
 - 移除 `internal/ccusage` 获取层——S5（S1 不动它）。

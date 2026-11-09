@@ -76,9 +76,22 @@ func CostFromPricing(u Usage, p CorpusModel, fast bool) float64 {
 
 	var total float64
 	if p.LongContextThreshold != nil {
+		// A negative bucket cannot come from a transcript (serde's u64 rejects
+		// it) but CostFromPricing is exported for adapters that parse their own
+		// sources; clamp like tieredCost does so a corrupt int64 cannot turn
+		// into a negative cost.
+		clamp := func(tokens int64) int64 {
+			if tokens <= 0 {
+				return 0
+			}
+			return tokens
+		}
+		input, output := clamp(u.Input), clamp(u.Output)
+		cacheCreate5m, cacheCreate1h := clamp(u.CacheCreate5m), clamp(u.CacheCreate1h)
+		cacheRead := clamp(u.CacheRead)
 		// The tier is chosen by the request's whole context, cached or not: a
 		// turn re-reading millions of cached tokens is a long-context request.
-		contextTokens := saturatingAdd(u.Input, u.CacheRead, u.CacheCreate5m, u.CacheCreate1h)
+		contextTokens := saturatingAdd(input, cacheRead, cacheCreate5m, cacheCreate1h)
 		longContext := contextTokens > *p.LongContextThreshold
 		rate := func(base float64, above *float64) float64 {
 			if longContext && above != nil {
@@ -87,11 +100,11 @@ func CostFromPricing(u Usage, p CorpusModel, fast bool) float64 {
 			return base
 		}
 		total = addTerms(
-			roundedProduct(u.Input, rate(p.Input, p.InputAbove)),
-			roundedProduct(u.Output, rate(p.Output, p.OutputAbove)),
-			roundedProduct(u.CacheCreate5m, rate(p.CacheCreate, p.CacheCreateAbove)),
-			roundedProduct(u.CacheCreate1h, rate(cacheCreate1hRate, cacheCreate1hAbove)),
-			roundedProduct(u.CacheRead, rate(p.CacheRead, p.CacheReadAbove)),
+			roundedProduct(input, rate(p.Input, p.InputAbove)),
+			roundedProduct(output, rate(p.Output, p.OutputAbove)),
+			roundedProduct(cacheCreate5m, rate(p.CacheCreate, p.CacheCreateAbove)),
+			roundedProduct(cacheCreate1h, rate(cacheCreate1hRate, cacheCreate1hAbove)),
+			roundedProduct(cacheRead, rate(p.CacheRead, p.CacheReadAbove)),
 		)
 	} else {
 		threshold := defaultLongContextThresholdTokens
@@ -125,9 +138,11 @@ func CostFromPricing(u Usage, p CorpusModel, fast bool) float64 {
 // - a miss is a miss - so an adapter that wants ccusage's diagnostic wording and
 // its empty-usage exception owns both.
 //
-// at is reserved for DeepSeek V4's time-dependent rates and flex for the Codex
-// service-tier delta; S1 implements neither, and both are here only so the
-// adapters can pass through what they know.
+// A non-zero at selects FindAt, so a DeepSeek V4 request is priced by the
+// schedule that applied when it ran (find_at, pricing.rs:1458-1483); the zero
+// time keeps the static Find path. flex stays reserved for the Codex
+// service-tier delta, which the Codex adapter applies per bucket itself
+// (report.rs:273-274).
 func Cost(c Corpus, model string, u Usage, at time.Time, mode CostMode, fast, flex bool) (cost float64, missingPricing bool) {
 	if mode == ModeDisplay {
 		return reportedCost(u), false
@@ -135,7 +150,23 @@ func Cost(c Corpus, model string, u Usage, at time.Time, mode CostMode, fast, fl
 	if mode == ModeAuto && u.ReportedCost != nil {
 		return *u.ReportedCost, false
 	}
-	pricing, ok := c.Find(model)
+	// calculate_cost_from_tokens returns 0 before it looks anything up when the
+	// model is None (cost.rs:99-101). The guard is repeated here because
+	// Find("") is not a miss: the fuzzy matcher treats the empty name as
+	// contained in a `@`-prefixed models.dev key, so a caller without the
+	// adapter's own empty-name check would price an arbitrary row.
+	if model == "" {
+		return 0, false
+	}
+	var (
+		pricing CorpusModel
+		ok      bool
+	)
+	if !at.IsZero() {
+		pricing, ok = c.FindAt(model, at.UnixMilli())
+	} else {
+		pricing, ok = c.Find(model)
+	}
 	if !ok {
 		return 0, true
 	}
@@ -187,6 +218,27 @@ func tieredCost(tokens int64, base float64, above *float64, threshold int64) flo
 func roundedProduct(count int64, rate float64) float64 {
 	product := float64(count) * rate
 	return math.Float64frombits(math.Float64bits(product))
+}
+
+// Product is roundedProduct's guarded form for cost formulas that live outside
+// this package: the Codex adapter's bucket and multiplier terms (codex
+// report.go). The same arm64 hazard applies there - Go fuses `count*rate + total`
+// into FMADDD, Rust rounds twice - and the adapter must not re-derive the guard
+// itself. TestCodexBucketAndUsageCostAreNotFused pins the bit pattern from the
+// adapter side.
+//
+//go:noinline
+func Product(left, right float64) float64 {
+	product := left * right
+	return math.Float64frombits(math.Float64bits(product))
+}
+
+// Sum sums terms left to right through the same opaque round-trip as addTerms.
+// Unlike +, a term cannot fuse into the accumulator because both sides are
+// plain float64 values, but keeping the round-trip makes the intent uniform
+// with Product and survives a future rewrite that folds a product in.
+func Sum(first float64, rest ...float64) float64 {
+	return addTerms(first, rest...)
 }
 
 // addTerms sums terms left to right, in the order ccusage writes them. The terms

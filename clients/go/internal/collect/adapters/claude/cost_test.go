@@ -264,3 +264,48 @@ func TestMemoizeFindAnswersEveryLookupTheCorpusWould(t *testing.T) {
 		}
 	}
 }
+
+// TestScheduledModelsArePricedAtTheirEventTime pins the cross-adapter effect of
+// nativepricing.FindAt (pricing.rs:1458-1483): a DeepSeek V4 request now bills
+// by the schedule that applied when it ran, before the cutoff at the old rates
+// and after it at the peak or off-peak rate. The frozen corpus row is the old
+// rate, so both the pre-cutoff and the post-cutoff cases have to be asserted
+// explicitly.
+func TestScheduledModelsArePricedAtTheirEventTime(t *testing.T) {
+	cost := testCostFunc(t, nil, nativepricing.ModeCalculate)
+	usage := Usage{Input: 1_000_000, Output: 1_000_000}
+	mustTime := func(value string) time.Time {
+		instant, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return instant
+	}
+	// 2026-08-17T02:00:00Z is a Monday peak hour; 05:00 is off-peak.
+	peak, missing := cost("deepseek-v4-flash", usage, mustTime("2026-08-17T02:00:00Z"))
+	if missing {
+		t.Fatal("peak-hour deepseek-v4-flash reported missing pricing")
+	}
+	offPeak, _ := cost("deepseek-v4-flash", usage, mustTime("2026-08-17T05:00:00Z"))
+	if !(peak > offPeak) {
+		t.Fatalf("peak %v <= off-peak %v, want the peak schedule", peak, offPeak)
+	}
+	// Before the cutoff the schedule's old rates apply (0.14 + 0.28 USD/M).
+	// They are deliberately not the frozen corpus row: the corpus keeps the
+	// static models.dev rate, which is what a caller without an event time
+	// still gets.
+	oldCost, _ := cost("deepseek-v4-flash", usage, mustTime("2026-08-17T01:00:00Z").AddDate(0, 0, -30))
+	if math.Abs(oldCost-0.42) > costEpsilon {
+		t.Fatalf("pre-cutoff cost = %v, want the old schedule's 0.42", oldCost)
+	}
+	zeroTime, _ := cost("deepseek-v4-flash", usage, time.Time{})
+	if zeroTime == oldCost {
+		t.Fatal("a zero event time must keep the static corpus row, not the schedule")
+	}
+	// A model outside the scheduled families ignores time entirely.
+	static, _ := cost(pricedModel, usage, mustTime("2026-08-17T02:00:00Z"))
+	untimed, _ := cost(pricedModel, usage, time.Time{})
+	if static != untimed {
+		t.Fatalf("unscheduled model changed with time: %v vs %v", static, untimed)
+	}
+}

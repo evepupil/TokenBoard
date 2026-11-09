@@ -25,6 +25,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
 // DefaultCcusageTimeoutMs matches the claude-code budget: ccusage walks the
@@ -41,6 +42,7 @@ type Options struct {
 	CollectedAt string
 	Since       string
 	Until       string
+	StateDir    string
 	HomeDir     string
 	Stderr      func(line string)
 	// Env resolves configuration; nil means the process environment.
@@ -50,6 +52,10 @@ type Options struct {
 	// ResolveBinary acquires the local ccusage binary; nil means
 	// ccusage.Resolve. Tests inject it so no real install is probed.
 	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
+	// useNativeReport selects the in-process adapters for this one collection.
+	// Only nativeCollect sets it; the compile-time useNativeTools constant is
+	// the reviewed switch.
+	useNativeReport bool
 }
 
 // Collect gathers one ccusage-tool source's usage.
@@ -83,9 +89,24 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 	if err != nil {
 		return nil, err
 	}
-	packageRunner, err := resolveRunner(env, options, stderr)
-	if err != nil {
-		return nil, err
+	var packageRunner ccusage.PackageRunner
+	native := useNativeTools || options.useNativeReport
+	if native {
+		prepared, err := pricing.Prepare(pricing.PrepareInput{
+			StateDir:       options.StateDir,
+			ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
+			Stderr:         stderr,
+		})
+		if err != nil {
+			return nil, err
+		}
+		packageRunner = nativePackageRunner
+		runner = newNativeToolRunner(prepared, options.HomeDir, env, stderr).Run
+	} else {
+		packageRunner, err = resolveRunner(env, options, stderr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	commandOptions := ccusage.CommandOptions{
 		TimeoutMs: readCcusageTimeoutMs(env),
@@ -212,6 +233,7 @@ func (p provider) Collect(ctx context.Context, options collect.Options) ([]contr
 		Timezone: options.Timezone,
 		Since:    options.Since,
 		Until:    options.Until,
+		StateDir: options.StateDir,
 		HomeDir:  options.HomeDir,
 		Stderr:   options.Stderr,
 		Env:      options.EnvValue,

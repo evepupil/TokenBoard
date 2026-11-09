@@ -60,6 +60,11 @@ type PreparedConfig struct {
 	// config's rates reach ccusage solely through the merged file. Reading
 	// Overrides there would silently bill a user who set
 	// TOKENBOARD_CCUSAGE_CONFIG differently from the ccusage path.
+	//
+	// It is the root defaults layer only. Scoped sections
+	// (commands.<...>, <agent>.defaults) reach ccusage through the merged file
+	// too, so an in-process pricer must resolve them with ResolveScope rather
+	// than reading this field directly.
 	MergedPricingOverrides map[string]any
 	// ContextPricingModels is the catalogue the Codex context-pricing rules may
 	// widen the static table with, and it is nil when the dynamic config could not
@@ -72,6 +77,11 @@ type PreparedConfig struct {
 	// rebuilds its rules with an empty model list on the same branch, and the two
 	// clients are diffed against each other on real data, so this has to match.
 	ContextPricingModels []Model
+	// ccusageConfig is the config file ccusage is actually pointed at, as
+	// parsed, or nil when it reads none. ResolveScope derives a report's
+	// effective options from it, so an in-process pricer sees exactly the
+	// layers a ccusage invocation would apply.
+	ccusageConfig map[string]any
 }
 
 // Prepare ports prepareDynamicCcusageConfig. The returned path is always a
@@ -107,8 +117,11 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 	} else {
 		overrides = createCcusagePricingOverrides(catalogue.Models)
 	}
-	merged := mergeCcusageConfig(staticConfig, overrides, explicitConfig,
+	merged, err := mergeCcusageConfig(staticConfig, overrides, explicitConfig,
 		nonRepresentableContextPricingModelIDs(catalogue.Models, overrides))
+	if err != nil {
+		return PreparedConfig{}, err
+	}
 	// The override block the merged file carries, which is what an in-process
 	// pricer has to bill from. It differs from overrides whenever an explicit
 	// config is present, and it also lacks the dynamic rows whose long-context
@@ -162,6 +175,9 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 				ContextPricingModels:     nil,
+				// Nothing was written and there is no explicit file here, so
+				// ccusage reads no config at all.
+				ccusageConfig: nil,
 			}, nil
 		}
 		return PreparedConfig{
@@ -174,6 +190,9 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			CoveredModelIDs:          covered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 			ContextPricingModels:     catalogue.Models,
+			// ccusage reads the materialized bundled file, which is the parsed
+			// static config.
+			ccusageConfig: staticConfig,
 		}, nil
 	}
 
@@ -203,6 +222,8 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 			ContextPricingModels:     nil,
+			// ccusage was pointed at the explicit file, or at nothing.
+			ccusageConfig: explicitConfig,
 		}, nil
 	}
 	stderr(fmt.Sprintf("TokenBoard model pricing: prepared ccusage config at %s", configPath))
@@ -214,6 +235,7 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 		CoveredModelIDs:          covered,
 		ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
 		ContextPricingModels:     catalogue.Models,
+		ccusageConfig:            merged,
 	}, nil
 }
 
@@ -302,15 +324,24 @@ func mergeCcusageConfig(
 	dynamicOverrides map[string]any,
 	explicit map[string]any,
 	nonRepresentable map[string]bool,
-) map[string]any {
+) (map[string]any, error) {
 	bundledDefaults, _ := bundled["defaults"].(map[string]any)
 	if bundledDefaults == nil {
 		bundledDefaults = map[string]any{}
 	}
 	explicitDefaults := map[string]any{}
 	if explicit != nil {
-		if value, ok := explicit["defaults"].(map[string]any); ok && value != nil {
-			explicitDefaults = value
+		// A non-object `defaults` is a hard error: the TypeScript collector's
+		// asRecord throws on it, and silently dropping the user's section would
+		// let the Go client write and bill a config the TS client refuses.
+		// ccusage itself would ignore the section, but it never gets to see
+		// this file when the collector refuses to prepare it.
+		if value, present := explicit["defaults"]; present && value != nil {
+			record, ok := value.(map[string]any)
+			if !ok {
+				return nil, errors.New("Model pricing explicit defaults must be an object")
+			}
+			explicitDefaults = record
 		}
 	}
 	pricingOverrides := mergePricingOverrides(
@@ -338,19 +369,27 @@ func mergeCcusageConfig(
 		}
 	}
 	merged["defaults"] = defaults
-	merged["codex"] = mergeCodexSection(bundled, explicit)
-	return merged
+	codexSection, err := mergeCodexSection(bundled, explicit)
+	if err != nil {
+		return nil, err
+	}
+	merged["codex"] = codexSection
+	return merged, nil
 }
 
-func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
+func mergeCodexSection(bundled, explicit map[string]any) (map[string]any, error) {
 	bundledCodex, _ := bundled["codex"].(map[string]any)
 	if bundledCodex == nil {
 		bundledCodex = map[string]any{}
 	}
 	explicitCodex := map[string]any{}
 	if explicit != nil {
-		if value, ok := explicit["codex"].(map[string]any); ok && value != nil {
-			explicitCodex = value
+		if value, present := explicit["codex"]; present && value != nil {
+			record, ok := value.(map[string]any)
+			if !ok {
+				return nil, errors.New("Model pricing explicit codex must be an object")
+			}
+			explicitCodex = record
 		}
 	}
 	merged := map[string]any{}
@@ -364,9 +403,13 @@ func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
 	if bundledCodexDefaults == nil {
 		bundledCodexDefaults = map[string]any{}
 	}
-	explicitCodexDefaults, _ := explicitCodex["defaults"].(map[string]any)
-	if explicitCodexDefaults == nil {
-		explicitCodexDefaults = map[string]any{}
+	explicitCodexDefaults := map[string]any{}
+	if value, present := explicitCodex["defaults"]; present && value != nil {
+		record, ok := value.(map[string]any)
+		if !ok {
+			return nil, errors.New("Model pricing explicit codex defaults must be an object")
+		}
+		explicitCodexDefaults = record
 	}
 	defaults := map[string]any{}
 	for key, value := range bundledCodexDefaults {
@@ -376,7 +419,7 @@ func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
 		defaults[key] = value
 	}
 	merged["defaults"] = defaults
-	return merged
+	return merged, nil
 }
 
 var longContextOverrideKeys = []string{

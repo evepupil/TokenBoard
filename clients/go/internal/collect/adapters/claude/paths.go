@@ -122,8 +122,9 @@ func ResolveRoots(env func(string) string, homeDir string) (Roots, error) {
 	dirs := []string{}
 	seen := map[string]bool{}
 	for _, candidate := range []string{joinPath(xdgConfig, "claude"), joinPath(home, ".claude")} {
-		if isDir(joinPath(candidate, "projects")) && !seen[candidate] {
-			seen[candidate] = true
+		key := comparePathKey(candidate)
+		if isDir(joinPath(candidate, "projects")) && !seen[key] {
+			seen[key] = true
 			dirs = append(dirs, candidate)
 		}
 	}
@@ -150,12 +151,50 @@ func validConfigDirs(entries []string, home string) []string {
 	seen := map[string]bool{}
 	for _, raw := range entries {
 		path := normalizeConfigPath(raw, home)
-		if isDir(joinPath(path, "projects")) && !seen[path] {
-			seen[path] = true
+		key := comparePathKey(path)
+		if isDir(joinPath(path, "projects")) && !seen[key] {
+			seen[key] = true
 			dirs = append(dirs, path)
 		}
 	}
 	return dirs
+}
+
+// comparePathKey renders a path the way Rust's Path equality compares it:
+// component by component, so "/a/", "/a//b" and "/a/./b" collapse onto "/a"
+// and "/a/b" while a ".." stays a literal component. The upstream duplicate
+// check is a HashSet<PathBuf> (paths.rs:32-36), and the raw-string map the port
+// used before made "/a" and "/a/" two roots - scanning the same tree twice,
+// which double-counts every usage line that carries no message id.
+func comparePathKey(path string) string {
+	root := ""
+	index := 0
+	if filepath.Separator == '\\' && len(path) >= 2 && path[1] == ':' {
+		root = path[:2]
+		index = 2
+	} else if len(path) > 0 && isSeparatorByte(path[0]) {
+		root = string(path[0])
+		index = 1
+	}
+	components := []string{}
+	for index < len(path) {
+		for index < len(path) && isSeparatorByte(path[index]) {
+			index++
+		}
+		start := index
+		for index < len(path) && !isSeparatorByte(path[index]) {
+			index++
+		}
+		if start == index {
+			break
+		}
+		segment := path[start:index]
+		if segment == "." {
+			continue
+		}
+		components = append(components, segment)
+	}
+	return root + strings.Join(components, "/")
 }
 
 // normalizeConfigPath is normalize_claude_config_path (paths.rs:57-63): expand
@@ -683,10 +722,12 @@ func recordedSessionID(path string) (string, bool) {
 		if bytes.Contains(line, sessionIDMarker) {
 			probe.SessionID = nil
 			// encoding/json accepts the shapes serde does here (an object with
-			// a string or null sessionId, unknown fields ignored) except that
-			// it keeps the last of two duplicate keys where serde rejects the
-			// line. Claude Code never writes duplicate keys, and a wrong id
-			// only changes which stale group a file joins.
+			// a string or null sessionId, unknown fields ignored) except for two
+			// malformed-input cases: it keeps the last of two duplicate keys
+			// where serde rejects the line, and it matches struct tags
+			// case-insensitively ("SessionID" hits this field; serde's rename is
+			// exact). Claude Code writes neither, and a wrong id only changes
+			// which stale group a file joins.
 			if json.Unmarshal(line, &probe) == nil && probe.SessionID != nil {
 				return *probe.SessionID, true
 			}

@@ -58,6 +58,8 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { scrubbedEnv } from "./child-env.mjs";
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, "..", "..", "..");
 const fixtureDir = join(
@@ -248,7 +250,8 @@ function run(argv, label) {
   try {
     stdout = execFileSync(ccusageBin, argv, {
       cwd: childCwd,
-      env: { ...process.env, CLAUDE_CONFIG_DIR: fixtureDir, CCUSAGE_MODEL_ALIASES: "" },
+      // Third-party binary: never let it read the collector credentials.
+      env: { ...scrubbedEnv(), CLAUDE_CONFIG_DIR: fixtureDir, CCUSAGE_MODEL_ALIASES: "" },
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });

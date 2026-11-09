@@ -73,6 +73,12 @@ func TestCost_switchesTheWholeRequestAboveTheThreshold(t *testing.T) {
 	partialCorpus := corpusPricing("two-stage", partial)
 	want = 601*2e-6 + 100*10e-6 + 100*1.25e-6 + 200*0.1e-6
 	approx(t, calculate(t, partialCorpus, "two-stage", above, false, false), want, "cost with a partial above band")
+
+	// A negative bucket from a hand-built Usage cannot produce a negative cost:
+	// the whole-request branch clamps like tieredCost does.
+	negative := Usage{Input: -1000, Output: 10}
+	approx(t, calculate(t, corpus, "two-stage", negative, false, false), 10*10e-6,
+		"cost with a negative bucket")
 }
 
 func TestCost_isMarginalForTheDefault200kTier(t *testing.T) {
@@ -177,6 +183,26 @@ func TestCost_saturatesInsteadOfWrapping(t *testing.T) {
 	}
 	approx(t, cost, want, "saturated long-context cost")
 	approx(t, calculate(t, corpus, "huge", usage, false, false), want, "Cost must saturate like CostFromPricing")
+}
+
+func TestCost_emptyModelNameNeverPrices(t *testing.T) {
+	// An `@`-prefixed key would match the empty name through the fuzzy
+	// matcher; Cost must short-circuit before the lookup, like
+	// calculate_cost_from_tokens does for an absent model (cost.rs:99-101).
+	corpus := Corpus{Models: map[string]CorpusModel{
+		"@cf/some/model": {Input: 1e-3, Output: 1e-3},
+	}}
+	usage := Usage{Input: 1000, Output: 100}
+
+	cost, missing := Cost(corpus, "", usage, time.Time{}, ModeCalculate, false, false)
+	if cost != 0 || missing {
+		t.Fatalf("Cost with no model = (%v, %v), want (0, false)", cost, missing)
+	}
+	// A reported cost still wins in Auto, before the empty-name guard.
+	reported := Usage{Input: 1000, ReportedCost: floatValue(1.5)}
+	if got, _ := Cost(corpus, "", reported, time.Time{}, ModeAuto, false, false); !sameBits(got, 1.5) {
+		t.Fatalf("ModeAuto with a reported cost and no model = %v, want 1.5", got)
+	}
 }
 
 func TestCost_distinguishesUnknownFromFreeModel(t *testing.T) {

@@ -45,6 +45,7 @@ import (
 	// this binary would link only the collect package and see an empty native
 	// registry, reporting every source as notImplemented.
 	_ "github.com/MisonL/TokenBoard/clients/go/internal/collect/providers"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/providers/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
@@ -342,6 +343,15 @@ func runParity(ctx context.Context, input parityInput) (parityReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("ccusage side: %w", err)
 	}
+	// The native side runs the provider's full pipeline, and production's
+	// ccusage path runs the same shared post-processing after the binary
+	// answers (codex-cost-projection.ts). Project the ccusage side too, or the
+	// projection's fixed-point rounding on one side only reads as a divergence:
+	// the sub-cent cost differences the first real run showed were exactly that.
+	ccusageRows, err = postProcessCcusageRows(input.Source, ccusageRows)
+	if err != nil {
+		return report, fmt.Errorf("ccusage side post-processing: %w", err)
+	}
 	report.CcusageSnapshots = len(ccusageRows)
 
 	lookupNative := input.LookupNative
@@ -503,7 +513,7 @@ func compareParity(native, ccusageRows []contract.Snapshot, now time.Time) parit
 // isLiveWriteDifference reports whether a differing row is explained by the
 // source still being appended to while the comparison ran, rather than by the
 // two implementations disagreeing. It mirrors tokenboard shadow's rule, with
-// ccusage in the later-scan role.
+// the native scan in the later-scan role (parity collects ccusage first).
 //
 // Every condition below must hold; anything else stays a difference:
 //
@@ -512,7 +522,7 @@ func compareParity(native, ccusageRows []contract.Snapshot, now time.Time) parit
 //   - only token counts and costUsd differ. sessionCount and correction are
 //     never derived from a partial read, so a difference in either is a real
 //     disagreement even on today's row.
-//   - every token field is non-decreasing towards the later (ccusage) scan.
+//   - every token field is non-decreasing towards the later (native) scan.
 //     Appending can only add usage; a row where the later scan sees fewer
 //     tokens means the read itself disagrees, not the timing.
 //
@@ -529,7 +539,7 @@ func isLiveWriteDifference(nativeRow contract.Snapshot, fields []parityFieldDiff
 		case "inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens", "totalTokens":
 			nativeValue, nativeOK := field.Native.(int64)
 			ccusageValue, ccusageOK := field.Ccusage.(int64)
-			if !nativeOK || !ccusageOK || ccusageValue < nativeValue {
+			if !nativeOK || !ccusageOK || nativeValue < ccusageValue {
 				return false
 			}
 		case "costUsd":
@@ -601,6 +611,18 @@ func parityFieldDiffs(nativeRow, ccusageRow contract.Snapshot) []parityFieldDiff
 		}
 	}
 	return diffs
+}
+
+// postProcessCcusageRows applies the provider post-processing that runs on
+// both collection paths, so the ccusage side carries the same shape as the
+// native side before the comparison. Only the Codex daily cost projection
+// exists today; codex.ProjectCodexDailyCosts ignores rows from other sources,
+// and the gate keeps that intent readable.
+func postProcessCcusageRows(source contract.Source, rows []contract.Snapshot) ([]contract.Snapshot, error) {
+	if source != contract.SourceCodex {
+		return rows, nil
+	}
+	return codex.ProjectCodexDailyCosts(rows)
 }
 
 // execCcusage runs the ccusage binary for a source and normalizes its daily and

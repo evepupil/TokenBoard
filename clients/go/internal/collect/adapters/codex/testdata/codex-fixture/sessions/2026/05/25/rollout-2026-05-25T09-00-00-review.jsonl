@@ -1,0 +1,3 @@
+{"type":"session_meta","timestamp":"2026-05-25T09:00:00.000Z","payload":{"id":"review"}}
+{"type":"turn_context","payload":{"model":"codex-auto-review"}}
+{"type":"event_msg","timestamp":"2026-05-25T09:01:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":20,"total_tokens":1020},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":20,"total_tokens":1020}}}}

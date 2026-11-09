@@ -54,8 +54,9 @@ func NewCostFunc(overrides map[string]any, mode CostMode) (CostFunc, error) {
 		return nil, err
 	}
 	find := memoizeFind(corpus)
+	findAt := memoizeFindAt(corpus)
 	return func(model string, usage Usage, at time.Time) (float64, bool) {
-		return priceUsage(find, mode, model, usage, at)
+		return priceUsage(find, findAt, mode, model, usage, at)
 	}, nil
 }
 
@@ -93,6 +94,50 @@ func memoizeFind(corpus nativepricing.Corpus) findModel {
 	}
 }
 
+// findAtFunc resolves a model at one instant (Corpus.FindAt).
+type findAtFunc func(model string, millis int64) (nativepricing.CorpusModel, bool)
+
+// memoizeFindAt caches Corpus.FindAt in hourly buckets per model. The DeepSeek
+// schedule is constant on whole UTC hours (pricing.rs:335-347), so a bucket key
+// is exact; one transcript repeats the same handful of model ids, and without
+// the cache every priced line would rescan the corpus.
+func memoizeFindAt(corpus nativepricing.Corpus) findAtFunc {
+	type resolution struct {
+		pricing nativepricing.CorpusModel
+		ok      bool
+	}
+	type key struct {
+		model      string
+		hourBucket int64
+	}
+	var mutex sync.Mutex
+	cache := make(map[key]resolution, 32)
+	return func(model string, millis int64) (nativepricing.CorpusModel, bool) {
+		bucket := key{model: model, hourBucket: floorDivHour(millis)}
+		mutex.Lock()
+		hit, seen := cache[bucket]
+		mutex.Unlock()
+		if seen {
+			return hit.pricing, hit.ok
+		}
+		pricing, ok := corpus.FindAt(model, millis)
+		mutex.Lock()
+		cache[bucket] = resolution{pricing: pricing, ok: ok}
+		mutex.Unlock()
+		return pricing, ok
+	}
+}
+
+// floorDivHour is Euclidean division by one hour in milliseconds, matching
+// TimestampMs's floor semantics for instants before the epoch.
+func floorDivHour(millis int64) int64 {
+	quotient := millis / 3_600_000
+	if millis%3_600_000 != 0 && millis < 0 {
+		quotient--
+	}
+	return quotient
+}
+
 // PopulateCosts fills Cost and MissingPricing on a copy of entries.
 //
 // Order is load-bearing: call it on the parsed entries, then feed the result to
@@ -127,7 +172,7 @@ func PopulateCosts(entries []Entry, cost CostFunc) []Entry {
 // cost.rs resolves the model once and derives both the cost and the missing
 // flag from that resolution; this function does the same through find, instead
 // of looking the name up a second time for missingPricing.
-func priceUsage(find findModel, mode CostMode, model string, usage Usage, at time.Time) (float64, bool) {
+func priceUsage(find findModel, findAt findAtFunc, mode CostMode, model string, usage Usage, at time.Time) (float64, bool) {
 	if mode == nativepricing.ModeDisplay || (mode == nativepricing.ModeAuto && usage.ReportedCost != nil) {
 		// Display bills the reported cost (or zero); Auto prefers it. Neither
 		// touches the pricing tables, so there is nothing to resolve.
@@ -139,7 +184,18 @@ func priceUsage(find findModel, mode CostMode, model string, usage Usage, at tim
 	if model == "" {
 		return 0, false
 	}
-	pricing, priced := find(model)
+	// A model whose price depends on when the request ran is resolved per
+	// event (find_at, pricing.rs:1458-1483); everything else shares the
+	// per-model memo.
+	var (
+		pricing nativepricing.CorpusModel
+		priced  bool
+	)
+	if !at.IsZero() && nativepricing.HasTimeDependentPricing(model) {
+		pricing, priced = findAt(model, at.UnixMilli())
+	} else {
+		pricing, priced = find(model)
+	}
 	if !priced {
 		// missing_pricing_model_for_usage silences a usage without tokens
 		// (cost.rs:58, 66-68) and reports every other miss.

@@ -55,11 +55,22 @@ func (c Corpus) WithOverrides(overrides map[string]any) (Corpus, error) {
 
 	// Deep copy: the caller's corpus keeps its own Models / ContextLimits /
 	// ExactOnlyNames / Counts, so applying overrides never rewrites history.
+	// The parsed records are retained too: apply_override stores every override
+	// in user_overrides (pricing.rs:1818-1820) and FindAt replays them after the
+	// DeepSeek schedule.
 	updated := Corpus{
 		Models:         cloneModels(c.Models),
 		ExactOnlyNames: maps.Clone(c.ExactOnlyNames),
 		ContextLimits:  maps.Clone(c.ContextLimits),
 		Counts:         maps.Clone(c.Counts),
+		DevThresholds:  maps.Clone(c.DevThresholds),
+		overrideFields: maps.Clone(c.overrideFields),
+	}
+	if updated.overrideFields == nil && len(parsed) > 0 {
+		updated.overrideFields = make(map[string]overrideFields, len(parsed))
+	}
+	for model, fields := range parsed {
+		updated.overrideFields[model] = fields
 	}
 	if updated.Models == nil && len(parsed) > 0 {
 		updated.Models = make(map[string]CorpusModel, len(parsed))

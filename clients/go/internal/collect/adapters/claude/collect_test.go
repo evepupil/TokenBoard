@@ -302,9 +302,14 @@ func TestCollectRespectsSincePruningAndUntilFiltering(t *testing.T) {
 	var pruned []string
 	assertTotals(t, collectTotals(t, since, "", &pruned), 20, "since only")
 
+	// The prune is reported once, as a count: one line per file would flood the
+	// hook log and carry absolute paths into the skill's failure message.
 	joined := strings.Join(pruned, "\n")
-	if !strings.Contains(joined, "sess-old.jsonl") {
-		t.Fatalf("stderr = %q, want the mtime-pruned transcript named", joined)
+	if !strings.Contains(joined, "Skipped 1 Claude session file ") {
+		t.Fatalf("stderr = %q, want one summarized skip line", joined)
+	}
+	if strings.Contains(joined, "sess-old.jsonl") || strings.Contains(joined, root) {
+		t.Fatalf("stderr = %q, want no file name or path in the skip line", joined)
 	}
 	if strings.Contains(joined, "sess-mid.jsonl") || strings.Contains(joined, "sess-new.jsonl") {
 		t.Fatalf("stderr = %q, want only the stale transcript pruned (--since never prunes by entry date)", joined)

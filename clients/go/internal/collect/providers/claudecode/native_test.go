@@ -819,7 +819,71 @@ func TestNativeExplicitPricingConfigPricesInProcess(t *testing.T) {
 	}
 }
 
-// TestNativeAppliesTheProviderWindowEnvironment pins M4: the native path must
+// TestNativeAppliesScopedPricingConfigAndMode pins the two config layers the
+// native path used to drop: scoped pricingOverrides (claude.defaults, not just
+// root defaults) and the cost mode. ccusage resolves both from `option_maps`
+// for `ccusage claude daily` (ccusage-config/src/config.rs:92-137); billing
+// from the root block alone gave a different price on any machine that scopes
+// its config, and the hardcoded ModeAuto ignored `defaults.mode`.
+func TestNativeAppliesScopedPricingConfigAndMode(t *testing.T) {
+	root := t.TempDir()
+	claudeHome := filepath.Join(root, "claude")
+	// 1,000,000 input tokens at the built-in $3/M-then-$6/M ladder with one
+	// $15/M output token: 200,000x3e-6 + 800,000x6e-6 + 1x15e-6 = 5.400015. The
+	// line also reports costUSD 0.5, which ModeAuto uses as-is.
+	writeNativeSession(t, claudeHome,
+		`{"type":"assistant","timestamp":"2026-03-02T10:00:00.000Z","costUSD":0.5,`+
+			`"message":{"model":"claude-sonnet-4-20250514",`+
+			`"usage":{"input_tokens":1000000,"output_tokens":1}}}`)
+
+	writeConfig := func(name, body string) string {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	// $11/M replaces the whole entry, so the above-200k band does not apply:
+	// 1,000,000x11e-6 + 1x11e-6 = 11.000011. ModeCalculate keeps the reported
+	// 0.5 from masking the scoped rate.
+	scoped := writeConfig("scoped-pricing.json", `{
+		"defaults": {"mode": "calculate"},
+		"claude": {"defaults": {"pricingOverrides": {"claude-sonnet-4-20250514": {
+			"inputCostPerToken": 0.000011,
+			"outputCostPerToken": 0.000011,
+			"cacheReadInputTokenCost": 0,
+			"cacheCreationInputTokenCost": 0
+		}}}}
+	}`)
+	calculate := writeConfig("calculate.json", `{"defaults": {"mode": "calculate"}}`)
+
+	collect := func(config string) contract.Snapshot {
+		t.Helper()
+		env := map[string]string{"CLAUDE_CONFIG_DIR": claudeHome}
+		if config != "" {
+			env["TOKENBOARD_CCUSAGE_CONFIG"] = config
+		}
+		snapshots := runNative(t, Options{}, env)
+		if len(snapshots) != 1 {
+			t.Fatalf("snapshots = %+v, want one row", snapshots)
+		}
+		return snapshots[0]
+	}
+
+	if got := collect(""); got.CostUSD != 0.5 {
+		t.Fatalf("no-config cost = %v, want the reported 0.5 (ModeAuto prefers costUSD)", got.CostUSD)
+	}
+	if got := collect(scoped); got.CostUSD != 11.000011 {
+		t.Fatalf("scoped-config cost = %v, want 11.000011 (claude.defaults.pricingOverrides must price the row)",
+			got.CostUSD)
+	}
+	if got := collect(calculate); got.CostUSD != 5.400015 {
+		t.Fatalf("calculate-mode cost = %v, want 5.400015 (defaults.mode=calculate must ignore the reported cost)",
+			got.CostUSD)
+	}
+}
+
 // apply the same TOKENBOARD_SINCE / TOKENBOARD_DEFAULT_SINCE / TOKENBOARD_UNTIL
 // fallbacks the ccusage path applies in buildRangeArgs. Without them a caller
 // that reaches the provider without the CLI's own resolution would scan a wider

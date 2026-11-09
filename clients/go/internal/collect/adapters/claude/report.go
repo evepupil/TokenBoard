@@ -27,9 +27,10 @@ package claude
 import (
 	"encoding/json"
 	"math"
-	"os"
 	"sort"
 	"strings"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 )
 
 // modelAliasesEnv is ccusage's CCUSAGE_MODEL_ALIASES (model_aliases.rs:8).
@@ -54,6 +55,13 @@ const activityFormat = "2006-01-02T15:04:05.000Z"
 // goes through resolveModelName, exactly like the upstream accumulator resolves
 // the display name it was handed.
 func displayModel(entry Entry) (string, bool) {
+	if entry.Advisor {
+		// An advisor row reports the iteration's model verbatim: upstream sets
+		// model to advisor.model (lib.rs:566, daily.rs:390) without the
+		// `<synthetic>` filter or the "-fast" suffix, and only the
+		// accumulator's alias resolution applies afterwards.
+		return resolveModelName(entry.Model), true
+	}
 	if entry.IsSynthetic || entry.Model == "" {
 		return "", false
 	}
@@ -64,92 +72,17 @@ func displayModel(entry Entry) (string, bool) {
 	return resolveModelName(name), true
 }
 
-// resolveModelName is resolve_model_name (model_aliases.rs:14-26): a direct
-// alias wins; otherwise a "-fast" name is looked up by its base and the alias
-// gains the suffix back. The empty alias map of a normal collector run makes
-// this the identity, but ccusage reads this environment variable today, so a
-// user shell that sets it must see the same names from both implementations.
-//
-// Upstream parses the variable once into a OnceLock; reading it on every call
-// is observably identical (the value cannot change under a running process in
-// any way ccusage would notice) and lets tests drive it with t.Setenv.
+// resolveModelName delegates to the shared implementation in nativepricing,
+// which also resolves aliases during FindAt. The environment variable and the
+// "-fast" rule are unchanged (model_aliases.rs:14-26).
 func resolveModelName(model string) string {
-	aliases := modelAliases(os.Getenv(modelAliasesEnv))
-	if alias := aliases[model]; alias != "" {
-		return alias
-	}
-	if base, ok := strings.CutSuffix(model, fastSuffix); ok {
-		if alias := aliases[base]; alias != "" {
-			return alias + fastSuffix
-		}
-	}
-	return model
+	return nativepricing.ResolveModelNameWithSuffix(model, fastSuffix)
 }
 
-// modelAliases is parse_model_aliases (model_aliases.rs:39-61).
-//
-// A value that starts with '{' is first read as a JSON object of strings; any
-// failure - a syntax error, a non-string value, trailing bytes - falls through
-// to the delimited form, which is how serde's all-or-nothing
-// BTreeMap<String, String> parse behaves. The delimited form strips at most one
-// leading '{' with a matching trailing '}', splits on ',' ';' or newline, cuts
-// each segment at its first '=', trims both sides and drops empty keys or
-// values. A later pair overwrites an earlier one, like collect() into a
-// BTreeMap.
+// modelAliases delegates to the shared parser so the existing alias tests keep
+// pinning the same behaviour.
 func modelAliases(raw string) map[string]string {
-	aliases := map[string]string{}
-	trimmed := strings.TrimSpace(raw)
-	if strings.HasPrefix(trimmed, "{") {
-		if parsed, ok := parseJSONAliases(trimmed); ok {
-			return parsed
-		}
-	}
-	stripped := trimmed
-	if inner, ok := strings.CutPrefix(trimmed, "{"); ok {
-		if rest, ok := strings.CutSuffix(inner, "}"); ok {
-			stripped = rest
-		}
-	}
-	for _, pair := range splitAliasPairs(stripped) {
-		from, to, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-		from = strings.TrimSpace(from)
-		to = strings.TrimSpace(to)
-		if from == "" || to == "" {
-			continue
-		}
-		aliases[from] = to
-	}
-	return aliases
-}
-
-// parseJSONAliases decodes a JSON object whose every value is a string, and
-// reports false for anything serde's BTreeMap<String, String> would reject.
-func parseJSONAliases(raw string) (map[string]string, bool) {
-	var decoded map[string]any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil || decoded == nil {
-		return nil, false
-	}
-	aliases := make(map[string]string, len(decoded))
-	for key, value := range decoded {
-		text, ok := value.(string)
-		if !ok {
-			return nil, false
-		}
-		aliases[key] = text
-	}
-	return aliases, true
-}
-
-// splitAliasPairs keeps the plain-split semantics of Rust's
-// split([',', ';', '\n']): empty segments are produced and then skipped by the
-// caller because they carry no '='.
-func splitAliasPairs(raw string) []string {
-	return strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ';' || r == '\n'
-	})
+	return nativepricing.ModelAliases(raw)
 }
 
 // dateInRange is date_within_range (date_utils.rs:196-203): both bounds are
@@ -199,7 +132,15 @@ func (t tokenCounts) total() int64 {
 // counters are u64 and saturate at u64::MAX; the parser already rejects values
 // above MaxInt64 (entry.go parseTokenCount), so clamping there is the same
 // fail-closed direction on a narrower type.
+//
+// A non-positive right operand contributes nothing: the subtraction below would
+// overflow and report MaxInt64 for every negative value. The parser never
+// produces one, but BuildDaily and BuildSessions are exported and take
+// caller-built entries.
 func saturatingAdd(left, right int64) int64 {
+	if right <= 0 {
+		return left
+	}
 	if left > math.MaxInt64-right {
 		return math.MaxInt64
 	}

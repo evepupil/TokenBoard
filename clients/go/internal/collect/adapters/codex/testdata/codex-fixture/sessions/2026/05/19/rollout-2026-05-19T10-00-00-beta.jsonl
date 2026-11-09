@@ -1,0 +1,4 @@
+{"type":"session_meta","timestamp":"2026-05-19T10:00:00.000Z","payload":{"id":"beta"}}
+{"type":"turn_context","payload":{"model":"gpt-5.1-codex"}}
+{"type":"event_msg","timestamp":"2026-05-19T10:01:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":50,"total_tokens":550}}}}
+{"type":"event_msg","timestamp":"2026-05-19T10:05:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900,"output_tokens":90,"total_tokens":990}}}}

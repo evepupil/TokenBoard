@@ -21,15 +21,17 @@ func (nativeTestProvider) Collect(context.Context, Options) ([]contract.Snapshot
 	return nil, nil
 }
 
-// TestLookupNativeReportsNoProviderInS1 pins the transitional contract: every
-// source resolves to an empty native seam, so a caller that wants the native
-// collection must report "not implemented" rather than fall back. Returning
-// the ccusage-backed provider here would compare ccusage with itself.
-func TestLookupNativeReportsNoProviderInS1(t *testing.T) {
+// TestLookupNativeWithoutRegistrationReportsNoProvider pins the seam's shape:
+// a source nobody registered natively resolves to (nil, false) rather than to a
+// ccusage-backed fallback. Which sources HAVE a registration is decided by the
+// provider packages' init() (providers/claudecode/register.go), and this
+// package's own test binary does not link them - the per-source assertion lives
+// in TestRegisterNativeAlwaysInstallsTheNativeProvider there.
+func TestLookupNativeWithoutRegistrationReportsNoProvider(t *testing.T) {
 	for _, source := range contract.AllSources() {
 		provider, ok := LookupNative(source)
 		if ok || provider != nil {
-			t.Fatalf("LookupNative(%q) = (%v, %v), want (nil, false) in S1", source, provider, ok)
+			t.Fatalf("LookupNative(%q) = (%v, %v) with no registration in this test binary, want (nil, false)", source, provider, ok)
 		}
 	}
 }

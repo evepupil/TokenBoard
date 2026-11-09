@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -96,6 +97,11 @@ type Entry struct {
 	Timestamp   time.Time
 	Sidechain   bool
 	IsSynthetic bool
+	// Advisor marks a row split off an advisor iteration. The report keeps its
+	// model verbatim: upstream assigns advisor.model without the parent-line
+	// `<synthetic>` filter and "-fast" suffix (lib.rs:566, daily.rs:390), while
+	// alias resolution still runs in the accumulator for every row.
+	Advisor     bool
 	ProjectPath string
 	Usage       Usage
 
@@ -171,6 +177,15 @@ func parseLineEntries(line string, daily bool) ([]Entry, bool) {
 	if !strings.Contains(line, usageMarker) {
 		return nil, false
 	}
+	// serde_json::from_slice parses the line as a str, so a candidate line that
+	// is not valid UTF-8 anywhere - including inside a string value - is a
+	// parse error upstream and contributes nothing. Go's string conversion and
+	// encoding/json would both accept it (the latter substituting U+FFFD), which
+	// would count usage ccusage drops. Only lines that pass the marker gate are
+	// checked, matching where upstream starts parsing.
+	if !utf8.ValidString(line) {
+		return nil, false
+	}
 	scan := &scanner{
 		data:     []byte(line),
 		nullScan: strings.Contains(line, nullLiteral),
@@ -244,6 +259,7 @@ func advisorEntries(line string, parent Entry) []Entry {
 			entry.MessageID = parent.MessageID + ":advisor:" + strconv.Itoa(index)
 		}
 		entry.Model = advisor.model
+		entry.Advisor = true
 		entry.Usage = advisor.usage
 		// The parent's synthetic marker must not propagate, so IsSynthetic is
 		// recomputed from the advisor's own model. Upstream assigns the model
@@ -271,10 +287,11 @@ type advisorUsage struct {
 // kept. AgentProgress wrappers have no top-level message, so they yield none -
 // the same asymmetry upstream has (daily.rs:368 parses the raw line).
 //
-// Known residual disagreement: this uses encoding/json, which keeps the LAST of
-// two duplicate members, while upstream's advisor envelope is a derived struct
-// that fails on a duplicate `type` or `model` and then yields no advisor rows at
-// all. The scanner above no longer rejects such a line (an iteration's members
+// Known residual disagreements, both limited to malformed input: this uses
+// encoding/json, which keeps the LAST of two duplicate members (upstream's
+// advisor envelope is a derived struct that fails on a duplicate `type` or
+// `model` and then yields no advisor rows at all) and matches struct tags
+// case-insensitively where serde's rename is exact. The scanner above no longer rejects such a line (an iteration's members
 // are unknown to the main derive), so a line with a duplicated iteration field
 // is accepted here and contributes the parent entry PLUS this pass's advisor
 // rows, where ccusage contributes only the parent. It fires only on malformed
@@ -378,6 +395,13 @@ func advisorUsageFromIteration(iteration advisorIteration) (Usage, bool) {
 	}
 	if iteration.CacheCreation != nil {
 		usage.HasCacheCreate = true
+		// A breakdown replaces the flat count entirely (types.rs:41-50:
+		// cache_creation_token_count ignores cache_creation_input_tokens once
+		// the breakdown is present, and an absent sub-field is zero). Clearing
+		// first keeps a partial breakdown - only one bucket present - from
+		// counting the flat value plus the bucket.
+		usage.CacheCreate5m = 0
+		usage.CacheCreate1h = 0
 		if iteration.CacheCreation.FiveMinutes != nil {
 			if !validTokenCount(*iteration.CacheCreation.FiveMinutes) {
 				return Usage{}, false

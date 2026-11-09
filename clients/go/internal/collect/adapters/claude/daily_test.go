@@ -344,6 +344,30 @@ func TestDisplayModelSuffixesFastAndDropsSynthetic(t *testing.T) {
 			wantName:    "claude-sonnet-4-5",
 			wantInModel: true,
 		},
+		{
+			// lib.rs:566 / daily.rs:390: an advisor row carries its model
+			// verbatim even when the iteration reports a fast speed.
+			name: "an advisor row keeps its model without the suffix",
+			entry: func() Entry {
+				entry := reportEntry(reportFixture{model: "claude-opus-4-6", fast: true})
+				entry.Advisor = true
+				return entry
+			}(),
+			wantName:    "claude-opus-4-6",
+			wantInModel: true,
+		},
+		{
+			// The `<synthetic>` filter applies to the parent line only; an
+			// advisor iteration named that way still gets a breakdown row.
+			name: "an advisor row named <synthetic> is still reported",
+			entry: func() Entry {
+				entry := reportEntry(reportFixture{model: "<synthetic>", synthetic: true})
+				entry.Advisor = true
+				return entry
+			}(),
+			wantName:    "<synthetic>",
+			wantInModel: true,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -567,5 +591,17 @@ func requireAlphabeticalKeys(t *testing.T, data []byte) {
 	}
 	if err := walk(); err != nil {
 		t.Fatalf("walking the report failed: %v", err)
+	}
+}
+
+func TestSaturatingAddIgnoresNonPositiveOperands(t *testing.T) {
+	if got := saturatingAdd(5, -3); got != 5 {
+		t.Fatalf("saturatingAdd(5, -3) = %d, want 5 (a corrupt negative must not saturate)", got)
+	}
+	if got := saturatingAdd(math.MaxInt64-1, 1); got != math.MaxInt64 {
+		t.Fatalf("saturatingAdd near the ceiling = %d, want MaxInt64", got)
+	}
+	if got := saturatingAdd(math.MaxInt64, 1); got != math.MaxInt64 {
+		t.Fatalf("saturatingAdd at the ceiling = %d, want MaxInt64", got)
 	}
 }

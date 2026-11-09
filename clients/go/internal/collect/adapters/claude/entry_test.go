@@ -831,6 +831,45 @@ func TestAdvisorIterationsBecomeSeparateEntries(t *testing.T) {
 	}
 }
 
+// TestAdvisorCacheBreakdownReplacesTheFlatCount: TokenUsageRaw's breakdown
+// wins outright once present (types.rs:41-50), so a breakdown carrying only
+// one bucket must not count the flat cache_creation_input_tokens as well.
+func TestAdvisorCacheBreakdownReplacesTheFlatCount(t *testing.T) {
+	usage := `{"input_tokens":1,"output_tokens":2,"iterations":[` +
+		`{"type":"advisor_message","model":"a","input_tokens":3,"output_tokens":4,` +
+		`"cache_creation_input_tokens":10,` +
+		`"cache_creation":{"ephemeral_1h_input_tokens":10}}]}`
+	entries := ParseLineEntries(`{"sessionId":"s","timestamp":"` + validTimestamp +
+		`","message":{"id":"msg_1","model":"m","usage":` + usage + `}}`)
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want the parent and the advisor", len(entries))
+	}
+	advisor := entries[1].Usage
+	if advisor.CacheCreate5m != 0 || advisor.CacheCreate1h != 10 {
+		t.Fatalf("advisor cache creation = 5m:%d 1h:%d, want 0/10 (breakdown replaces the flat count)",
+			advisor.CacheCreate5m, advisor.CacheCreate1h)
+	}
+}
+
+// TestInvalidUTF8LineIsRejected: serde_json parses each candidate line as a
+// str, so a single invalid byte - even inside a string value the collector
+// never keeps - rejects the line. Go would accept it and substitute U+FFFD.
+func TestInvalidUTF8LineIsRejected(t *testing.T) {
+	valid := `{"sessionId":"s","timestamp":"` + validTimestamp +
+		`","requestId":"req-1","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`
+	if entries := ParseLineEntries(valid); len(entries) != 1 {
+		t.Fatalf("control line produced %d entries, want 1", len(entries))
+	}
+	invalid := `{"sessionId":"s","timestamp":"` + validTimestamp +
+		`","requestId":"req-` + "\xff" + `","message":{"id":"msg_1","model":"m","usage":{"input_tokens":1,"output_tokens":2}}}`
+	if entries := ParseLineEntries(invalid); len(entries) != 0 {
+		t.Fatalf("invalid-UTF-8 line produced %d entries, want none", len(entries))
+	}
+	if entries := ParseDailyLineEntries(invalid); len(entries) != 0 {
+		t.Fatalf("daily chain accepted an invalid-UTF-8 line (%d entries)", len(entries))
+	}
+}
+
 func TestAdvisorIterationSchemaIsAllOrNothing(t *testing.T) {
 	base := func(iterations string) string {
 		return `{"sessionId":"s","timestamp":"` + validTimestamp +

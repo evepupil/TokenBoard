@@ -430,6 +430,51 @@ func TestHookNativeScansEveryResolvedRoot(t *testing.T) {
 	}
 }
 
+// TestHookNativeScansEveryClaudeHomeEntry covers TokenBoard's own CLAUDE_HOME
+// alias: unlike CLAUDE_CONFIG_DIR it is split by the adapter (ccusage does not
+// know the variable), so a comma list or a ~ entry there is only covered when
+// the scan and the recompute both resolve through ResolveRoots. The cursor
+// assertion is the load-bearing half, exactly as in the config-dir test.
+func TestHookNativeScansEveryClaudeHomeEntry(t *testing.T) {
+	root := t.TempDir()
+	homeA := filepath.Join(root, "home-a")
+	homeB := filepath.Join(root, "home-b")
+	writeHookSession(t, homeA, "project-a", "a.jsonl",
+		nativeRowAt(31, "2026-05-22T02:00:00.000Z"))
+	writeHookSession(t, homeB, "project-b", "b.jsonl",
+		nativeRowAt(42, "2026-05-23T02:00:00.000Z"))
+	stateDir := filepath.Join(root, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots, err := runNativeHook(t, Options{StateDir: stateDir}, hookNativeEnv(map[string]string{
+		"HOME":        root,
+		"CLAUDE_HOME": "~/home-a,~/home-b",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cursor, err := sessioncursor.Read(filepath.Join(stateDir, CursorName), "claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"project-a/a.jsonl", "project-b/b.jsonl"} {
+		if _, ok := cursor.Files[key]; !ok {
+			t.Fatalf("cursor has no entry for %s: the scan did not cover every CLAUDE_HOME entry", key)
+		}
+	}
+
+	byDate := map[string]int64{}
+	for _, snapshot := range snapshots {
+		byDate[snapshot.UsageDate] = snapshot.InputTokens
+	}
+	if len(byDate) != 2 || byDate["2026-05-22"] != 31 || byDate["2026-05-23"] != 42 {
+		t.Fatalf("snapshots = %+v, want rows from both CLAUDE_HOME entries", snapshots)
+	}
+}
+
 // TestHookNativeUsesTheResolvedTimezone pins the timezone hand-off: the
 // incremental scan and the recompute must attribute the same row to the same
 // day, or the reconciliation would fail for every row near midnight.

@@ -55,6 +55,11 @@ type Options struct {
 	Env               func(string) string
 	// Runner runs ccusage; nil means ccusage.RunJSON.
 	Runner ccusage.CommandRunner
+	// useNativeReport selects the in-process report source (native.go). It is
+	// deliberately unexported: the compiled-in useNativeCodex constant is the
+	// only user-facing switch, and nativeCollect is the only writer, so a
+	// caller outside this package cannot select an unvalidated code path.
+	useNativeReport bool
 	// ResolveBinary acquires ccusage; nil means ccusage.Resolve.
 	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
@@ -122,9 +127,20 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 		}
 	}
 
-	packageRunner, err := resolveRunner(commandEnv, hookMode, options, stderr)
-	if err != nil {
-		return nil, err
+	// The S3 seam. Native replaces only the report source: the pricing config
+	// above, the rules below and everything downstream of the runner stay the
+	// same, so a failure here surfaces exactly where a failed ccusage run
+	// would. See native.go for why the substitution lives at the runner.
+	native := useNativeCodex || options.useNativeReport
+	var packageRunner ccusage.PackageRunner
+	if native {
+		packageRunner = nativePackageRunner
+		runner = newNativeReportRunner(prepared).Run
+	} else {
+		packageRunner, err = resolveRunner(commandEnv, hookMode, options, stderr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// The rule set is derived from the same catalogue that priced the ccusage
 	// config: the static table widened by every unambiguously priced catalogue

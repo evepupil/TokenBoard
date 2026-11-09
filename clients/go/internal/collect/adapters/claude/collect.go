@@ -96,8 +96,11 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	// them. An unvalidated bound used to empty every row silently: a spelling
 	// like "2026-09-25T00:00:00Z" survives compactDateBound but never compares
 	// equal to a YYYYMMDD date. "all" (lower bound only) and "" mean no bound.
+	// The field labels match the ccusage path's buildRangeArgs ("Claude since
+	// date"), so the same bad input reads the same whether the native switch is
+	// flipped; tooling that classifies errors by text keeps working.
 	sinceBound, untilBound, err := sessionusage.AssertValidDateFilterRange(
-		opts.Since, opts.Until, "--since", "--until")
+		opts.Since, opts.Until, "Claude since date", "Claude until date")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,11 +129,25 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 	// --since drops whole session groups from the file list; --until never
 	// narrows it (paths.rs:117-172). Both report commands prune this way:
 	// run_daily via daily.rs:36 and run_session via load_entries_since.
-	files, err = PruneByMTime(files, compactDateBound(sinceBound), opts.Timezone, now, func(path string) {
-		stderr("claude: skipping " + path + ": session last written before the --since window")
+	//
+	// The skip is summarized in one line rather than reported per file: the
+	// callback runs for every pruned transcript (thousands on a normal
+	// machine), each line carried an absolute path, and the skill's failure
+	// formatter keeps the first non-noise stderr line as the error message - so
+	// per-file noise both buried the real error and leaked the home directory.
+	skipped := 0
+	files, err = PruneByMTime(files, compactDateBound(sinceBound), opts.Timezone, now, func(string) {
+		skipped++
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if skipped > 0 {
+		plural := ""
+		if skipped != 1 {
+			plural = "s"
+		}
+		stderr(fmt.Sprintf("Skipped %d Claude session file%s last written before the --since window", skipped, plural))
 	}
 
 	// One pricing function per collection, exactly like each ccusage command

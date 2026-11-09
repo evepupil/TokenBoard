@@ -25,6 +25,53 @@ func (s stage) holds(pricing CorpusModel) bool {
 	return (pricing.Source == SourceModelsDev) == (s == modelsDevStage)
 }
 
+// FindExact is PricingMap::find_exact (pricing.rs:1484-1486): one map hit, no
+// aliases, no normalized spellings, no fuzzy stages.
+func (c Corpus) FindExact(model string) (CorpusModel, bool) {
+	pricing, ok := c.Models[model]
+	return pricing, ok
+}
+
+// FindExactWithFallback is find_exact_with_fallback (pricing.rs:1501-1533):
+// exact, then an exact-only id under another spelling, then the normalized
+// key index - and never a fuzzy match. The embedded models.dev stage is part
+// of the merged Models table here, so no extra fallback pass is needed (the
+// live models.dev map is disabled whenever ccusage runs offline, which the
+// collector always does).
+//
+// The normalized index is built per call: a lookup that misses the exact key
+// scans the table once and stops at the second normalized match to report
+// ambiguity. Tool adapters only reach this on a miss, so the linear scan is
+// bounded by the rare prefix-candidate case.
+func (c Corpus) FindExactWithFallback(model string) (CorpusModel, bool) {
+	if pricing, ok := c.Models[model]; ok {
+		return pricing, true
+	}
+	if c.isExactOnlyLookup(model) {
+		if id, ok := c.exactOnlyIDSpelledBy(model); ok {
+			pricing, found := c.Models[id]
+			return pricing, found
+		}
+		return CorpusModel{}, false
+	}
+	normalized := normalizePricingKey(model)
+	var (
+		match CorpusModel
+		found bool
+	)
+	for key, pricing := range c.Models {
+		if normalizePricingKey(key) != normalized {
+			continue
+		}
+		if found {
+			// A second key with the same spelling makes it name neither entry.
+			return CorpusModel{}, false
+		}
+		match, found = pricing, true
+	}
+	return match, found
+}
+
 // Find returns the rates that price model, and whether any table claimed it.
 //
 // ccusage keeps two pricing maps - a primary one (the LiteLLM snapshot plus the

@@ -1,0 +1,7 @@
+[
+  {"variant": "agent", "metadata": {"runState": {"sessionState": {"mainAgentState": {"messageHistory": [
+    {"role": "user", "providerOptions": {}},
+    {"role": "assistant", "providerOptions": {"codebuff": {"model": "gpt-5",
+      "usage": {"promptTokens": 2000, "completionTokens": 300, "cachedTokensCreated": 40}}}}
+  ]}}}}}
+]

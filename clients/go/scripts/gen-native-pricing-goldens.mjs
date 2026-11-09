@@ -45,6 +45,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { scrubbedEnv } from "./child-env.mjs";
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, "..", "..", "..");
 const goldensPath = join(
@@ -445,7 +447,8 @@ function indexBreakdowns(report) {
 function ccusageOptions() {
   return {
     env: {
-      ...process.env,
+      // Third-party binary: never let it read the collector credentials.
+      ...scrubbedEnv(),
       CLAUDE_CONFIG_DIR: claudeDir,
       // The shipped configuration leaves this table empty; make that explicit
       // so an inherited value cannot rewrite a model name.

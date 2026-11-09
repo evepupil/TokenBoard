@@ -126,15 +126,10 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	if endpoint != "" {
 		pricingStderr = stderr
 	}
-	// The merged override block is the only part of the prepared config this
-	// path uses, and it must be MergedPricingOverrides rather than Overrides:
-	// Overrides carries just the bundled/catalogue layer, while the user's
-	// TOKENBOARD_CCUSAGE_CONFIG rates reach ccusage only through the merged
-	// file. Passing Overrides here would bill a machine that set an explicit
-	// config differently from its own ccusage runs.
-	//
 	// ConfigPath is deliberately ignored: it exists to point the ccusage
-	// subprocess at a config file, and the native path never spawns one.
+	// subprocess at a config file, and the native path never spawns one. The
+	// rates this path bills from are resolved below with ResolveScope, which
+	// reads the same config ccusage would have read.
 	prepared, err := pricing.Prepare(pricing.PrepareInput{
 		Endpoint:       endpoint,
 		StateDir:       stateDir,
@@ -150,6 +145,24 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 			return nil, fmt.Errorf("claudecode: model pricing config %s: %w", explicit, err)
 		}
 		return nil, err
+	}
+
+	// The ccusage path runs `ccusage claude daily`, so the rates and cost mode
+	// that apply are the ones ccusage resolves for that scope - root defaults
+	// plus commands.<...> and claude.* sections. Reading the config's root
+	// defaults block alone (or hardcoding the mode) would bill a machine that
+	// scopes its overrides differently from its own ccusage runs.
+	scope := prepared.ResolveScope(pricing.Scope{Agent: "claude", Report: "daily"})
+	mode := claudeCostMode(scope.Mode)
+	covered := prepared.CoveredModelIDs
+	if extra := scope.Overrides; len(extra) > 0 {
+		covered = make(map[string]bool, len(prepared.CoveredModelIDs)+len(extra))
+		for modelID := range prepared.CoveredModelIDs {
+			covered[modelID] = true
+		}
+		for modelID := range extra {
+			covered[modelID] = true
+		}
 	}
 
 	roots, err := resolveNativeRoots(env, input.options)
@@ -177,8 +190,9 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 			stateDir:    stateDir,
 			homeDir:     input.options.HomeDir,
 			roots:       roots,
-			overrides:   prepared.MergedPricingOverrides,
-			covered:     prepared.CoveredModelIDs,
+			overrides:   scope.Overrides,
+			mode:        mode,
+			covered:     covered,
 		})
 	}
 
@@ -192,8 +206,8 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 		Since:     sinceBound,
 		Until:     untilBound,
 		Roots:     roots,
-		Overrides: prepared.MergedPricingOverrides,
-		Mode:      nativepricing.ModeAuto,
+		Overrides: scope.Overrides,
+		Mode:      mode,
 		Stderr:    stderr,
 	})
 	if err != nil {
@@ -227,6 +241,19 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	}
 	reportUnpriced(snapshots, prepared.CoveredModelIDs, stderr)
 	return snapshots, nil
+}
+
+// claudeCostMode maps the config's mode string onto the pricing engine's
+// ladder. ResolveScope only ever returns the three values ccusage accepts.
+func claudeCostMode(mode string) nativepricing.CostMode {
+	switch mode {
+	case "calculate":
+		return nativepricing.ModeCalculate
+	case "display":
+		return nativepricing.ModeDisplay
+	default:
+		return nativepricing.ModeAuto
+	}
 }
 
 // resolveNativeRoots is the root-resolution switch for the native path.
@@ -268,6 +295,7 @@ type nativeHookInput struct {
 	homeDir   string
 	roots     claude.Roots
 	overrides map[string]any
+	mode      nativepricing.CostMode
 	covered   map[string]bool
 }
 
@@ -352,7 +380,7 @@ func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.S
 			Until:     until,
 			Roots:     input.roots,
 			Overrides: input.overrides,
-			Mode:      nativepricing.ModeAuto,
+			Mode:      input.mode,
 			Stderr:    input.stderr,
 		})
 		if err != nil {

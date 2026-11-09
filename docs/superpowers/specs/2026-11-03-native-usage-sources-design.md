@@ -244,16 +244,29 @@ S1 的整分支终审留下七项义务，其中三项已写进代码注释（`c
   `collect.LookupNative` 接进热路径前必须先决策。**S2 已落地**：`adapters/claude/cost.go` 的
   `memoizeFind` 在每次 collection 建一个按模型名缓存的 finder（`f60ddf3`），`internal/nativepricing`
   本身仍不缓存。
-- `parityEnv`（`clients/go/cmd/parity/main.go:306`）只剥离 `TOKENBOARD_HOOK_MODE`；S2 起的原生 provider
+- `parityEnv`（`clients/go/cmd/parity/main.go:432`）只剥离 `TOKENBOARD_HOOK_MODE`；S2 起的原生 provider
   子进程必须沿用 `internal/ccusage.ScrubCredentialEnv`（`clients/go/internal/ccusage/credentials.go:45`）
   的同一名单，即 AGENTS.md「ccusage 子进程环境必须剥离凭据」这条跨端不变量。**S2 复核结论**：
   原生 provider 完全 in-process，不 spawn ccusage，因此 parity 的 `execCcusage` 子进程仍是唯一
   需要脱敏的路径，沿用该名单即可；`parityEnv` 保持只剥离 hook mode。
-- `Cost` 的 `at time.Time` 形参在 S1 无效（`clients/go/internal/nativepricing/cost.go:128-130`）：S2 用它
-  接 DeepSeek 时段定价。
+- `Cost` 的 `at time.Time` 形参在 S1 无效（`clients/go/internal/nativepricing/cost.go`）：`FindAt` 与
+  时段费率资产都还没有实现。**DeepSeek 时段定价推迟到 S3**——但它是**定价引擎层**的缺口，不是
+  Codex 适配器专属：ccusage 的 claude daily 也会对带时段费率的模型名（经代理网关出现在
+  Claude transcript 里的 deepseek 行）按事件时间计价，所以 S3 落地前 claude 路径在这类行上
+  本来就与上游不一致，与适配器对错无关（2026-11-06 复核确认，Codex 发现 4）。S3 计划
+  （`docs/superpowers/plans/2026-11-06-s3-codex-adapter.md` Task 7）已把 `FindAt`、时段表与
+  每模型长上下文档位阈值列为独立可交付，并要求 claude 金样本的交叉回归。
 - parity 的 ccusage 侧目前比较 raw normalize 输出（无 codex corrections、无动态定价）：S2 扩展。
-  S2 已改：`cmd/parity` 通过 `pricing.Prepare` 共享同一份 merged config（`f113539`），两侧现在比较
-  的是一致定价口径下的输出；codex 扩展推迟到 S3。
+  S2 已改：`cmd/parity` 通过 `pricing.Prepare` 把同一份 merged config 交给 ccusage 的 `--config`
+  与 native 的作用域解析（`f113539`；作用域与 mode 见 2026-11-06 复核）。两侧共享的只是
+  **override 文件**：不在 override 与冻结语料里的模型仍分别是 ccusage 的在线 LiteLLM 表与
+  native 的冻结语料，319 条 costUsd diff 就是这么来的（报告 §3）。codex 扩展推迟到 S3。
+- **配置作用域与计费 mode**（2026-11-06 复核）：ccusage 按 `ConfigContext::option_maps` 合并
+  root `defaults`、`commands["claude daily"]`、`commands["daily"]`、`commands["claude:daily"]`、
+  `claude.defaults`、`claude.commands["daily"]` 六层，`defaults.mode` 决定 auto/calculate/display。
+  **S2 已落地**：`pricing.PreparedConfig.ResolveScope` 逐层字段合并，native 按 `claude daily`
+  作用域计价；只读根 `defaults.pricingOverrides` + 固定 `ModeAuto` 的旧实现会在作用域配置下
+  与 ccusage 分叉。
 
 **S4 必须处理**
 

@@ -89,12 +89,12 @@ func TestCompareTreatsTodayAsLiveWrite(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
 	t.Run("today row that only grew is a live write", func(t *testing.T) {
-		native := []contract.Snapshot{snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)}
-		// ccusage runs second, so it sees the newer bytes: more usage, and the
-		// pro-rata cost share moved with them.
-		later := snapshotRow("2026-11-04", "claude-sonnet", 150, 10, 1.4)
+		// The native scan runs second, so it sees the newer bytes: more usage,
+		// and the pro-rata cost share moved with them.
+		earlier := snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)
+		native := []contract.Snapshot{snapshotRow("2026-11-04", "claude-sonnet", 150, 10, 1.4)}
 
-		report := compareParity(native, []contract.Snapshot{later}, now)
+		report := compareParity(native, []contract.Snapshot{earlier}, now)
 
 		if report.Status != statusMatch {
 			t.Fatalf("status = %q, want %q (a live write is not a failure)", report.Status, statusMatch)
@@ -108,10 +108,10 @@ func TestCompareTreatsTodayAsLiveWrite(t *testing.T) {
 	})
 
 	t.Run("a settled date stays a difference", func(t *testing.T) {
-		native := []contract.Snapshot{snapshotRow("2026-11-03", "claude-sonnet", 100, 10, 1)}
-		later := snapshotRow("2026-11-03", "claude-sonnet", 150, 10, 1.4)
+		earlier := snapshotRow("2026-11-03", "claude-sonnet", 100, 10, 1)
+		native := []contract.Snapshot{snapshotRow("2026-11-03", "claude-sonnet", 150, 10, 1.4)}
 
-		report := compareParity(native, []contract.Snapshot{later}, now)
+		report := compareParity(native, []contract.Snapshot{earlier}, now)
 
 		if report.Status != statusDiff {
 			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
@@ -125,10 +125,12 @@ func TestCompareTreatsTodayAsLiveWrite(t *testing.T) {
 	})
 
 	t.Run("a today row that shrank is a difference", func(t *testing.T) {
-		native := []contract.Snapshot{snapshotRow("2026-11-04", "claude-sonnet", 150, 10, 1.4)}
-		later := snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)
+		// The later scan cannot see less usage than the earlier one when the
+		// source only appends, so a shrinking row is a real read disagreement.
+		earlier := snapshotRow("2026-11-04", "claude-sonnet", 150, 10, 1.4)
+		native := []contract.Snapshot{snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)}
 
-		report := compareParity(native, []contract.Snapshot{later}, now)
+		report := compareParity(native, []contract.Snapshot{earlier}, now)
 
 		if report.Status != statusDiff {
 			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
@@ -139,11 +141,11 @@ func TestCompareTreatsTodayAsLiveWrite(t *testing.T) {
 	})
 
 	t.Run("a today row with a sessionCount change stays a difference", func(t *testing.T) {
-		native := []contract.Snapshot{snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)}
+		earlier := snapshotRow("2026-11-04", "claude-sonnet", 100, 10, 1)
 		later := snapshotRow("2026-11-04", "claude-sonnet", 150, 10, 1.4)
 		later.SessionCount = 2
 
-		report := compareParity(native, []contract.Snapshot{later}, now)
+		report := compareParity([]contract.Snapshot{later}, []contract.Snapshot{earlier}, now)
 
 		if report.Status != statusDiff {
 			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
@@ -236,6 +238,56 @@ func TestCompareDistinguishesEmptyFromMatch(t *testing.T) {
 			t.Fatalf("status = %q, want %q", report.Status, statusDiff)
 		}
 	})
+}
+
+// TestRunParityAppliesProviderPostProcessing pins that the ccusage side gets
+// the same shared post-processing production applies to BOTH collection paths.
+// For Codex that is the daily cost projection (codex-cost-projection.ts):
+// ccusage reports one date-level cost and the provider redistributes it across
+// models at fixed precision, so comparing the native side (projected inside
+// Collect) against raw ccusage rows would diff on sub-cent rounding alone.
+func TestRunParityAppliesProviderPostProcessing(t *testing.T) {
+	codexRow := func(model string, tokens int64, cost float64) contract.Snapshot {
+		return contract.Snapshot{
+			Source:       contract.SourceCodex,
+			UsageDate:    "2026-11-01",
+			Timezone:     "UTC",
+			Model:        model,
+			InputTokens:  tokens,
+			TotalTokens:  tokens,
+			CostUSD:      cost,
+			SessionCount: 1,
+			CollectedAt:  "2026-11-01T00:00:00.000Z",
+		}
+	}
+	// The raw ccusage costs and the projection of them: one date-level total
+	// (2.9998396) rounded to 1e-6 and split by token share (1:2).
+	raw := []contract.Snapshot{
+		codexRow("model-a", 1000, 1.4481393926922606),
+		codexRow("model-b", 2000, 1.5517002073077395),
+	}
+	projected := []contract.Snapshot{
+		codexRow("model-a", 1000, 0.999947),
+		codexRow("model-b", 2000, 1.999893),
+	}
+
+	native := &paritySeamStub{snapshots: projected}
+	report, err := runParity(context.Background(), parityInput{
+		Source:       contract.SourceCodex,
+		Timezone:     "UTC",
+		LookupNative: func(contract.Source) (collect.Provider, bool) { return native, true },
+		Prepare:      offlinePrepare,
+		Now:          func() time.Time { return time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC) },
+		CollectCcusage: func(context.Context, ccusageRequest) ([]contract.Snapshot, error) {
+			return raw, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runParity: %v", err)
+	}
+	if report.Status != statusMatch || report.Matched != 2 {
+		t.Fatalf("report = %+v, want a clean match after the shared projection is applied to the ccusage side", report)
+	}
 }
 
 // TestRunParityConsumesTheNativeSeam injects a native provider through the

@@ -1,6 +1,6 @@
 # 2026-10-30 三平台客户端审查台账（fix/post-merge-audit-followups @ edcbf1e）
 
-六 agent 全维度审查（skill 全链路、Go 正确性、TS↔Go parity、跨平台语义、安全隐私、collector+测试 CI），基线在 macOS 本机、Linux <linux-host>、Windows <windows-host> 三平台实测。**0 P1；5 P2；若干 P3。全部为既有缺陷，非分支引入。**
+六 agent 全维度审查（skill 全链路、Go 正确性、TS↔Go parity、跨平台语义、安全隐私、collector+测试 CI），基线在 macOS 本机、Linux（内网测试机 A）、Windows（内网测试机 B）三平台实测。**0 P1；5 P2；若干 P3。全部为既有缺陷，非分支引入。**
 
 本文件记录**审查结论与修复落地**；修复本身未提交（等用户确认）。
 
@@ -104,11 +104,11 @@
 `4f737cd`：三个测试补 `TOKENBOARD_TIMEZONE=UTC`（onboarding 与真实调度器一致），并注释说明为什么不在这里测时区 gate（它有自己的测试 `TestFallbackTimezoneFailsClosedOnWindows`）。
 
 ### 验证
-- Windows 真机（`<windows-host>`，仓库 `C:\Users\<user>\.tokenboard\TokenBoard` @ `4f737cd`）：`go test ./internal/cli/` → ok 3.044s
+- Windows 真机（内网测试机 B，仓库 `C:\Users\<user>\.tokenboard\TokenBoard` @ `4f737cd`）：`go test ./internal/cli/` → ok 3.044s
 - CI run 41031925282（commit `4f737cd`）：**success**（全部 job 绿，含 windows-latest）
 
 ### 三平台基线（本轮结束时实测）
-| 项 | macOS 本机 | Linux <linux-host> | Windows <windows-host> |
+| 项 | macOS 本机 | Linux（测试机 A） | Windows（测试机 B） |
 |---|---|---|---|
 | skill 套件 | 872/872 | 872/872（node 24.22.1） | 863 pass / 9 skip / 0 fail（便携 node 24.22.1） |
 | Go 全量 `go test ./...` | 待跑（本机改动后已跑，见第六节） | 全绿（`-race` 同） | cli 包 ok（真机） |
@@ -159,7 +159,7 @@
 
 ### 本轮验证口径
 
-- Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/amd64`、`GOOS=windows/arm64`、`GOOS=linux` vet+build 通过。Linux 真机（<linux-host>）全量 `go test ./... -race` 全绿。
+- Go：`gofmt -l` 干净、`go vet ./...`、`go test ./... -count=1` 全绿；`GOOS=windows/amd64`、`GOOS=windows/arm64`、`GOOS=linux` vet+build 通过。Linux 真机（测试机 A）全量 `go test ./... -race` 全绿。
 - TS：`pnpm -r test`（usage-core 40 / collector 1268+3skip / web 1060）、`pnpm -r typecheck`、`pnpm format:check` 全过。
 - skill：`node --test skills/tokenboard/scripts/*.test.mjs` **873 全过**（新增 Windows `%` 命令行测试）。
 - 全部 P2 修复先红后绿（红态均实测记录），凭据类修复以子进程回写 env 文件实证「抓不到」。
