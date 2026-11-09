@@ -46,6 +46,10 @@ func walk(dir string, depth int, accept func(string) bool, files *[]string) {
 	if err != nil {
 		return
 	}
+	// Sorted by name: os.ReadDir's order is a filesystem order, and the
+	// adapters' reports depend on a stable walk (the Rust collector sorts the
+	// files it collects too).
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	if len(entries) > maxWalkEntries {
 		entries = entries[:maxWalkEntries]
 	}
