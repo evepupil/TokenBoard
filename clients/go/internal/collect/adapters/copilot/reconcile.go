@@ -162,7 +162,7 @@ func reconcileSessionStateEntries(entries []Entry, otelCalls map[string][]int64,
 	}
 	sort.Strings(keys)
 	intervalIndices := []Entry{}
-	otelAfter := make(map[string]int64)
+	otelAfter := map[string]int64{}
 	for _, key := range keys {
 		sorted := grouped[key]
 		sort.SliceStable(sorted, func(i, j int) bool {
