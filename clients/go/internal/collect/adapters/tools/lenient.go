@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"strings"
@@ -10,6 +11,19 @@ import (
 // the small value helpers beside them. The rule they all share: an unexpected
 // JSON type is a default value, never a parse failure, so one odd field cannot
 // discard a whole line or file.
+
+// DecodeJSONLine decodes one JSONL line into a generic value with numbers kept
+// as json.Number. jsonl::records decodes each line on its own and skips lines
+// that do not decode; a trailing value after the object is not scanned.
+func DecodeJSONLine(line []byte) (any, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(line))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	return value, true
+}
 
 // LenientU64 is lenient_u64 (jsonl.rs:75-84): serde's Value::as_u64. Floats,
 // strings, negative numbers and null are all zero; only a non-negative integer

@@ -47,6 +47,50 @@ func tsShape(value string) bool {
 	}
 }
 
+// ParseCompactDate is parse_compact_date (date_utils.rs:179-188): exactly eight
+// digits naming a real calendar day. Partial bounds return false.
+func ParseCompactDate(value string) (time.Time, bool) {
+	if len(value) != 8 {
+		return time.Time{}, false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < '0' || value[index] > '9' {
+			return time.Time{}, false
+		}
+	}
+	parsed, err := time.ParseInLocation("20060102", value, time.UTC)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+// DateRangeBoundsMs is date_range_bounds_ms (date_utils.rs:212-225): the
+// half-open window [since 00:00, the day after until 00:00) in the report
+// timezone. A bound that is absent or not a full YYYYMMDD date does not narrow
+// its side. A nil result means unbounded.
+func DateRangeBoundsMs(since, until, tz string) (sinceMs, untilMs *int64) {
+	if date, ok := ParseCompactDate(since); ok {
+		millis := startOfDayMillis(date, tz)
+		sinceMs = &millis
+	}
+	if date, ok := ParseCompactDate(until); ok {
+		millis := startOfDayMillis(date.AddDate(0, 0, 1), tz)
+		untilMs = &millis
+	}
+	return sinceMs, untilMs
+}
+
+// startOfDayMillis is start_of_day_ms (date_utils.rs:232-241): the first
+// instant of the civil date in the timezone. A day whose midnight a
+// spring-forward transition skips (or a fall-back transition repeats) resolves
+// to time.Date's answer, which is the first instant after the gap: Go and Jiff
+// both land on the transition instant, never the neighbouring day.
+func startOfDayMillis(date time.Time, tz string) int64 {
+	location := loadReportLocation(tz)
+	return time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, location).UnixMilli()
+}
+
 // FormatRFC3339Millis is format_rfc3339_millis (date_utils.rs:356-368): always
 // UTC, always three fractional digits.
 func FormatRFC3339Millis(millis int64) string {
