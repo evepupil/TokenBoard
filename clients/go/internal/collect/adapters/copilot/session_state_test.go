@@ -236,3 +236,16 @@ func TestCopilotSessionStateDropsOnlyNonStringFields(t *testing.T) {
 		t.Fatalf("entries = %+v, want the one gpt-5.4 usage record", usage.Entries)
 	}
 }
+
+// jsonl::records deserializes a whole line with serde_json::from_slice, which
+// rejects content after the value; a half-overwritten line is the realistic
+// shape. Accepting its prefix would count usage Rust never sees.
+func TestCopilotSessionStateDropsALineWithTrailingContent(t *testing.T) {
+	usage := eventsFor(t, "session-1", []string{
+		`{"type":"session.shutdown","id":"truncated","timestamp":"2026-04-15T09:52:27.352Z","data":{"totalNanoAiu":99}}garbag`,
+		`{"type":"session.shutdown","id":"kept","timestamp":"2026-04-15T09:52:28.352Z","data":{"totalNanoAiu":12}}`,
+	})
+	if len(usage.CreditSnapshots) != 1 || usage.CreditSnapshots[0].DedupKey != "credits:session-1:kept" {
+		t.Fatalf("snapshots = %+v, want only the well-formed line", usage.CreditSnapshots)
+	}
+}

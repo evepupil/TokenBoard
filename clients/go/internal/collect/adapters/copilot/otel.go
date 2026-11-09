@@ -147,7 +147,7 @@ func parseOtelFile(path string, ceiling int64) ([]Entry, error) {
 	records := make([]otelRecord, 0)
 	forEachJSONLine(content, func(line []byte) bool {
 		return containsBytes(line, []byte(`"attributes"`))
-	}, decodeJSONLineStrict, func(value any) {
+	}, DecodeJSONLineStrict, func(value any) {
 		if record, ok := decodeOtelRecord(value); ok {
 			records = append(records, record)
 		}
@@ -160,9 +160,12 @@ func parseOtelFile(path string, ceiling int64) ([]Entry, error) {
 			candidates = append(candidates, converted)
 		}
 	}
+	// One set of suppression indexes per file (parser.rs:141-146): rebuilding it
+	// per candidate is the same answer at candidates×candidates work.
+	sets := newCandidateSets(candidates)
 	entries := make([]Entry, 0, len(candidates))
 	for index, cand := range candidates {
-		if !shouldEmitCandidate(index, cand, newCandidateSets(candidates)) {
+		if !shouldEmitCandidate(index, cand, sets) {
 			continue
 		}
 		entries = append(entries, Entry{

@@ -13,8 +13,10 @@ import (
 // discard a whole line or file.
 
 // DecodeJSONLine decodes one JSONL line into a generic value with numbers kept
-// as json.Number. jsonl::records decodes each line on its own and skips lines
-// that do not decode; a trailing value after the object is not scanned.
+// as json.Number and accepts content after the value. Use it only where the
+// Rust side's reader does the same (serde_json::from_slice pulls one value and
+// ignores what follows); Copilot's pipelines deserialize a whole line, so they
+// use copilot.DecodeJSONLineStrict instead.
 func DecodeJSONLine(line []byte) (any, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	decoder.UseNumber()

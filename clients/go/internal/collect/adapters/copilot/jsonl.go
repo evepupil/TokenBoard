@@ -85,9 +85,10 @@ func cutSuffix(value, suffix string) (string, bool) {
 	return value, false
 }
 
-// decodeJSONLineStrict decodes one JSONL line and rejects trailing content, as
-// serde_json::from_slice does.
-func decodeJSONLineStrict(line []byte) (any, bool) {
+// DecodeJSONLineStrict decodes one JSONL line and rejects trailing content, as
+// serde_json::from_slice does. Both copilot pipelines read their lines through
+// it: jsonl::records deserializes each line as one complete value.
+func DecodeJSONLineStrict(line []byte) (any, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(line))
 	decoder.UseNumber()
 	var value any

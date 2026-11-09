@@ -88,7 +88,7 @@ func parseSessionStateContent(path, sessionID string, parsed *SourceUsage) (Sour
 // visitSessionStateEvent to read the same way. Unknown fields are ignored, as
 // serde ignores them (the upstream fixtures carry `"cost"` inside `requests`).
 func decodeSessionStateEvent(line []byte) (any, bool) {
-	value, ok := tools.DecodeJSONLine(line)
+	value, ok := DecodeJSONLineStrict(line)
 	if !ok {
 		return nil, false
 	}
