@@ -219,6 +219,15 @@ func ReadFiniteNumber(value any) (float64, bool) {
 // confused.
 const secondsThreshold = 100_000_000_000
 
+// maxJSDateMilliseconds is the largest time value (|t| ≤ 8.64e15 ms) a JS Date
+// holds; `new Date(x)` is invalid beyond it, and TS's readEventTimestamp returns
+// null for those, falling back to the session timestamp.
+const maxJSDateMilliseconds = 8.64e15
+
+func inJSDateRange(milliseconds float64) bool {
+	return milliseconds >= -maxJSDateMilliseconds && milliseconds <= maxJSDateMilliseconds
+}
+
 // ReadEventTimestamp reads epoch seconds, epoch milliseconds, or a timestamp
 // string as a time.Time. The string forms follow the JS Date parser for the
 // shapes real session logs use: an explicit zone is honored, a zone-less
@@ -232,6 +241,12 @@ func ReadEventTimestamp(value any) (time.Time, bool) {
 		milliseconds := numeric
 		if numeric < secondsThreshold {
 			milliseconds = numeric * 1000
+		}
+		// Without the bound, int64(milliseconds) is undefined past 2^63 and
+		// time.UnixMilli renders whatever it produced, so a five-digit year would
+		// reach the snapshot and fail validation for the whole source.
+		if !inJSDateRange(milliseconds) {
+			return time.Time{}, false
 		}
 		return time.UnixMilli(int64(milliseconds)), true
 	}

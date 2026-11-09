@@ -172,6 +172,26 @@ func TestReadFiniteNumberRejectsNonFiniteValues(t *testing.T) {
 	}
 }
 
+// `new Date(n)` is invalid outside ±8.64e15 ms, and TS's readEventTimestamp returns
+// null there so the row falls back to the session timestamp. Go's int64 conversion of
+// such a float is undefined, and time.UnixMilli happily renders the wrapped value —
+// a year like "33658-09-27" would then fail snapshot validation and take the whole
+// source down instead of one row.
+func TestReadEventTimestampRejectsValuesOutsideTheJSRange(t *testing.T) {
+	for _, value := range []any{9.5e15, 8.64e15 + 1, 1e30, "9.5e15"} {
+		if parsed, ok := ReadEventTimestamp(value); ok {
+			t.Fatalf("ReadEventTimestamp(%v) = %v, want ok=false", value, parsed)
+		}
+	}
+	// Instants a JS Date can still hold stay readable on both sides, including the
+	// last one; only beyond the bound does the two sides' treatment differ.
+	for _, value := range []any{4.1e12, 8.64e15} {
+		if _, ok := ReadEventTimestamp(value); !ok {
+			t.Fatalf("ReadEventTimestamp(%v) rejected an in-range instant", value)
+		}
+	}
+}
+
 // A NaN reaches the readers as a JSON number from a corrupted store. The readers'
 // rejections above keep it out of the counts, but the cost reader on a costed
 // source (`ReadFiniteNumber` directly) is the last path a NaN could ride to a
