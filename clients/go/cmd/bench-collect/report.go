@@ -22,7 +22,7 @@ func writeTextReport(w io.Writer, report benchReport) {
 	writeSideReport(w, report.Ccusage)
 	writeSideReport(w, report.Native)
 	if report.Ccusage.BytesReadPending || report.Native.BytesReadPending {
-		fmt.Fprintf(w, "bytesRead: %d (pending — the adapter read counter lands in S2)\n", report.Ccusage.BytesRead)
+		fmt.Fprintln(w, "bytesRead: not measured (no adapter read counter; the column stays 0 and is not an estimate)")
 	}
 	for _, regression := range report.Regressions {
 		fmt.Fprintf(w, "regression: %s\n", regression)

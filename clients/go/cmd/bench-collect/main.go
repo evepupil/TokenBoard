@@ -146,8 +146,9 @@ type roundSample struct {
 	PeakRSSBytes uint64 `json:"peakRssBytes"`
 	// OutputBytes is the ccusage JSON the child wrote (0 on the native side).
 	OutputBytes uint64 `json:"outputBytes"`
-	// BytesRead is the source bytes the collection read. It is 0 in S1 and
-	// BytesReadPending says so: the adapter read counter lands in S2.
+	// BytesRead is the source bytes the collection read. No adapter counts
+	// them yet, so it stays 0 and BytesReadPending marks the zero as a
+	// placeholder rather than a measurement.
 	BytesRead        uint64 `json:"bytesRead"`
 	BytesReadPending bool   `json:"bytesReadPending"`
 	// Calls is the number of ccusage invocations the round made: always 2 for a
@@ -172,8 +173,8 @@ type sideReport struct {
 	// a monotone children high-water, this process's own high-water, Windows'
 	// peak working set, or unavailable.
 	RSSSource string `json:"rssSource,omitempty"`
-	// BytesRead is 0 in S1: the adapter read counter lands in S2. Pending says
-	// the zero is a placeholder rather than a measurement of no reads.
+	// BytesRead stays 0: no adapter read counter exists. Pending says the zero
+	// is a placeholder rather than a measurement of no reads.
 	BytesRead        uint64 `json:"bytesRead"`
 	BytesReadPending bool   `json:"bytesReadPending"`
 }
@@ -506,7 +507,7 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 			"ccusage runs without --offline, exactly as production does, so its prices may include a live refresh while the native side bills from the frozen corpus; the flags, not the prices, are what this comparison holds constant")
 	}
 	report.Notes = append(report.Notes,
-		"bytesRead is pending until the S2 adapter read counter lands")
+		"bytesRead is not measured: no adapter read counter exists, so the column stays 0 rather than carrying an estimate")
 	report.markRegressions()
 	return report, nil
 }
@@ -525,9 +526,8 @@ func summarizeSide(kind string, results []roundResult) sideReport {
 	source := ""
 	labeled := true
 	for index, result := range results {
-		// BytesRead is pending for the whole side: S1 has no adapter read
-		// counter, so the zero is a placeholder and the report says so. S2
-		// replaces this constant with the counter's value once it exists.
+		// BytesRead is pending for the whole side: nothing counts adapter
+		// reads, so the zero is a placeholder and the report says so.
 		report.Rounds = append(report.Rounds, roundSample{
 			Round:            index + 1,
 			WallMs:           result.WallMs,
