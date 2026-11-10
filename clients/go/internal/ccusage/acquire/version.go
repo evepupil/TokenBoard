@@ -8,7 +8,7 @@
 // scripts/check-deps.sh enforces the same equality in CI, and
 // TestPackageSpecifierMatchesCollectorPackageJSON re-checks it from the repo
 // checkout so a bump on one side cannot silently drift the other.
-package ccusage
+package acquire
 
 // Version is the ccusage release the client expects. Upgrading ccusage means
 // changing this constant and packages/collector/package.json in the same PR,

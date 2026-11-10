@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
 
@@ -205,13 +206,13 @@ func Run(input Input) (Result, error) {
 	// (tests, or a hand-placed binary) while the ccusage it should pair with
 	// lives under TOKENBOARD_CONFIG_DIR/bin.
 	if hasCcusage {
-		ccusageDir := ccusage.BundledBinDir(input.Env, "")
+		ccusageDir := ccacq.BundledBinDir(input.Env, "")
 		if err := os.MkdirAll(ccusageDir, 0o700); err != nil {
 			stderr(fmt.Sprintf("TokenBoard updated to %s, but the bundled ccusage could not be installed: %v", version, err))
 		} else if err := writeExecutable(filepath.Join(ccusageDir, ccusageBinaryName(goos)), ccusageData); err != nil {
 			stderr(fmt.Sprintf("TokenBoard updated to %s, but the bundled ccusage could not be installed: %v", version, err))
 		}
-	} else if stalePath := filepath.Join(ccusage.BundledBinDir(input.Env, ""), ccusageBinaryName(goos)); fileExists(stalePath) {
+	} else if stalePath := filepath.Join(ccacq.BundledBinDir(input.Env, ""), ccusageBinaryName(goos)); fileExists(stalePath) {
 		// The release carries no ccusage, so whatever is there stays — a
 		// version this client was never tested against. Say so rather than
 		// report a clean update; the skill's bootstrap install reports the

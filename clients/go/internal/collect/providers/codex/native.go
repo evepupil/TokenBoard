@@ -8,7 +8,7 @@ package codex
 // pricing, hook cursors and their retries all still run, and every document
 // they normalize or inspect keeps ccusage's report shape (spec §6.1.1). This
 // file only replaces the step that ran `ccusage codex daily` / `ccusage codex
-// session`: a stand-in for ccusage.CommandRunner that answers the same
+// session`: a stand-in for ccexec.CommandRunner that answers the same
 // invocation with the in-process adapter's report.
 //
 // Substituting at the runner seam rather than at Collect is deliberate. The
@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
+	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	adapter "github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -84,7 +86,7 @@ func (nativeProvider) Collect(ctx context.Context, options collect.Options) ([]c
 // the `--config` pair ConfigArgs appends, so a broken explicit config fails
 // exactly as it would on the ccusage path) without resolving or spawning a
 // ccusage binary. The native runner parses the resulting argument list.
-var nativePackageRunner = ccusage.PackageRunner{
+var nativePackageRunner = ccrunner.PackageRunner{
 	Command: "ccusage",
 	RunPackageArgs: func(_, _ string, packageArgs []string) []string {
 		return append([]string{}, packageArgs...)
@@ -112,8 +114,8 @@ func newNativeReportRunner(prepared pricing.PreparedConfig) *nativeReportRunner 
 	return &nativeReportRunner{prepared: prepared, pricing: map[string]nativeReportPricing{}}
 }
 
-// Run implements ccusage.CommandRunner.
-func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []string, options ccusage.CommandOptions) (any, error) {
+// Run implements ccexec.CommandRunner.
+func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []string, options ccexec.CommandOptions) (any, error) {
 	// The subprocess path bounds ccusage by killing the child at TimeoutMs
 	// (TOKENBOARD_CODEX_DAILY_TIMEOUT_MS). There is no child here, so the budget
 	// becomes a deadline on the scan, which polls it between files; dropping it

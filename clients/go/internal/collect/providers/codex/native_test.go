@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	adapter "github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
@@ -260,13 +262,13 @@ func TestNativeHookRecomputesAndReconcilesTheSameWindow(t *testing.T) {
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex")
 	nativeFixtureSession(t, codexHome)
-	neverRuns := func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+	neverRuns := func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 		t.Error("native hook mode must not run ccusage")
 		return nil, os.ErrClosed
 	}
-	resolveBinary := func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+	resolveBinary := func(ccacq.AcquireOptions) (ccacq.Binary, error) {
 		t.Error("native hook mode must not resolve a ccusage binary")
-		return ccusage.Binary{}, os.ErrClosed
+		return ccacq.Binary{}, os.ErrClosed
 	}
 	options := Options{
 		CodexHome:     provHome(codexHome),
@@ -391,7 +393,7 @@ func nativeReportCost(t *testing.T, codexHome, explicitConfig string) float64 {
 	runner := newNativeReportRunner(prepared)
 	decoded, err := runner.Run(context.Background(), "ccusage",
 		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
-		ccusage.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}})
+		ccexec.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}})
 	if err != nil {
 		t.Fatalf("native report: %v", err)
 	}
@@ -459,7 +461,7 @@ func TestNativeReportHonoursTheCommandTimeout(t *testing.T) {
 	runner := newNativeReportRunner(prepared)
 	_, err = runner.Run(context.Background(), "ccusage",
 		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
-		ccusage.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}, TimeoutMs: 1})
+		ccexec.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}, TimeoutMs: 1})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want the ccusage timeout line", err)
 	}

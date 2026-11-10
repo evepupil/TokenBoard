@@ -130,7 +130,7 @@ func TestParityPassesThePreparedConfigToCcusage(t *testing.T) {
 
 // TestCcusageReportArgsMatchProduction adds --config to the pinned production
 // flags in every other position, and proves an empty path adds no flag at all
-// (ccusage.ConfigArgs returns nil when neither config variable is set).
+// (ccrunner.ConfigArgs returns nil when neither config variable is set).
 func TestCcusageReportArgsMatchProduction(t *testing.T) {
 	rangeArgs := []string{"--since", "2026-11-01", "--until", "2026-11-03"}
 	config := []string{"--config", "/state/ccusage.dynamic.json"}

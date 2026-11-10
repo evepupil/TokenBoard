@@ -23,7 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -167,13 +168,13 @@ func TestHookNativeNeverRunsCcusage(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, floatPtr(0.12)))
 	options := Options{
 		StateDir: stateDir,
-		Runner: func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+		Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 			t.Error("the native hook path must not run ccusage")
 			return nil, errors.New("ccusage must not run")
 		},
-		ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
 			t.Error("the native hook path must not resolve a ccusage binary")
-			return ccusage.Binary{}, errors.New("ccusage must not run")
+			return ccacq.Binary{}, errors.New("ccusage must not run")
 		},
 	}
 	snapshots, err := runNativeHook(t, options, hookNativeEnv(map[string]string{

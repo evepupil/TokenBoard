@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -26,7 +27,7 @@ type stubRunner struct {
 	responses func(args []string) any
 }
 
-func (r *stubRunner) run(_ context.Context, command string, args []string, options ccusage.CommandOptions) (any, error) {
+func (r *stubRunner) run(_ context.Context, command string, args []string, options ccexec.CommandOptions) (any, error) {
 	r.calls = append(r.calls, append([]string{}, args...))
 	r.commands = append(r.commands, command)
 	r.timeouts = append(r.timeouts, options.TimeoutMs)
@@ -652,8 +653,8 @@ func TestHookModeNeverDownloadsCcusage(t *testing.T) {
 			"CLAUDE_CONFIG_DIR":    filepath.Dir(stateDir),
 		}),
 		Runner: runner.run,
-		ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
-			return ccusage.Binary{}, os.ErrNotExist
+		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
+			return ccacq.Binary{}, os.ErrNotExist
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "not exist") {
@@ -916,8 +917,8 @@ func TestCollectFallsBackToPackageRunnerOutsideHookMode(t *testing.T) {
 		Env:         testEnv(map[string]string{"TOKENBOARD_PACKAGE_MANAGER": "pnpm"}),
 		Runner:      runner.run,
 		Stderr:      func(line string) { lines = append(lines, line) },
-		ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
-			return ccusage.Binary{}, os.ErrNotExist
+		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
+			return ccacq.Binary{}, os.ErrNotExist
 		},
 	})
 	if err != nil {

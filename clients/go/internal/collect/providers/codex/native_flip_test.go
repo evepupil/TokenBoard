@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 )
 
 // TestNativeCodexIsTheDefaultPath is the S5 gate: the compile-time switch points
@@ -16,7 +16,7 @@ func TestNativeCodexIsTheDefaultPath(t *testing.T) {
 	}
 	codexHome := provEmptyCodexHome(t)
 	calls := 0
-	runner := func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+	runner := func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 		calls++
 		return nil, nil
 	}

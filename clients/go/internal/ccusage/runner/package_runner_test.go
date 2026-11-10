@@ -1,4 +1,4 @@
-package ccusage
+package runner
 
 import (
 	"os"
@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
 )
 
 // Port of package-runner.test.ts. The TS suite also pins the specifier against
@@ -25,14 +27,14 @@ func platformCommand(command, platform string) string {
 }
 
 func TestPackageSpecifierIsPinnedToTheAdaptedVersion(t *testing.T) {
-	if Version != "20.0.33" {
-		t.Errorf("Version = %q, want 20.0.33", Version)
+	if acquire.Version != "20.0.33" {
+		t.Errorf("Version = %q, want 20.0.33", acquire.Version)
 	}
-	if PackageSpecifier != "ccusage@20.0.33" {
-		t.Errorf("PackageSpecifier = %q", PackageSpecifier)
+	if acquire.PackageSpecifier != "ccusage@20.0.33" {
+		t.Errorf("acquire.PackageSpecifier = %q", acquire.PackageSpecifier)
 	}
-	if strings.Contains(PackageSpecifier, "latest") {
-		t.Errorf("specifier must never float: %q", PackageSpecifier)
+	if strings.Contains(acquire.PackageSpecifier, "latest") {
+		t.Errorf("specifier must never float: %q", acquire.PackageSpecifier)
 	}
 }
 
@@ -47,8 +49,8 @@ func TestPackageSpecifierMatchesCollectorPackageJSON(t *testing.T) {
 		packageJSON := filepath.Join(dir, "packages", "collector", "package.json")
 		if data, readErr := os.ReadFile(packageJSON); readErr == nil {
 			text := string(data)
-			if !strings.Contains(text, `"ccusage": "`+Version+`"`) {
-				t.Errorf("packages/collector/package.json does not pin ccusage to %s", Version)
+			if !strings.Contains(text, `"ccusage": "`+acquire.Version+`"`) {
+				t.Errorf("packages/collector/package.json does not pin ccusage to %s", acquire.Version)
 			}
 			return
 		}
@@ -72,8 +74,8 @@ func TestResolvePackageRunnerUsesNpxByDefault(t *testing.T) {
 	if runner.Command != platformCommand("npx", "linux") {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"daily", "--json"})
-	if !reflect.DeepEqual(args, []string{PackageSpecifier, "daily", "--json"}) {
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"daily", "--json"})
+	if !reflect.DeepEqual(args, []string{acquire.PackageSpecifier, "daily", "--json"}) {
 		t.Errorf("args = %v", args)
 	}
 }
@@ -96,7 +98,7 @@ func TestPackageRunnerArgsAppendExplicitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{PackageSpecifier, "daily", "--json", "--config", configPath}
+	want := []string{acquire.PackageSpecifier, "daily", "--json", "--config", configPath}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}
@@ -117,7 +119,7 @@ func TestPackageRunnerPrefersDynamicPricingConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{PackageSpecifier, "daily", "--json", "--config", dynamicPath}
+	want := []string{acquire.PackageSpecifier, "daily", "--json", "--config", dynamicPath}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}
@@ -161,8 +163,8 @@ func TestPackageRunnerSupportsBunx(t *testing.T) {
 	if runner.Command != "/opt/bin/bunx" {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"codex", "session", "--json"})
-	if !reflect.DeepEqual(args, []string{PackageSpecifier, "codex", "session", "--json"}) {
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"codex", "session", "--json"})
+	if !reflect.DeepEqual(args, []string{acquire.PackageSpecifier, "codex", "session", "--json"}) {
 		t.Errorf("args = %v", args)
 	}
 }
@@ -182,8 +184,8 @@ func TestPackageRunnerSupportsNpmExec(t *testing.T) {
 	if runner.Command != "/opt/bin/npm" {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"daily", "--json"})
-	want := []string{"exec", "--yes", "--package", PackageSpecifier, "--", "ccusage", "daily", "--json"}
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"daily", "--json"})
+	want := []string{"exec", "--yes", "--package", acquire.PackageSpecifier, "--", "ccusage", "daily", "--json"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}
@@ -204,8 +206,8 @@ func TestPackageRunnerSupportsPnpmDlx(t *testing.T) {
 	if runner.Command != "/opt/bin/pnpm" {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"daily", "--json"})
-	want := []string{"dlx", PackageSpecifier, "daily", "--json"}
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"daily", "--json"})
+	want := []string{"dlx", acquire.PackageSpecifier, "daily", "--json"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}
@@ -226,7 +228,7 @@ func TestResolvePackageRunnerUsesLocalCcusageBinaryForTheHotPath(t *testing.T) {
 	if runner.Command != "/opt/bin/ccusage" {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"codex", "daily", "--json"})
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"codex", "daily", "--json"})
 	if !reflect.DeepEqual(args, []string{"codex", "daily", "--json"}) {
 		t.Errorf("args = %v", args)
 	}
@@ -256,8 +258,8 @@ func TestResolvePackageRunnerFallsBackWhenLocalBinaryIsMissing(t *testing.T) {
 	if runner.Command != platformCommand("pnpm", runtime.GOOS) {
 		t.Errorf("command = %q", runner.Command)
 	}
-	args := runner.RunPackageArgs(PackageSpecifier, "ccusage", []string{"codex", "daily", "--json"})
-	want := []string{"dlx", PackageSpecifier, "codex", "daily", "--json"}
+	args := runner.RunPackageArgs(acquire.PackageSpecifier, "ccusage", []string{"codex", "daily", "--json"})
+	want := []string{"dlx", acquire.PackageSpecifier, "codex", "daily", "--json"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
 	}

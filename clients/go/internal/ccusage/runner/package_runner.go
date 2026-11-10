@@ -1,10 +1,12 @@
-package ccusage
+package runner
 
 import (
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
 )
 
 // Port of package-runner.ts: which command runs ccusage, and how the package
@@ -137,5 +139,5 @@ func (r PackageRunner) Args(packageArgs []string, env func(string) string, fileE
 	if err != nil {
 		return nil, err
 	}
-	return r.RunPackageArgs(PackageSpecifier, "ccusage", append(packageArgs, configArgs...)), nil
+	return r.RunPackageArgs(acquire.PackageSpecifier, "ccusage", append(packageArgs, configArgs...)), nil
 }

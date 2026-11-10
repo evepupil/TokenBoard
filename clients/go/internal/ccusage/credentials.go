@@ -57,9 +57,3 @@ func ScrubCredentialEnv(env []string) []string {
 	}
 	return out
 }
-
-// scrubCredentialEnv is the in-package spelling. Callers inside ccusage keep reading the same
-// way they did; the exported name is what selfupdate imports across the package boundary.
-func scrubCredentialEnv(env []string) []string {
-	return ScrubCredentialEnv(env)
-}

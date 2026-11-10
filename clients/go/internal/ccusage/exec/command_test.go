@@ -1,4 +1,4 @@
-package ccusage
+package exec
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	core "github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 )
 
 // The TS command.test.ts runs these against the Node binary; the Go port uses
@@ -112,7 +114,7 @@ func TestRunJSONPassesArgumentsDirectlyWithoutShellParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, ok := result.(*orderedRecord)
+	record, ok := result.(core.OrderedObject)
 	if !ok {
 		t.Fatalf("result = %T", result)
 	}
@@ -153,7 +155,7 @@ func TestRunJSONStripsCredentialVariablesFromTheChildEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, ok := result.(*orderedRecord)
+	record, ok := result.(core.OrderedObject)
 	if !ok {
 		t.Fatalf("result = %T", result)
 	}
@@ -252,7 +254,7 @@ func TestRunJSONRetriesTransientPackageDownloadFailuresBeforeSucceeding(t *testi
 	if string(attempts) != "2" {
 		t.Errorf("attempts = %q, want \"2\"", attempts)
 	}
-	record, _ := result.(*orderedRecord)
+	record, _ := result.(core.OrderedObject)
 	if value, _ := record.Get("ok"); value != true {
 		t.Errorf("result = %v", result)
 	}

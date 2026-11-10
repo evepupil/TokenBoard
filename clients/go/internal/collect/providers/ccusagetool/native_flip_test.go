@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -31,7 +31,7 @@ func TestNativeToolsAreTheDefaultPath(t *testing.T) {
 		}
 	}
 	calls := 0
-	runner := func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+	runner := func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 		calls++
 		return nil, nil
 	}

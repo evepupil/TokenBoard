@@ -40,6 +40,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	// The providers register both seams (collect.Lookup and
 	// collect.LookupNative) from their own init(); without this blank import
@@ -168,7 +170,7 @@ type ccusageRequest struct {
 	Until    string
 	Timezone string
 	// ConfigPath is the merged ccusage config, passed as --config. Empty means
-	// no flag, matching ccusage.ConfigArgs when neither config variable is set.
+	// no flag, matching ccrunner.ConfigArgs when neither config variable is set.
 	ConfigPath string
 }
 
@@ -649,13 +651,13 @@ func execCcusage(ctx context.Context, request ccusageRequest) ([]contract.Snapsh
 	if request.Until != "" {
 		rangeArgs = append(rangeArgs, "--until", request.Until)
 	}
-	commandOptions := ccusage.CommandOptions{TimeoutMs: ccusageTimeoutMs}
+	commandOptions := ccexec.CommandOptions{TimeoutMs: ccusageTimeoutMs}
 
 	dailyArgs, err := ccusageReportArgs(request.Source, "daily", rangeArgs, request.Timezone, request.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
-	daily, err := ccusage.RunJSON(ctx, binary, dailyArgs, commandOptions)
+	daily, err := ccexec.RunJSON(ctx, binary, dailyArgs, commandOptions)
 	if err != nil {
 		return nil, fmt.Errorf("ccusage daily: %w", err)
 	}
@@ -669,7 +671,7 @@ func execCcusage(ctx context.Context, request ccusageRequest) ([]contract.Snapsh
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := ccusage.RunJSON(ctx, binary, sessionArgs, commandOptions)
+	sessions, err := ccexec.RunJSON(ctx, binary, sessionArgs, commandOptions)
 	if err != nil {
 		return nil, fmt.Errorf("ccusage session: %w", err)
 	}
@@ -701,7 +703,7 @@ func hasCcusageSide(source contract.Source) bool {
 // and `--single-thread`, Codex additionally runs `--offline`.
 //
 // The `--config` pair goes last, exactly where the providers append it through
-// ccusage.ConfigArgs, and an empty path adds no flag at all — ccusage then
+// ccrunner.ConfigArgs, and an empty path adds no flag at all — ccusage then
 // falls back to its built-in pricing, which is what production does when no
 // config was prepared.
 func ccusageReportArgs(source contract.Source, report string, rangeArgs []string, timezone, configPath string) ([]string, error) {
@@ -738,7 +740,7 @@ func ccusageReportArgs(source contract.Source, report string, rangeArgs []string
 // which install they mean; the executable name is resolved here because
 // internal/ccusage keeps it unexported.
 func defaultCcusageBin() string {
-	return filepath.Join(ccusage.BundledBinDir(nil, ""), ccusageBinaryName())
+	return filepath.Join(ccacq.BundledBinDir(nil, ""), ccusageBinaryName())
 }
 
 // ccusageBinaryName is the bundled ccusage executable's platform name.

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -169,7 +170,7 @@ func TestQwenNativeWindowFiltersDailyEntriesButSessionRowsByLastActivity(t *test
 		t.Helper()
 		decoded, err := runner.Run(context.Background(), "ccusage",
 			[]string{"qwen", report, "--json", "--since", "2026-02-24", "--timezone", "UTC"},
-			ccusage.CommandOptions{TimeoutMs: 30000})
+			ccexec.CommandOptions{TimeoutMs: 30000})
 		if err != nil {
 			t.Fatalf("%s report: %v", report, err)
 		}
@@ -231,7 +232,7 @@ func TestNativeToolRunnerAnswersGeminiUnderTheCLICommandName(t *testing.T) {
 	}
 	runner := newNativeToolRunner(preparedForTest(t), "", nil, nil)
 	_, err = runner.Run(context.Background(), "ccusage", []string{"import", "daily", "--json"},
-		ccusage.CommandOptions{})
+		ccexec.CommandOptions{})
 	if err == nil {
 		t.Fatal("an unsupported command must fail, not answer with an empty report")
 	}
@@ -253,7 +254,7 @@ func TestNativeToolRunnerHonoursTheCommandTimeout(t *testing.T) {
 	runner := newNativeToolRunner(preparedForTest(t), "", nil, nil)
 	_, err := runner.Run(context.Background(), "ccusage",
 		[]string{"amp", "daily", "--json", "--timezone", "UTC"},
-		ccusage.CommandOptions{
+		ccexec.CommandOptions{
 			Env:       []string{"AMP_DATA_DIR=" + env("AMP_DATA_DIR")},
 			TimeoutMs: 1,
 		})
@@ -284,8 +285,8 @@ func itoa(value int) string {
 	return string(encoded)
 }
 
-func commandOptionsWith(ampDir string) ccusage.CommandOptions {
-	return ccusage.CommandOptions{Env: []string{"AMP_DATA_DIR=" + ampDir, "HOME=" + ampDir}, TimeoutMs: 30000}
+func commandOptionsWith(ampDir string) ccexec.CommandOptions {
+	return ccexec.CommandOptions{Env: []string{"AMP_DATA_DIR=" + ampDir, "HOME=" + ampDir}, TimeoutMs: 30000}
 }
 
 // TestCopilotAdapterIsImportedFromAProductionFile guards the registration

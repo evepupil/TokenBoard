@@ -1,4 +1,4 @@
-package ccusage
+package exec
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	core "github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -77,7 +78,7 @@ func RunJSON(ctx context.Context, command string, args []string, options Command
 			// Decode with the ordered reader: ccusage's breakdown objects are
 			// iterated in document order, and JSON.parse (the TS runner) keeps
 			// that order too. encoding/json's maps would sort it away.
-			decoded, err := decodeOrdered(output)
+			decoded, err := core.DecodeOrderedJSON(output)
 			if err != nil {
 				return nil, fmt.Errorf("Command returned invalid JSON: %v", err)
 			}
@@ -116,7 +117,7 @@ func runOnce(ctx context.Context, inv invocation, env []string, timeoutMs int) (
 	// Every ccusage spawn goes through here, so stripping at this point is the
 	// one place that cannot be forgotten by a new provider. An empty env means
 	// "inherit", which is exactly the case that leaks the upload token.
-	cmd.Env = scrubCredentialEnv(env)
+	cmd.Env = core.ScrubCredentialEnv(env)
 	if inv.windowsCmdLine != "" {
 		cmd.SysProcAttr = verbatimProcessAttr(inv.windowsCmdLine)
 	}

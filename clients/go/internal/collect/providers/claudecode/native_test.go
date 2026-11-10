@@ -33,6 +33,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
@@ -179,13 +181,13 @@ func TestSwitchSelectsTheNativePath(t *testing.T) {
 func TestNativeNeverFallsBackToCcusage(t *testing.T) {
 	options := nativeTestOptions(t)
 	options.Env = testEnv(map[string]string{"CLAUDE_CONFIG_DIR": filepath.Join(t.TempDir(), "does-not-exist")})
-	options.Runner = func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+	options.Runner = func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 		t.Error("native failure must not fall back to ccusage")
 		return nil, errors.New("ccusage must not run")
 	}
-	options.ResolveBinary = func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+	options.ResolveBinary = func(ccacq.AcquireOptions) (ccacq.Binary, error) {
 		t.Error("native failure must not resolve a ccusage binary")
-		return ccusage.Binary{}, errors.New("ccusage must not run")
+		return ccacq.Binary{}, errors.New("ccusage must not run")
 	}
 	_, err := nativeCollect(context.Background(), nativeInput{
 		options:     options,
@@ -504,13 +506,13 @@ func TestNativeHookModeRunsTheReconciledPath(t *testing.T) {
 			CollectedAt:    nativeCollectedAt,
 			StateDir:       t.TempDir(),
 			PricingFetcher: failingFetcher(t),
-			Runner: func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+			Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 				t.Error("native hook mode must not run ccusage")
 				return nil, errors.New("ccusage must not run")
 			},
-			ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+			ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
 				t.Error("native hook mode must not resolve a ccusage binary")
-				return ccusage.Binary{}, errors.New("ccusage must not run")
+				return ccacq.Binary{}, errors.New("ccusage must not run")
 			},
 		}
 	}

@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
+	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
@@ -53,8 +56,8 @@ type Options struct {
 	HomeDir           string
 	Stderr            func(line string)
 	Env               func(string) string
-	// Runner runs ccusage; nil means ccusage.RunJSON.
-	Runner ccusage.CommandRunner
+	// Runner runs ccusage; nil means ccexec.RunJSON.
+	Runner ccexec.CommandRunner
 	// useNativeReport selects the in-process report source (native.go). It is
 	// deliberately unexported: the compiled-in useNativeCodex constant is the
 	// only user-facing switch, and nativeCollect is the only writer, so a
@@ -64,8 +67,8 @@ type Options struct {
 	// (2026-11-10) the native source is the default; the protocol suites and
 	// the parity harness are the only callers that set it.
 	ccusagePath bool
-	// ResolveBinary acquires ccusage; nil means ccusage.Resolve.
-	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
+	// ResolveBinary acquires ccusage; nil means ccacq.Resolve.
+	ResolveBinary func(ccacq.AcquireOptions) (ccacq.Binary, error)
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
 	PricingFetcher func(request *http.Request) (*http.Response, error)
 	// HookAcknowledgement receives the per-scope uploaded file list.
@@ -88,7 +91,7 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	}
 	runner := options.Runner
 	if runner == nil {
-		runner = ccusage.RunJSON
+		runner = ccexec.RunJSON
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -136,7 +139,7 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	// same, so a failure here surfaces exactly where a failed ccusage run
 	// would. See native.go for why the substitution lives at the runner.
 	native := useNativeCodex && !options.ccusagePath
-	var packageRunner ccusage.PackageRunner
+	var packageRunner ccrunner.PackageRunner
 	if native {
 		packageRunner = nativePackageRunner
 		runner = newNativeReportRunner(prepared).Run
@@ -194,8 +197,8 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 // providerRun is the per-invocation state every collection path shares.
 type providerRun struct {
 	ctx           context.Context
-	runner        ccusage.CommandRunner
-	packageRunner ccusage.PackageRunner
+	runner        ccexec.CommandRunner
+	packageRunner ccrunner.PackageRunner
 	timezone      string
 	collectedAt   string
 	stateDir      string
@@ -218,16 +221,16 @@ func resolveRunner(
 	hookMode bool,
 	options Options,
 	stderr func(string),
-) (ccusage.PackageRunner, error) {
+) (ccrunner.PackageRunner, error) {
 	resolveBinary := options.ResolveBinary
 	if resolveBinary == nil {
-		resolveBinary = ccusage.Resolve
+		resolveBinary = ccacq.Resolve
 	}
 	// Boolean(env.X) in TS: any non-empty value, whitespace included.
 	forceRunner := env("TOKENBOARD_FORCE_PACKAGE_RUNNER") != ""
 	var localBinary string
 	if !forceRunner {
-		binary, err := resolveBinary(ccusage.AcquireOptions{
+		binary, err := resolveBinary(ccacq.AcquireOptions{
 			Env:      env,
 			HomeDir:  homeDir(options),
 			HookMode: hookMode,
@@ -235,14 +238,14 @@ func resolveRunner(
 		})
 		if err != nil {
 			if hookMode {
-				return ccusage.PackageRunner{}, err
+				return ccrunner.PackageRunner{}, err
 			}
 			stderr(fmt.Sprintf("TokenBoard ccusage: %s; falling back to the package runner", err.Error()))
 		} else {
 			localBinary = binary.Path
 		}
 	}
-	return ccusage.ResolvePackageRunner(ccusage.RunnerInput{
+	return ccrunner.ResolvePackageRunner(ccrunner.RunnerInput{
 		Env:         env,
 		LocalBinary: localBinary,
 	})

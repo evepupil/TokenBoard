@@ -3,7 +3,7 @@ package codex
 import (
 	"os"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -35,8 +35,8 @@ func CommandArgs(report string, rangeArgs []string, singleThread bool, timezone 
 }
 
 // PackageCommandOptions builds the command options for one ccusage run.
-func PackageCommandOptions(env []string, timeoutMs int, stderr func(string)) ccusage.CommandOptions {
-	return ccusage.CommandOptions{
+func PackageCommandOptions(env []string, timeoutMs int, stderr func(string)) ccexec.CommandOptions {
+	return ccexec.CommandOptions{
 		Env:        env,
 		TimeoutMs:  timeoutMs,
 		Retries:    readPackageCommandRetries(),

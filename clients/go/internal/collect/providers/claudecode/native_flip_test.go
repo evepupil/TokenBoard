@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -28,13 +29,13 @@ func TestNativeClaudeIsTheDefaultPath(t *testing.T) {
 		StateDir:       t.TempDir(),
 		Env:            testEnv(map[string]string{"CLAUDE_CONFIG_DIR": configDir}),
 		PricingFetcher: failingFetcher(t),
-		Runner: func(context.Context, string, []string, ccusage.CommandOptions) (any, error) {
+		Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
 			t.Error("the default path must not run ccusage")
 			return nil, errors.New("ccusage must not run")
 		},
-		ResolveBinary: func(ccusage.AcquireOptions) (ccusage.Binary, error) {
+		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
 			t.Error("the default path must not acquire a ccusage binary")
-			return ccusage.Binary{}, errors.New("ccusage must not be acquired")
+			return ccacq.Binary{}, errors.New("ccusage must not be acquired")
 		},
 	})
 	if err != nil {

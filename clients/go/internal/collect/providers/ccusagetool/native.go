@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
+	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	// The copilot adapter registers itself from its init(); this import is
 	// what puts that registration into every production build. A _test.go
@@ -68,7 +70,7 @@ func (p nativeProvider) Collect(ctx context.Context, options collect.Options) ([
 // nativePackageRunner keeps the package-runner seam intact without a package:
 // the args are the ones the provider built, and the command name the native
 // runner sees is the plain `ccusage` label.
-var nativePackageRunner = ccusage.PackageRunner{
+var nativePackageRunner = ccrunner.PackageRunner{
 	Command: "ccusage",
 	RunPackageArgs: func(_, _ string, packageArgs []string) []string {
 		return packageArgs
@@ -120,8 +122,8 @@ func (runner *nativeToolRunner) toolEnvLookup() func(string) (string, bool) {
 	}
 }
 
-// Run implements ccusage.CommandRunner.
-func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string, options ccusage.CommandOptions) (any, error) {
+// Run implements ccexec.CommandRunner.
+func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string, options ccexec.CommandOptions) (any, error) {
 	// The subprocess path bounds the run by killing the child at TimeoutMs.
 	// Here the same budget becomes a context deadline, but the adapters' loader
 	// signature (func(Options) ([]Entry, error)) cannot observe it: LoadCommand

@@ -34,6 +34,7 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
@@ -116,7 +117,7 @@ func TestCopilotAdaptersMatchTheGoldens(t *testing.T) {
 				"COPILOT_HOME":                    home,
 				"COPILOT_OTEL_FILE_EXPORTER_PATH": "",
 			}
-			got, err := runner.Run(t.Context(), "ccusage", command.Argv[1:], ccusage.CommandOptions{})
+			got, err := runner.Run(t.Context(), "ccusage", command.Argv[1:], ccexec.CommandOptions{})
 			if err != nil {
 				t.Fatalf("native runner %v: %v", command.Argv[1:], err)
 			}
@@ -306,7 +307,7 @@ func TestCopilotRunnerHonoursTheModeFlag(t *testing.T) {
 		"--since", "20260101", "--until", "20260228"}
 	run := func(mode string) map[string]any {
 		t.Helper()
-		got, err := runner.Run(t.Context(), "ccusage", append(append([]string{}, argv...), "--mode", mode), ccusage.CommandOptions{})
+		got, err := runner.Run(t.Context(), "ccusage", append(append([]string{}, argv...), "--mode", mode), ccexec.CommandOptions{})
 		if err != nil {
 			t.Fatalf("--mode %s: %v", mode, err)
 		}
@@ -327,7 +328,7 @@ func TestCopilotRunnerHonoursTheModeFlag(t *testing.T) {
 	if _, unpriced := displayTotals["unpricedModels"]; unpriced {
 		t.Fatalf("display totals carry unpricedModels: %v", displayTotals)
 	}
-	if _, err := runner.Run(t.Context(), "ccusage", append(append([]string{}, argv...), "--mode", "bogus"), ccusage.CommandOptions{}); err == nil {
+	if _, err := runner.Run(t.Context(), "ccusage", append(append([]string{}, argv...), "--mode", "bogus"), ccexec.CommandOptions{}); err == nil {
 		t.Fatal("an unknown mode must fail")
 	}
 }

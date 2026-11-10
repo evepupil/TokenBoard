@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -33,7 +34,7 @@ type testRunner struct {
 	commands  []string
 }
 
-func (r *testRunner) run(_ context.Context, command string, args []string, _ ccusage.CommandOptions) (any, error) {
+func (r *testRunner) run(_ context.Context, command string, args []string, _ ccexec.CommandOptions) (any, error) {
 	key := strings.Join(args, " ")
 	r.calls = append(r.calls, key)
 	r.commands = append(r.commands, command)

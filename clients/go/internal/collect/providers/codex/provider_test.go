@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -51,7 +52,7 @@ type provStubRunner struct {
 }
 
 func (r *provStubRunner) run(
-	_ context.Context, command string, args []string, options ccusage.CommandOptions,
+	_ context.Context, command string, args []string, options ccexec.CommandOptions,
 ) (any, error) {
 	r.t.Helper()
 	call := provCall{

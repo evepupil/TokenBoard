@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -32,7 +33,7 @@ type roundRequest struct {
 	// configuration.
 	StateDir string
 	// ConfigPath is the merged ccusage config the run prepared, passed as
-	// --config. Empty means no flag, matching ccusage.ConfigArgs when neither
+	// --config. Empty means no flag, matching ccrunner.ConfigArgs when neither
 	// config variable is set.
 	ConfigPath string
 }
@@ -231,7 +232,7 @@ func resetHookCursor(stateDir string, source contract.Source) error {
 // contract, which is where `gemini-cli` becomes `gemini`.
 //
 // The `--config` pair goes last, exactly where the providers append it through
-// ccusage.ConfigArgs, and an empty path adds no flag at all.
+// ccrunner.ConfigArgs, and an empty path adds no flag at all.
 //
 // The table duplicates the providers on purpose: this harness must not import
 // the code it is meant to measure out of, but a provider flag change has to be
@@ -325,7 +326,7 @@ func assertUsableBinary(bin string) error {
 // collector's bundled layer probes, so both sides agree on the install; the
 // executable name is resolved here because internal/ccusage keeps it unexported.
 func defaultCcusageBin() string {
-	return filepath.Join(ccusage.BundledBinDir(nil, ""), ccusageBinaryName())
+	return filepath.Join(ccacq.BundledBinDir(nil, ""), ccusageBinaryName())
 }
 
 // ccusageBinaryName is the bundled ccusage executable's platform name.

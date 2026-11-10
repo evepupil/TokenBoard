@@ -1,6 +1,6 @@
 //go:build !windows
 
-package ccusage
+package exec
 
 import "syscall"
 
