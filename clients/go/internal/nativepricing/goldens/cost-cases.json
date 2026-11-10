@@ -4,7 +4,7 @@
     "command": "CLAUDE_CONFIG_DIR=<fixture-tree> ccusage claude daily --json --breakdown --offline --config packages/collector/ccusage.json -z UTC -s 20260101 -u 20260217 --mode {auto,calculate}",
     "fixtureNote": "One compact-JSON assistant line per case, one distinct UTC day each, written under <fixture-tree>/projects/goldens/<index>.jsonl.",
     "configPath": "packages/collector/ccusage.json",
-    "configSha256": "3e8a11fcd43f191f7602e33eadd71f1abd4d12279479ae8891e6da6cdea66883",
+    "configSha256": "3b4c1151ac422affea345a63d83cd44c236becc000e60f84cc65b2c028b43ab7",
     "pricingOverrides": {
       "LongCat-2.5-Preview": {
         "inputCostPerToken": 3e-7,
@@ -313,6 +313,13 @@
         "outputCostPerToken": 0.000006,
         "outputCostPerTokenAbove200kTokens": 0.000012,
         "maxInputTokens": 500000
+      },
+      "hy4-free": {
+        "inputCostPerToken": 9.6e-7,
+        "outputCostPerToken": 0.00000288,
+        "cacheReadInputTokenCost": 4.8e-8,
+        "cacheCreationInputTokenCost": 9.6e-7,
+        "maxInputTokens": 1000000
       },
       "longcat-2.5-preview": {
         "inputCostPerToken": 3e-7,

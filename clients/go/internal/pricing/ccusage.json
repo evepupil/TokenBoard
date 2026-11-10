@@ -332,6 +332,13 @@
         "outputCostPerToken": 0.0,
         "cacheReadInputTokenCost": 0.0,
         "maxInputTokens": 1000000
+      },
+      "hy4-free": {
+        "inputCostPerToken": 9.6e-7,
+        "outputCostPerToken": 2.88e-6,
+        "cacheReadInputTokenCost": 4.8e-8,
+        "cacheCreationInputTokenCost": 9.6e-7,
+        "maxInputTokens": 1000000
       }
     }
   }
