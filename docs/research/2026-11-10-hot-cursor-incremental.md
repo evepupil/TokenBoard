@@ -51,30 +51,35 @@ export TOKENBOARD_HOOK_MODE=1 TOKENBOARD_TIMEZONE=Asia/Shanghai
 `(user_id, device_id, source, usage_date, model)` 五元键 upsert，不是累加。
 正确的判据是「热跑对变更键的绝对值 == 冷扫的绝对值」，`hot == ref` 已经成立。
 
-## 3. 一项待查观察（未定性）
+## 3. `sessionCount` 在不同输入间 1→0：已定性
 
-同一个键 `(2026-10-09, deepseek-v4.1-flash)`，token 与成本完全相同，但：
+同一个键 `(2026-10-09, deepseek-v4.1-flash)`，token 与成本完全相同，但 `sessionCount` 在截断
+输入上是 1、完整输入上是 0。查清后这不是解析差异，也不是移植缺陷。
 
-| 输入 | inputTokens | costUsd | sessionCount |
-|---|---|---|---|
-| a 截断（600 行）+ b | 2225696 | 0.7038571200000001 | **1** |
-| a 完整（1037 行）+ b | 2225696 | 0.7038571200000001 | **0** |
+**`sessionCount` 不来自解析器。** claude 原生路径在
+`clients/go/internal/collect/providers/claudecode/native.go:229`（预览）与 `:396`（hook）调用
+`ccusage.NormalizeCcusageDailyJSON`，并把**独立的 sessions 报告**经 `NormalizeOptions.Sessions`
+传入（`HasSessions: true`，注释说明空报告等于「没有会话」而非「没采集」）。
+`ccusage/normalize.go:247` 的 `readSessionCount` 再从那张表里按 `(usageDate, model)` 取值。
 
-**我没有把它定性为缺陷。** 已确认的事实：
+**会话的归属键是单点的**：日期取 `lastActivity`（`readSessionDate`，normalize.go:271-288），
+模型取 token 最多的那一个（`readSessionCountModel`，normalize.go:290-303），然后只在那一个键上
+加 1。用夹具实测：
 
-- `sessionfile/parser.go:193` 用 `int64(len(row.sessions))` 赋值，而该文件里建行的唯一路径
-  （`mergeMetric`，`parser.go:473-487`）必然放入至少一个 session id，所以**解析路径不可能产出 0**。
-- `sessionusage/aggregate.go:96` 在新建行时显式写 `SessionCount: 0`，函数注释是「按与 ccusage daily
-  报告相同的方式，把 usage 记录合并为每 (usageDate, model) 一行」。这是**第二条**建行路径，
-  不携带会话信息。
-- 因此 0 不是解析产物，而是另一条聚合路径产生的行在该键上生效。
+| 输入 | 该会话最后活动 | 主导模型 | 归属键是否存在于 daily 行 | sessionCount |
+|---|---|---|---|---|
+| 前 600 行 | `2026-10-09` | `deepseek-v4.1-flash` | 命中 | 1 |
+| 完整 1037 行 | `2026-10-31T03:03:17Z` | `deepseek-v4.1-flash`（3060 万 token） | **未命中** | 0 |
 
-未确认的部分：为什么「文件被截断」会让该键走解析路径、而「文件完整」走零会话的聚合路径；
-这是否与既有的「零成本行 pro-rata 分摊」在同一日期重写该行有关。在读完 `Aggregate` 的调用链
-之前，任何「这是 bug」的结论都只是猜测。**复现方式已完整记录在上述夹具里**，下次可直接接着查。
+完整文件里该会话的归属键是 `(2026-10-31, deepseek-v4.1-flash)`，但那天 daily 只有
+`DeepSeek-Flash` 与 `DeepSeek-V4.1-Flash`（拼写不同），没有同名的行，于是
+`sessionCounts[key]` 查空、这个会话被静默丢弃。所以 1→0 的原因是**归属键落空**。
 
-影响面评估（当前）：`sessionCount` 只影响展示与排行榜的会话数统计，不参与 token/成本；
-且该键的 token 与成本在两种输入下完全相同，所以即使这是缺陷，也不会造成用量或费用错误。
+**为什么不算缺陷**：`readSessionCount` 与 `readSessionCountModel` 都是从 TS 归一化器逐字移植的，
+且两侧共用同一份实现，属既有的 ccusage 语义。值得记录的口径限制是——**会话归属到当天不存在的
+模型行时，它的会话数会静默消失**；token 与成本不受影响（它们来自 daily 行自身的数据）。
+影响面因此限于会话数展示与排行榜的会话统计。
+
 
 ## 4. 未覆盖
 
