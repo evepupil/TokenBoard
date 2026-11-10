@@ -20,12 +20,14 @@ func TestNativeCodexIsTheDefaultPath(t *testing.T) {
 		calls++
 		return nil, nil
 	}
-	snapshots, err := provCollect(t, Options{
+	snapshots, err := Collect(context.Background(), Options{
 		CodexHome:   provHome(codexHome),
 		Timezone:    "UTC",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner,
-	}, nil)
+		StateDir:    t.TempDir(),
+		Env:         provEnv(provForceEnv(nil)),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

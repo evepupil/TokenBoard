@@ -60,6 +60,10 @@ type Options struct {
 	// only user-facing switch, and nativeCollect is the only writer, so a
 	// caller outside this package cannot select an unvalidated code path.
 	useNativeReport bool
+	// ccusagePath asks for the ccusage subprocess explicitly. Since S5
+	// (2026-11-10) the native source is the default; the protocol suites and
+	// the parity harness are the only callers that set it.
+	ccusagePath bool
 	// ResolveBinary acquires ccusage; nil means ccusage.Resolve.
 	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
@@ -131,7 +135,7 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	// above, the rules below and everything downstream of the runner stay the
 	// same, so a failure here surfaces exactly where a failed ccusage run
 	// would. See native.go for why the substitution lives at the runner.
-	native := useNativeCodex || options.useNativeReport
+	native := useNativeCodex && !options.ccusagePath
 	var packageRunner ccusage.PackageRunner
 	if native {
 		packageRunner = nativePackageRunner

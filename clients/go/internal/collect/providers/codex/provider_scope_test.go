@@ -95,6 +95,7 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 		return provJSON(t, provDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",
@@ -158,10 +159,11 @@ func TestCodexScopeCollectsACommaContainingHomeFromTheJSONEnvironmentValue(t *te
 		t.Fatal(err)
 	}
 	snapshots, err := Collect(context.Background(), Options{
-		Since:    "20260509",
-		Timezone: "Asia/Shanghai",
-		StateDir: t.TempDir(),
-		Runner:   runner.run,
+		ccusagePath: true,
+		Since:       "20260509",
+		Timezone:    "Asia/Shanghai",
+		StateDir:    t.TempDir(),
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"CODEX_HOME":                  codexHome,
 			"TOKENBOARD_CODEX_HOMES_JSON": string(encodedHomes),
@@ -203,9 +205,10 @@ func TestCodexScopePersistsFrozenChildUsageUnderTheOriginalSourceIdentity(t *tes
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -271,10 +274,11 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForAFilenameWithItsExtension(t 
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -298,10 +302,11 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForADirectoryQualifiedSessionID
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -375,12 +380,13 @@ func TestCodexScopeScansAllConfiguredHomesTogetherDuringAFullHistoryCollection(t
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(firstHome + "," + secondHome),
-		Timezone:  "Asia/Shanghai",
-		Since:     "all",
-		StateDir:  t.TempDir(),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(firstHome + "," + secondHome),
+		Timezone:    "Asia/Shanghai",
+		Since:       "all",
+		StateDir:    t.TempDir(),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -440,9 +446,10 @@ func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Runner:      runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":      "bun",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
@@ -489,9 +496,10 @@ func TestCodexScopeCapsTheConfiguredBatchSize(t *testing.T) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  t.TempDir(),
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    t.TempDir(),
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":  "",
 			"TOKENBOARD_SINCE":            "all",
@@ -528,6 +536,7 @@ func TestCodexScopeCollectsAFrozenDailyReportWhenBoundedSessionDiscoveryIsEmpty(
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",
@@ -573,10 +582,11 @@ func TestCodexScopeReturnsAnEmptyBoundedReportWithoutSessionFiles(t *testing.T) 
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  t.TempDir(),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(map[string]string{"TOKENBOARD_SINCE": "20260508"})),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    t.TempDir(),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(map[string]string{"TOKENBOARD_SINCE": "20260508"})),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -607,6 +617,7 @@ func TestCodexScopeKeepsScopedFilesAvailableUntilReconciliationCompletes(t *test
 		return provJSON(t, provDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",

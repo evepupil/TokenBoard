@@ -69,6 +69,7 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -129,6 +130,7 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	_, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -177,6 +179,7 @@ func TestCodexHookRescansAllPendingRowsWhenARetryCrossesAUsageDate(t *testing.T)
 			{"date":"2026-05-23","model":"gpt-5","inputTokens":20,"outputTokens":10,"totalTokens":30,"costUSD":0.06}]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -227,6 +230,7 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	_, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -272,6 +276,7 @@ func TestCodexHookRetriesAnUnboundedCollectionAfterOneChildReaderRace(t *testing
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    t.TempDir(),
 		Timezone:    "Asia/Shanghai",
@@ -429,6 +434,7 @@ func TestCodexHookKeepsCompleteChangedDateAggregationWhileExcludingUnrelatedHist
 		return provJSON(t, provChangedDateDailyResult(activeTokens)), nil
 	}}
 	options := Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -515,6 +521,7 @@ func TestCodexHookDoesNotAddAReusedPendingSnapshotLabelledAllOnTopOfTheSameDay(t
 		return daily, nil
 	}}
 	options := Options{
+		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",

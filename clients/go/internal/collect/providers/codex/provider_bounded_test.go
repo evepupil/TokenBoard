@@ -61,13 +61,14 @@ func TestCodexBoundedKeepsTheBoundedSnapshotWhenItsSourceChangesAfterTheFrozenCo
 		return provJSON(t, provBoundedSessionRow("stable-session", "2026-05-21T04:24:07.234Z", "gpt-5.6")), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Stderr:    provReportDiagnostic(&diagnostics),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Stderr:      provReportDiagnostic(&diagnostics),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -104,13 +105,14 @@ func TestCodexBoundedReportsAStaleCanonicalAttributionCacheWriteDuringAFullHisto
 		return provJSON(t, provBoundedSessionRow("stable-session", "2026-05-21T04:24:07.234Z", "gpt-5.6")), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "all",
-		Stderr:    provReportDiagnostic(&diagnostics),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "all",
+		Stderr:      provReportDiagnostic(&diagnostics),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,13 +148,14 @@ func TestCodexBoundedRetriesTheCompleteCollectionOnceWhenTheScopeCopySeesASource
 		return provJSON(t, provBoundedSessionRow("scope-race-session", "2026-05-21T04:24:07.234Z", "gpt-5.6")), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Stderr:    provReportDiagnostic(&diagnostics),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Stderr:      provReportDiagnostic(&diagnostics),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -195,13 +198,14 @@ func TestCodexBoundedRetriesTheCompleteCollectionOnceWhenAttributionIsBrieflyMis
 		return provJSON(t, provBoundedSessionRow("scope-race-session", "2026-05-21T04:24:07.234Z", "gpt-5.6")), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Stderr:    provReportDiagnostic(&diagnostics),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Stderr:      provReportDiagnostic(&diagnostics),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,13 +247,14 @@ func TestCodexBoundedRetriesOnceWhenAChildSessionRemainsUnstableDuringFrozenCorr
 		return provJSON(t, provBoundedSessionRow("unstable-session", "2026-05-21T04:24:07.234Z", "gpt-5.6")), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Stderr:    provReportDiagnostic(&diagnostics),
-		Runner:    runner.run,
-		Env:       provEnv(provForceEnv(nil)),
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Stderr:      provReportDiagnostic(&diagnostics),
+		Runner:      runner.run,
+		Env:         provEnv(provForceEnv(nil)),
 	})
 	if err == nil || err.Error() != "Codex child session changed while correcting; retry the sync" {
 		t.Fatalf("err = %v", err)
@@ -309,11 +314,12 @@ func TestCodexBoundedRunsEveryReportInConfiguredBatches(t *testing.T) {
 			"lastActivity":"2026-05-21T04:24:07.234Z","models":{"gpt-5.6":{"inputTokens":10,"totalTokens":10}}}]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_CODEX_BATCH_SIZE": "1",
 		})),
@@ -399,11 +405,12 @@ func TestCodexBoundedNarrowsCanonicalAttributionToCacheMissFilesWithinASharedSco
 		return provJSON(t, `{"data":[{"date":"2026-05-21","models":{"gpt-5.6":{"inputTokens":20,"totalTokens":20}}}]}`), nil
 	}}
 	options := Options{
-		CodexHome: provHome(codexHome),
-		StateDir:  stateDir,
-		Timezone:  "Asia/Shanghai",
-		Since:     "20260515",
-		Runner:    runner.run,
+		ccusagePath: true,
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		Since:       "20260515",
+		Runner:      runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_CODEX_BATCH_SIZE": "200",
 		})),

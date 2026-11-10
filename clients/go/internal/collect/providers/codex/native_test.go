@@ -133,12 +133,14 @@ func TestUseNativeCodexSelectsTheNativeSource(t *testing.T) {
 	runner := &provStubRunner{t: t, respond: func(provCall) (any, error) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
-	if _, err := provCollect(t, Options{
+	if _, err := Collect(context.Background(), Options{
 		CodexHome:   provHome(codexHome),
 		Timezone:    "UTC",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
-	}, nil); err != nil {
+		StateDir:    t.TempDir(),
+		Env:         provEnv(provForceEnv(nil)),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 0 {
