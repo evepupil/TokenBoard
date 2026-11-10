@@ -232,6 +232,18 @@ ccusage 一旦从仓库移除，金样本就永久冻结、无法再生成；没
 金样本生成器属 S1（见 S1 计划 Task 5），但**逐来源固化**须在各自的 S2/S3/S4 落地时同步完成，
 S5 移除前做一次总盘点确认 14 个来源齐全。
 
+- [x] **总盘点（2026-11-10，S5 移除获取层之后补做）**：14/14 来源齐全，均有由真实
+  `ccusage 20.0.33` 读取固定夹具树后生成的原始 `--json` 报告，Go 侧逐字段严格比对、无豁免列表。
+  - claude-code：`adapters/claude/goldens/claude-reports.json`（daily auto/calculate 各 12 行、session 4 行）。
+  - codex：`adapters/codex/goldens/codex-reports.json`（auto 11 / calculate 11 / session 13 / unbounded 12 行）。
+  - 11 个工具来源：`adapters/tools/goldens/tool-reports.json`（`gemini` 子命令对应 `gemini-cli`）；
+    copilot 单独在 `providers/ccusagetool/copilot-goldens/copilot-reports.json`（另含 2 份 upstream 快照）。
+  - 生成方式仍可复现，但**依赖仓库外的 ccusage 20.0.33**（默认 `~/.tokenboard/bin/ccusage`，`CCUSAGE_BIN` 可覆盖；
+    CI 的 `deps` job 通过 `check-deps.sh` 跑四个 `--check`）。一旦 TS collector 退役、pnpm 不再提供 ccusage，
+    这条复现路径就断——届时金样本只能作为只读基线使用，这是 S5 有意接受的取舍。
+  - 已知覆盖深度缺口（不阻塞 S5，记在此处以免被当成已覆盖）：多数工具来源每个报告只有 1–3 行；
+    claude 金样本只覆盖 parser 接受路径、不含线级拒绝与窗口剪枝（见 `adapters/claude/goldens_test.go` 头条注释）。
+
 ### 8.1 S1 结转义务（2026-11-05 最终审查后登记）
 
 S1 的整分支终审留下七项义务，其中三项已写进代码注释（`clients/go/internal/nativepricing/cost.go:122-130`
