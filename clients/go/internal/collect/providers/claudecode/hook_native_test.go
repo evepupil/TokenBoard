@@ -9,8 +9,8 @@ package claudecode
 // halves must be the same tree and the same implementation; a key the parser
 // proved exists but the recompute misses is a hard error.
 //
-// Everything here runs through nativeCollect, which is what useNativeClaude ==
-// true dispatches to and what the registry's native provider calls.
+// Everything here runs through nativeCollect, which is now the only path:
+// Collect dispatches to it and the registry's native provider calls it.
 
 import (
 	"context"

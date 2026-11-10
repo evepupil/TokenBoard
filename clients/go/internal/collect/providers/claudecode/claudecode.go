@@ -34,10 +34,6 @@ type Options struct {
 	Env func(string) string
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
 	PricingFetcher func(request *http.Request) (*http.Response, error)
-	// ccusagePath forces the ccusage subprocess implementation even though
-	// the native one is the default. Only tests and the parity harness set
-	// it; it is unexported so no configuration can reach it.
-	ccusagePath bool
 }
 
 // Collect gathers Claude Code usage.

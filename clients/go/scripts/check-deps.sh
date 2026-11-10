@@ -26,8 +26,9 @@
 # meant to be minted from ccusage 20.0.33 by the same version, but not
 # necessarily the same executable file (this script prefers
 # node_modules/.bin/ccusage, the generator ~/.tokenboard/bin/ccusage).
-# The Go client itself runs none of this: useNativeClaude flipped in S5 and the
-# acquisition layer is gone (docs/specs/go-client-spec.md §4).
+# The Go client itself runs none of this: S5 removed the ccusage acquisition
+# layer and the in-process adapter is now the only path
+# (docs/specs/go-client-spec.md §4).
 #
 # The codex adapter's row-level goldens get the same gate through their own
 # generator: gen-codex-goldens.mjs --check re-mints in memory from the committed

@@ -458,11 +458,10 @@ func TestNativeHookModeMakesNoNetworkCall(t *testing.T) {
 }
 
 // TestNativeHookModeRunsTheReconciledPath pins the replacement of the old
-// not-wired refusal: with hook mode on, the native branch (the code
-// useNativeClaude == true dispatches to) and the registry's native provider
-// (which the parity harness calls regardless of the switch) both run the
-// in-process reconciliation - incremental scan, bounded-window recompute,
-// assertion - and neither spawns ccusage.
+// not-wired refusal: with hook mode on, both the native branch Collect
+// dispatches to and the registry's native provider (which the parity harness
+// calls) run the in-process reconciliation - incremental scan, bounded-window
+// recompute, assertion - and neither spawns ccusage.
 func TestNativeHookModeRunsTheReconciledPath(t *testing.T) {
 	configDir := t.TempDir()
 	writeNativeSession(t, configDir,
