@@ -172,7 +172,7 @@ AMP_DATA_DIR=$HOME/.local/share/amp ~/.tokenboard/bin/ccusage amp daily --json \
 - codex 与 claude-code 的 hook 路径都已跑（codex match；claude-code 与 preview 同口径），
   但两侧都用**全新临时 state dir**（`clients/go/internal/cli/shadow.go:126,132` 各建一个
   `tokenboard-shadow-{go,ts}-*` 并 `defer os.RemoveAll`），测的是冷 cursor 上的增量行为；
-  生产的热 cursor（只有少量文件变更、窄 ccusage 窗口）仍无端到端证据。
+  热 cursor（复用同一 state dir、只有少量文件变更）另有单独验证，见 `docs/research/2026-11-10-hot-cursor-incremental.md`：热跑产出的绝对状态与全新冷扫逐键、逐字段一致。
 - 工具族只有 kimi / zcode / amp 有数据（§5），其余九个逐个双跑均为两侧一致 `empty`，
   它们的等价性只能依赖冻结金样本与 2026-11-09 的 parity 证据，**没有**有数据的双跑证据。
 - preview 窗口截止 2026-11-09（避开活写竞态），不是全历史；`--hook` 与 `--until` 互斥，
