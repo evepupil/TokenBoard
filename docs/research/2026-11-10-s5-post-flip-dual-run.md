@@ -23,9 +23,14 @@ TOKENBOARD_COLLECTOR_DIR=$PWD TOKENBOARD_TIMEZONE=Asia/Shanghai \
   /tmp/tb-a81450b shadow --source claude-code --until 2026-11-09 > /tmp/shadow-claude.out
 ```
 
-## 2. codex：match，10 条快照
+## 2. codex：match，preview 与 hook 两条路径
 
-`codex: match — 10 snapshots`。翻转后 codex 的真实数据等价性成立。
+| 模式 | 命令 | 结果 |
+|---|---|---|
+| preview | `shadow-dual-run.mjs --client /tmp/tb-a81450b --source codex --until 2026-11-09` | `match`，10 快照 |
+| hook | `shadow-dual-run.mjs --client /tmp/tb-a81450b --source codex --hook` | `match`，18 快照，`liveWrite` 1 |
+
+翻转后 codex 的真实数据等价性在全量与增量两条路径上都成立。
 
 ## 3. claude-code：382 条快照，131 条只差 `costUsd`
 
@@ -87,7 +92,8 @@ harness 只能看到「字段不同」，无法判断差异是否可归因。人
 
 ## 5. 未覆盖
 
-- `--hook` 路径未跑（本轮只跑 preview 路径）；热 cursor 增量仍无端到端证据。
+- hook 路径已跑（codex match、claude-code 与 preview 同口径），但两侧都用**全新临时 state dir**，
+  测的是冷 cursor 上的增量行为；生产的热 cursor（只有少量文件变更）仍无端到端证据。
 - 工具族 12 源未跑（本机多数未安装；`shadow-dual-run` 会在 TS 侧对每个源跑完整 ccusage 窗口）。
 - 窗口截止 2026-11-09（避开活写竞态），不是全历史。
 - 只在本机、darwin 上验证。
