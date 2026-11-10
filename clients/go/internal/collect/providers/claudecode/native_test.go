@@ -145,12 +145,12 @@ func TestRegisterNativeAlwaysInstallsTheNativeProvider(t *testing.T) {
 	}
 }
 
-// TestSwitchDefaultsToCcusage pins both halves of the switch: the constant is
-// false, and Collect on that path really runs ccusage (a stub runner sees the
-// daily and session invocations).
-func TestSwitchDefaultsToCcusage(t *testing.T) {
-	if useNativeClaude {
-		t.Fatal("useNativeClaude must default to false until the native path has passed the parity gate")
+// TestSwitchSelectsTheNativePath pins both halves of the switch: the constant
+// is true (S5, 2026-11-10), and asking for the ccusage path by name really
+// runs ccusage (a stub runner sees the daily and session invocations).
+func TestSwitchSelectsTheNativePath(t *testing.T) {
+	if !useNativeClaude {
+		t.Fatal("useNativeClaude is false; the native path regressed to ccusage")
 	}
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 1, 2)}
@@ -160,6 +160,7 @@ func TestSwitchDefaultsToCcusage(t *testing.T) {
 		StateDir:    stateDir,
 		Env:         testEnv(forceRunnerEnv(nil)),
 		Runner:      runner.run,
+		ccusagePath: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -932,6 +933,7 @@ func TestNativeAppliesTheProviderWindowEnvironment(t *testing.T) {
 		StateDir:    t.TempDir(),
 		Env:         testEnv(forceRunnerEnv(env)),
 		Runner:      runner.run,
+		ccusagePath: true,
 	}); err != nil {
 		t.Fatalf("ccusage path: %v", err)
 	}

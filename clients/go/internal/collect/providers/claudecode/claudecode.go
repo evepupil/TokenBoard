@@ -51,6 +51,10 @@ type Options struct {
 	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
 	PricingFetcher func(request *http.Request) (*http.Response, error)
+	// ccusagePath forces the ccusage subprocess implementation even though
+	// the native one is the default. Only tests and the parity harness set
+	// it; it is unexported so no configuration can reach it.
+	ccusagePath bool
 }
 
 // Collect gathers Claude Code usage.
@@ -80,7 +84,7 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	// its own state dir, hook mode, locking and pending handling instead of the
 	// ccusage path below. Flipping the constant is a reviewed commit with the
 	// parity evidence for ALL of that, not a one-line swap.
-	if useNativeClaude {
+	if useNativeClaude && !options.ccusagePath {
 		return nativeCollect(ctx, nativeInput{
 			options:     options,
 			env:         env,

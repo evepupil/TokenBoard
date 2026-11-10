@@ -112,6 +112,7 @@ func TestCollectRunsDailyAndSessionAndNormalizes(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 1, 2)}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-04-28T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -155,8 +156,9 @@ func TestCollectUsesConfiguredSinceWindow(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "npm",
 			"TOKENBOARD_SINCE":           "20260509",
@@ -180,8 +182,9 @@ func TestCollectUsesDefaultSinceWhenPrimaryEmpty(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_SINCE":         "",
 			"TOKENBOARD_DEFAULT_SINCE": "20260501",
@@ -202,10 +205,11 @@ func TestCollectPrefersExplicitWindowOverEnvironment(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "20260708",
-		Until:    "20260709",
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "20260708",
+		Until:       "20260709",
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_SINCE": "20260509",
 			"TOKENBOARD_UNTIL": "20260510",
@@ -224,11 +228,12 @@ func TestCollectRejectsShellMetacharactersBeforeRunning(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "20260708&echo injected",
-		Env:      testEnv(forceRunnerEnv(nil)),
-		Runner:   runner.run,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "20260708&echo injected",
+		Env:         testEnv(forceRunnerEnv(nil)),
+		Runner:      runner.run,
 	})
 	if err == nil || !strings.Contains(err.Error(), "Invalid Claude since date") {
 		t.Errorf("err = %v", err)
@@ -238,9 +243,10 @@ func TestCollectRejectsShellMetacharactersBeforeRunning(t *testing.T) {
 	}
 
 	_, err = Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "20260708",
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "20260708",
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_UNTIL": "20260708&echo injected",
 		})),
@@ -255,12 +261,13 @@ func TestCollectRejectsReversedWindow(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "20260709",
-		Until:    "20260708",
-		Env:      testEnv(forceRunnerEnv(nil)),
-		Runner:   runner.run,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "20260709",
+		Until:       "20260708",
+		Env:         testEnv(forceRunnerEnv(nil)),
+		Runner:      runner.run,
 	})
 	if err == nil || !strings.Contains(err.Error(), "since date must not be after until date") {
 		t.Errorf("err = %v", err)
@@ -271,9 +278,10 @@ func TestCollectAllowsExplicitAllScan(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "all",
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "all",
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_SINCE":         "20260708",
 			"TOKENBOARD_DEFAULT_SINCE": "20260509",
@@ -294,11 +302,12 @@ func TestCollectBudgetsCcusageCommands(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Since:    "20260708",
-		Env:      testEnv(forceRunnerEnv(nil)),
-		Runner:   runner.run,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Since:       "20260708",
+		Env:         testEnv(forceRunnerEnv(nil)),
+		Runner:      runner.run,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -312,8 +321,9 @@ func TestCollectHonoursTimeoutOverride(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_CCUSAGE_TIMEOUT_MS": "1234",
 		})),
@@ -331,8 +341,9 @@ func TestCollectPassesGeneratedDynamicPricingConfig(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
 		Env: testEnv(forceRunnerEnv(map[string]string{
 			"TOKENBOARD_ENDPOINT": "https://tokenboard.example/api/v1/ingest",
 		})),
@@ -364,10 +375,11 @@ func TestCollectPassesBundledConfigWithoutEndpoint(t *testing.T) {
 	stateDir := newStateDir(t)
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Env:      testEnv(forceRunnerEnv(map[string]string{"TOKENBOARD_ENDPOINT": ""})),
-		Runner:   runner.run,
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Env:         testEnv(forceRunnerEnv(map[string]string{"TOKENBOARD_ENDPOINT": ""})),
+		Runner:      runner.run,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -431,6 +443,7 @@ func TestHookModeUsesChangedFilesToNarrowReconciliation(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, &cost))
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 16, 26)}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -469,6 +482,7 @@ func TestHookModeUsesClaudeHomeWhenConfigDirUnset(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, &cost))
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 8, 13)}
 	_, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -496,6 +510,7 @@ func TestHookModeReconcilesWhenParsedCostIsMissing(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, nil))
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 8, 13)}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -522,6 +537,7 @@ func TestHookModeIgnoresSyntheticZeroUsageRows(t *testing.T) {
 		claudeUsageRow("2026-05-22T03:00:00.000Z", "claude-haiku-4-5", 8, 13, &cost))
 	runner := &stubRunner{responses: dailyAndSession("claude-haiku-4-5", 8, 13)}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -545,6 +561,7 @@ func TestHookModeFailsWhenReconciliationHasNoSnapshots(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, &cost))
 	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
 	_, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -576,6 +593,7 @@ func TestHookModeSkipsCcusageWhenNothingChanged(t *testing.T) {
 		"CLAUDE_CONFIG_DIR":    claudeHome,
 	})
 	first, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -603,6 +621,7 @@ func TestHookModeSkipsCcusageWhenNothingChanged(t *testing.T) {
 	}
 	callsAfterFirst := len(runner.calls)
 	second, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:05:00.000Z",
 		StateDir:    stateDir,
@@ -625,8 +644,9 @@ func TestHookModeNeverDownloadsCcusage(t *testing.T) {
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, floatPtr(0.12)))
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 8, 13)}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "Asia/Shanghai",
-		StateDir: stateDir,
+		ccusagePath: true,
+		Timezone:    "Asia/Shanghai",
+		StateDir:    stateDir,
 		Env: testEnv(map[string]string{
 			"TOKENBOARD_HOOK_MODE": "1",
 			"CLAUDE_CONFIG_DIR":    filepath.Dir(stateDir),
@@ -665,11 +685,12 @@ func TestCollectReportsUnpricedModelsOnce(t *testing.T) {
 	}}
 	lines := []string{}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Env:      testEnv(forceRunnerEnv(nil)),
-		Runner:   runner.run,
-		Stderr:   func(line string) { lines = append(lines, line) },
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Env:         testEnv(forceRunnerEnv(nil)),
+		Runner:      runner.run,
+		Stderr:      func(line string) { lines = append(lines, line) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -705,11 +726,12 @@ func TestCollectStaysQuietAboutModelsCcusagePricedItself(t *testing.T) {
 	}}
 	lines := []string{}
 	_, err := Collect(context.Background(), Options{
-		Timezone: "UTC",
-		StateDir: stateDir,
-		Env:      testEnv(forceRunnerEnv(nil)),
-		Runner:   runner.run,
-		Stderr:   func(line string) { lines = append(lines, line) },
+		ccusagePath: true,
+		Timezone:    "UTC",
+		StateDir:    stateDir,
+		Env:         testEnv(forceRunnerEnv(nil)),
+		Runner:      runner.run,
+		Stderr:      func(line string) { lines = append(lines, line) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -748,6 +770,7 @@ func TestHookModeAdvancesPastOversizedAssistantRowWithoutUsage(t *testing.T) {
 		return map[string]any{"data": []any{}}
 	}}
 	options := Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -852,6 +875,7 @@ func TestHookModeDoesNotCommitCursorForUnreadableOversizedRows(t *testing.T) {
 				return map[string]any{"data": []any{}}
 			}}
 			_, err := Collect(context.Background(), Options{
+				ccusagePath: true,
 				Timezone:    "Asia/Shanghai",
 				CollectedAt: "2026-05-22T10:00:00.000Z",
 				StateDir:    stateDir,
@@ -885,6 +909,7 @@ func TestCollectFallsBackToPackageRunnerOutsideHookMode(t *testing.T) {
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 1, 2)}
 	lines := []string{}
 	snapshots, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-04-28T10:00:00.000Z",
 		StateDir:    stateDir,
@@ -923,6 +948,7 @@ func TestCollectRejectsAMissingExplicitPricingConfig(t *testing.T) {
 	missing := filepath.Join(stateDir, "absent.json")
 	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 1, 2)}
 	_, err := Collect(context.Background(), Options{
+		ccusagePath: true,
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-04-28T10:00:00.000Z",
 		StateDir:    stateDir,

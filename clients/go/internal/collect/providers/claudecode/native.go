@@ -33,8 +33,10 @@ import (
 // useNativeClaude selects the in-process adapter instead of the ccusage
 // subprocess. It is a compile-time constant, not an environment variable:
 // flipping it is a reviewed commit, and a user must not be able to run an
-// unvalidated code path on their own data.
-const useNativeClaude = false
+// unvalidated code path on their own data. Since S5 (2026-11-10) it is true;
+// Options.ccusagePath asks for the subprocess implementation by name (the
+// protocol tests and the parity harness do).
+const useNativeClaude = true
 
 // nativeInput is what Collect's dispatch hands the native path: the resolved
 // environment, diagnostics sink, timezone and collection timestamp. The rest of
