@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,7 +96,6 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 		return provJSON(t, provDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",
@@ -115,7 +115,7 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 	configArgs := provConfigArgs(stateDir)
 	call := func(report string) []string {
 		return append([]string{
-			"ccusage@20.0.33", "codex", report, "--json", "--offline", "--single-thread",
+			"codex", report, "--json", "--offline", "--single-thread",
 			"--timezone", "Asia/Shanghai",
 		}, configArgs...)
 	}
@@ -159,11 +159,10 @@ func TestCodexScopeCollectsACommaContainingHomeFromTheJSONEnvironmentValue(t *te
 		t.Fatal(err)
 	}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		Since:       "20260509",
-		Timezone:    "Asia/Shanghai",
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
+		Since:    "20260509",
+		Timezone: "Asia/Shanghai",
+		StateDir: t.TempDir(),
+		Runner:   runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"CODEX_HOME":                  codexHome,
 			"TOKENBOARD_CODEX_HOMES_JSON": string(encodedHomes),
@@ -205,10 +204,9 @@ func TestCodexScopePersistsFrozenChildUsageUnderTheOriginalSourceIdentity(t *tes
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -274,11 +272,10 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForAFilenameWithItsExtension(t 
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Timezone:    "Asia/Shanghai",
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Timezone:  "Asia/Shanghai",
+		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -302,11 +299,10 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForADirectoryQualifiedSessionID
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Timezone:    "Asia/Shanghai",
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Timezone:  "Asia/Shanghai",
+		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER": "",
 			"TOKENBOARD_SINCE":           "all",
@@ -380,13 +376,12 @@ func TestCodexScopeScansAllConfiguredHomesTogetherDuringAFullHistoryCollection(t
 		return provJSON(t, provDailyResult), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(firstHome + "," + secondHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "all",
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(firstHome + "," + secondHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "all",
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -435,9 +430,8 @@ func TestCodexScopeMapsHistoricalSubagentModelNamesToCcusageCanonicalModels(t *t
 	assertCloseTo(t, got.CostUSD, 10*2.0/1_000_000, 14)
 }
 
-// The selected package manager and the explicit since window both reach every
-// frozen bounded report.
-func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(t *testing.T) {
+// The explicit since window reaches every frozen bounded report.
+func TestCodexScopeUsesSinceForFrozenBoundedReports(t *testing.T) {
 	codexHome := provEmptyCodexHome(t)
 	stateDir := t.TempDir()
 	provWriteJSONL(t, filepath.Join(codexHome, "sessions", "2026", "05", "09", "active.jsonl"),
@@ -446,15 +440,11 @@ func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "bun",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_BUNX_BIN":             "/opt/bin/bunx",
-			"TOKENBOARD_SINCE":                "20260509",
+			"TOKENBOARD_SINCE": "20260509",
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -464,19 +454,19 @@ func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(
 		t.Fatalf("calls = %+v", runner.calls)
 	}
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260509",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260509",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 	}, configArgs...))
 	for _, call := range runner.calls {
-		if call.command != "/opt/bin/bunx" {
-			t.Errorf("command = %q", call.command)
+		if call.command != ccusage.ReportCommand {
+			t.Errorf("command = %q, want the report label", call.command)
 		}
 	}
 }
@@ -496,10 +486,9 @@ func TestCodexScopeCapsTheConfiguredBatchSize(t *testing.T) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":  "",
 			"TOKENBOARD_SINCE":            "all",
@@ -536,7 +525,6 @@ func TestCodexScopeCollectsAFrozenDailyReportWhenBoundedSessionDiscoveryIsEmpty(
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",
@@ -582,11 +570,10 @@ func TestCodexScopeReturnsAnEmptyBoundedReportWithoutSessionFiles(t *testing.T) 
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(map[string]string{"TOKENBOARD_SINCE": "20260508"})),
+		CodexHome: provHome(codexHome),
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(map[string]string{"TOKENBOARD_SINCE": "20260508"})),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -617,7 +604,6 @@ func TestCodexScopeKeepsScopedFilesAvailableUntilReconciliationCompletes(t *test
 		return provJSON(t, provDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		Timezone:    "Asia/Shanghai",
 		CollectedAt: "2026-05-09T10:00:00.000Z",

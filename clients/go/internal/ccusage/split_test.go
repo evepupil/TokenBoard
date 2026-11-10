@@ -1,11 +1,10 @@
 package ccusage
 
-// The split gate for S5 Task 7 (2026-11-10): internal/ccusage stays the
-// shared contract the native providers and self-update depend on - report
-// decoding, normalization, the ordered JSON records and the credential scrub.
-// Everything that exists only to acquire, spawn or splice ccusage now lives
-// in internal/ccusage/{acquire,exec,runner}; this test fails if any of it
-// grows back into the shared package.
+// The split gate for S5 (2026-11-10): internal/ccusage is the shared contract
+// the native providers and self-update depend on - report decoding,
+// normalization, the ordered JSON records, the credential scrub and the
+// report-source seam. The acquisition and execution subpackages are deleted;
+// this test fails if a helper that reaches a binary grows back in here.
 
 import (
 	"go/ast"
@@ -39,6 +38,13 @@ var sharedExports = map[string]bool{
 	"RecordWith":        true,
 	// credentials.go
 	"ScrubCredentialEnv": true,
+	// report.go: the report-source seam every provider calls. It names a
+	// report shape, not a binary; the acquisition and execution layers that
+	// used to back it are gone.
+	"CommandOptions": true,
+	"CommandRunner":  true,
+	"ReportCommand":  true,
+	"WithConfigArgs": true,
 }
 
 func TestCcusageCoreKeepsOnlySharedContracts(t *testing.T) {
@@ -104,8 +110,7 @@ func TestCcusageCoreKeepsOnlySharedContracts(t *testing.T) {
 
 // TestCcusageCoreImportsNoNetworkOrProcessPackages pins the other half of the
 // split: a package that only decodes and normalizes reports has no business
-// opening sockets or spawning processes. The acquisition and execution code
-// that does lives in the subpackages.
+// opening sockets or spawning processes.
 func TestCcusageCoreImportsNoNetworkOrProcessPackages(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -128,7 +133,7 @@ func TestCcusageCoreImportsNoNetworkOrProcessPackages(t *testing.T) {
 				t.Fatalf("%s: %v", name, err)
 			}
 			if forbidden[path] {
-				t.Errorf("%s imports %q; acquisition and execution belong in internal/ccusage/{acquire,exec,runner}", name, path)
+				t.Errorf("%s imports %q; the client no longer acquires or spawns a ccusage binary", name, path)
 			}
 		}
 	}

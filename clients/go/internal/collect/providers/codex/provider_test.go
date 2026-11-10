@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -43,16 +42,31 @@ func (c provCall) hasArg(value string) bool {
 
 func (c provCall) envValue(key string) string { return c.env[key] }
 
+// provCalls is the recorded invocation list. Its String form names each call
+// without the environment: the child env carries the whole process
+// environment (credentials included), and a failing assertion that dumped it
+// wrote real secrets into the test log.
+type provCalls []provCall
+
+// summary renders the calls as label and arguments only.
+func (calls provCalls) summary() string {
+	lines := make([]string, 0, len(calls))
+	for _, call := range calls {
+		lines = append(lines, call.command+" "+strings.Join(call.args, " "))
+	}
+	return "[" + strings.Join(lines, "; ") + "]"
+}
+
 // provStubRunner is the fake ccusage runner: it records the invocation and
 // answers through the test's responder.
 type provStubRunner struct {
 	t       *testing.T
-	calls   []provCall
+	calls   provCalls
 	respond func(call provCall) (any, error)
 }
 
 func (r *provStubRunner) run(
-	_ context.Context, command string, args []string, options ccexec.CommandOptions,
+	_ context.Context, command string, args []string, options ccusage.CommandOptions,
 ) (any, error) {
 	r.t.Helper()
 	call := provCall{
@@ -73,8 +87,8 @@ func (r *provStubRunner) run(
 }
 
 // callsWith returns the recorded calls whose args contain value.
-func (r *provStubRunner) callsWith(value string) []provCall {
-	out := []provCall{}
+func (r *provStubRunner) callsWith(value string) provCalls {
+	out := provCalls{}
 	for _, call := range r.calls {
 		if call.hasArg(value) {
 			out = append(out, call)
@@ -344,11 +358,6 @@ func provCollect(t *testing.T, options Options, extraEnv map[string]string) ([]c
 	if options.Env == nil {
 		options.Env = provEnv(provForceEnv(extraEnv))
 	}
-	// From S5 (2026-11-10) on, the native report source is the default. Every
-	// test in this suite drives the ccusage subcommand protocol through an
-	// injected runner, so it asks for that path by name; native_flip_test.go
-	// owns the default-path gate.
-	options.ccusagePath = true
 	return Collect(context.Background(), options)
 }
 
@@ -370,7 +379,7 @@ func TestProviderRejectsRelativeExplicitCodexSymlinkRootsBeforeCollection(t *tes
 	}
 }
 
-func TestProviderRunsCodexCcusageDailyJSONAndNormalizesCacheInputAliases(t *testing.T) {
+func TestProviderNormalizesCacheInputAliasesFromTheDailyReport(t *testing.T) {
 	stateDir := t.TempDir()
 	codexHome := provEmptyCodexHome(t)
 	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
@@ -393,17 +402,17 @@ func TestProviderRunsCodexCcusageDailyJSONAndNormalizesCacheInputAliases(t *test
 	}
 
 	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--timezone", "Asia/Shanghai",
+		"codex", "daily", "--json", "--offline", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--timezone", "Asia/Shanghai",
+		"codex", "session", "--json", "--offline", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
-	if runner.calls[0].command != provPlatformCommand("npx") {
-		t.Errorf("command = %q", runner.calls[0].command)
+	if runner.calls[0].command != ccusage.ReportCommand {
+		t.Errorf("command = %q, want the report label", runner.calls[0].command)
 	}
 
 	if len(snapshots) != 1 {
@@ -423,9 +432,8 @@ func TestProviderPassesTheBundledPricingConfigWithoutAnEndpoint(t *testing.T) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_ENDPOINT":             "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
@@ -436,7 +444,7 @@ func TestProviderPassesTheBundledPricingConfigWithoutAnEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configPath := provConfigArgs(stateDir)[1]
 	for _, call := range runner.calls {
@@ -509,7 +517,7 @@ func TestProviderKeepsContextPricingAttributionSeparateForDuplicateSessionPathsA
 	}
 
 	if len(runner.callsWith("session")) != 3 {
-		t.Fatalf("session calls = %v", runner.callsWith("session"))
+		t.Fatalf("session calls = %s", runner.callsWith("session").summary())
 	}
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshots = %+v", snapshots)
@@ -619,10 +627,10 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 		t.Fatal(err)
 	}
 	if len(runner.callsWith("daily")) != 2 {
-		t.Errorf("daily calls = %v", runner.callsWith("daily"))
+		t.Errorf("daily calls = %s", runner.callsWith("daily").summary())
 	}
 	if len(runner.callsWith("session")) != 2 {
-		t.Errorf("session calls = %v", runner.callsWith("session"))
+		t.Errorf("session calls = %s", runner.callsWith("session").summary())
 	}
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshots = %+v", snapshots)
@@ -753,10 +761,9 @@ func TestProviderPassesTheConfiguredDefaultSinceWindowToFrozenBoundedReports(t *
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
@@ -768,19 +775,19 @@ func TestProviderPassesTheConfiguredDefaultSinceWindowToFrozenBoundedReports(t *
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 3 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260501",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260501",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 	}, configArgs...))
 }
 
@@ -795,13 +802,12 @@ func TestProviderPrefersAnExplicitSinceWindowOverTheProcessEnvironment(t *testin
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260708",
-		Until:       "20260709",
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260708",
+		Until:     "20260709",
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 			"TOKENBOARD_SINCE":                "20260501",
@@ -812,19 +818,19 @@ func TestProviderPrefersAnExplicitSinceWindowOverTheProcessEnvironment(t *testin
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 3 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260708", "--until", "20260709", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260708", "--until", "20260709", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--timezone", "Asia/Shanghai",
 	}, configArgs...))
 }
@@ -880,10 +886,9 @@ func TestProviderPassesConfiguredCodexHomeToUnscopedCcusageCommands(t *testing.T
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
@@ -915,11 +920,10 @@ func TestProviderUsesAFrozenHomeForEveryBoundedReport(t *testing.T) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Since:       "20260512",
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		Since:     "20260512",
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
@@ -1070,11 +1074,10 @@ func TestProviderUsesCanonicalSessionAttributionForAnUntilOnlyWindow(t *testing.
 	calls := []provCall{}
 	runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(t, &calls, nil, "")}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 			"TOKENBOARD_SINCE":                "",
@@ -1168,12 +1171,11 @@ func TestProviderUsesCanonicalSessionAttributionWhenAllHistoryIsBoundedByUntil(t
 	calls := []provCall{}
 	runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(t, &calls, nil, "")}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "all",
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "all",
+		StateDir:  stateDir,
+		Runner:    runner.run,
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 			"TOKENBOARD_UNTIL":                "20260521",
@@ -1205,13 +1207,12 @@ func TestProviderUsesAnArchiveOnlyLocalSessionForCanonicalBoundedAttribution(t *
 	stateDir := t.TempDir()
 	runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(t, nil, nil, "")}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		StateDir:    stateDir,
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260515",
+		StateDir:  stateDir,
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1254,13 +1255,12 @@ func TestProviderPrefersAnActiveSessionOverAnArchiveWithTheSameBoundedReportPath
 		return provJSON(t, provCanonicalSessionResult("gpt-5.5")), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260515",
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1306,11 +1306,10 @@ func TestProviderPreservesEveryConfiguredCodexHomeWhileResolvingBoundedCanonical
 		return provJSON(t, provMultiCanonicalSessionResult()), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		StateDir:    stateDir,
-		Runner:      runner.run,
+		Timezone: "Asia/Shanghai",
+		Since:    "20260515",
+		StateDir: stateDir,
+		Runner:   runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
 			"CODEX_HOME": combinedHome,
 		})),
@@ -1443,12 +1442,11 @@ func TestProviderKeepsAMergedBoundedSessionFromDuplicatePathsAcrossCodexHomesCan
 			"lastActivity":"2026-05-21T04:24:07.234Z","models":{"`+model+`":{"totalTokens":20}}}]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(map[string]string{"CODEX_HOME": combinedHome})),
+		Timezone: "Asia/Shanghai",
+		Since:    "20260515",
+		StateDir: t.TempDir(),
+		Runner:   runner.run,
+		Env:      provEnv(provForceEnv(map[string]string{"CODEX_HOME": combinedHome})),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1474,13 +1472,12 @@ func TestProviderKeepsAnUnchangedSessionCountAttributedToItsCanonicalModelAcross
 	run := func(since string) []contract.Snapshot {
 		runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(t, &calls, nil, "")}
 		snapshots, err := Collect(context.Background(), Options{
-			ccusagePath: true,
-			CodexHome:   provHome(codexHome),
-			StateDir:    stateDir,
-			Timezone:    "Asia/Shanghai",
-			Since:       since,
-			Runner:      runner.run,
-			Env:         provEnv(provForceEnv(nil)),
+			CodexHome: provHome(codexHome),
+			StateDir:  stateDir,
+			Timezone:  "Asia/Shanghai",
+			Since:     since,
+			Runner:    runner.run,
+			Env:       provEnv(provForceEnv(nil)),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1530,24 +1527,22 @@ func TestProviderWarmsCanonicalSessionAttributionFromAScopedFullHistoryCollectio
 	runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(t, &calls, nil, "")}
 
 	if _, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Timezone:    "Asia/Shanghai",
-		Since:       "all",
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Timezone:  "Asia/Shanghai",
+		Since:     "all",
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	bounded, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260515",
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1585,13 +1580,12 @@ func TestProviderRefreshesCanonicalSessionAttributionWhenItsSourceFileChanges(t 
 
 	run := func() []contract.Snapshot {
 		snapshots, err := Collect(context.Background(), Options{
-			ccusagePath: true,
-			CodexHome:   provHome(codexHome),
-			StateDir:    stateDir,
-			Timezone:    "Asia/Shanghai",
-			Since:       "20260515",
-			Runner:      runner.run,
-			Env:         provEnv(provForceEnv(nil)),
+			CodexHome: provHome(codexHome),
+			StateDir:  stateDir,
+			Timezone:  "Asia/Shanghai",
+			Since:     "20260515",
+			Runner:    runner.run,
+			Env:       provEnv(provForceEnv(nil)),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1645,13 +1639,12 @@ func TestProviderKeepsAFrozenSnapshotWhenItsSourceSessionChangesAfterCanonicalAt
 		return provJSON(t, provCanonicalSessionResult("gpt-5.5")), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260515",
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1677,13 +1670,12 @@ func TestProviderPreservesACanonicalSessionCountWhenItsModelHasNoDailyTokenRow(t
 	runner := &provStubRunner{t: t, respond: provWindowSensitiveRunner(
 		t, nil, func() string { return "gpt-5.6" }, missingCanonicalModelDailyResult)}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    stateDir,
-		Timezone:    "Asia/Shanghai",
-		Since:       "20260515",
-		Runner:      runner.run,
-		Env:         provEnv(provForceEnv(nil)),
+		CodexHome: provHome(codexHome),
+		StateDir:  stateDir,
+		Timezone:  "Asia/Shanghai",
+		Since:     "20260515",
+		Runner:    runner.run,
+		Env:       provEnv(provForceEnv(nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1707,11 +1699,10 @@ func TestProviderReportsPartialCollectionWhenSessionCountsFail(t *testing.T) {
 			"inputTokens":1,"outputTokens":2,"totalTokens":3}]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
-		CodexHome:   provHome(codexHome),
-		StateDir:    t.TempDir(),
-		Runner:      runner.run,
-		Stderr:      func(line string) { errors = append(errors, line) },
+		CodexHome: provHome(codexHome),
+		StateDir:  t.TempDir(),
+		Runner:    runner.run,
+		Stderr:    func(line string) { errors = append(errors, line) },
 		Env: provEnv(map[string]string{
 			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",

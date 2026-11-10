@@ -15,9 +15,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
-	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
@@ -56,19 +53,9 @@ type Options struct {
 	HomeDir           string
 	Stderr            func(line string)
 	Env               func(string) string
-	// Runner runs ccusage; nil means ccexec.RunJSON.
-	Runner ccexec.CommandRunner
-	// useNativeReport selects the in-process report source (native.go). It is
-	// deliberately unexported: the compiled-in useNativeCodex constant is the
-	// only user-facing switch, and nativeCollect is the only writer, so a
-	// caller outside this package cannot select an unvalidated code path.
-	useNativeReport bool
-	// ccusagePath asks for the ccusage subprocess explicitly. Since S5
-	// (2026-11-10) the native source is the default; the protocol suites and
-	// the parity harness are the only callers that set it.
-	ccusagePath bool
-	// ResolveBinary acquires ccusage; nil means ccacq.Resolve.
-	ResolveBinary func(ccacq.AcquireOptions) (ccacq.Binary, error)
+	// Runner answers one report call; nil means the in-process native source.
+	// Tests inject a stub.
+	Runner ccusage.CommandRunner
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
 	PricingFetcher func(request *http.Request) (*http.Response, error)
 	// HookAcknowledgement receives the per-scope uploaded file list.
@@ -88,10 +75,6 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	stderr := options.Stderr
 	if stderr == nil {
 		stderr = func(string) {}
-	}
-	runner := options.Runner
-	if runner == nil {
-		runner = ccexec.RunJSON
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -134,20 +117,11 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 		}
 	}
 
-	// The S3 seam. Native replaces only the report source: the pricing config
-	// above, the rules below and everything downstream of the runner stay the
-	// same, so a failure here surfaces exactly where a failed ccusage run
-	// would. See native.go for why the substitution lives at the runner.
-	native := useNativeCodex && !options.ccusagePath
-	var packageRunner ccrunner.PackageRunner
-	if native {
-		packageRunner = nativePackageRunner
-		runner = newNativeReportRunner(prepared).Run
-	} else {
-		packageRunner, err = resolveRunner(commandEnv, hookMode, options, stderr)
-		if err != nil {
-			return nil, err
-		}
+	// The report source is the in-process native runner; everything around it
+	// (pricing config, rules, scopes, retries) stays as it was. See native.go.
+	var runner ccusage.CommandRunner = newNativeReportRunner(prepared).Run
+	if options.Runner != nil {
+		runner = options.Runner
 	}
 	// The rule set is derived from the same catalogue that priced the ccusage
 	// config: the static table widened by every unambiguously priced catalogue
@@ -169,16 +143,15 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 		prepared.ExplicitOverrideModelIDs,
 	))
 	collection := providerRun{
-		ctx:           ctx,
-		runner:        runner,
-		packageRunner: packageRunner,
-		timezone:      timezone,
-		collectedAt:   collectedAt,
-		stateDir:      stateDir,
-		env:           commandEnv,
-		options:       options,
-		stderr:        stderr,
-		rules:         rules,
+		ctx:         ctx,
+		runner:      runner,
+		timezone:    timezone,
+		collectedAt: collectedAt,
+		stateDir:    stateDir,
+		env:         commandEnv,
+		options:     options,
+		stderr:      stderr,
+		rules:       rules,
 	}
 
 	var snapshots []contract.Snapshot
@@ -196,59 +169,20 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 
 // providerRun is the per-invocation state every collection path shares.
 type providerRun struct {
-	ctx           context.Context
-	runner        ccexec.CommandRunner
-	packageRunner ccrunner.PackageRunner
-	timezone      string
-	collectedAt   string
-	stateDir      string
-	env           func(string) string
-	options       Options
-	stderr        func(string)
+	ctx         context.Context
+	runner      ccusage.CommandRunner
+	timezone    string
+	collectedAt string
+	stateDir    string
+	env         func(string) string
+	options     Options
+	stderr      func(string)
 	// rules is the context-pricing rule set for this run: the static table
 	// widened by the models the running catalogue prices (and narrowed by the
 	// user's explicit overrides), exactly as the TS provider scopes its rules
 	// for the lifetime of one collect. Nothing reads DefaultRules directly on
 	// this path, so a model the server newly prices is repriced here too.
 	rules *Rules
-}
-
-// resolveRunner picks the ccusage invocation. Hook mode never downloads: the
-// hook path must stay offline, so a machine with no usable binary reports the
-// source unavailable instead of fetching a package.
-func resolveRunner(
-	env func(string) string,
-	hookMode bool,
-	options Options,
-	stderr func(string),
-) (ccrunner.PackageRunner, error) {
-	resolveBinary := options.ResolveBinary
-	if resolveBinary == nil {
-		resolveBinary = ccacq.Resolve
-	}
-	// Boolean(env.X) in TS: any non-empty value, whitespace included.
-	forceRunner := env("TOKENBOARD_FORCE_PACKAGE_RUNNER") != ""
-	var localBinary string
-	if !forceRunner {
-		binary, err := resolveBinary(ccacq.AcquireOptions{
-			Env:      env,
-			HomeDir:  homeDir(options),
-			HookMode: hookMode,
-			Stderr:   stderr,
-		})
-		if err != nil {
-			if hookMode {
-				return ccrunner.PackageRunner{}, err
-			}
-			stderr(fmt.Sprintf("TokenBoard ccusage: %s; falling back to the package runner", err.Error()))
-		} else {
-			localBinary = binary.Path
-		}
-	}
-	return ccrunner.ResolvePackageRunner(ccrunner.RunnerInput{
-		Env:         env,
-		LocalBinary: localBinary,
-	})
 }
 
 func homeDir(options Options) string {
@@ -520,7 +454,7 @@ func (run *providerRun) collectScopedBatch(
 	if err != nil {
 		return scopedBatch{}, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return scopedBatch{}, err
@@ -613,7 +547,7 @@ func (run *providerRun) collectSessionCounts(
 		run.stderr("Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: " + err.Error())
 		return map[string]any{"data": []any{}}, nil
 	}
-	result, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	result, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(env), ReadSessionTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		if required {
@@ -784,7 +718,7 @@ func (run *providerRun) collectFrozenBoundedBatch(
 	if err != nil {
 		return frozenBoundedBatch{}, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return frozenBoundedBatch{}, err
@@ -1107,7 +1041,7 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(collectionEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return nil, err
@@ -1257,7 +1191,7 @@ func envWith(env func(string) string, key, value string) func(string) string {
 // every codex call carries `--config`; omitting it makes ccusage fall back to
 // its own price table and every cost diverges.
 func (run *providerRun) runnerArgs(env func(string) string, packageArgs []string) ([]string, error) {
-	return run.packageRunner.Args(packageArgs, env, nil)
+	return ccusage.WithConfigArgs(packageArgs, env, nil)
 }
 
 // codexCommandEnvKeys are the variables the provider overrides for a ccusage

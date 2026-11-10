@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -319,20 +318,4 @@ func assertUsableBinary(bin string) error {
 		return fmt.Errorf("ccusage binary at %s is not executable", bin)
 	}
 	return nil
-}
-
-// defaultCcusageBin is the install layout the skill uses:
-// <BundledBinDir>/ccusage[.exe]. BundledBinDir is the same directory the
-// collector's bundled layer probes, so both sides agree on the install; the
-// executable name is resolved here because internal/ccusage keeps it unexported.
-func defaultCcusageBin() string {
-	return filepath.Join(ccacq.BundledBinDir(nil, ""), ccusageBinaryName())
-}
-
-// ccusageBinaryName is the bundled ccusage executable's platform name.
-func ccusageBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "ccusage.exe"
-	}
-	return "ccusage"
 }

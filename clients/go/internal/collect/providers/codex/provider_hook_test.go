@@ -69,7 +69,6 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -102,7 +101,7 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	want := []string{"Codex child session changed; retrying hook reconciliation once"}
 	if len(diagnostics) != len(want) || diagnostics[0] != want[0] {
@@ -130,7 +129,6 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -152,7 +150,7 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	if !provReadPendingUpload(t, stateDir, "2026/05/22/session.jsonl") {
 		t.Error("the session file must stay pending an upload")
@@ -179,7 +177,6 @@ func TestCodexHookRescansAllPendingRowsWhenARetryCrossesAUsageDate(t *testing.T)
 			{"date":"2026-05-23","model":"gpt-5","inputTokens":20,"outputTokens":10,"totalTokens":30,"costUSD":0.06}]}`), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -230,7 +227,6 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	_, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -252,7 +248,7 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 2 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	if !provReadPendingUpload(t, stateDir, "2026/05/22/session.jsonl") {
 		t.Error("the session file must stay pending an upload")
@@ -276,7 +272,6 @@ func TestCodexHookRetriesAnUnboundedCollectionAfterOneChildReaderRace(t *testing
 		return provJSON(t, provHookDailyResult), nil
 	}}
 	snapshots, err := Collect(context.Background(), Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    t.TempDir(),
 		Timezone:    "Asia/Shanghai",
@@ -310,7 +305,7 @@ func TestCodexHookRetriesAnUnboundedCollectionAfterOneChildReaderRace(t *testing
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	want := []string{"Codex session files changed during unbounded collection; retrying once"}
 	if len(diagnostics) != len(want) || diagnostics[0] != want[0] {
@@ -434,7 +429,6 @@ func TestCodexHookKeepsCompleteChangedDateAggregationWhileExcludingUnrelatedHist
 		return provJSON(t, provChangedDateDailyResult(activeTokens)), nil
 	}}
 	options := Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",
@@ -521,7 +515,6 @@ func TestCodexHookDoesNotAddAReusedPendingSnapshotLabelledAllOnTopOfTheSameDay(t
 		return daily, nil
 	}}
 	options := Options{
-		ccusagePath: true,
 		CodexHome:   provHome(codexHome),
 		StateDir:    stateDir,
 		Timezone:    "Asia/Shanghai",

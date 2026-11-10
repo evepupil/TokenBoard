@@ -1,20 +1,16 @@
 // Port of providers/ccusage-tools.test.ts. The TS suite drives the provider
-// through a recording package runner; here the same observable arguments come
-// from TOKENBOARD_CCUSAGE_BIN pointing at a real file, which resolves to the
-// local runner whose RunPackageArgs forwards the provider's arguments
-// untouched — the same shape the TS stub returns.
+// through a recording package runner; here a stub ccusage.CommandRunner
+// records the report arguments the provider builds - the same list the native
+// adapters parse.
 
 package ccusagetool
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -34,7 +30,7 @@ type testRunner struct {
 	commands  []string
 }
 
-func (r *testRunner) run(_ context.Context, command string, args []string, _ ccexec.CommandOptions) (any, error) {
+func (r *testRunner) run(_ context.Context, command string, args []string, _ ccusage.CommandOptions) (any, error) {
 	key := strings.Join(args, " ")
 	r.calls = append(r.calls, key)
 	r.commands = append(r.commands, command)
@@ -99,15 +95,9 @@ func sessionReport(t *testing.T, sessionID string, lastActivity string) any {
 	}]}`)
 }
 
-// toolEnv points the package runner at a real file so it selects the local
-// runner, whose argument list is exactly what the provider built.
 func toolEnv(t *testing.T) map[string]string {
 	t.Helper()
-	binary := filepath.Join(t.TempDir(), "ccusage")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return map[string]string{"TOKENBOARD_CCUSAGE_BIN": binary}
+	return map[string]string{"TOKENBOARD_STATE_DIR": t.TempDir()}
 }
 
 func envFunc(values map[string]string) func(string) string {
@@ -125,12 +115,10 @@ func collectTool(t *testing.T, source contract.Source, runner *testRunner, optio
 	if options.CollectedAt == "" {
 		options.CollectedAt = testCollectedAt
 	}
-	// From S5 (2026-11-10) on, the tool family's default is the in-process
-	// adapters. This suite asserts the ccusage subprocess protocol, so it asks
-	// for that path by name; the production default and its gate live in
-	// native_flip_test.go.
+	// The recorded report arguments are what the native adapters parse, so a
+	// stub runner standing in for them pins the provider half of the protocol
+	// without touching a real tool directory.
 	options.Runner = runner.run
-	options.ccusagePath = true
 	// Keep the native adapters' data-directory discovery away from the
 	// tester's own installs: every tool source resolves its HOME override on
 	// the first call, and a missing value would read the real ~/.zcode etc.

@@ -1,19 +1,14 @@
 package claudecode
 
-// The default-path gate for the S5 flip (2026-11-10): Collect now runs the
-// in-process adapter, and nothing on that path may spawn or acquire ccusage.
-// claudecode_test.go drives the subprocess implementation through
-// Options.ccusagePath; this file owns what a user actually gets.
+// The default-path gate for S5 (2026-11-10): Collect runs the in-process
+// adapter, and the package no longer has a subprocess seam to reach.
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -29,14 +24,6 @@ func TestNativeClaudeIsTheDefaultPath(t *testing.T) {
 		StateDir:       t.TempDir(),
 		Env:            testEnv(map[string]string{"CLAUDE_CONFIG_DIR": configDir}),
 		PricingFetcher: failingFetcher(t),
-		Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
-			t.Error("the default path must not run ccusage")
-			return nil, errors.New("ccusage must not run")
-		},
-		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
-			t.Error("the default path must not acquire a ccusage binary")
-			return ccacq.Binary{}, errors.New("ccusage must not be acquired")
-		},
 	})
 	if err != nil {
 		t.Fatal(err)

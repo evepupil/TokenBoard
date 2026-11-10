@@ -380,10 +380,9 @@ func TestRunRejectsInvalidInvocations(t *testing.T) {
 		{"unknown scenario", []string{"-source", "claude-code", "-scenario", "week"}},
 		{"too few rounds", []string{"-source", "claude-code", "-scenario", "full", "-rounds", "4"}},
 		{"hook without a cursor source", []string{"-source", "kimi", "-scenario", "hook"}},
-		// A source ccusage does not answer for is an invocation error, not a
-		// failed run: rejecting it up front keeps the exit code at 2 instead of
-		// surfacing a measurement failure after the harness has already started.
-		{"source without a ccusage path", []string{"-source", "opencode", "-scenario", "full"}},
+		// A source ccusage does not answer for has no baseline to compare
+		// against: asking for one is an invocation error, not a failed run.
+		{"baseline for a source without a ccusage path", []string{"-source", "opencode", "-scenario", "full", "-ccusage-bin", "/usr/bin/false"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -411,8 +410,9 @@ func TestRunRejectsInvalidInvocations(t *testing.T) {
 func TestRunPrintsJSONAndText(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	seam := benchInput{
-		Now:      func() time.Time { return now },
-		Timezone: "UTC",
+		CcusageBin: "/injected/ccusage",
+		Now:        func() time.Time { return now },
+		Timezone:   "UTC",
 		CollectCcusage: func(context.Context, roundRequest) (roundResult, error) {
 			return roundResult{WallMs: 1_500, PeakRSSBytes: 1 << 30, RSSSource: rssSourceWait4, Calls: 2}, nil
 		},
@@ -442,6 +442,10 @@ func TestRunPrintsJSONAndText(t *testing.T) {
 		t.Errorf("native status = %q, want %q when the native seam has no provider",
 			report.Native.Status, sideNotImplemented)
 	}
+	if len(report.Ccusage.Rounds) != 5 || report.Ccusage.Status != sideMeasured {
+		t.Errorf("ccusage = %d rounds / %q, want 5 measured with -ccusage-bin",
+			len(report.Ccusage.Rounds), report.Ccusage.Status)
+	}
 	if !report.Ccusage.BytesReadPending {
 		t.Error("bytesReadPending = false, want true until the S2 adapter counter lands")
 	}
@@ -454,7 +458,7 @@ func TestRunPrintsJSONAndText(t *testing.T) {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
 	}
 	text := stdout.String()
-	for _, want := range []string{"bench-collect", "ccusage", "native: notImplemented", "median", "bytesRead"} {
+	for _, want := range []string{"bench-collect", "ccusage: measured", "native: notImplemented", "median", "bytesRead"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text report is missing %q:\n%s", want, text)
 		}
@@ -563,5 +567,36 @@ func TestBenchBinarySeesTheNativeRegistry(t *testing.T) {
 	provider, ok := collect.LookupNative(contract.SourceClaudeCode)
 	if !ok || provider == nil {
 		t.Fatalf("collect.LookupNative(%q) = (%v, %v), want the claude-code native provider", contract.SourceClaudeCode, provider, ok)
+	}
+}
+
+// TestBenchRunWithoutABaselineMeasuresOnlyTheNativeSide pins the post-S5
+// default at the CLI boundary: with no -ccusage-bin the ccusage column is
+// skipped and no round is measured for it.
+func TestBenchRunWithoutABaselineMeasuresOnlyTheNativeSide(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	input := benchInput{
+		Source:   contract.SourceClaudeCode,
+		Scenario: scenarioSingle,
+		Rounds:   defaultRounds,
+		Timezone: "UTC",
+		Now:      func() time.Time { return now },
+		CollectNative: func(context.Context, roundRequest) (roundResult, error) {
+			return roundResult{WallMs: 10, PeakRSSBytes: 10, RSSSource: rssSourceSelf, Calls: 1}, nil
+		},
+	}
+	report, err := runBench(context.Background(), input)
+	if err != nil {
+		t.Fatalf("runBench: %v", err)
+	}
+	if report.Ccusage.Status != sideSkipped || len(report.Ccusage.Rounds) != 0 {
+		t.Fatalf("ccusage = %q / %d rounds, want skipped", report.Ccusage.Status, len(report.Ccusage.Rounds))
+	}
+	if report.Native.Status != sideMeasured || len(report.Native.Rounds) != defaultRounds {
+		t.Fatalf("native = %q / %d rounds, want %d measured",
+			report.Native.Status, len(report.Native.Rounds), defaultRounds)
+	}
+	if report.Regression {
+		t.Error("a skipped baseline is no regression")
 	}
 }

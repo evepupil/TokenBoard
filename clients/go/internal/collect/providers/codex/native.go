@@ -30,21 +30,12 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
-	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	adapter "github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
-
-// useNativeCodex selects the in-process report source instead of the ccusage
-// subprocess. It is a compile-time constant, not an environment variable:
-// flipping it was a reviewed commit of its own (S5, 2026-11-10), so a user
-// cannot run an unvalidated code path on their own data. The ccusage path
-// remains reachable only by building with the constant set back to false.
-const useNativeCodex = true
 
 // nativeInput is what the native entry point hands the pipeline. Everything
 // else - env, timezone, collectedAt, state directory, pricing preparation - is
@@ -59,13 +50,11 @@ type nativeInput struct {
 // because a fallback would make a parity comparison "ccusage against ccusage"
 // and pass silently.
 func nativeCollect(ctx context.Context, options Options) ([]contract.Snapshot, error) {
-	options.useNativeReport = true
 	return Collect(ctx, options)
 }
 
-// nativeProvider is the registry adapter for LookupNative. It always runs the
-// native path, whatever the switch says; the parity harness looks the native
-// side up here.
+// nativeProvider is the registry adapter for LookupNative: the same
+// in-process path Collect runs, looked up by the parity harness.
 type nativeProvider struct{}
 
 // Collect adapts nativeCollect to the registry's Provider interface.
@@ -80,17 +69,6 @@ func (nativeProvider) Collect(ctx context.Context, options collect.Options) ([]c
 		Env:                 options.EnvValue,
 		HookAcknowledgement: options.HookAcknowledgement,
 	})
-}
-
-// nativePackageRunner keeps the provider's argument construction (including
-// the `--config` pair ConfigArgs appends, so a broken explicit config fails
-// exactly as it would on the ccusage path) without resolving or spawning a
-// ccusage binary. The native runner parses the resulting argument list.
-var nativePackageRunner = ccrunner.PackageRunner{
-	Command: "ccusage",
-	RunPackageArgs: func(_, _ string, packageArgs []string) []string {
-		return append([]string{}, packageArgs...)
-	},
 }
 
 // nativeReportRunner answers the provider's report calls in process. It is a
@@ -115,7 +93,7 @@ func newNativeReportRunner(prepared pricing.PreparedConfig) *nativeReportRunner 
 }
 
 // Run implements ccexec.CommandRunner.
-func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []string, options ccexec.CommandOptions) (any, error) {
+func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []string, options ccusage.CommandOptions) (any, error) {
 	// The subprocess path bounds ccusage by killing the child at TimeoutMs
 	// (TOKENBOARD_CODEX_DAILY_TIMEOUT_MS). There is no child here, so the budget
 	// becomes a deadline on the scan, which polls it between files; dropping it

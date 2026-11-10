@@ -14,7 +14,7 @@ package claudecode
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
@@ -166,17 +164,9 @@ func TestHookNativeNoChangesReturnsEmpty(t *testing.T) {
 func TestHookNativeNeverRunsCcusage(t *testing.T) {
 	claudeHome, stateDir, _ := hookFixture(t,
 		claudeUsageRow("2026-05-22T02:00:00.000Z", "claude-sonnet-4-5", 8, 13, floatPtr(0.12)))
-	options := Options{
-		StateDir: stateDir,
-		Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
-			t.Error("the native hook path must not run ccusage")
-			return nil, errors.New("ccusage must not run")
-		},
-		ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
-			t.Error("the native hook path must not resolve a ccusage binary")
-			return ccacq.Binary{}, errors.New("ccusage must not run")
-		},
-	}
+	// The path has no subprocess seam left to stub: a regression would have to
+	// reintroduce one, and cmd/tokenboard's G1 gate fails on the import.
+	options := Options{StateDir: stateDir}
 	snapshots, err := runNativeHook(t, options, hookNativeEnv(map[string]string{
 		"CLAUDE_CONFIG_DIR": claudeHome,
 	}))
@@ -612,3 +602,43 @@ func hookRowAt(inputTokens int, timestamp string) string {
 		`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":%d,"output_tokens":1}}}`,
 		timestamp, inputTokens)
 }
+
+func hookFixture(t *testing.T, rows ...string) (claudeHome, stateDir, sessionFile string) {
+	t.Helper()
+	root := t.TempDir()
+	claudeHome = filepath.Join(root, "claude")
+	stateDir = filepath.Join(root, "state")
+	sessionFile = filepath.Join(claudeHome, "projects", "project-a", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join(rows, "\n") + "\n"
+	if err := os.WriteFile(sessionFile, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return claudeHome, stateDir, sessionFile
+}
+
+func claudeUsageRow(timestamp, model string, input, output int, cost *float64) string {
+	row := map[string]any{
+		"type":      "assistant",
+		"timestamp": timestamp,
+		"message": map[string]any{
+			"model": model,
+			"usage": map[string]any{
+				"input_tokens":  input,
+				"output_tokens": output,
+			},
+		},
+	}
+	if cost != nil {
+		row["costUSD"] = *cost
+	}
+	encoded, _ := json.Marshal(row)
+	return string(encoded)
+}
+
+func floatPtr(value float64) *float64 { return &value }

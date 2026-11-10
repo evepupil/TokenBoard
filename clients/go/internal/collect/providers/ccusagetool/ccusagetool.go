@@ -22,9 +22,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
-	ccrunner "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/runner"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -50,15 +47,9 @@ type Options struct {
 	Stderr      func(line string)
 	// Env resolves configuration; nil means the process environment.
 	Env func(string) string
-	// Runner runs ccusage; nil means ccexec.RunJSON.
-	Runner ccexec.CommandRunner
-	// ResolveBinary acquires the local ccusage binary; nil means
-	// ccacq.Resolve. Tests inject it so no real install is probed.
-	ResolveBinary func(ccacq.AcquireOptions) (ccacq.Binary, error)
-	// ccusagePath asks for the subprocess path explicitly. Since S5 (2026-11-10)
-	// the in-process adapters are the default; the parity harness and the
-	// ccusage-protocol tests are the only callers that set it.
-	ccusagePath bool
+	// Runner answers one report call; nil means the in-process adapter for the
+	// source. Tests inject a stub.
+	Runner ccusage.CommandRunner
 }
 
 // Collect gathers one ccusage-tool source's usage.
@@ -75,10 +66,6 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 	if stderr == nil {
 		stderr = func(string) {}
 	}
-	runner := options.Runner
-	if runner == nil {
-		runner = ccexec.RunJSON
-	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
 		timezone = sessionusage.LocalTimezone()
@@ -92,37 +79,26 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 	if err != nil {
 		return nil, err
 	}
-	var packageRunner ccrunner.PackageRunner
-	native := !options.ccusagePath
-	if native {
-		prepared, err := pricing.Prepare(pricing.PrepareInput{
-			StateDir:       options.StateDir,
-			ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
-			Stderr:         stderr,
-		})
-		if err != nil {
-			return nil, err
-		}
-		packageRunner = nativePackageRunner
+	prepared, err := pricing.Prepare(pricing.PrepareInput{
+		StateDir:       options.StateDir,
+		ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
+		Stderr:         stderr,
+	})
+	if err != nil {
+		return nil, err
+	}
+	runner := options.Runner
+	if runner == nil {
 		runner = newNativeToolRunner(prepared, options.HomeDir, env, stderr).Run
-	} else {
-		packageRunner, err = resolveRunner(env, options, stderr)
-		if err != nil {
-			return nil, err
-		}
 	}
-	commandOptions := ccexec.CommandOptions{
-		TimeoutMs: readCcusageTimeoutMs(env),
-		Retries:   readPackageCommandRetries(env),
-		OnRetry:   stderr,
-	}
+	commandOptions := ccusage.CommandOptions{}
 
-	dailyArgs, err := packageRunner.Args(append(
+	dailyArgs, err := ccusage.WithConfigArgs(append(
 		[]string{command, "daily", "--json"}, append(rangeArgs, "--timezone", timezone)...), env, nil)
 	if err != nil {
 		return nil, err
 	}
-	daily, err := runner(ctx, packageRunner.Command, dailyArgs, commandOptions)
+	daily, err := runner(ctx, ccusage.ReportCommand, dailyArgs, commandOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -133,12 +109,12 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 		return []contract.Snapshot{}, nil
 	}
 
-	sessionArgs, err := packageRunner.Args(append(
+	sessionArgs, err := ccusage.WithConfigArgs(append(
 		[]string{command, "session", "--json"}, append(rangeArgs, "--timezone", timezone)...), env, nil)
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := runner(ctx, packageRunner.Command, sessionArgs, commandOptions)
+	sessions, err := runner(ctx, ccusage.ReportCommand, sessionArgs, commandOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -170,40 +146,6 @@ func buildRangeArgs(since, until string) ([]string, error) {
 		args = append(args, "--until", normalizedUntil)
 	}
 	return args, nil
-}
-
-// resolveRunner picks the ccusage invocation the way the claude-code and codex
-// providers do: the resolved local binary when there is one, the package
-// runner otherwise. Tool sources never collect in hook mode, so unlike those
-// providers this one may fall through to the package runner (and its download
-// layer) instead of reporting the source unavailable.
-func resolveRunner(env func(string) string, options Options, stderr func(string)) (ccrunner.PackageRunner, error) {
-	resolveBinary := options.ResolveBinary
-	if resolveBinary == nil {
-		resolveBinary = ccacq.Resolve
-	}
-	// Boolean(env.X) in TS: any non-empty value, whitespace included.
-	var localBinary string
-	if env("TOKENBOARD_FORCE_PACKAGE_RUNNER") == "" {
-		binary, err := resolveBinary(ccacq.AcquireOptions{
-			Env:     env,
-			HomeDir: options.HomeDir,
-			Stderr:  stderr,
-		})
-		if err != nil {
-			// The TypeScript collector has no bundled binary: it always
-			// reaches ccusage through the package manager. Keep that fallback
-			// so an existing skill install (which pins
-			// TOKENBOARD_PACKAGE_MANAGER) keeps working.
-			stderr(fmt.Sprintf("TokenBoard ccusage: %s; falling back to the package runner", err.Error()))
-		} else {
-			localBinary = binary.Path
-		}
-	}
-	return ccrunner.ResolvePackageRunner(ccrunner.RunnerInput{
-		Env:         env,
-		LocalBinary: localBinary,
-	})
 }
 
 func readCcusageTimeoutMs(env func(string) string) int {

@@ -3,10 +3,12 @@
 // the harness for §9.3 of
 // docs/superpowers/specs/2026-11-03-native-usage-sources-design.md.
 //
-// The ccusage side execs the pinned binary; the native side runs
-// collect.LookupNative in-process. A source with no native provider reports
-// notImplemented in the native column, and the report never treats that as a
-// win.
+// The native side runs collect.LookupNative in-process. The ccusage column is
+// optional: -ccusage-bin names a binary and the side execs it, which is how the
+// S5 report (docs/research/2026-11-10-native-vs-ccusage-benchmark.md) was
+// produced. Without the flag the report measures the native side alone; the
+// client itself no longer acquires ccusage anywhere. A source with no native
+// provider reports notImplemented, and the report never treats that as a win.
 //
 // # Peak RSS of the ccusage child
 //
@@ -120,6 +122,8 @@ const (
 	sideNative         = "native"
 	sideMeasured       = "measured"
 	sideNotImplemented = "notImplemented"
+	// sideSkipped is the ccusage column of a run that asked for no baseline.
+	sideSkipped = "skipped"
 )
 
 // RSS provenance labels. They travel into the report so a reader can tell an
@@ -208,14 +212,17 @@ type benchReport struct {
 // benchInput is one run's inputs. The function seams exist so the loop,
 // aggregation and reporting are testable without a ccusage binary.
 type benchInput struct {
-	Source     contract.Source
-	Scenario   scenario
-	Rounds     int
+	Source   contract.Source
+	Scenario scenario
+	Rounds   int
+	// CcusageBin names the ccusage binary for the baseline column. Empty means
+	// the run measures the native side only.
 	CcusageBin string
 	Timezone   string
 	// Now is the run clock; nil means time.Now.
 	Now func() time.Time
-	// CollectCcusage measures one ccusage round; nil means exec the binary.
+	// CollectCcusage measures one ccusage round; nil means exec CcusageBin.
+	// It is only consulted when CcusageBin is set.
 	CollectCcusage roundRunner
 	// CollectNative measures one native round; nil means run the registered
 	// native provider, or report notImplemented when there is none.
@@ -258,7 +265,7 @@ func runWith(args []string, stdout, stderr io.Writer, input benchInput) int {
 	source := flags.String("source", "", "usage source to benchmark (required)")
 	scenarioName := flags.String("scenario", "", "window to measure: single, 30d, full or hook (required)")
 	rounds := flags.Int("rounds", defaultRounds, "rounds per scenario (minimum 5)")
-	ccusageBin := flags.String("ccusage-bin", "", "ccusage binary (default ~/.tokenboard/bin/ccusage)")
+	ccusageBin := flags.String("ccusage-bin", "", "also measure this ccusage binary as a baseline (optional)")
 	jsonOutput := flags.Bool("json", false, "print a machine-readable report")
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: bench-collect -source S -scenario single|30d|full|hook [-rounds 5] [-ccusage-bin PATH] [-json]")
@@ -345,13 +352,6 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 	if !contract.IsValidSource(string(input.Source)) {
 		return benchReport{}, fmt.Errorf("%w: unknown source %q", errUsage, input.Source)
 	}
-	// A source ccusage cannot answer has nothing to benchmark: report it as a
-	// usage error here rather than as a failed round after the harness has
-	// already measured the native side.
-	if !hasCcusagePath(input.Source) {
-		return benchReport{}, fmt.Errorf(
-			"%w: %s has no ccusage path; bench-collect measures ccusage-backed sources", errUsage, input.Source)
-	}
 	if input.Scenario == scenarioHook && !hasHookCursor(input.Source) {
 		return benchReport{}, fmt.Errorf(
 			"%w: %s installs no hook cursor; the hook scenario covers claude-code and codex",
@@ -379,9 +379,14 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		return benchReport{}, err
 	}
 
-	bin := input.CcusageBin
-	if bin == "" {
-		bin = defaultCcusageBin()
+	bin := strings.TrimSpace(input.CcusageBin)
+	// An injected ccusage runner is a baseline on its own: the CLI never sets
+	// one without a binary, but runBench's callers (the tests) drive the loop
+	// directly.
+	baseline := bin != "" || input.CollectCcusage != nil
+	if baseline && !hasCcusagePath(input.Source) {
+		return benchReport{}, fmt.Errorf(
+			"%w: %s has no ccusage baseline; drop -ccusage-bin", errUsage, input.Source)
 	}
 	collectCcusage := input.CollectCcusage
 	collectNative := input.CollectNative
@@ -426,11 +431,13 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 	// The binary check runs after the pricing preparation so a configuration
 	// failure is what a run reports first; it only applies to the side that
 	// actually execs ccusage.
-	if collectCcusage == nil {
-		if err := assertUsableBinary(bin); err != nil {
-			return benchReport{}, err
+	if baseline {
+		if collectCcusage == nil {
+			if err := assertUsableBinary(bin); err != nil {
+				return benchReport{}, err
+			}
+			collectCcusage = collectCcusageRound
 		}
-		collectCcusage = collectCcusageRound
 	}
 	if collectNative == nil {
 		collectNative = collectNativeRound
@@ -456,14 +463,18 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		Platform:              runtime.GOOS + "/" + runtime.GOARCH,
 		CcusageConfigPath:     prepared.ConfigPath,
 		PricingSource:         prepared.Catalogue.Source,
-		CcusageNetworkAllowed: ccusageNetworkAllowed(input.Source),
+		CcusageNetworkAllowed: baseline && ccusageNetworkAllowed(input.Source),
 	}
 
-	ccusageRounds, err := measureRounds(ctx, collectCcusage, request, input.Rounds)
-	if err != nil {
-		return report, fmt.Errorf("ccusage side: %w", err)
+	if baseline {
+		ccusageRounds, err := measureRounds(ctx, collectCcusage, request, input.Rounds)
+		if err != nil {
+			return report, fmt.Errorf("ccusage side: %w", err)
+		}
+		report.Ccusage = summarizeSide(sideCcusage, ccusageRounds)
+	} else {
+		report.Ccusage = sideReport{Kind: sideCcusage, Status: sideSkipped}
 	}
-	report.Ccusage = summarizeSide(sideCcusage, ccusageRounds)
 
 	nativeRounds, nativeErr := measureRounds(ctx, collectNative, request, input.Rounds)
 	switch {
@@ -481,10 +492,15 @@ func runBench(ctx context.Context, input benchInput) (benchReport, error) {
 		report.Notes = append(report.Notes,
 			"hook: no cursor watermark found, so the window is unfiltered — this measures the cold-cursor path")
 	}
-	report.Notes = append(report.Notes,
-		"ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs")
-	report.Notes = append(report.Notes,
-		"both sides ran under the merged pricing config at "+report.CcusageConfigPath)
+	if baseline {
+		report.Notes = append(report.Notes,
+			"ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs")
+		report.Notes = append(report.Notes,
+			"both sides ran under the merged pricing config at "+report.CcusageConfigPath)
+	} else {
+		report.Notes = append(report.Notes,
+			"no -ccusage-bin: only the native side was measured")
+	}
 	if report.CcusageNetworkAllowed {
 		report.Notes = append(report.Notes,
 			"ccusage runs without --offline, exactly as production does, so its prices may include a live refresh while the native side bills from the frozen corpus; the flags, not the prices, are what this comparison holds constant")

@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	adapter "github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
@@ -122,31 +120,18 @@ func TestRegisterNativeAlwaysInstallsTheCodexProvider(t *testing.T) {
 	}
 }
 
-// TestUseNativeCodexSelectsTheNativeSource pins the switch's current state: the
-// constant is true (S5, 2026-11-10), so Collect takes the in-process report
-// source and the caller's ccusage runner is never invoked. An injected
-// useNativeReport = false still asks for the ccusage path, which is how the
-// parity harness keeps exercising it.
+// TestUseNativeCodexSelectsTheNativeSource pins that Collect takes the
+// in-process report source and never reaches the caller's report runner.
 func TestUseNativeCodexSelectsTheNativeSource(t *testing.T) {
-	if !useNativeCodex {
-		t.Fatal("useNativeCodex is false; the native path regressed to the ccusage source")
-	}
 	codexHome := provEmptyCodexHome(t)
-	runner := &provStubRunner{t: t, respond: func(provCall) (any, error) {
-		return provJSON(t, `{"data":[]}`), nil
-	}}
 	if _, err := Collect(context.Background(), Options{
 		CodexHome:   provHome(codexHome),
 		Timezone:    "UTC",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
-		Runner:      runner.run,
 		StateDir:    t.TempDir(),
 		Env:         provEnv(provForceEnv(nil)),
 	}); err != nil {
 		t.Fatal(err)
-	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("calls = %v, want none: the native source must not invoke ccusage", runner.calls)
 	}
 }
 
@@ -256,28 +241,18 @@ func TestNativeCollectMatchesNormalizePipeline(t *testing.T) {
 
 // TestNativeHookRecomputesAndReconcilesTheSameWindow pins §6.1.3 on the native
 // path: the incremental cursor scan runs as before, the whole-window recompute
-// runs the same in-process implementation, the reconciliation assertion passes,
-// and neither ccusage nor its binary is consulted.
+// runs the same in-process implementation, and the reconciliation assertion
+// passes.
 func TestNativeHookRecomputesAndReconcilesTheSameWindow(t *testing.T) {
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex")
 	nativeFixtureSession(t, codexHome)
-	neverRuns := func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
-		t.Error("native hook mode must not run ccusage")
-		return nil, os.ErrClosed
-	}
-	resolveBinary := func(ccacq.AcquireOptions) (ccacq.Binary, error) {
-		t.Error("native hook mode must not resolve a ccusage binary")
-		return ccacq.Binary{}, os.ErrClosed
-	}
 	options := Options{
-		CodexHome:     provHome(codexHome),
-		StateDir:      filepath.Join(root, "state"),
-		Timezone:      "UTC",
-		CollectedAt:   "2026-05-22T10:00:00.000Z",
-		Runner:        neverRuns,
-		ResolveBinary: resolveBinary,
-		Env:           provEnv(map[string]string{"TOKENBOARD_HOOK_MODE": "1"}),
+		CodexHome:   provHome(codexHome),
+		StateDir:    filepath.Join(root, "state"),
+		Timezone:    "UTC",
+		CollectedAt: "2026-05-22T10:00:00.000Z",
+		Env:         provEnv(map[string]string{"TOKENBOARD_HOOK_MODE": "1"}),
 	}
 
 	snapshots, err := nativeCollect(context.Background(), options)
@@ -393,7 +368,7 @@ func nativeReportCost(t *testing.T, codexHome, explicitConfig string) float64 {
 	runner := newNativeReportRunner(prepared)
 	decoded, err := runner.Run(context.Background(), "ccusage",
 		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
-		ccexec.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}})
+		ccusage.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}})
 	if err != nil {
 		t.Fatalf("native report: %v", err)
 	}
@@ -461,7 +436,7 @@ func TestNativeReportHonoursTheCommandTimeout(t *testing.T) {
 	runner := newNativeReportRunner(prepared)
 	_, err = runner.Run(context.Background(), "ccusage",
 		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
-		ccexec.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}, TimeoutMs: 1})
+		ccusage.CommandOptions{Env: []string{"CODEX_HOME=" + codexHome}, TimeoutMs: 1})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want the ccusage timeout line", err)
 	}

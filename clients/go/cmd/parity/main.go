@@ -33,6 +33,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -40,8 +41,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	// The providers register both seams (collect.Lookup and
 	// collect.LookupNative) from their own init(); without this blank import
@@ -651,13 +650,13 @@ func execCcusage(ctx context.Context, request ccusageRequest) ([]contract.Snapsh
 	if request.Until != "" {
 		rangeArgs = append(rangeArgs, "--until", request.Until)
 	}
-	commandOptions := ccexec.CommandOptions{TimeoutMs: ccusageTimeoutMs}
+	commandOptions := execCommandOptions{TimeoutMs: ccusageTimeoutMs}
 
 	dailyArgs, err := ccusageReportArgs(request.Source, "daily", rangeArgs, request.Timezone, request.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
-	daily, err := ccexec.RunJSON(ctx, binary, dailyArgs, commandOptions)
+	daily, err := runCcusageJSON(ctx, binary, dailyArgs, commandOptions)
 	if err != nil {
 		return nil, fmt.Errorf("ccusage daily: %w", err)
 	}
@@ -671,7 +670,7 @@ func execCcusage(ctx context.Context, request ccusageRequest) ([]contract.Snapsh
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := ccexec.RunJSON(ctx, binary, sessionArgs, commandOptions)
+	sessions, err := runCcusageJSON(ctx, binary, sessionArgs, commandOptions)
 	if err != nil {
 		return nil, fmt.Errorf("ccusage session: %w", err)
 	}
@@ -734,21 +733,58 @@ func ccusageReportArgs(source contract.Source, report string, rangeArgs []string
 	return args, nil
 }
 
-// defaultCcusageBin is the install layout the skill uses:
-// <BundledBinDir>/ccusage[.exe]. BundledBinDir is the same directory the
-// collector's bundled layer probes, so this command and the collector agree on
-// which install they mean; the executable name is resolved here because
-// internal/ccusage keeps it unexported.
+// defaultCcusageBin is where earlier releases installed the ccusage binary:
+// <config dir>/bin/ccusage[.exe], or ~/.tokenboard/bin when no config dir is
+// set. The client itself no longer bundles or acquires one, so this path is
+// only what a pre-S5 install left behind.
 func defaultCcusageBin() string {
-	return filepath.Join(ccacq.BundledBinDir(nil, ""), ccusageBinaryName())
+	dir := strings.TrimSpace(os.Getenv("TOKENBOARD_CONFIG_DIR"))
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		dir = filepath.Join(home, ".tokenboard")
+	}
+	name := "ccusage"
+	if runtime.GOOS == "windows" {
+		name = "ccusage.exe"
+	}
+	return filepath.Join(dir, "bin", name)
 }
 
-// ccusageBinaryName is the bundled ccusage executable's platform name.
-func ccusageBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "ccusage.exe"
+// execCommandOptions is the subset of the old command options this harness
+// uses: a byte budget and nothing to retry, because a parity run compares
+// one real execution.
+type execCommandOptions struct {
+	TimeoutMs int
+}
+
+// runCcusageJSON execs the binary, decodes its stdout with the shared ordered
+// reader and returns the report. It is the only place this dev-only harness
+// spawns a process (besides the self-update tests), so it carries the
+// credential scrub the collector used to apply to every child.
+func runCcusageJSON(ctx context.Context, binary string, args []string, options execCommandOptions) (any, error) {
+	runCtx := ctx
+	if options.TimeoutMs > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutMs)*time.Millisecond)
+		defer cancel()
 	}
-	return "ccusage"
+	cmd := exec.CommandContext(runCtx, binary, args...)
+	cmd.Env = ccusage.ScrubCredentialEnv(nil)
+	output, err := cmd.Output()
+	if err != nil {
+		if runCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("Command timed out after %dms: %s", options.TimeoutMs, strings.Join(args, " "))
+		}
+		return nil, fmt.Errorf("Command failed: %s: %w", strings.Join(args, " "), err)
+	}
+	decoded, err := ccusage.DecodeOrderedJSON(output)
+	if err != nil {
+		return nil, fmt.Errorf("Command returned invalid JSON: %v", err)
+	}
+	return decoded, nil
 }
 
 // writeTextReport prints the count summary and one line per diverging row.

@@ -2,9 +2,9 @@ package ccusagetool
 
 // The native report source wiring (S4a Task 14): the same seam as
 // providers/codex/native.go. These tests pin that every tool source has a
-// registered native provider, that the default path still runs ccusage, and
-// that one end-to-end native collection lands in the same snapshot shape the
-// ccusage path normalizes to.
+// registered native provider reachable from production code, and that one
+// end-to-end native collection lands in the same snapshot shape the shared
+// normalizer produces.
 
 import (
 	"context"
@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -57,33 +56,6 @@ func TestEveryToolSourceReachesANativeAdapter(t *testing.T) {
 		if !tools.HasNativeAdapter(command) {
 			t.Fatalf("%s has no native adapter reachable from this package's non-test imports", command)
 		}
-	}
-}
-
-// TestUseNativeToolsSelectsTheNativePath pins the switch's current state: the
-// constant is true (S5, 2026-11-10), so the registered provider takes the
-// in-process adapters and never invokes ccusage. Collect's ccusagePath option
-// stays available to the parity harness and the protocol tests.
-func TestUseNativeToolsSelectsTheNativePath(t *testing.T) {
-	if !useNativeTools {
-		t.Fatal("useNativeTools is false; the native path regressed to ccusage")
-	}
-	runner := &testRunner{t: t, responses: map[string]any{
-		"amp daily --json --timezone UTC":   dailyReport(t, "2026-01-02"),
-		"amp session --json --timezone UTC": sessionReport(t, "s-1", ""),
-	}}
-	if _, ok := collect.Lookup(contract.SourceAmp); !ok {
-		t.Fatal("amp has no provider")
-	}
-	if _, err := Collect(context.Background(), contract.SourceAmp, Options{
-		Timezone: "UTC",
-		Env:      envFunc(toolEnv(t)),
-		Runner:   runner.run,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.calls) != 0 {
-		t.Fatal("the native path must not invoke the ccusage runner")
 	}
 }
 
@@ -170,7 +142,7 @@ func TestQwenNativeWindowFiltersDailyEntriesButSessionRowsByLastActivity(t *test
 		t.Helper()
 		decoded, err := runner.Run(context.Background(), "ccusage",
 			[]string{"qwen", report, "--json", "--since", "2026-02-24", "--timezone", "UTC"},
-			ccexec.CommandOptions{TimeoutMs: 30000})
+			ccusage.CommandOptions{TimeoutMs: 30000})
 		if err != nil {
 			t.Fatalf("%s report: %v", report, err)
 		}
@@ -232,7 +204,7 @@ func TestNativeToolRunnerAnswersGeminiUnderTheCLICommandName(t *testing.T) {
 	}
 	runner := newNativeToolRunner(preparedForTest(t), "", nil, nil)
 	_, err = runner.Run(context.Background(), "ccusage", []string{"import", "daily", "--json"},
-		ccexec.CommandOptions{})
+		ccusage.CommandOptions{})
 	if err == nil {
 		t.Fatal("an unsupported command must fail, not answer with an empty report")
 	}
@@ -254,7 +226,7 @@ func TestNativeToolRunnerHonoursTheCommandTimeout(t *testing.T) {
 	runner := newNativeToolRunner(preparedForTest(t), "", nil, nil)
 	_, err := runner.Run(context.Background(), "ccusage",
 		[]string{"amp", "daily", "--json", "--timezone", "UTC"},
-		ccexec.CommandOptions{
+		ccusage.CommandOptions{
 			Env:       []string{"AMP_DATA_DIR=" + env("AMP_DATA_DIR")},
 			TimeoutMs: 1,
 		})
@@ -285,8 +257,8 @@ func itoa(value int) string {
 	return string(encoded)
 }
 
-func commandOptionsWith(ampDir string) ccexec.CommandOptions {
-	return ccexec.CommandOptions{Env: []string{"AMP_DATA_DIR=" + ampDir, "HOME=" + ampDir}, TimeoutMs: 30000}
+func commandOptionsWith(ampDir string) ccusage.CommandOptions {
+	return ccusage.CommandOptions{Env: []string{"AMP_DATA_DIR=" + ampDir, "HOME=" + ampDir}, TimeoutMs: 30000}
 }
 
 // TestCopilotAdapterIsImportedFromAProductionFile guards the registration

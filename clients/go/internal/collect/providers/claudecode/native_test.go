@@ -33,8 +33,6 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
-	ccacq "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/acquire"
-	ccexec "github.com/MisonL/TokenBoard/clients/go/internal/ccusage/exec"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
@@ -147,48 +145,12 @@ func TestRegisterNativeAlwaysInstallsTheNativeProvider(t *testing.T) {
 	}
 }
 
-// TestSwitchSelectsTheNativePath pins both halves of the switch: the constant
-// is true (S5, 2026-11-10), and asking for the ccusage path by name really
-// runs ccusage (a stub runner sees the daily and session invocations).
-func TestSwitchSelectsTheNativePath(t *testing.T) {
-	if !useNativeClaude {
-		t.Fatal("useNativeClaude is false; the native path regressed to ccusage")
-	}
-	stateDir := newStateDir(t)
-	runner := &stubRunner{responses: dailyAndSession("claude-sonnet-4-5", 1, 2)}
-	snapshots, err := Collect(context.Background(), Options{
-		Timezone:    "UTC",
-		CollectedAt: nativeCollectedAt,
-		StateDir:    stateDir,
-		Env:         testEnv(forceRunnerEnv(nil)),
-		Runner:      runner.run,
-		ccusagePath: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.calls) != 2 || !contains(runner.calls[0], "daily") || !contains(runner.calls[1], "session") {
-		t.Fatalf("calls = %v, want a daily and a session ccusage invocation", runner.calls)
-	}
-	if len(snapshots) != 1 || snapshots[0].Model != "claude-sonnet-4-5" {
-		t.Fatalf("snapshots = %+v", snapshots)
-	}
-}
-
 // TestNativeNeverFallsBackToCcusage pins that a native failure is returned
-// as-is. A fallback would turn a parity comparison into "ccusage against
-// ccusage" and pass silently.
+// as-is. There is no fallback implementation left to borrow, so the error
+// itself is the contract: a rewritten error would hide which layer failed.
 func TestNativeNeverFallsBackToCcusage(t *testing.T) {
 	options := nativeTestOptions(t)
 	options.Env = testEnv(map[string]string{"CLAUDE_CONFIG_DIR": filepath.Join(t.TempDir(), "does-not-exist")})
-	options.Runner = func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
-		t.Error("native failure must not fall back to ccusage")
-		return nil, errors.New("ccusage must not run")
-	}
-	options.ResolveBinary = func(ccacq.AcquireOptions) (ccacq.Binary, error) {
-		t.Error("native failure must not resolve a ccusage binary")
-		return ccacq.Binary{}, errors.New("ccusage must not run")
-	}
 	_, err := nativeCollect(context.Background(), nativeInput{
 		options:     options,
 		env:         options.Env,
@@ -260,10 +222,10 @@ func TestNativeCollectPropagatesOverridesAndFailsClosedOnBadConfig(t *testing.T)
 			StateDir:       stateDir,
 			PricingFetcher: failingFetcher(t),
 		},
-		env: testEnv(forceRunnerEnv(map[string]string{
+		env: testEnv(map[string]string{
 			"CLAUDE_CONFIG_DIR":         claudeHome,
 			"TOKENBOARD_CCUSAGE_CONFIG": goodConfig,
-		})),
+		}),
 		timezone:    "UTC",
 		collectedAt: nativeCollectedAt,
 	}); err != nil {
@@ -283,10 +245,10 @@ func TestNativeCollectPropagatesOverridesAndFailsClosedOnBadConfig(t *testing.T)
 	}
 	_, err = nativeCollect(context.Background(), nativeInput{
 		options: Options{Timezone: "UTC", CollectedAt: nativeCollectedAt, StateDir: t.TempDir()},
-		env: testEnv(forceRunnerEnv(map[string]string{
+		env: testEnv(map[string]string{
 			"CLAUDE_CONFIG_DIR":         claudeHome,
 			"TOKENBOARD_CCUSAGE_CONFIG": badConfig,
-		})),
+		}),
 		timezone:    "UTC",
 		collectedAt: nativeCollectedAt,
 	})
@@ -422,6 +384,19 @@ func TestNativeCollectPassesEmptyHomeDirWhenConfigDirIsSet(t *testing.T) {
 // nativeRow builds one assistant line whose input token count names the tree it
 // was written to. output_tokens is required: the adapter's usage parser drops a
 // row whose usage object lacks it.
+func testEnv(values map[string]string) func(string) string {
+	return func(key string) string { return values[key] }
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func nativeRow(inputTokens int) string {
 	return fmt.Sprintf(`{"type":"assistant","timestamp":"2026-03-02T10:00:00.000Z",`+
 		`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":%d,"output_tokens":1}}}`,
@@ -498,28 +473,21 @@ func TestNativeHookModeRunsTheReconciledPath(t *testing.T) {
 		"TOKENBOARD_HOOK_MODE": "1",
 	})
 
-	// neverRuns builds options whose ccusage seams fail the test if consulted.
-	neverRuns := func(t *testing.T) Options {
+	// nativeOptions builds the hook-mode options; the pricing fetcher fails
+	// the test, so the hook path must not reach the network either.
+	nativeOptions := func(t *testing.T) Options {
 		t.Helper()
 		return Options{
 			Timezone:       "UTC",
 			CollectedAt:    nativeCollectedAt,
 			StateDir:       t.TempDir(),
 			PricingFetcher: failingFetcher(t),
-			Runner: func(context.Context, string, []string, ccexec.CommandOptions) (any, error) {
-				t.Error("native hook mode must not run ccusage")
-				return nil, errors.New("ccusage must not run")
-			},
-			ResolveBinary: func(ccacq.AcquireOptions) (ccacq.Binary, error) {
-				t.Error("native hook mode must not resolve a ccusage binary")
-				return ccacq.Binary{}, errors.New("ccusage must not run")
-			},
 		}
 	}
 
 	runs := map[string]func(t *testing.T) ([]contract.Snapshot, error){
 		"native branch": func(t *testing.T) ([]contract.Snapshot, error) {
-			options := neverRuns(t)
+			options := nativeOptions(t)
 			return nativeCollect(context.Background(), nativeInput{
 				options:     options,
 				env:         env,
@@ -532,8 +500,8 @@ func TestNativeHookModeRunsTheReconciledPath(t *testing.T) {
 			if !ok || provider == nil {
 				t.Fatalf("collect.LookupNative(%q) has no provider", contract.SourceClaudeCode)
 			}
-			// nativeProvider does not accept a runner: it has no ccusage seam
-			// to reach, which is exactly the property under test.
+			// nativeProvider takes no runner: the registry path is the same
+			// in-process implementation, which is the property under test.
 			return provider.Collect(context.Background(), collect.Options{
 				Timezone: "UTC",
 				StateDir: t.TempDir(),
@@ -632,7 +600,7 @@ func TestNativeRejectsUnloadableTimezone(t *testing.T) {
 			`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":5,"output_tokens":1}}}`)
 	_, err := nativeCollect(context.Background(), nativeInput{
 		options:     Options{Timezone: "Mars/Olympus_Mons", StateDir: t.TempDir()},
-		env:         testEnv(forceRunnerEnv(map[string]string{"CLAUDE_CONFIG_DIR": configDir})),
+		env:         testEnv(map[string]string{"CLAUDE_CONFIG_DIR": configDir}),
 		timezone:    "Mars/Olympus_Mons",
 		collectedAt: nativeCollectedAt,
 	})
@@ -645,7 +613,7 @@ func TestNativeRejectsUnloadableTimezone(t *testing.T) {
 // its snapshots, failing the test on error.
 func runNative(t *testing.T, options Options, env map[string]string) []contract.Snapshot {
 	t.Helper()
-	options.Env = testEnv(forceRunnerEnv(env))
+	options.Env = testEnv(env)
 	// The helper deliberately does NOT resolve TOKENBOARD_SINCE/UNTIL: that
 	// fallback is the provider's job, and a helper that applied it would hide a
 	// provider that forgot (TestNativeAppliesTheProviderWindowEnvironment).
@@ -925,22 +893,6 @@ func TestNativeAppliesTheProviderWindowEnvironment(t *testing.T) {
 	if len(snapshots) != 1 || snapshots[0].UsageDate != "2026-05-22" || snapshots[0].InputTokens != 101 {
 		t.Fatalf("snapshots = %+v, want only the in-window 2026-05-22 row: TOKENBOARD_SINCE must reach the adapter",
 			snapshots)
-	}
-
-	// The ccusage side resolves the same window; its argv is the evidence.
-	runner := &stubRunner{responses: func([]string) any { return map[string]any{"data": []any{}} }}
-	if _, err := Collect(context.Background(), Options{
-		Timezone:    "UTC",
-		CollectedAt: nativeCollectedAt,
-		StateDir:    t.TempDir(),
-		Env:         testEnv(forceRunnerEnv(env)),
-		Runner:      runner.run,
-		ccusagePath: true,
-	}); err != nil {
-		t.Fatalf("ccusage path: %v", err)
-	}
-	if len(runner.calls) == 0 || !contains(runner.calls[0], "--since") || !contains(runner.calls[0], "20260501") {
-		t.Fatalf("ccusage args = %v, want --since 20260501", runner.calls)
 	}
 
 	// Control: without the variable the same tree yields both rows, so the
