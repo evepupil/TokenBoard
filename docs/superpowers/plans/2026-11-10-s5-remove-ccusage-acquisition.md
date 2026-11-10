@@ -169,8 +169,8 @@
 - [x] **Step 4: Run test** —— PASS；`go test ./internal/collect/providers/claudecode/ ./internal/collect/adapters/claude/ -count=1` 全绿。
 - [x] **Step 5: 证据** —— 重跑 `parity`（窗口同 §9）+ `shadow --source claude-code --hook`，把结果写进 §9 的「翻转后复验」小节；明确记录 45 条差异的性质（Task 2 的口径）。
   **实际**：「翻转后复验」小节在 `2026-11-05-claude-native-parity.md` §9 落地；负载降到 47 后补跑
-  `shadow-dual-run.mjs --source claude-code --until 2026-11-09`：382 快照、0 only-in-side、
-  131 条差异**只差 `costUsd`**，逐行倍率 0.50×–4.74×，其中 `kimi-k3.1` 的 1.98 倍经三路对照
+  `shadow-dual-run.mjs --source claude-code --until 2026-11-09`：513 快照（382 匹配 + 131 差异）、
+  0 only-in-side，131 条差异**只差 `costUsd`**，逐行倍率 0.50×–4.74×，其中 `kimi-k3.1` 的 1.98 倍经三路对照
   （在线精确命中 vs 离线模糊命中）归因到价表口径（`2026-11-10-s5-post-flip-dual-run.md` §3）。
   **未覆盖**：`--hook` 路径与本机热 cursor 仍没有端到端双跑证据。
 - [x] **Step 6: Commit** —— `feat(claude): use the native adapter by default`

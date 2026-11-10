@@ -42,15 +42,18 @@ TOKENBOARD_COLLECTOR_DIR=$PWD TOKENBOARD_TIMEZONE=Asia/Shanghai \
 
 两条路径的字段级结果完全相同：
 
+`shadow` 报告的 `snapshots` 字段是**匹配行数**（`compareShadow` 只在 `HashPayload` 相等时自增），
+不是快照总数；总数 = 匹配 + `differing` + `liveWrite`。
+
 | 指标 | preview | hook |
 |---|---|---|
-| 快照总数 | 382 | 384 |
+| 匹配 | 382 | 384 |
 | 差异 | 131 | 131 |
+| 快照总数 | 513 | 519（含 4 条 `liveWrite`） |
 | `onlyInTs` / `onlyInGo` | 0 / 0 | 0 / 0 |
 | 差异字段 | 只有 `costUsd`（131/131） | 只有 `costUsd`（131/131） |
 | 差异模型数 | 22（deepseek 族 98 条，其余 33 条） | 22（分布逐项相同） |
 | 倍率区间（go/ts） | 0.50×–4.74× | 0.50×–4.74× |
-| `liveWrite` | — | 4 |
 
 hook 多出的 2 条快照与 4 条 `liveWrite` 来自当天正在写入的会话，属已知的活写竞态，
 不是语义差异。
