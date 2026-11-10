@@ -217,9 +217,10 @@ function runCli() {
 }
 
 // readClientStatus reports what is actually installed beside the config, for
-// a binary install: the client and the bundled ccusage, with their versions.
-// A version is null when the file is missing or does not answer, which is the
-// signal that the install is not what the config claims.
+// a binary install: the client, plus any ccusage an earlier release left
+// there. The client's version being null (missing or does not answer) is the
+// signal that the install is not what the config claims. The ccusage fields
+// are informational only — since S5 nothing installs or reads that copy.
 export function readClientStatus({ configDir, platform = process.platform, spawn = spawnSync, exists = existsSync }) {
   const binDir = join(configDir, 'bin')
   const clientPath = join(binDir, binaryFileName(platform))

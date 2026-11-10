@@ -256,7 +256,7 @@ export function verifyChecksum(data, name, checksums) {
   }
 }
 
-function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, quiet = false, cwd }) {
+function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, cwd }) {
   const result = spawn(command, args, {
     shell: platform === 'win32' && /\.(cmd|bat)$/i.test(command),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -266,12 +266,8 @@ function runExternal(command, args, { spawn, platform = process.platform, log = 
   })
   const stdout = String(result.stdout ?? '')
   const stderr = String(result.stderr ?? '')
-  // A caller that expects the command to fail (an optional archive member that
-  // may be absent) must not have its stderr reported as a diagnostic.
-  if (!quiet) {
-    if (stdout) log(redactUrlCredentials(stdout))
-    if (stderr) log(redactUrlCredentials(stderr))
-  }
+  if (stdout) log(redactUrlCredentials(stdout))
+  if (stderr) log(redactUrlCredentials(stderr))
   if (result.error?.code === 'ENOBUFS') {
     throw new Error(`${command} produced more than 64 MiB of output and was stopped`)
   }
@@ -294,12 +290,11 @@ function runExternal(command, args, { spawn, platform = process.platform, log = 
 // cwd at the archive's directory, forward-slash destination. That shape is
 // also exactly what the POSIX tars accept, so there is no platform branch
 // here and CI exercises the same code path on every OS.
-function runTarExtract({ archivePath, extractDir, name, platform = process.platform, spawn, log, quiet = false }) {
+function runTarExtract({ archivePath, extractDir, name, platform = process.platform, spawn, log }) {
   return runExternal('tar', ['-xzf', basename(archivePath), '-C', toTarPath(extractDir), name], {
     spawn,
     platform,
     log,
-    quiet,
     cwd: dirname(archivePath)
   })
 }
@@ -314,39 +309,6 @@ function toTarPath(value) {
 export function extractBinary({ archivePath, extractDir, name, platform = process.platform, spawn = spawnSync, log }) {
   mkdirSync(extractDir, { recursive: true })
   runTarExtract({ archivePath, extractDir, name, platform, spawn, log })
-  return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
-}
-
-// extractOptionalEntry unpacks an entry that a release may not carry (an older
-// tag has no bundled ccusage) and returns null when it is absent. A present
-// entry is still validated: an empty or non-file entry is a malformed archive,
-// not a release without the file.
-//
-// tar exits non-zero both for an absent member and for a corrupt archive, and
-// cannot distinguish the two here — but `verifyChecksum` has already pinned the
-// whole tarball to the release's checksums.txt before extraction, so a corrupt
-// archive never reaches this helper. The catch therefore only ever sees the
-// legitimate absent-member case.
-export function extractOptionalEntry({
-  archivePath,
-  extractDir,
-  name,
-  platform = process.platform,
-  spawn = spawnSync,
-  log
-}) {
-  mkdirSync(extractDir, { recursive: true })
-  // tar exits non-zero when the member is absent; that is the case this
-  // helper exists for, so the exit status is not treated as fatal here.
-  try {
-    runTarExtract({ archivePath, extractDir, name, platform, spawn, log, quiet: true })
-  } catch {
-    return null
-  }
-  const extracted = join(extractDir, name)
-  if (!existsSync(extracted)) {
-    return null
-  }
   return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
 }
 
@@ -450,19 +412,10 @@ export async function installClientBinary({
       spawn,
       log
     })
-    // Spec §4.1: the tarball carries the platform's ccusage beside the client.
-    // It is unpacked before the client is swapped in so a malformed entry
-    // fails the install while the machine is still untouched — the Go
-    // self-update extracts it before its own swap for the same reason.
+    // Releases no longer carry a bundled ccusage (S5): the client collects
+    // in process. A copy an earlier release installed stays on disk untouched,
+    // and the install says so once instead of reporting a clean machine.
     const ccusageName = platform === 'win32' ? 'ccusage.exe' : 'ccusage'
-    const ccusage = extractOptionalEntry({
-      archivePath,
-      extractDir,
-      name: ccusageName,
-      platform,
-      spawn,
-      log
-    })
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
     const staged = `${target}.new`
     rmSync(staged, { force: true })
@@ -477,36 +430,14 @@ export async function installClientBinary({
       rmSync(staged, { force: true })
       throw error
     }
-    // A fresh install places the bundled copy where the bundled layer looks,
-    // so the first run works offline; an older release without it simply
-    // installs no bundled copy and the probe/download layers take over. The
-    // client is already live at this point, so a write failure here warns
-    // instead of failing an install that succeeded — the Go self-update
-    // treats it the same way.
-    if (ccusage !== null) {
-      const ccusagePath = join(configDir, 'bin', ccusageName)
-      try {
-        writeFileSync(ccusagePath, ccusage, { mode: 0o755 })
-        chmodSync(ccusagePath, 0o755)
-        log(`TokenBoard bundled ccusage installed at ${ccusagePath}`)
-      } catch (error) {
-        log(
-          `TokenBoard client ${release.version} installed, but the bundled ccusage could not be written: ${errorMessage(error)}`
-        )
-      }
+    const staleCcusage = join(configDir, 'bin', ccusageName)
+    if (existsSync(staleCcusage)) {
+      log(
+        `TokenBoard client ${release.version} installed at ${target}; the client no longer bundles or uses ccusage, so the existing ${staleCcusage} is left in place`
+      )
     } else {
-      // The release carries no ccusage. A copy from an earlier install stays
-      // on disk, and the client will happily run it — so say which version
-      // that is instead of reporting a clean install.
-      const ccusagePath = join(configDir, 'bin', ccusageName)
-      const staleVersion = readVersion(ccusagePath, spawn)
-      if (staleVersion !== null) {
-        log(
-          `TokenBoard client ${release.version} installed; release ${release.tag} carries no ccusage, so the existing ${ccusagePath} (${staleVersion}) is left in place`
-        )
-      }
+      log(`TokenBoard client ${release.version} installed at ${target}`)
     }
-    log(`TokenBoard client ${release.version} installed at ${target}`)
     return { version: release.version, path: target, tag: release.tag }
   } finally {
     rmSync(work, { recursive: true, force: true })

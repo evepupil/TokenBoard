@@ -538,10 +538,9 @@ test('recovery ignores a staged binary that does not run', () => {
   assert.equal(readFileSync(binaryPath, 'utf8'), 'previous')
 })
 
-// Spec §4.1: the release tarball carries the platform's ccusage beside the
-// client. A fresh install must place it where the bundled layer looks, or the
-// first run falls back to a download the offline hook path cannot perform.
-test('installClientBinary installs the bundled ccusage beside the client', async (t) => {
+// A release archive that happens to carry a ccusage member no longer has it
+// installed: the client collects in process since S5 and would never read it.
+test('installClientBinary ignores a ccusage member in the archive', async (t) => {
   const { baseUrl } = await withServer(t, {
     platform: 'darwin_amd64',
     version: '1.2.3',
@@ -556,65 +555,31 @@ test('installClientBinary installs the bundled ccusage beside the client', async
     spawn: fixtureSpawn(),
     log: () => {}
   })
-  const bundled = join(configDir, 'bin', 'ccusage')
-  assert.equal(existsSync(bundled), true, 'the bundled ccusage must be installed')
-  assert.match(readFileSync(bundled, 'utf8'), /ccusage 20\.0\.33/)
-  assert.equal(existsSync(join(configDir, 'client-install')), false)
-})
-
-// A malformed bundled ccusage must fail the install before the client is
-// swapped in. Failing afterwards would leave a client whose install reported
-// an error but which is already live — the next sync would run against a
-// half-installed tree with no bundled ccusage.
-test('installClientBinary refuses a malformed ccusage without installing the client', async (t) => {
-  const { baseUrl } = await withServer(t, {
-    platform: 'darwin_amd64',
-    version: '1.2.3',
-    extraFiles: { ccusage: '' }
-  })
-  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
-  await assert.rejects(
-    installClientBinary({ baseUrl, configDir, platform: 'darwin', arch: 'x64', log: () => {} }),
-    /ccusage is empty|does not contain ccusage/
-  )
-  assert.equal(existsSync(join(configDir, 'bin', 'tokenboard')), false, 'the client must not be installed')
-})
-
-// An older release without ccusage still installs the client; the three-layer
-// acquisition covers the machine afterwards.
-test('installClientBinary accepts a release without ccusage', async (t) => {
-  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
-  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
-  const result = await installClientBinary({
-    baseUrl,
-    configDir,
-    platform: 'darwin',
-    arch: 'x64',
-    spawn: fixtureSpawn(),
-    log: () => {}
-  })
   assert.equal(result.version, '1.2.3')
-  assert.equal(existsSync(join(configDir, 'bin', 'ccusage')), false)
+  assert.equal(existsSync(join(configDir, 'bin', 'ccusage')), false, 'the archive member must not be installed')
+  assert.equal(existsSync(join(configDir, 'bin', 'tokenboard')), true)
 })
 
-// An older release without a bundled ccusage leaves the previous one in
-// place. That copy is now a version the new client was never tested against,
-// so the install must say so rather than report a clean install.
-test('installClientBinary warns when it leaves a stale bundled ccusage behind', async (t) => {
+// A ccusage copy an earlier release installed is left in place untouched and
+// the install says so once, with the same wording the Go self-update uses.
+test('installClientBinary reports the ccusage an earlier release left behind', async (t) => {
   const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
   const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
   mkdirSync(join(configDir, 'bin'), { recursive: true })
-  writeFileSync(join(configDir, 'bin', 'ccusage'), '#!/bin/sh\necho "ccusage 20.0.20"\n', { mode: 0o755 })
+  const stalePath = join(configDir, 'bin', 'ccusage')
+  writeFileSync(stalePath, '#!/bin/sh\necho "ccusage 20.0.20"\n', { mode: 0o755 })
   const lines = []
   await installClientBinary({
     baseUrl,
     configDir,
     platform: 'darwin',
     arch: 'x64',
-    spawn: fixtureSpawn({ ccusage: '20.0.20' }),
+    spawn: fixtureSpawn(),
     log: (line) => lines.push(line)
   })
-  const stale = lines.find((line) => line.includes('carries no ccusage'))
-  assert.ok(stale, `a stale bundled ccusage must be reported, got ${JSON.stringify(lines)}`)
-  assert.match(stale, /20\.0\.20/)
+  const stale = lines.find((line) => line.includes('no longer bundles or uses ccusage'))
+  assert.ok(stale, `a left-behind ccusage must be reported, got ${JSON.stringify(lines)}`)
+  assert.ok(stale.includes(stalePath), `the report must name ${stalePath}, got ${stale}`)
+  // Left in place means untouched, and never executed by the install.
+  assert.match(readFileSync(stalePath, 'utf8'), /ccusage 20\.0\.20/)
 })

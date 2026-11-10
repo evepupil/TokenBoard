@@ -755,10 +755,9 @@ test('status surfaces fatal notify-worker errors and omits an empty list', () =>
 })
 
 // A binary install's health is not visible from clientType alone: the client
-// or the bundled ccusage can be missing or be a version the client was never
-// tested against (an install from a tag without a bundled copy leaves the
-// previous one in place). Status reports what is actually on disk.
-test('status reports the installed binary and bundled ccusage', () => {
+// can be missing. A ccusage copy is still reported when one sits beside it —
+// an earlier release may have left one — but it is informational only.
+test('status reports the installed binary and any ccusage left beside it', () => {
   const status = buildStatus({
     configPath: '/home/user/.tokenboard/config.json',
     config: { clientType: 'binary', timezone: 'UTC', source: 'all' },
@@ -797,7 +796,7 @@ test('status omits the client block for a git install', () => {
 
 // The probe reports what is on disk, not what the config claims: a deleted
 // binary or an unreadable one must not look like a healthy install.
-test('readClientStatus reports a real installed client and bundled ccusage', () => {
+test('readClientStatus reports a real installed client and any ccusage beside it', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-status-'))
   try {
     mkdirSync(join(dir, 'bin'), { recursive: true })

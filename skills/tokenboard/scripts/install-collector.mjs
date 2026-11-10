@@ -167,9 +167,9 @@ function runCli() {
       tag: flags['release-tag'] || process.env.TOKENBOARD_RELEASE_TAG || undefined,
       baseUrl,
       configDir: configDir(),
-      // The installer reports a failed bundled-ccusage write through this
-      // channel. Without it the default is a no-op and the warning is lost,
-      // leaving the client installed with no bundled copy and no sign of it.
+      // The installer's notices (including "a ccusage from an earlier release
+      // is left in place") go out through this channel. Without it the default
+      // is a no-op and the message would never reach the operator.
       log: (line) => console.log(line)
     })
       .then((installed) => {
