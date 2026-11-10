@@ -223,16 +223,6 @@ test('buildShadowInvocation only passes --until to the sources that accept it', 
   assert.equal(grok.env.TOKENBOARD_UNTIL, undefined)
 })
 
-// The ccusage-backed sources must run the same ccusage binary on both sides,
-// or the comparison measures two different tools. The others have no ccusage
-// to pin.
-test('buildShadowInvocation pins ccusage only for the sources that use it', () => {
-  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC', ccusageBin: '/bin/ccusage' }
-  assert.equal(buildShadowInvocation({ config, source: 'claude-code' }).env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage')
-  assert.equal(buildShadowInvocation({ config, source: 'codex' }).env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage')
-  assert.equal(buildShadowInvocation({ config, source: 'pi' }).env.TOKENBOARD_CCUSAGE_BIN, undefined)
-})
-
 // A machine whose Codex archive is a symlink refuses the scan unless the
 // configured roots are passed through, which is exactly what sync does.
 test('buildShadowInvocation passes the configured codex symlink roots', () => {
@@ -257,24 +247,24 @@ test('buildShadowInvocation strips an inherited hook mode', () => {
   assert.equal(invocation.env.TOKENBOARD_HOOK_MODE, undefined)
 })
 
-test('readDualRunConfig defaults to the installed binary and the pinned ccusage', () => {
+test('readDualRunConfig defaults to the installed binary', () => {
   const root = mkdtempSync(join(tmpdir(), 'dual-run-config-'))
   try {
     const binDir = join(root, 'bin')
     mkdirSync(binDir, { recursive: true })
     const binary = join(binDir, process.platform === 'win32' ? 'tokenboard.exe' : 'tokenboard')
-    const ccusage = join(binDir, process.platform === 'win32' ? 'ccusage.exe' : 'ccusage')
     writeFileSync(binary, '')
-    writeFileSync(ccusage, '')
 
     const previous = process.env.TOKENBOARD_CONFIG_DIR
     process.env.TOKENBOARD_CONFIG_DIR = root
     try {
       const config = readDualRunConfig({ env: {}, config: { timezone: 'UTC' } })
       assert.equal(config.binary, binary)
-      assert.equal(config.ccusageBin, ccusage)
       assert.equal(config.collectorDir, join(root, 'TokenBoard'))
       assert.equal(config.logPath, join(root, 'logs', 'shadow-dual-run.jsonl'))
+      // The client no longer runs ccusage on either side, so the harness has
+      // no binary to pin and must not look for one.
+      assert.equal('ccusageBin' in config, false)
     } finally {
       if (previous === undefined) delete process.env.TOKENBOARD_CONFIG_DIR
       else process.env.TOKENBOARD_CONFIG_DIR = previous
@@ -332,22 +322,14 @@ test('every comparable source is one the client accepts', () => {
   }
 })
 
-// The tool family collects through ccusage, so the harness has to pin the
-// binary for it too. Without the pin the Go side resolves ccusage its own way
-// (bundled copy, then PATH, then a download) while the TypeScript child uses
-// the checkout's node_modules copy — a difference that shows up as a diff
-// rather than as the configuration bug it is.
-test('buildShadowInvocation pins the ccusage binary for the tool sources', () => {
-  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC', ccusageBin: '/bin/ccusage' }
-  for (const source of ['amp', 'gemini-cli', 'zcode', 'claude-code']) {
+test('buildShadowInvocation never injects a ccusage binary', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC' }
+  for (const source of ['amp', 'gemini-cli', 'zcode', 'claude-code', 'codex', 'pi']) {
     const invocation = buildShadowInvocation({ config, source })
-    assert.equal(invocation.env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage', `${source} must run the pinned ccusage`)
+    assert.equal(invocation.env.TOKENBOARD_CCUSAGE_BIN, undefined, `${source} must not receive a ccusage pin`)
   }
-  // A file-backed source never touches ccusage; injecting the variable would
-  // make the environment look like a difference between the two runs.
-  const pi = buildShadowInvocation({ config, source: 'pi' })
-  assert.equal(pi.env.TOKENBOARD_CCUSAGE_BIN, undefined)
 })
+
 
 // The dual run's default comparison is a full preview, but production runs the
 // hook path. --hook lets the harness measure the code that actually collects

@@ -623,7 +623,6 @@ export function buildSyncInvocation({
     TOKENBOARD_UPLOAD_TOKEN: config.uploadToken,
     TOKENBOARD_TIMEZONE: config.timezone,
     TOKENBOARD_SOURCE: source,
-    TOKENBOARD_PACKAGE_MANAGER: packageManager,
     ...codexSymlinkRoots,
     ...(until !== undefined ? { TOKENBOARD_UNTIL: until } : {}),
     TOKENBOARD_SINCE: since,
@@ -685,6 +684,10 @@ export function buildSyncInvocation({
     shell: false,
     env: {
       ...sharedEnv,
+      // The checkout client is the TypeScript collector, which still reaches
+      // ccusage through a package manager (spec D6). The Go binary does not,
+      // so only this branch carries the selection.
+      TOKENBOARD_PACKAGE_MANAGER: packageManager,
       ...(ccusageConfig ? { TOKENBOARD_CCUSAGE_CONFIG: ccusageConfig } : {})
     }
   }

@@ -1194,18 +1194,19 @@ func (run *providerRun) runnerArgs(env func(string) string, packageArgs []string
 	return ccusage.WithConfigArgs(packageArgs, env, nil)
 }
 
-// codexCommandEnvKeys are the variables the provider overrides for a ccusage
-// run. The TS side passes `{ ...process.env, CODEX_HOME }`, so everything else
-// the child needs (PATH for the npx shim, HOME, TMPDIR) is inherited.
+// codexCommandEnvKeys are the variables the provider hands the report runner.
+// The TS side passes `{ ...process.env, CODEX_HOME }` to a ccusage child; the
+// native runner reads the same list out of the environment it is given, so the
+// frozen CODEX_HOME and the dynamic config path keep winning over the process
+// environment exactly as they did for the child.
 var codexCommandEnvKeys = []string{
 	"CODEX_HOME", "TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG", "TOKENBOARD_CCUSAGE_CONFIG",
-	"TOKENBOARD_PACKAGE_MANAGER", "TOKENBOARD_STATE_DIR", "TOKENBOARD_ENDPOINT",
+	"TOKENBOARD_STATE_DIR", "TOKENBOARD_ENDPOINT",
 }
 
-// environOf materializes the child environment for a ccusage run: the process
-// environment with the provider's overrides applied last, so a frozen
-// CODEX_HOME always wins over the inherited one. Passing only the overrides
-// strips PATH, and the package runner's npx shim then cannot find node.
+// environOf materializes that environment: the process environment with the
+// provider's overrides applied last, so a frozen CODEX_HOME always wins over
+// the inherited one.
 func environOf(env func(string) string) []string {
 	overrides := make(map[string]string, len(codexCommandEnvKeys))
 	for _, key := range codexCommandEnvKeys {

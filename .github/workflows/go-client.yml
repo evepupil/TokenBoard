@@ -233,6 +233,11 @@ jobs:
         shell: bash
         run: node --test skills/tokenboard/scripts/*.test.mjs
 
+  # The Go goldens were minted from ccusage 20.0.33 and this gate re-mints them
+  # in memory against a real binary, which the frozen recipes in the generator
+  # headers document. The client no longer acquires or spawns ccusage (S5), but
+  # the TS collector still depends on it (spec D6), so the workspace install
+  # provides the same binary the goldens were minted with.
   deps:
     name: ccusage contract
     runs-on: ubuntu-latest

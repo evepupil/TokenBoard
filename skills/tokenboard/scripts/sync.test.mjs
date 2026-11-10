@@ -338,6 +338,26 @@ test('a binary client invocation runs the Go binary with the same env contract',
   // value in the environment is forwarded untouched — the same passthrough
   // rule the git client follows.
   assert.equal(invocation.env.TOKENBOARD_CCUSAGE_CONFIG, '/custom/pricing.json')
+  // The Go client has no package runner, so the selection that only the
+  // TypeScript checkout reads is not handed to it.
+  assert.equal(invocation.env.TOKENBOARD_PACKAGE_MANAGER, undefined)
+})
+
+test('a checkout client invocation still hands the TypeScript collector its package manager', () => {
+  const invocation = buildSyncInvocation({
+    flags: { mode: 'sync' },
+    env: {},
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo',
+      clientType: 'git',
+      packageManager: 'bun'
+    },
+    fileExists: () => true
+  })
+  assert.equal(invocation.env.TOKENBOARD_PACKAGE_MANAGER, 'bun')
 })
 
 test('the release source recorded in the config reaches the binary', () => {

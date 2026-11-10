@@ -102,7 +102,6 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 		StateDir:    stateDir,
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 			"TOKENBOARD_SINCE":                "all",
 			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
@@ -208,8 +207,7 @@ func TestCodexScopePersistsFrozenChildUsageUnderTheOriginalSourceIdentity(t *tes
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -277,8 +275,7 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForAFilenameWithItsExtension(t 
 		Timezone:  "Asia/Shanghai",
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -304,8 +301,7 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForADirectoryQualifiedSessionID
 		Timezone:  "Asia/Shanghai",
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -490,7 +486,6 @@ func TestCodexScopeCapsTheConfiguredBatchSize(t *testing.T) {
 		StateDir:  t.TempDir(),
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":  "",
 			"TOKENBOARD_SINCE":            "all",
 			"TOKENBOARD_CODEX_BATCH_SIZE": "2",
 		})),

@@ -765,7 +765,6 @@ func TestProviderPassesTheConfiguredDefaultSinceWindowToFrozenBoundedReports(t *
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 			"TOKENBOARD_SINCE":                "",
 			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
@@ -890,7 +889,6 @@ func TestProviderPassesConfiguredCodexHomeToUnscopedCcusageCommands(t *testing.T
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 		}),
 	})
@@ -925,7 +923,6 @@ func TestProviderUsesAFrozenHomeForEveryBoundedReport(t *testing.T) {
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 		}),
 	})
@@ -1704,7 +1701,6 @@ func TestProviderReportsPartialCollectionWhenSessionCountsFail(t *testing.T) {
 		Runner:    runner.run,
 		Stderr:    func(line string) { errors = append(errors, line) },
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
 			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
 		}),
 	})

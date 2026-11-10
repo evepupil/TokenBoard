@@ -24,7 +24,7 @@ import { configDir, parseArgs, readConfig } from './config.mjs'
 import { errorMessage } from './error-message.mjs'
 import { readSince } from './sync-options.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
-import { ccusageToolSources, usageSources } from './usage-sources.mjs'
+import { usageSources } from './usage-sources.mjs'
 
 // The sources `tokenboard shadow` can compare with data on a normal machine.
 // The two Antigravity GUI sources need a language server and are outside the
@@ -34,9 +34,8 @@ import { ccusageToolSources, usageSources } from './usage-sources.mjs'
 // until the twelve tools were ported.
 //
 // Comparing a tool source is still worth the spawn when the tool is not
-// installed: both sides report empty, and a wrong subcommand name would make
-// ccusage exit 2, failing the Go source instead of looking like an uninstalled
-// tool.
+// installed: both sides report empty, and a wrong tool name would fail the Go
+// source instead of looking like an uninstalled tool.
 const dualRunExcludedSources = new Set(['antigravity', 'antigravity-ide'])
 export const dualRunSources = usageSources.filter((source) => !dualRunExcludedSources.has(source))
 
@@ -61,16 +60,9 @@ export function defaultDualRunSince({ config = {}, env = {}, now = new Date() } 
   return readSince({ env, config, now })
 }
 
-// Sources whose collector shells out to ccusage. A comparison of these is only
-// meaningful when both sides run the same ccusage binary, so the harness pins
-// it the way CI does. The tool family belongs here too: without the pin the
-// Go side could resolve (and download) a different copy than the one the
-// TypeScript side reaches through node_modules.
-const ccusageSources = new Set(['claude-code', 'codex', ...ccusageToolSources])
-
 // `--until` is accepted only for the two sources with a date window. The tool
-// family is ccusage-backed but takes no window on either side, so passing the
-// flag there is a usage error rather than a silently ignored one.
+// family takes no window on either side, so passing the flag there is a usage
+// error rather than a silently ignored one.
 const untilSources = new Set(['claude-code', 'codex'])
 
 export const usage = `Usage: shadow-dual-run.mjs [--client PATH] [--since YYYYMMDD] [--until YYYY-MM-DD] [--hook] [--log PATH] [--source NAME]
@@ -108,13 +100,6 @@ export function readDualRunConfig({ env = process.env, config = {}, homeDir = ho
     binary,
     collectorDir: config.collectorDir || env.TOKENBOARD_COLLECTOR_DIR || join(root, 'TokenBoard'),
     timezone: config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    // The ccusage copy a shipping install already has. Pinning it is what
-    // makes a claude-code or codex comparison apples to apples: both sides
-    // run this file rather than each resolving one their own way.
-    ccusageBin: firstExisting([
-      join(root, 'bin', process.platform === 'win32' ? 'ccusage.exe' : 'ccusage'),
-      join(root, 'TokenBoard', 'packages', 'collector', 'node_modules', '.bin', 'ccusage')
-    ]),
     logPath: dualRunLogPath({ env }),
     // The configured symlinked Codex roots, exactly as sync injects them: a
     // machine whose archived_sessions is a symlink refuses the scan without
@@ -122,13 +107,6 @@ export function readDualRunConfig({ env = process.env, config = {}, homeDir = ho
     codexSymlinkRoots: Array.isArray(config.codexSymlinkRoots) ? config.codexSymlinkRoots : undefined,
     homeDir
   }
-}
-
-function firstExisting(candidates) {
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate
-  }
-  return undefined
 }
 
 // buildShadowInvocation assembles one `tokenboard shadow` call. The
@@ -147,7 +125,7 @@ function firstExisting(candidates) {
 //
 // `--hook` wins over `--until`: both clients reject --until in hook mode
 // (the hook window comes from the changed cursor dates, not a flag), and
-// silently passing the pair would fail every ccusage source. The trade is
+// silently passing the pair would fail that source. The trade is
 // accepted — hook mode cannot exclude the actively-written current day, so
 // same-day rows carry the known live-write race and same-instant cost deltas.
 export function buildShadowInvocation({ config, source, since, until, hook = false, env = process.env }) {
@@ -161,9 +139,6 @@ export function buildShadowInvocation({ config, source, since, until, hook = fal
   }
   if (since) childEnv.TOKENBOARD_SINCE = since
   if (passUntil) childEnv.TOKENBOARD_UNTIL = until
-  if (config.ccusageBin && ccusageSources.has(source)) {
-    childEnv.TOKENBOARD_CCUSAGE_BIN = config.ccusageBin
-  }
   if (config.codexSymlinkRoots?.length) {
     childEnv.TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON = JSON.stringify(config.codexSymlinkRoots)
   }
@@ -426,7 +401,7 @@ function run() {
   const until = typeof flags.until === 'string' ? flags.until : undefined
   const hook = flags.hook === true
 
-  // `--until` narrows a comparison to settled days, and only the ccusage-backed sources accept
+  // `--until` narrows a comparison to settled days, and only claude-code and codex accept
   // it. Silently dropping it for the others would let an operator believe the window was
   // narrowed when the comparison actually ran unbounded — the harness would then report a diff
   // the caller thought it had excluded. A named source that cannot honor the flag is a usage
