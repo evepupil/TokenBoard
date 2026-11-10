@@ -89,6 +89,9 @@ Go 客户端**会上传**（`internal/cli/cli.go:261`），所以翻到原生后
 
 ## 4. 未覆盖边界
 
+- 本文是**翻转前**的探针：它测的是「Go 原生 vs 在线 ccusage」的差额。翻转后同一批真实数据在
+  生产双跑里的逐行表现（131 条只差 `costUsd`、倍率 0.50×–4.74×）见
+  `docs/research/2026-11-10-s5-post-flip-dual-run.md`。
 - 只在 claude-code 的 daily 链路、本机 `~/.claude` 上实测；codex / 工具族没有等价的代价。
 - 窗口只覆盖 7 天（2026-11-02 至 11-08）；`full` 历史未扫描。
 - 探针路径 `NewCostFunc(overrides, ModeAuto)` × `NewDedupe(DedupeDaily)` 复刻 daily 链路。
