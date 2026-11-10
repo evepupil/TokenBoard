@@ -79,6 +79,14 @@ export TOKENBOARD_HOOK_MODE=1 TOKENBOARD_TIMEZONE=Asia/Shanghai
 ## 4. 未覆盖
 
 - 只验证 claude-code（hook 路径最复杂、且是生产主力）。codex 的 hook 增量走
-  `providers/codex/hook_profiles.go` 的独立实现，本次未覆盖。
+  `providers/codex/hook_profiles.go` 的独立实现，两次尝试都没能构成有效实验，见下条。
+- **codex 的热 cursor 仍未验证——不是没试，是夹具不成立**：用同样方法试了四份真实 codex
+  会话（`2026/10/14`、`10/15`、`11/03`、`11/04`），把文件截成两半再比「半份冷扫」与「整份
+  冷扫」的总量，**四份的总量全部相同**，于是截断本身不改变结果，做不出可判定的差异。直接
+  原因是 codex 的用量来自逐轮的 `token_count` 事件，截断尾部常常不产生新的计费事件；其中
+  两份（`11/03`、`11/04`）连总量都是 0，既无 token 也无成本。另外，夹具必须放在源文件真实
+  的 `sessions/YYYY/MM/DD` 目录下——放到 `sessions/2026/01/01/` 时 provider 静默返回空结果
+  且 exit 0，不报错。要验证 codex 热 cursor，需要一个**尾部确实带用量事件**的会话，本机现有
+  样本里没找到。
 - 文件「缩小」或整体重写（compaction）的情形未测；本次只测了追加。
 - 未在 Windows / Linux 上跑。
