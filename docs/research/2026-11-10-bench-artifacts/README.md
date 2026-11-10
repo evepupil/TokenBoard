@@ -13,3 +13,7 @@ layers were deleted (commit `7959fae`). The numbers are reported in
 - `/tmp/tokenboard-bench-*` pricing config paths in the files are per-run temp
   directories and no longer exist; the config is `packages/collector/ccusage.json`
   (the run reports "static catalogue" because no endpoint was configured).
+- The `bytesRead: 0 (pending — the adapter read counter lands in S2)` lines are
+  the wording of `7959fae`. No read-byte counter was ever added (S2 shipped
+  without one); later runs print `bytesRead: not measured` instead (`a85319b`).
+  Either way the column is a placeholder, never an estimate.
