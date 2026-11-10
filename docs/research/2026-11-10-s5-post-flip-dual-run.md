@@ -1,6 +1,7 @@
 # 2026-11-10 S5 翻转后的真实数据双跑
 
-- 日期：2026-11-10 17:26–18:30（Asia/Shanghai），本机 macOS / darwin amd64，负载 47
+- 日期：2026-11-10（Asia/Shanghai）。首轮 17:26–18:30，负载 47；补跑 amp / grok-build /
+  deepseek-harness 与九个空工具源在 21:00–22:10，负载 13.9。本机 macOS / darwin amd64。
 - 分支 / 二进制：`feat/native-usage-sources` @ `a81450b` → `go build -o /tmp/tb-a81450b ./cmd/tokenboard`
 - 目的：补齐 S5 计划 Task 3/5 Step 5 记下的未覆盖项——翻转后（获取层已删、三个来源全走原生）
   的端到端双跑。生产本机仍是 `clientType: git`（TS collector），所以两侧都是真实路径：
