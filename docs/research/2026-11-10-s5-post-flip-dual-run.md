@@ -15,7 +15,7 @@ TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON='["<HOME>/.codex/archived_sessions.local"]' 
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source claude-code --until 2026-11-09
 ```
 
-第二次的分类是 `diff`（exit 0，因为 harness 对 `diff` 也只在 `--summary` 里计数；见 §4）。
+第二次判为 `diff`，harness 按设计 **exit 1**（`exitCodeForDualRun`：任一 `diff`/`error` 即失败）。
 结构化明细由同一二进制直接产出：
 
 ```bash
