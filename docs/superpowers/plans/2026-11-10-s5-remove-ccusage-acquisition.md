@@ -115,9 +115,9 @@
 - [x] **Step 3: Implement** —— 只改常量与旧断言；`native_test.go:127-128` 改为「为 true」。
 - [x] **Step 4: Run test to verify it passes** —— 同上 → PASS；`go test ./internal/collect/providers/codex/ ./internal/collect/adapters/codex/ -count=1` 全绿；`go build ./...`。
 - [x] **Step 5: 真机证据** —— `go run ./cmd/parity -source codex -since <T-14> -until <T-1> -ccusage-bin <bin> -json` 与 `tokenboard shadow --source codex --until <T-1>` 各跑一次，写进 docs。
-  **实际**：`parity -source codex -since 2026-11-02 -until 2026-11-08` 在 S5 完成后（`c728165`）重跑，
-  `status: match`、8/8 快照一致；`tokenboard shadow --source codex` 未跑——本机负载 176 时
-  跑 TS 侧 ccusage 全窗口不划算，而 shadow 的 TS 侧与 parity 的 ccusage 侧是同一条采集链路。
+  **实际**：`parity -source codex` 在 S5 完成后（`c728165`）重跑 `status: match`、8/8 快照一致；
+  负载降到 47 后补跑 `shadow-dual-run.mjs --client <a81450b> --source codex --until 2026-11-09`
+  得 **match、10 快照**（`docs/research/2026-11-10-s5-post-flip-dual-run.md` §2）。
 - [x] **Step 6: Commit** —— `feat(codex): use the native report source by default`
 
 ### Task 4: 翻转 `useNativeTools`（11 个工具 + copilot）
@@ -141,10 +141,10 @@
 - [x] **Step 3: Implement** —— 常量 + 旧断言。
 - [x] **Step 4: Run test** —— PASS；`go test ./internal/collect/providers/ccusagetool/ ./internal/collect/adapters/tools/ ./internal/collect/adapters/copilot/ -count=1` 全绿。
 - [x] **Step 5: 证据** —— 本机 `node skills/tokenboard/scripts/shadow-dual-run.mjs` 输出追加进 docs（含 `not-installed` 与 `empty` 的计数）；copilot 记 Ruling「真机 N/A，闸门 = 金样本 + 上游快照」。
-  **实际**：S5 后未重跑 `shadow-dual-run.mjs`（本机 load 176，且它会在 TS 侧跑全部 21 个源的
-  ccusage 窗口）。copilot 的 Ruling 已记在 `.superpowers/sdd/2026-11-09-s4b-copilot/progress.md`；
-  工具源的等价性证据是 2026-11-09 的 parity（`2026-11-09-tools-native-parity.md`）与本次 S5 后
-  codex parity match，**不是**双跑。**未覆盖**：翻转后工具源的真实数据双跑。
+  **实际**：工具族 12 源 S5 后仍未做双跑——`shadow-dual-run.mjs` 会在 TS 侧对每个源跑完整
+  ccusage 窗口，而本机多数工具未安装，能得到的最好结果是 `empty`。copilot 的 Ruling 已记在
+  `.superpowers/sdd/2026-11-09-s4b-copilot/progress.md`；工具源的等价性证据仍是 2026-11-09 的
+  parity 与金样本，**不是**双跑。**未覆盖**：翻转后工具源的真实数据双跑。
 - [x] **Step 6: Commit** —— `feat(tools): use the native adapters by default`
 
 ### Task 5: 翻转 `useNativeClaude` 并更新 hook 路径证据
@@ -168,9 +168,11 @@
 - [x] **Step 3: Implement** —— 常量 + 旧断言 + 注释里的「until it flips」表述。
 - [x] **Step 4: Run test** —— PASS；`go test ./internal/collect/providers/claudecode/ ./internal/collect/adapters/claude/ -count=1` 全绿。
 - [x] **Step 5: 证据** —— 重跑 `parity`（窗口同 §9）+ `shadow --source claude-code --hook`，把结果写进 §9 的「翻转后复验」小节；明确记录 45 条差异的性质（Task 2 的口径）。
-  **实际**：「翻转后复验」小节在 `2026-11-05-claude-native-parity.md` §9 落地（164/164 快照、
-  非成本字段 0 diff、117 条成本差异逐条归因）；`shadow --source claude-code --hook` 未在 S5 后重跑，
-  理由同 Task 3 Step 5。**未覆盖**：翻转后的 hook 路径与本机热 cursor 还没有端到端双跑证据。
+  **实际**：「翻转后复验」小节在 `2026-11-05-claude-native-parity.md` §9 落地；负载降到 47 后补跑
+  `shadow-dual-run.mjs --source claude-code --until 2026-11-09`：382 快照、0 only-in-side、
+  131 条差异**只差 `costUsd`**，逐行倍率 0.50×–4.74×，其中 `kimi-k3.1` 的 1.98 倍经三路对照
+  （在线精确命中 vs 离线模糊命中）归因到价表口径（`2026-11-10-s5-post-flip-dual-run.md` §3）。
+  **未覆盖**：`--hook` 路径与本机热 cursor 仍没有端到端双跑证据。
 - [x] **Step 6: Commit** —— `feat(claude): use the native adapter by default`
 
 ### Task 6: 性能报告（§9.3 / G5）
