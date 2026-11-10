@@ -39,10 +39,10 @@ import (
 
 // useNativeCodex selects the in-process report source instead of the ccusage
 // subprocess. It is a compile-time constant, not an environment variable:
-// flipping it is a reviewed commit (and its own commit), and a user must not be
-// able to run an unvalidated code path on their own data. Until it flips,
-// Collect keeps the ccusage path byte for byte.
-const useNativeCodex = false
+// flipping it was a reviewed commit of its own (S5, 2026-11-10), so a user
+// cannot run an unvalidated code path on their own data. The ccusage path
+// remains reachable only by building with the constant set back to false.
+const useNativeCodex = true
 
 // nativeInput is what the native entry point hands the pipeline. Everything
 // else - env, timezone, collectedAt, state directory, pricing preparation - is

@@ -120,34 +120,29 @@ func TestRegisterNativeAlwaysInstallsTheCodexProvider(t *testing.T) {
 	}
 }
 
-// TestUseNativeCodexDefaultsToTheCcusagePath pins both halves of the switch: the
-// constant is false, and Collect on that path really runs ccusage (the stub
-// runner sees the daily and session invocations).
-func TestUseNativeCodexDefaultsToTheCcusagePath(t *testing.T) {
-	if useNativeCodex {
-		t.Fatal("useNativeCodex must default to false until the native path has passed the parity gate")
+// TestUseNativeCodexSelectsTheNativeSource pins the switch's current state: the
+// constant is true (S5, 2026-11-10), so Collect takes the in-process report
+// source and the caller's ccusage runner is never invoked. An injected
+// useNativeReport = false still asks for the ccusage path, which is how the
+// parity harness keeps exercising it.
+func TestUseNativeCodexSelectsTheNativeSource(t *testing.T) {
+	if !useNativeCodex {
+		t.Fatal("useNativeCodex is false; the native path regressed to the ccusage source")
 	}
 	codexHome := provEmptyCodexHome(t)
 	runner := &provStubRunner{t: t, respond: func(provCall) (any, error) {
 		return provJSON(t, `{"data":[]}`), nil
 	}}
-	snapshots, err := provCollect(t, Options{
+	if _, err := provCollect(t, Options{
 		CodexHome:   provHome(codexHome),
 		Timezone:    "UTC",
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
-	}, nil)
-	if err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %v, want the daily and session ccusage invocations", runner.calls)
-	}
-	if !runner.calls[0].hasArg("daily") || !runner.calls[1].hasArg("session") {
-		t.Fatalf("calls = %v, want daily then session", runner.calls)
-	}
-	if len(snapshots) != 0 {
-		t.Fatalf("snapshots = %+v, want none for an empty home", snapshots)
+	if len(runner.calls) != 0 {
+		t.Fatalf("calls = %v, want none: the native source must not invoke ccusage", runner.calls)
 	}
 }
 
