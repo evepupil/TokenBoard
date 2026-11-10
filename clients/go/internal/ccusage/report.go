@@ -11,6 +11,7 @@ package ccusage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -38,17 +39,22 @@ type CommandRunner func(ctx context.Context, command string, args []string, opti
 // config wins over an explicit one, and a configured path that does not exist
 // is an error rather than a silently dropped flag (ccusage would otherwise
 // fall back to its own prices).
+//
+// Both variables are trimmed and a whitespace-only value means "not set", as
+// the package runner read them: without the trim, `TOKENBOARD_CCUSAGE_CONFIG=" "`
+// became `--config " "` and priced nothing.
 func WithConfigArgs(args []string, env func(string) string, fileExists func(string) bool) ([]string, error) {
-	configPath := ""
-	variable := "TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG"
-	if env != nil {
-		configPath = env(variable)
+	read := func(name string) string {
+		if env == nil {
+			return ""
+		}
+		return strings.TrimSpace(env(name))
 	}
+	variable := "TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG"
+	configPath := read(variable)
 	if configPath == "" {
 		variable = "TOKENBOARD_CCUSAGE_CONFIG"
-		if env != nil {
-			configPath = env(variable)
-		}
+		configPath = read(variable)
 	}
 	if configPath == "" {
 		return append([]string{}, args...), nil

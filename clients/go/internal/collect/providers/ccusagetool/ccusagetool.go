@@ -32,9 +32,6 @@ import (
 // tool's whole session tree to build one day's totals.
 const DefaultCcusageTimeoutMs = 900_000
 
-// DefaultPackageCommandRetries retries a transient ccusage failure twice.
-const DefaultPackageCommandRetries = 2
-
 // Options configures one collection. Zero values fall back to the environment
 // and the clock, like the TS provider's optional arguments.
 type Options struct {
@@ -91,7 +88,14 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 	if runner == nil {
 		runner = newNativeToolRunner(prepared, options.HomeDir, env, stderr).Run
 	}
-	commandOptions := ccusage.CommandOptions{}
+	// The budget the subprocess path applied to every call is still applied to
+	// the in-process one: the native runner turns TimeoutMs into a context
+	// deadline, and without it a hung tool store has nothing to stop it. The
+	// value is read unconditionally rather than only for an injected runner so
+	// TOKENBOARD_CCUSAGE_TIMEOUT_MS keeps meaning what it meant before S5.
+	commandOptions := ccusage.CommandOptions{
+		TimeoutMs: readCcusageTimeoutMs(env),
+	}
 
 	dailyArgs, err := ccusage.WithConfigArgs(append(
 		[]string{command, "daily", "--json"}, append(rangeArgs, "--timezone", timezone)...), env, nil)
@@ -155,13 +159,6 @@ func readCcusageTimeoutMs(env func(string) string) int {
 		return value
 	}
 	return DefaultCcusageTimeoutMs
-}
-
-func readPackageCommandRetries(env func(string) string) int {
-	if value, ok := contract.ParseInt(env("TOKENBOARD_PACKAGE_COMMAND_RETRIES")); ok && value >= 0 {
-		return value
-	}
-	return DefaultPackageCommandRetries
 }
 
 func init() {

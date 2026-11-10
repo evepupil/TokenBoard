@@ -110,14 +110,21 @@ func TestCcusageCoreKeepsOnlySharedContracts(t *testing.T) {
 
 // TestCcusageCoreImportsNoNetworkOrProcessPackages pins the other half of the
 // split: a package that only decodes and normalizes reports has no business
-// opening sockets or spawning processes.
+// opening sockets, spawning processes or looking for a binary on disk. os
+// itself stays allowed: ScrubCredentialEnv reads os.Environ, which is the one
+// thing in this package that legitimately touches the process environment.
+// The evidence that nothing here reaches for a binary is the dependency gate
+// in cmd/tokenboard/main_test.go.
 func TestCcusageCoreImportsNoNetworkOrProcessPackages(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
-	forbidden := map[string]bool{"net/http": true, "os/exec": true, "archive/tar": true, "compress/gzip": true}
+	forbidden := map[string]bool{
+		"net/http": true, "os/exec": true,
+		"archive/tar": true, "archive/zip": true, "compress/gzip": true,
+	}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -133,7 +140,7 @@ func TestCcusageCoreImportsNoNetworkOrProcessPackages(t *testing.T) {
 				t.Fatalf("%s: %v", name, err)
 			}
 			if forbidden[path] {
-				t.Errorf("%s imports %q; the client no longer acquires or spawns a ccusage binary", name, path)
+				t.Errorf("%s imports %q; the client no longer acquires or spawns a ccusage binary, and the report contract must not do it indirectly", name, path)
 			}
 		}
 	}
