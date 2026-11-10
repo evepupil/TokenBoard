@@ -47,6 +47,10 @@ ccusage 的 LiteLLM 实时价表。
 （`kimi-k3.1-pro-highspeed`）；同一份 `--config` 下 `ccusage --offline` 给出的正是 $172.74，
 与 Go 逐位一致。明细见 `docs/research/2026-11-10-s5-post-flip-dual-run.md`。
 
+同样的双向偏移也出现在工具族：本机 `zcode` 的 5 条快照里 4 条成本不同（TS 计 0、Go 非零），
+因为服务端目录给 GLM-5.3 系补了价、在线表没有；用同一份动态配置跑 `ccusage --offline`
+得到的四个值与 Go 逐位一致。
+
 ### 2.3 性能
 
 同机 5 轮中位数（2026-11-10，机器负载 76–142，只看中位数）：
