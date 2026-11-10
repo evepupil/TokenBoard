@@ -8,8 +8,12 @@
 # fixture tree through the collector's own invocation and diffs the result
 # against recorded goldens.
 #
-# The goldens are the contract the Go client's ccusage layer (M4) is written
-# against, so they are pinned before that layer exists rather than after.
+# The tool-source goldens are the contract the Go client's in-process adapters
+# are written against. Since S5 (2026-11-10) the client no longer runs ccusage:
+# this gate now protects the TypeScript collector, which still does, and the
+# frozen 20.0.33 the adapters' own goldens were minted from. The binary comes
+# from the workspace install because packages/collector still depends on it
+# (spec D6); the day that dependency goes, so does this gate's binary.
 #
 # Native side: claude-code also has an in-process adapter whose goldens are
 # minted by scripts/gen-claude-goldens.mjs and compared by
@@ -22,8 +26,8 @@
 # meant to be minted from ccusage 20.0.33 by the same version, but not
 # necessarily the same executable file (this script prefers
 # node_modules/.bin/ccusage, the generator ~/.tokenboard/bin/ccusage).
-# This script still guards the binary itself, which is what production runs
-# until useNativeClaude flips (docs/research/2026-11-05-claude-native-parity.md).
+# The Go client itself runs none of this: useNativeClaude flipped in S5 and the
+# acquisition layer is gone (docs/specs/go-client-spec.md §4).
 #
 # The codex adapter's row-level goldens get the same gate through their own
 # generator: gen-codex-goldens.mjs --check re-mints in memory from the committed
