@@ -13,9 +13,11 @@ TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON='["<HOME>/.codex/archived_sessions.local"]' 
   node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source codex --until 2026-11-09
 
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source claude-code --until 2026-11-09
+node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source claude-code --hook
 ```
 
-第二次判为 `diff`，harness 按设计 **exit 1**（`exitCodeForDualRun`：任一 `diff`/`error` 即失败）。
+preview 与 hook 两次都判为 `diff`，harness 按设计 **exit 1**（`exitCodeForDualRun`：任一
+`diff`/`error` 即失败）。
 结构化明细由同一二进制直接产出：
 
 ```bash
@@ -32,20 +34,26 @@ TOKENBOARD_COLLECTOR_DIR=$PWD TOKENBOARD_TIMEZONE=Asia/Shanghai \
 
 翻转后 codex 的真实数据等价性在全量与增量两条路径上都成立。
 
-## 3. claude-code：382 条快照，131 条只差 `costUsd`
+## 3. claude-code：preview 与 hook 同口径，131 条只差 `costUsd`
 
-| 指标 | 值 |
-|---|---|
-| 快照总数 | 382 |
-| 一致 | 251 |
-| 差异 | 131 |
-| `onlyInTs` / `onlyInGo` | 0 / 0 |
-| 差异字段 | 只有 `costUsd`（131/131） |
-| 差异模型数 | 22（deepseek 族 98 条，其余 33 条） |
+两条路径的字段级结果完全相同：
 
-token、日期、时区、模型名、`sessionCount` 全部逐位一致；成本差异的逐行倍率（go/ts）在
-**0.50× 到 4.74×** 之间，不是统一方向：deepseek 族的两种拼写在在线表上命中不同条目，
-既能更贵也能更便宜（`2026-11-10-s5-flip-coverage.md` §2.4 记录的「双向费率差」的逐行体现）。
+| 指标 | preview | hook |
+|---|---|---|
+| 快照总数 | 382 | 384 |
+| 差异 | 131 | 131 |
+| `onlyInTs` / `onlyInGo` | 0 / 0 | 0 / 0 |
+| 差异字段 | 只有 `costUsd`（131/131） | 只有 `costUsd`（131/131） |
+| 差异模型数 | 22（deepseek 族 98 条，其余 33 条） | 22（分布逐项相同） |
+| 倍率区间（go/ts） | 0.50×–4.74× | 0.50×–4.74× |
+| `liveWrite` | — | 4 |
+
+hook 多出的 2 条快照与 4 条 `liveWrite` 来自当天正在写入的会话，属已知的活写竞态，
+不是语义差异。
+
+token、日期、时区、模型名、`sessionCount` 全部逐位一致；成本差异的逐行倍率（go/ts）方向不一致：
+deepseek 族的两种拼写在在线表上命中不同条目，既能更贵也能更便宜
+（`2026-11-10-s5-flip-coverage.md` §2.4 记录的「双向费率差」的逐行体现）。
 **没有任何非成本字段的分叉**，所以按 spec §2 G2 的定义，这不是语义移植缺陷；
 但倍率远大于总量级的 7.7%，发布说明和后续裁决都必须按逐行倍率看，不能按总量看。
 
@@ -92,8 +100,10 @@ harness 只能看到「字段不同」，无法判断差异是否可归因。人
 
 ## 5. 未覆盖
 
-- hook 路径已跑（codex match、claude-code 与 preview 同口径），但两侧都用**全新临时 state dir**，
-  测的是冷 cursor 上的增量行为；生产的热 cursor（只有少量文件变更）仍无端到端证据。
+- codex 与 claude-code 的 hook 路径都已跑（codex match；claude-code 与 preview 同口径），
+  但两侧都用**全新临时 state dir**，测的是冷 cursor 上的增量行为；生产的热 cursor
+  （只有少量文件变更、窄 ccusage 窗口）仍无端到端证据。
 - 工具族 12 源未跑（本机多数未安装；`shadow-dual-run` 会在 TS 侧对每个源跑完整 ccusage 窗口）。
-- 窗口截止 2026-11-09（避开活写竞态），不是全历史。
+- preview 窗口截止 2026-11-09（避开活写竞态），不是全历史；`--hook` 与 `--until` 互斥，
+  所以 hook 那次必然包含当天，其 diff 里已由 harness 单列 `liveWrite`。
 - 只在本机、darwin 上验证。
