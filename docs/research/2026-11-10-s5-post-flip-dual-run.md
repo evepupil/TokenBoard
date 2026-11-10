@@ -29,6 +29,10 @@ TOKENBOARD_COLLECTOR_DIR=$PWD TOKENBOARD_TIMEZONE=Asia/Shanghai \
   /tmp/tb-a81450b shadow --source claude-code --until 2026-11-09 > /tmp/shadow-claude.out
 ```
 
+`shadow` 会把本机 `model-pricing-cache.json` 播种进两侧的临时 state dir
+（`clients/go/internal/cli/shadow.go:146` 的 `seedShadowPricingCache`），所以下面的比较走的是
+**动态定价目录**这条生产路径，不是纯静态回退。
+
 ## 2. codex：match，preview 与 hook 两条路径
 
 | 模式 | 命令 | 结果 |
@@ -128,8 +132,9 @@ TS 侧 0、Go 侧非零。**三路对照**：用同一份动态配置（`~/.toke
 ## 6. 未覆盖
 
 - codex 与 claude-code 的 hook 路径都已跑（codex match；claude-code 与 preview 同口径），
-  但两侧都用**全新临时 state dir**，测的是冷 cursor 上的增量行为；生产的热 cursor
-  （只有少量文件变更、窄 ccusage 窗口）仍无端到端证据。
+  但两侧都用**全新临时 state dir**（`clients/go/internal/cli/shadow.go:126,132` 各建一个
+  `tokenboard-shadow-{go,ts}-*` 并 `defer os.RemoveAll`），测的是冷 cursor 上的增量行为；
+  生产的热 cursor（只有少量文件变更、窄 ccusage 窗口）仍无端到端证据。
 - 工具族只有 kimi / zcode 有数据（§5）；其余十个来源在本机不存在或返回 0 条，它们的等价性
   只能依赖冻结金样本与 2026-11-09 的 parity 证据，**没有**双跑证据。
 - preview 窗口截止 2026-11-09（避开活写竞态），不是全历史；`--hook` 与 `--until` 互斥，
