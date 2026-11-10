@@ -330,7 +330,6 @@ test('buildShadowInvocation never injects a ccusage binary', () => {
   }
 })
 
-
 // The dual run's default comparison is a full preview, but production runs the
 // hook path. --hook lets the harness measure the code that actually collects
 // scheduled usage.
