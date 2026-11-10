@@ -171,8 +171,9 @@ func runAgainst(t *testing.T, server *httptest.Server, target, tag string) (Resu
 }
 
 // runAgainstWithConfigDir pins TOKENBOARD_CONFIG_DIR to a test directory. The
-// bundled ccusage install follows that variable, and without it the test would
-// write into the machine's real ~/.tokenboard/bin.
+// update probes that directory's bin for a ccusage copy left by an earlier
+// release, and without it the test would inspect the machine's real
+// ~/.tokenboard/bin.
 func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag, configDir string) (Result, error) {
 	t.Helper()
 	return Run(Input{

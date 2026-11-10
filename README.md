@@ -135,8 +135,8 @@ Local usage sources:
 
 | Source | Reads |
 | --- | --- |
-| Claude Code | `ccusage` daily/session reports |
-| Codex | `@ccusage/codex` daily/session reports |
+| Claude Code | `~/.claude/projects/**/*.jsonl` session records (`CLAUDE_CONFIG_DIR`, `CLAUDE_HOME`) |
+| Codex | `~/.codex/{sessions,archived_sessions}/**/*.jsonl` session records (`CODEX_HOME`) |
 | Antigravity CLI | `~/.gemini/antigravity-cli/conversations/*.db` token metadata |
 | Antigravity | `~/.gemini/antigravity/conversations` token metadata |
 | Antigravity IDE | `~/.gemini/antigravity-ide/conversations` token metadata |
@@ -144,13 +144,14 @@ Local usage sources:
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`) |
 | Grok Build | `~/.grok/{sessions,archived_sessions}/**/updates.jsonl` (`GROK_HOME`) |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl[.zstd]` (`DSH_HOME`, `DSH_SESSION_ROOT`) |
-| amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode | the tool's own store, read through the pinned `ccusage` runtime |
+| amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode | the tool's own store, read in process exactly as ccusage reads it |
 
-The twelve `ccusage` tools share one collector: each runs `<tool> daily --json` and `<tool> session
---json`, and `gemini-cli` uses ccusage's `gemini` subcommand. A tool that is not installed answers
-the daily call with an empty report, which is not an error — the session call is skipped and the
-source contributes nothing to that run. None of them installs a notifier hook, and none accepts a
-`--until` window.
+Every source is collected in process: the client no longer downloads or runs `ccusage`. Claude
+Code and Codex are read from their own session records; the twelve tool sources reuse the same
+readers and pricing ccusage 20.0.33 implements, verified row by row against reports that binary
+produced for frozen fixture trees. A tool that is not installed contributes nothing to the run —
+that is not an error. None of the tools installs a notifier hook, and none accepts a `--until`
+window.
 
 Only token counts, model ids and timestamps are read from these stores. For OpenCode the token fields
 are projected inside SQLite so the message blob, which also holds prompts and a local path, never
@@ -230,13 +231,12 @@ node skills/tokenboard/scripts/uninstall.mjs --remove-config
 node skills/tokenboard/scripts/uninstall.mjs --all
 ```
 
-Package manager overrides:
+Package manager override (the TypeScript checkout collector only — the Go binary installs and
+collects without a package manager):
 
 | Variable | Values |
 | --- | --- |
 | `TOKENBOARD_PACKAGE_MANAGER` | `pnpm`, `bun`, `npm` |
-| `TOKENBOARD_CCUSAGE_BIN` | custom `ccusage` path |
-| `TOKENBOARD_FORCE_PACKAGE_RUNNER` | `1` to force package-runner execution |
 
 ## Production Deploy
 

@@ -124,11 +124,9 @@ func provEnv(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
 
-// provForceEnv is forceRunnerEnv plus the ts suite's usual blanks.
+// provForceEnv is the TS suite's env shaper, now only the blanks it sets.
 func provForceEnv(extra map[string]string) map[string]string {
-	values := map[string]string{
-		"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-	}
+	values := map[string]string{}
 	for key, value := range extra {
 		values[key] = value
 	}
@@ -435,8 +433,7 @@ func TestProviderPassesTheBundledPricingConfigWithoutAnEndpoint(t *testing.T) {
 		CodexHome: provHome(codexHome),
 		StateDir:  stateDir,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_ENDPOINT":             "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_ENDPOINT": "",
 		}),
 		Runner: runner.run,
 	})
@@ -765,9 +762,8 @@ func TestProviderPassesTheConfiguredDefaultSinceWindowToFrozenBoundedReports(t *
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "",
-			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
+			"TOKENBOARD_SINCE":         "",
+			"TOKENBOARD_DEFAULT_SINCE": "20260501",
 		}),
 	})
 	if err != nil {
@@ -808,9 +804,8 @@ func TestProviderPrefersAnExplicitSinceWindowOverTheProcessEnvironment(t *testin
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "20260501",
-			"TOKENBOARD_UNTIL":                "20260502",
+			"TOKENBOARD_SINCE": "20260501",
+			"TOKENBOARD_UNTIL": "20260502",
 		}),
 	})
 	if err != nil {
@@ -888,9 +883,7 @@ func TestProviderPassesConfiguredCodexHomeToUnscopedCcusageCommands(t *testing.T
 		CodexHome: provHome(codexHome),
 		StateDir:  stateDir,
 		Runner:    runner.run,
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -922,9 +915,7 @@ func TestProviderUsesAFrozenHomeForEveryBoundedReport(t *testing.T) {
 		Since:     "20260512",
 		StateDir:  stateDir,
 		Runner:    runner.run,
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1076,10 +1067,9 @@ func TestProviderUsesCanonicalSessionAttributionForAnUntilOnlyWindow(t *testing.
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "",
-			"TOKENBOARD_DEFAULT_SINCE":        "",
-			"TOKENBOARD_UNTIL":                "20260521",
+			"TOKENBOARD_SINCE":         "",
+			"TOKENBOARD_DEFAULT_SINCE": "",
+			"TOKENBOARD_UNTIL":         "20260521",
 		}),
 	})
 	if err != nil {
@@ -1174,8 +1164,7 @@ func TestProviderUsesCanonicalSessionAttributionWhenAllHistoryIsBoundedByUntil(t
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_UNTIL":                "20260521",
+			"TOKENBOARD_UNTIL": "20260521",
 		}),
 	})
 	if err != nil {
@@ -1700,9 +1689,7 @@ func TestProviderReportsPartialCollectionWhenSessionCountsFail(t *testing.T) {
 		StateDir:  t.TempDir(),
 		Runner:    runner.run,
 		Stderr:    func(line string) { errors = append(errors, line) },
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)

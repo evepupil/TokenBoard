@@ -11,7 +11,7 @@
 | D2 | 仓库 | **不拆库**：Go client 长期住在 `clients/go/`，无拆仓里程碑 |
 | D3 | 依赖策略 | **能用最新就用最新**：依赖跟随 latest，靠「升级门禁」（见 §5）兜底，不做长期 pin |
 | D4 | 交付形态 | 单二进制，GoReleaser × 6 平台（darwin/linux/win32 × x64/arm64），免 CGO |
-| D5 | ccusage | 捆绑 > 探测 > 下载（fail-closed）；ccusage 是 Rust 静态二进制（npm 平台包分发，MIT，sha512 可 pin） |
+| D5 | ccusage | ~~捆绑 > 探测 > 下载（fail-closed）~~ → **已退役（2026-11-10，S5）**：所有来源在进程内采集，客户端不再获取、执行或分发 ccusage；见 §4 |
 | D6 | GUI | 与 CLI 解耦另行立项，不进本 spec |
 | D7 | Zig | 不采用 |
 | D8 | 前置沟通 | 开工前与上游作者对齐（skill 是上游核心资产，client Go 化改变交付模式） |
@@ -25,7 +25,7 @@
 
 **非目标**
 - 不改服务端（Worker/API/D1 schema）；不改上传协议。
-- 不替换 ccusage 的解析职责（继续 spawn 其二进制读 Claude Code/Codex 等来源）。
+- ~~不替换 ccusage 的解析职责（继续 spawn 其二进制读 Claude Code/Codex 等来源）。~~ → 已改为原生采集（2026-11-10，见 §4）；TS collector（`packages/collector`）仍按 D6 的过渡策略保留 ccusage。
 - 不做 GUI；不做自建定价源；不改 hook 语义（含「hook 模式禁联网」纪律）。
 - 迁移期不改 TS collector 的行为语义（冻结只收 bugfix，避免影子基线移动）。
 
@@ -49,7 +49,7 @@ clients/go/
       goldens/                      # 金样本：TS 导出的接受/拒绝+哈希清单
     state/                          # 状态目录、renameAtomic、flock
     platform/                       # launchd/systemd/schtasks、symlink 守卫
-    ccusage/                        # 捆绑/探测/下载三层获取器（见 §4）
+    ccusage/                        # 报告契约：解码、normalize、有序 JSON、凭据剥离、report.go 接缝（见 §4）
   testdata/                         # 与 packages/collector 共用语义的 fixture（影子验证输入）
 ```
 
@@ -64,9 +64,11 @@ clients/go/
 
 **来源枚举 parity 的专项测试（2026-10-25，随 PR #25 的 12 个工具来源补齐）**：金样本只覆盖 hash payload、不覆盖来源集合，所以 `contract_test.go` 的 `TestUsageSourcesMatchUsageCore` 用硬编码的 21 项声明序列断言 `AllSources()` 的顺序与内容——两侧任何一边加来源都会先红。CI 的 `shadow` job 同步把 12 个工具源加入逐源循环：干净 HOME 下两侧都应报空 match，子命令名一旦漂移（如误传 `gemini-cli`，ccusage 会 exit 2），Go 侧整源失败而 TS 侧报空，diff 即失败。
 
-## 4. ccusage 集成（三层，fail-closed）
+## 4. ccusage 集成（已退役）
 
-优先级：**捆绑 > 探测 > 下载**。
+**2026-11-10（S5）起：Go 客户端不再获取、执行或分发 ccusage。** `claude-code`、`codex` 与 12 个工具来源都由 `internal/collect/adapters/*` 在进程内产出与 ccusage 同形的报告，经共享的 `NormalizeCcusageDailyJSON` 归一化。`internal/ccusage` 只剩报告契约（decode/normalize/有序 JSON/`ScrubCredentialEnv`）和 `report.go` 的 `CommandOptions`/`CommandRunner`/`ReportCommand`/`WithConfigArgs` 接缝；`internal/ccusage/{acquire,exec,runner}` 已删除，`cmd/tokenboard` 的 `main_test.go` 用 `go list -deps` 断言三层不进二进制。发布归档只含 `tokenboard[.exe]` 与 `README.md`；升级时发现旧版留下的 `ccusage` 会提示并原地保留。`TOKENBOARD_CCUSAGE_BIN`、`TOKENBOARD_FORCE_PACKAGE_RUNNER` 与 Go 侧的 `TOKENBOARD_PACKAGE_MANAGER` 已无读取者；`TOKENBOARD_CCUSAGE_CONFIG` 保留（显式定价覆盖表仍然生效）。证据：`docs/research/2026-11-05-claude-native-parity.md`、`2026-11-08-codex-native-parity.md`、`2026-11-09-tools-native-parity.md`、`2026-11-09-copilot-native-parity.md`、`2026-11-10-s5-flip-coverage.md`、`2026-11-10-native-vs-ccusage-benchmark.md`。
+
+以下为退役前的设计，保留作历史记录。优先级：**捆绑 > 探测 > 下载**。
 1. **捆绑**：CI 从 npm registry 下载 `@ccusage/ccusage-<platform>-<arch>@<version>` tarball，验 `dist.integrity`（sha512），随 GoReleaser tarball 分发；安装脚本放 `<configDir>/bin/`（`TOKENBOARD_CONFIG_DIR`，缺省即 `~/.tokenboard/bin/`）。MIT 再分发需附许可声明。
 2. **探测**：PATH 上已有 ccusage 可用；版本与 client 期望不符 → stderr 告警（不拒绝）。
 3. **下载**：sync/preview 时检测两者皆无 → 下载期望版本到 `<configDir>/bin/`，sha512 不符即拒用。**hook 模式禁止下载**（禁联网纪律），只用已有版本否则该 source unavailable。（当前 Go/TS collector 都没有 `doctor` 子命令。）
@@ -74,7 +76,7 @@ clients/go/
 
 ## 5. 依赖升级门禁（D3 的兜底机制）
 
-`clients/go/scripts/check-deps.sh`（CI 跑；已实现，金样本在 `clients/go/testdata/ccusage-golden/`）：
+`clients/go/scripts/check-deps.sh`（CI 跑；已实现，金样本在 `clients/go/testdata/ccusage-golden/`）。S5 之后这层门禁的作用只剩「金样本仍能从冻结的 20.0.33 二进制复现」——客户端本身不再依赖 ccusage，CI 通过 TS collector 的 npm 依赖提供该二进制：
 1. 对 ccusage：取固定 fixture 会话树，用二进制跑 `claude daily --json --breakdown` / `claude session --json`（含 `--config packages/collector/ccusage.json`，与原采集调用同形），键序规范化后与金样本 diff；shape 变化 → 退出码 1，人工审后 `--update` 重铸。版本闸门：二进制版本必须等于 TS 侧 `packages/collector/package.json` 的 pin，否则直接拒绝。旧/新双版本对照留给 CI 传入 `CCUSAGE_BIN` 两次调用。
 2. 对 Go 依赖：常规 `go build`+ 全量测试即为门禁；`go.mod` 无 pin 压力，常规 dependabot/手动升级。
 - JSON 输出上游无 schemaVersion、无 CHANGELOG —— 此门禁是唯一防线，不可省。
@@ -212,6 +214,7 @@ clients/go/
   - `self-update` 的 `--tag`/`--repo` 曾解析后丢弃，现在都进 `Input`，且 flag 优先于环境变量（与 skill 的 `flags['release-repo'] || env.…` 同序）。
   - 安装时指定的发布源此前只用于那一次安装，后续自动更新回落到默认仓库。现在 `migrateToBinaryClient` 把非默认的 `releaseRepo`/`releaseBaseUrl` 写入配置，`buildSyncInvocation` 经 `sharedEnv` 传给 client，`runPreCollectUpgrade` 也把 invocation 的 env 传给 self-update spawn（此前完全没传，用了 ambient env）。`release-tag` 刻意不持久化——它只钉住一次安装。
   - `swap` 注释曾声称两次 rename 之间没有空窗，实际目标路径在该窗口缺失。注释订正；skill 侧新增 `recoverOrphanedBinary`，在目标缺失时从最新 `.backup-*` 恢复（前缀取自配置路径的 basename，与 Go 的 `backupPath` 同源）。
+- 2026-11-10 S5 收尾（原生采集取代 ccusage）：三个编译期开关翻到原生，`internal/ccusage/{acquire,exec,runner}` 删除，客户端不再获取/执行/分发 ccusage（§4）。随之收尾的发布与脚本改动：归档只剩 `tokenboard[.exe]` + `README.md`（`release-dry-run` 断言反向检查 ccusage 与 `LICENSE.ccusage` 不出现）；`bundle-ccusage.mjs`、`dist-ccusage/` 与 `.goreleaser.yaml` 的捆绑条目删除；`e2e-self-update.mjs` 改为「旧版留下的 ccusage 原样保留并提示一次」，本机以 goreleaser snapshot 实测通过（`0.0.0-SNAPSHOT-b5a33bc -> 9.9.9, backup kept, legacy ccusage left in place, second run a no-op`）；`sync.mjs` 只对 TS checkout 客户端注入 `TOKENBOARD_PACKAGE_MANAGER`，`shadow-dual-run.mjs` 不再钉选 ccusage 二进制。`deps` job 仍然保留，作用改为「金样本能从冻结的 20.0.33 复现」。费用口径：native 与 ccusage `--offline` 逐位一致，与在线 LiteLLM 表相差 -7.7%（`docs/research/2026-11-10-s5-flip-coverage.md`），新采集的 claude 费用改为离线口径，历史 `costUsd` 不重算。
 - 2026-10-21 发布链路预检：workflow 新增 `release-dry-run` job——`bundle-ccusage` + `goreleaser check` + `goreleaser release --snapshot --clean --skip=publish`，并断言产物契约（恰好 6 个 `tokenboard_<os>_<arch>.tar.gz` + `checksums.txt`；每个归档含 `tokenboard[.exe]`、`ccusage[.exe]`、`README.md`、`LICENSE.ccusage`；Linux 归档内二进制 `version` 必须是 `tokenboard (go) 0.0.0-SNAPSHOT-<sha>`，不是 `dev`）。`release` 以 `needs: [test, deps, shadow, release-dry-run]` 前置，首次真实 tag 不再是对该流水线的第一次执行。同一 job 末尾跑 `clients/go/scripts/e2e-self-update.mjs`：本地起 GitHub 形状的发布端点（`/releases/latest` 302 → tag 页 → 资产），用 snapshot 二进制作为「旧版」、用带 `9.9.9` 版本戳的重新构建作为发布资产，断言自更新完成换入、保留一份 backup、装上捆绑 ccusage、且第二次运行不再下载。首跑即抓到一个真实缺陷：`setup-node` 因 `package.json` 的 `packageManager` 字段默认启用 pnpm 缓存，缺少 `pnpm/action-setup` 时直接失败——`release` job 有同样形状，首次真实 tag 会以同样方式失败，两处已一并补上。
 - 2026-10-20 发布链路（`.github/workflows/go-client.yml`）：
   - `test`：ubuntu/macos/windows 三平台 × `go-version-file: clients/go/go.mod`，跑 `gofmt -l`（非 Windows）、`go vet`、`go test -race`；Linux 上额外做 windows/linux/darwin arm64 交叉构建，把「3 OS × 2 arch」的另一半也纳入编译门禁。

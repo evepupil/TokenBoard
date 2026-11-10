@@ -18,6 +18,11 @@ respective license.
   - `clients/go/internal/nativepricing/corpus.go` (architecture and constants
     ported from `rust/crates/ccusage-core/src/pricing.rs` and `build.rs`)
 
+The client used to redistribute ccusage binaries inside its release archives.
+Since 2026-11-10 it does not: every source collects in process, and the
+archives carry only `tokenboard`. The MIT notice above is kept for the source
+derived from ccusage that remains compiled into the client.
+
 ccusage is Copyright (c) 2025 ryoppippi. Permission is hereby granted, free of
 charge, to any person obtaining a copy of this software and associated
 documentation files (the "Software"), to deal in the Software without

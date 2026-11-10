@@ -143,13 +143,24 @@ successful generation and records the failure for the next scheduled retry.
 
 ## Collector integration
 
-Claude Code and Codex usage is calculated locally by the pinned `ccusage@20.0.33` runtime. Before a
-normal preview or sync, the collector derives the origin from `TOKENBOARD_ENDPOINT`, reads the
-paginated `/api/v1/model-pricing` compatibility alias, and writes a merged temporary `ccusage` config
-under `TOKENBOARD_STATE_DIR`. Dynamic catalogue prices override the bundled
-`packages/collector/ccusage.json`; a user-supplied `TOKENBOARD_CCUSAGE_CONFIG` remains the highest
-priority layer. The generated config is passed through `TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG` and the
-same package-runner entry point for local binaries, npx, npm, pnpm, and bun.
+The Go client since 2026-11-10 (S5) prices every source in its own process from a frozen copy of
+the `ccusage@20.0.33` rate tables (`internal/nativepricing`); it no longer downloads or runs
+`ccusage`. The TypeScript collector still calls the `ccusage@20.0.33` runtime until it is retired.
+Either way, before a normal preview or sync the collector derives the origin from
+`TOKENBOARD_ENDPOINT`, reads the paginated `/api/v1/model-pricing` compatibility alias, and writes a
+merged temporary `ccusage`-shaped config under `TOKENBOARD_STATE_DIR`. Dynamic catalogue prices
+override the bundled `packages/collector/ccusage.json`; a user-supplied `TOKENBOARD_CCUSAGE_CONFIG`
+remains the highest priority layer. The generated config is passed through
+`TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG`. The file keeps ccusage's shape because the TypeScript collector
+still passes it to the binary as `--config` and the Go adapters parse the same `pricingOverrides`
+block.
+
+Cost scope note (2026-11-10): the frozen tables match `ccusage --offline` bit for bit, while an
+online ccusage run may price from LiteLLM's live table instead. Over a one-week window on the
+maintainer's machine that difference was -7.7% on total cost, concentrated in the deepseek family;
+it is a rate-source boundary, not a missing model (`docs/research/2026-11-10-s5-flip-coverage.md`).
+New claude/codex/tool usage is priced from the frozen tables; historical `costUsd` is never
+recomputed.
 For Codex request-level repricing, models explicitly listed in the user's `pricingOverrides` are
 excluded from catalogue and static context rules so the explicit prices remain authoritative.
 

@@ -102,10 +102,9 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 		StateDir:    stateDir,
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "all",
-			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
-			"TOKENBOARD_CODEX_BATCH_SIZE":     "2",
+			"TOKENBOARD_SINCE":            "all",
+			"TOKENBOARD_DEFAULT_SINCE":    "20260501",
+			"TOKENBOARD_CODEX_BATCH_SIZE": "2",
 		}),
 	})
 	if err != nil {

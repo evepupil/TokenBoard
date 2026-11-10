@@ -76,8 +76,7 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		Stderr:      provReportDiagnostic(&diagnostics),
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(input SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -135,8 +134,7 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -183,8 +181,7 @@ func TestCodexHookRescansAllPendingRowsWhenARetryCrossesAUsageDate(t *testing.T)
 		CollectedAt: "2026-05-23T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(input SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -233,8 +230,7 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -435,9 +431,8 @@ func TestCodexHookKeepsCompleteChangedDateAggregationWhileExcludingUnrelatedHist
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_STATE_DIR":            stateDir,
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
+			"TOKENBOARD_STATE_DIR": stateDir,
 		}),
 	}
 	if _, err := Collect(context.Background(), options); err != nil {
@@ -521,8 +516,7 @@ func TestCodexHookDoesNotAddAReusedPendingSnapshotLabelledAllOnTopOfTheSameDay(t
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 	}
 

@@ -40,7 +40,7 @@ pnpm format:check
 - `apps/web/app/features/`：按业务 feature 组织的服务、查询、schema、组件和测试。
 - `packages/collector/`：本地 Node.js collector，负责调用 `ccusage`、读取各工具本地 usage 记录并上传 snapshot。
 - `packages/usage-core/`：跨端共享的 usage schema、normalize、hash 和工具函数。
-- `clients/go/`：Go 客户端（M0–M6 已落地：`internal/contract` 契约与金样本、`internal/upload` 上传与 backoff、`internal/state` 运行锁、`internal/cli` 子命令、`internal/collect` 全部 21 个来源 provider（九个核心来源 + 12 个 ccusage 工具来源，后者由 `providers/ccusagetool` 参数化实现）与共享扫描/cursor 层、`internal/pricing` 动态定价目录、`internal/ccusage`/`codexusage` 外部工具调用、`internal/release` + `internal/selfupdate` 发布通道）。与 TS collector 共用 `collector-run.lock`、cursor 文件名和 `upload-backoff.json`，改动这些协议必须两侧同时验证（`docs/specs/go-client-spec.md`）。发布侧另有仓库根 `.goreleaser.yaml`（构建矩阵 3 OS × 2 arch）与 skill 的 `clientType`（`git`|`binary`，缺省 `git`）。
+- `clients/go/`：Go 客户端（M0–M6 已落地：`internal/contract` 契约与金样本、`internal/upload` 上传与 backoff、`internal/state` 运行锁、`internal/cli` 子命令、`internal/collect` 全部 21 个来源 provider（九个核心来源 + 12 个 ccusage 工具来源，后者由 `providers/ccusagetool` 参数化实现）与共享扫描/cursor 层、`internal/pricing` 动态定价目录、`internal/ccusage`（仅报告契约：decode/normalize/有序 JSON/凭据剥离/report 接缝）、`internal/release` + `internal/selfupdate` 发布通道）。Go 客户端自 2026-11-10（S5）起全部来源在进程内采集，**不获取、不执行、不分发 ccusage**；`internal/ccusage/{acquire,exec,runner}` 已删除，`cmd/tokenboard` 的 `main_test.go` 以 `go list -deps` 守住这条边界。与 TS collector 共用 `collector-run.lock`、cursor 文件名和 `upload-backoff.json`，改动这些协议必须两侧同时验证（`docs/specs/go-client-spec.md`）。发布侧另有仓库根 `.goreleaser.yaml`（构建矩阵 3 OS × 2 arch）与 skill 的 `clientType`（`git`|`binary`，缺省 `git`）。
 - `skills/tokenboard/`：Codex / Claude Code 安装、同步、hook、schedule 脚本。
 - `apps/web/app/components/ui/`：通用 UI 原语；业务组件不要放这里。
 - `apps/web/db/migrations/`：按序执行的 D1 migration；部署前必须核对 migration、Drizzle schema 和 `db/verify-*.sql`。
@@ -71,7 +71,7 @@ TokenBoard 是一个面向多用户的 AI token 使用统计平台，而不是�
 
 - 支持用户注册或创建个人上传 token。
 - 支持 Claude Code、Codex、Antigravity CLI、Antigravity、Antigravity IDE、OpenCode、Pi、Grok Build、DeepSeek Harness，以及 amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode 十二个 ccusage 工具类 usage 来源（`packages/usage-core` 共 21 个来源枚举）。
-- 通过 TokenBoard skill + collector CLI 调用 `ccusage`、`@ccusage/codex`，并从 Antigravity 三类本地历史中提取 token 元数据。
+- 通过 TokenBoard skill + collector CLI 采集各来源（Go 客户端在原进程内读取 Claude Code / Codex 会话记录与各工具本地存储；TypeScript collector 在其退役前仍调用 `ccusage`、`@ccusage/codex`），并从 Antigravity 三类本地历史中提取 token 元数据。
 - Antigravity CLI 可额外通过官方 `statusLine.command` 写入脱敏本地诊断事件；该路径不参与 collector snapshot 或上传计量。
 - 后端接收标准化后的 usage snapshot，并按用户、日期、来源、模型聚合。
 - 提供统计 dashboard、公开 JSON API、GitHub README SVG 卡片。
@@ -106,8 +106,8 @@ TokenBoard 是一个面向多用户的 AI token 使用统计平台，而不是�
 - TokenBoard skill: Codex / Claude Code 通知 hook 安装入口，以及 Antigravity CLI status line 采集安装入口
 - CLI runtime: Node.js
 - Usage source:
-  - Claude Code: `ccusage`
-  - Codex: `@ccusage/codex`
+  - Claude Code: `~/.claude/projects/**/*.jsonl` 会话记录（Go 原生；TS collector 调用 `ccusage`）
+  - Codex: `~/.codex/{sessions,archived_sessions}/**/*.jsonl`（Go 原生；TS collector 调用 `@ccusage/codex`）
   - Antigravity CLI: `~/.gemini/antigravity-cli/conversations/*.db` 的 `gen_metadata.data` token 元数据；`~/.gemini/antigravity-cli/settings.json` 的 `statusLine.command` 仅写入本地脱敏诊断日志
   - Antigravity: `~/.gemini/antigravity/conversations` 的 SQLite token 元数据和 bounded language-server metadata projection
   - Antigravity IDE: `~/.gemini/antigravity-ide/conversations` 的 SQLite token 元数据和 bounded language-server metadata projection
@@ -150,7 +150,7 @@ Worker 不负责：
 
 本地 skill/collector 负责：
 
-- 调用 `ccusage` 或 `@ccusage/codex`。
+- 在原进程内读取各来源记录（Go 客户端；TS collector 过渡期仍调用 `ccusage` 或 `@ccusage/codex`）。
 - 从 Antigravity 三类本地历史中只提取 token、model、timestamp 和去重所需 hash。
 - 通过 Antigravity CLI status line handler 读取 stdin，严格限长解析后只保存脱敏 JSONL。
 - 将不同来源的数据 normalize 成 TokenBoard 的标准格式。
@@ -191,7 +191,7 @@ OpenCode / Pi / Grok Build / DeepSeek Harness 约束：
 
 ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo、copilot、gemini-cli、kimi、qwen、openclaw、zcode）：
 
-- 这 12 个来源由参数化 provider 统一采集：`<tool> daily --json` 取总量、`<tool> session --json` 取 session 数，两侧实现都只有一份代码（TS `providers/ccusage-tools.ts`，Go `providers/ccusagetool`）。
+- 这 12 个来源由参数化 provider 统一采集：`<tool> daily --json` 取总量、`<tool> session --json` 取 session 数，两侧实现都只有一份代码（TS `providers/ccusage-tools.ts`，Go `providers/ccusagetool`）。Go 侧自 S5 起由 `providers/ccusagetool/native.go` 的进程内 runner 应答同一组参数，`adapters/tools` 逐工具实现读取与定价；参数表仍是契约，改名必须两侧同时改。
 - 子命令名固定为来源同名，唯一例外是 `gemini-cli` → `gemini`（ccusage 没有 `gemini-cli` 子命令，传错名会 exit 2 使整源失败）。命令名映射表两侧必须同时改。
 - 工具未安装时 ccusage 以 exit 0 返回空 daily 报告（`{"daily":[],...}`），provider 据此直接返回空结果、**不发起 session 调用**；这条短路只认 `daily` 数组，比 normalize 的行提取更严格。
 - 这 12 个来源不做动态定价 prepare（TS 侧同样不做），自报费用直接使用；它们不安装 hook，也不参与 hook cursor warm。
@@ -202,7 +202,7 @@ ccusage 工具类来源约束（amp、droid、codebuff、hermes、goose、kilo�
 
 这些不变量一旦破坏就是静默计费分叉，两侧改动必须同步验证：
 
-- **ccusage 子进程环境必须剥离凭据**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.scrubCredentialEnv`）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE`/`TOKENBOARD_RELEASE_BASE_URL`/`TOKENBOARD_REPO_URL` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。skill 侧的同一名单在 `skills/tokenboard/scripts/child-env.mjs`（`upgrade-utils.mjs` 的 `spawnRedacted` 用它保护 `git clone`/`pnpm install` 子进程，后者会执行依赖的 lifecycle 脚本），三处名单由 `skills/tokenboard/scripts/child-env.test.mjs` 与 Go/TS 各自测试对照，改动需同步。
+- **凭据不得进入第三方子进程环境**（TS `command.ts` 经 `childProcessEnv`，Go `ccusage.ScrubCredentialEnv`；Go 客户端已不再 spawn ccusage，该函数现在只被 `selfupdate` 的探测与 dev-only 的 `cmd/parity` 使用，名单本身仍是三处对照的契约）。`npx`/`pnpm dlx` 会下载执行第三方包，`TOKENBOARD_UPLOAD_TOKEN`/`TOKENBOARD_PAIRING_CODE`/`TOKENBOARD_RELEASE_BASE_URL`/`TOKENBOARD_REPO_URL` 不得出现在其 env 里；新增 provider 时不要绕过这个过滤。skill 侧的同一名单在 `skills/tokenboard/scripts/child-env.mjs`（`upgrade-utils.mjs` 的 `spawnRedacted` 用它保护 `git clone`/`pnpm install` 子进程，后者会执行依赖的 lifecycle 脚本），三处名单由 `skills/tokenboard/scripts/child-env.test.mjs` 与 Go/TS 各自测试对照，改动需同步。
 - **Codex 静态费率用运行时除法**：`internal/collect/providers/codex/context_pricing.go` 的 `codexDivisor` 是 `var` 而非 `const`——Go 对无类型常量表达式精确求值后舍入一次，JS 是 double 除法再舍入一次，`0.2/1e6` 一类字面量两边差 1 ULP，会让 `snapshotHash` 分叉、shadow 报 diff。`TestStaticRatesMatchTheJavaScriptDoubles` 钉住位模式。
 - **公开端点 `/api/public/model-pricing` 有 IP 限流**（`publicModelPricingRead` 120/60s）。Worker Cache 只存 200，所以带随机 `cursor` 的请求每次都直达 D1，不能撤掉这道闸。
 - **上传端点强制 https**，loopback（`localhost`/`127.0.0.1`/`::1`）例外（TS `endpoint.ts`，Go `cli/endpoint.go`）。上传请求一律 `redirect: 'manual'` / `CheckRedirect`（Go 同 host 异 port 会带 Authorization 转发）。
@@ -643,4 +643,4 @@ git rev-list --left-right --count master...origin/master
 - collector 依赖外部 usage 工具；升级相关依赖时必须同步更新 provider 测试、package-runner 测试和 `pnpm-lock.yaml`。
 - 判断 client 健康状态时，区分 client 代码问题、主机网络问题和用户未配置问题。
 - TokenBoard 定时同步日志默认位于用户配置目录下的 `logs/daily-sync.out.log` 和 `logs/daily-sync.err.log`。
-- 项目要求 Node.js `^22.23.4 || ^24.22.1 || >=26.12.1`、pnpm `10.21.0`；根 `.npmrc` 设 `engine-strict=true`，且 `setup.mjs`/`sync.mjs`/`install-collector.mjs` 入口会硬拒更低版本（安全下限，见 `skills/tokenboard/scripts/node-version.mjs`）。改这条线要同步四个 `package.json` 的 `engines`、`.npmrc`、README 和 SKILL.md 的排障文案，`node-floor-docs.test.mjs` 会守住一致性。collector 依赖外部 `ccusage`/`@ccusage/codex`，缺少本地来源应按 unavailable 处理，不能创建空目录伪造成功。
+- 项目要求 Node.js `^22.23.4 || ^24.22.1 || >=26.12.1`、pnpm `10.21.0`；根 `.npmrc` 设 `engine-strict=true`，且 `setup.mjs`/`sync.mjs`/`install-collector.mjs` 入口会硬拒更低版本（安全下限，见 `skills/tokenboard/scripts/node-version.mjs`）。改这条线要同步四个 `package.json` 的 `engines`、`.npmrc`、README 和 SKILL.md 的排障文案，`node-floor-docs.test.mjs` 会守住一致性。TS collector 依赖外部 `ccusage`/`@ccusage/codex`（Go 客户端已原生采集）；缺少本地来源应按 unavailable 处理，不能创建空目录伪造成功。
