@@ -38,14 +38,14 @@ import (
 
 // useNativeTools selects the in-process adapters instead of the ccusage
 // subprocess. It is a compile-time constant, not an environment variable:
-// flipping it is a reviewed commit, and the switch must never fall back to
-// ccusage silently (a parity run would then compare ccusage with itself).
-const useNativeTools = false
+// flipping it was a reviewed commit of its own (S5, 2026-11-10), and the
+// switch must never fall back to ccusage silently (a parity run would then
+// compare ccusage with itself).
+const useNativeTools = true
 
 // nativeCollect is the native entry point: the same pipeline as Collect, with
 // the in-process report source.
 func nativeCollect(ctx context.Context, source contract.Source, options Options) ([]contract.Snapshot, error) {
-	options.useNativeReport = true
 	return Collect(ctx, source, options)
 }
 

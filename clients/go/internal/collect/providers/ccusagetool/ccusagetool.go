@@ -52,10 +52,10 @@ type Options struct {
 	// ResolveBinary acquires the local ccusage binary; nil means
 	// ccusage.Resolve. Tests inject it so no real install is probed.
 	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
-	// useNativeReport selects the in-process adapters for this one collection.
-	// Only nativeCollect sets it; the compile-time useNativeTools constant is
-	// the reviewed switch.
-	useNativeReport bool
+	// ccusagePath asks for the subprocess path explicitly. Since S5 (2026-11-10)
+	// the in-process adapters are the default; the parity harness and the
+	// ccusage-protocol tests are the only callers that set it.
+	ccusagePath bool
 }
 
 // Collect gathers one ccusage-tool source's usage.
@@ -90,7 +90,7 @@ func Collect(ctx context.Context, source contract.Source, options Options) ([]co
 		return nil, err
 	}
 	var packageRunner ccusage.PackageRunner
-	native := useNativeTools || options.useNativeReport
+	native := !options.ccusagePath
 	if native {
 		prepared, err := pricing.Prepare(pricing.PrepareInput{
 			StateDir:       options.StateDir,

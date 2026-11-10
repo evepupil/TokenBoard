@@ -59,30 +59,30 @@ func TestEveryToolSourceReachesANativeAdapter(t *testing.T) {
 	}
 }
 
-// TestUseNativeToolsDefaultsToTheCcusagePath pins that flipping the switch is a
-// reviewed commit: the constant is false and the registered provider runs the
-// ccusage subprocess.
-func TestUseNativeToolsDefaultsToTheCcusagePath(t *testing.T) {
-	if useNativeTools {
-		t.Fatal("useNativeTools must default to false until the parity gate is green")
+// TestUseNativeToolsSelectsTheNativePath pins the switch's current state: the
+// constant is true (S5, 2026-11-10), so the registered provider takes the
+// in-process adapters and never invokes ccusage. Collect's ccusagePath option
+// stays available to the parity harness and the protocol tests.
+func TestUseNativeToolsSelectsTheNativePath(t *testing.T) {
+	if !useNativeTools {
+		t.Fatal("useNativeTools is false; the native path regressed to ccusage")
 	}
 	runner := &testRunner{t: t, responses: map[string]any{
 		"amp daily --json --timezone UTC":   dailyReport(t, "2026-01-02"),
 		"amp session --json --timezone UTC": sessionReport(t, "s-1", ""),
 	}}
 	if _, ok := collect.Lookup(contract.SourceAmp); !ok {
-		t.Fatal("amp has no ccusage provider")
+		t.Fatal("amp has no provider")
 	}
-	_, err := Collect(context.Background(), contract.SourceAmp, Options{
+	if _, err := Collect(context.Background(), contract.SourceAmp, Options{
 		Timezone: "UTC",
 		Env:      envFunc(toolEnv(t)),
 		Runner:   runner.run,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.calls) == 0 {
-		t.Fatal("the default path must invoke ccusage")
+	if len(runner.calls) != 0 {
+		t.Fatal("the native path must not invoke the ccusage runner")
 	}
 }
 

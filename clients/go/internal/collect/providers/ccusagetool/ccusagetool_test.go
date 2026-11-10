@@ -124,7 +124,18 @@ func collectTool(t *testing.T, source contract.Source, runner *testRunner, optio
 	if options.CollectedAt == "" {
 		options.CollectedAt = testCollectedAt
 	}
+	// From S5 (2026-11-10) on, the tool family's default is the in-process
+	// adapters. This suite asserts the ccusage subprocess protocol, so it asks
+	// for that path by name; the production default and its gate live in
+	// native_flip_test.go.
 	options.Runner = runner.run
+	options.ccusagePath = true
+	// Keep the native adapters' data-directory discovery away from the
+	// tester's own installs: every tool source resolves its HOME override on
+	// the first call, and a missing value would read the real ~/.zcode etc.
+	if options.HomeDir == "" {
+		options.HomeDir = t.TempDir()
+	}
 	snapshots, err := Collect(context.Background(), source, options)
 	if err != nil {
 		t.Fatal(err)
