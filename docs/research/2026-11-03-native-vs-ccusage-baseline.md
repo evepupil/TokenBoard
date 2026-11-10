@@ -13,11 +13,12 @@
 
 > **重要声明（必读）**
 >
-> **S1 尚未实现任何 native provider**。`bench-collect` 的 native 列在三个场景里全部返回
-> `notImplemented`（0 轮测量）。因此**本文只是 ccusage 侧的基线**，不是 native vs ccusage 的对比；
-> native 侧的真实数据要等 S2+ 落地后由
-> `docs/research/<date>-native-vs-ccusage-benchmark.md` 交付（设计文档 §9.3）。
-> 本文任何数字都**不能**被引用为“native 更快/更慢”的证据。
+> ~~S1 尚未实现任何 native provider~~ —— **2026-11-10 更新**：native 侧已交付，对比结果见
+> `docs/research/2026-11-10-native-vs-ccusage-benchmark.md`（S5；single/30d 两个场景，5 轮中位数）
+> 与 `2026-11-05-claude-native-parity.md` §5.3（full 场景，native 墙钟 +22.1%）。
+> 本文的 value 仍然是**ccusage 侧的基线**：`bench-collect` 的 native 列在本轮三场景里全部是
+> `notImplemented`（0 轮测量），所以本文任何数字都**不能**被引用为“native 更快/更慢”的证据。
+> 两份新报告与本文件的测量条件不同（本机负载 59 vs 76–142），绝对值不可直接相减。
 
 ## 1. 测量方法
 
