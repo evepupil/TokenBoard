@@ -71,7 +71,7 @@ hook 多出的 2 条快照与 4 条 `liveWrite` 来自当天正在写入的会�
 token、日期、时区、模型名、`sessionCount` 全部逐位一致；成本差异的逐行倍率（go/ts）方向不一致：
 deepseek 族的两种拼写在在线表上命中不同条目，既能更贵也能更便宜
 （`2026-11-10-s5-flip-coverage.md` §2.4 记录的「双向费率差」的逐行体现）。
-**没有任何非成本字段的分叉**，所以按 spec §2 G2 的定义，这不是语义移植缺陷；
+**没有任何非成本字段的分叉**，所以按 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 的定义，这不是语义移植缺陷；
 但倍率远大于总量级的 7.7%，发布说明和后续裁决都必须按逐行倍率看，不能按总量看。
 
 ### 3.1 `kimi-k3.1` 的 1.98 倍：精确命中 vs 模糊命中
@@ -94,7 +94,7 @@ ccusage claude daily ... --config /tmp/mini.json   # 不带 --offline
 ```
 
 结论：**Go 与 ccusage `--offline` 逐位一致**，差异全部来自在线目录对 `kimi-k3.1` 的精确命中。
-这是 spec §2 G2 定义的口径边界，但幅度提醒值得写进发布说明：单行成本差异可以是 ~2 倍，
+这是 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 定义的口径边界，但幅度提醒值得写进发布说明：单行成本差异可以是 ~2 倍，
 不只 7.7% 的总量级。触发条件是服务端目录里同时存在同一模型名的「基础版」与「highspeed 版」，
 冻结语料只能按最长键模糊命中。
 

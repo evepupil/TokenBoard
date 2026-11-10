@@ -15,7 +15,7 @@
 ## Global Constraints
 
 - 三个开关是编译期常量、不是环境变量（`clients/go/internal/collect/providers/{claudecode,codex,ccusagetool}/native.go`），每次翻转是独立 commit，且必须能在失败时单独 `git revert`。
-- 翻转的验收口径按 spec §2 G2 重定义后的 parity 基准：**非成本字段逐项一致（`onlyInNative`/`onlyInCcusage` 为 0），成本差异逐条可归因到「冻结语料 + 服务端 override」口径**；§10.1.4 的「全 match」对 claude 不可满足（2026-11-10 口径复核，见 `docs/research/2026-11-05-claude-native-parity.md` §9）。
+- 翻转的验收口径按 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 重定义后的 parity 基准：**非成本字段逐项一致（`onlyInNative`/`onlyInCcusage` 为 0），成本差异逐条可归因到「冻结语料 + 服务端 override」口径**；§10.1.4 的「全 match」对 claude 不可满足（2026-11-10 口径复核，见 `docs/research/2026-11-05-claude-native-parity.md` §9）。
 - 删除类改动 fail-closed：任何被删符号若仍被非测试代码引用，编译失败即停；不得为了让编译通过而保留「静默降级」分支。
 - TS collector（`packages/collector`）按 spec D6 保持使用 ccusage，**本计划的任何删除都不得改动 TS 侧行为**（`packages/collector/package.json` 的 `ccusage` 依赖保留）。
 - `packages/collector/ccusage.json` 与 `clients/go/internal/pricing/ccusage.json` 必须逐字节相同（CI `workspace typecheck` 的 `diff -u` 断言）；原生路径继续使用这份 bundled override，不因移除 ccusage 而删除。
@@ -39,7 +39,7 @@
   - 三路总费用：ccusage 在线 9388.10 → ccusage 离线/内置表 8669.30（-7.7%）→ native 与 ccusage 离线**逐位一致**；
   - -7.7% 的成因是 LiteLLM 在线价表与 ccusage 20.0.33 构建期快照的费率差异（deepseek 族**双向**不同），**不是漏模型**；
   - 唯一真正的漏价 `hy4-free`（~$7/周）已补 `pricingOverrides`（`1b963af`），`step-5-preview`（~$0.21/周）由 `step-5-preview-free` 刻意置零，其余未覆盖模型（`group/auto-dfmodel`、`deepseek_for_coding`、`kimi-k3.1`）在 ccusage 在线/离线两侧均为 0。
-- **决策（2026-11-10）：** 补 `hy4-free` override，接受剩余 7.7% 的总差额，并在发布说明中明示——这是 spec §2 G2 已定义的口径边界，不是缺陷修复。
+- **决策（2026-11-10）：** 补 `hy4-free` override，接受剩余 7.7% 的总差额，并在发布说明中明示——这是 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 已定义的口径边界，不是缺陷修复。
 - Codex、11 个工具来源、copilot 的闸门与 gap：`2026-11-08-codex-native-parity.md`（10/10 match）、`2026-11-09-tools-native-parity.md`（3 个有数据的来源方向 0 diff；`CCUSAGE_MODEL_ALIASES` 不移植，R1）、`2026-11-09-copilot-native-parity.md` §4（真机 N/A，靠金样本 + 上游快照交叉）。
 
 ---

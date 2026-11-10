@@ -31,7 +31,7 @@ ccusage 的 LiteLLM 实时价表。
 
 本机 7 天窗口（2026-11-02 至 11-08，`Asia/Shanghai`）实测：在线 **9388.10 USD**、离线/native
 **8669.30 USD**，native 比在线低 **7.7%**。差额几乎全部来自 `deepseek-v4.1-flash` 系列的费率
-差异（LiteLLM 实时表与冻结快照双向都不等），不是漏模型。这是 `spec §2 G2` 已定义的边界。
+差异（LiteLLM 实时表与冻结快照双向都不等），不是漏模型。这是 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 已定义的边界。
 
 相关的小改动：唯一真正漏价的 `hy4-free`（约 $7/周）已补 override，现按 `hy4` 同费率计费。
 `step-5-preview` 沿用 `step-5-preview-free` 的置零约定；`group/auto-dfmodel`、`deepseek_for_coding`、

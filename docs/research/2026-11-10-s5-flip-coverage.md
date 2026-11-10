@@ -62,7 +62,7 @@ LiteLLM 在线价表与 ccusage 20.0.33 构建期快照对 `deepseek-v4.1-flash`
 - `DeepSeek-V4.1-Flash`（首字母大写）：在线 $1891、离线 $943，在线**翻倍**
 - 两种拼写在 LiteLLM 表上命中了不同的定价条目，而在冻结快照上归一化到同一费率
 
-这不是「漏」——LiteLLM 的实时价表随时会变动。spec §2 G2 已经明确定义了这条边界。
+这不是「漏」——LiteLLM 的实时价表随时会变动。`docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 已经明确定义了这条边界。
 
 ## 3. S5 决策：补一条 override，接受 7.7% 差额
 
@@ -84,7 +84,7 @@ LiteLLM 在线价表与 ccusage 20.0.33 构建期快照对 `deepseek-v4.1-flash`
 ### 对翻转的影响
 
 Go 客户端**会上传**（`internal/cli/cli.go:261`），所以翻到原生后生产 sync 机器的 claude 费用将从
-在线口径变为离线口径，总额下降约 7.7%。这是 **spec §2 G2 已定义的口径边界**，需要在发布说明
+在线口径变为离线口径，总额下降约 7.7%。这是 **`docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 已定义的口径边界**，需要在发布说明
 中明确写明，不做静默降量。
 
 ## 4. 未覆盖边界
