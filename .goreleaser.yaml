@@ -50,21 +50,9 @@ archives:
       # The consumer extracts the binary by name and ignores everything else,
       # so the readme travels with it without changing that lookup.
       - README.md
-      # Spec §4.1: ccusage is bundled rather than fetched on first run, so a
-      # fresh install works offline and the version is the one the gate in
-      # clients/go/scripts/check-deps.sh verified. bundle-ccusage.mjs lays the
-      # files out one directory per platform, and the glob copies the binary
-      # under its own base name — `ccusage`, or `ccusage.exe` on Windows —
-      # the name the bundled layer looks up (binaryName() in
-      # internal/ccusage). `dst` does not take templates, so the rename happens
-      # in the bundle layout, not here.
-      - src: dist-ccusage/ccusage_{{ .Os }}_{{ .Arch }}/*
-        dst: .
-        strip_parent: true
-      # MIT requires the notice to travel with the redistribution.
-      - src: dist-ccusage/LICENSE.ccusage
-        dst: .
-        strip_parent: true
+      # No ccusage: since S5 (2026-11-10) every source collects in process, so
+      # the archive carries the client alone. A client that still finds a copy
+      # from an earlier release reports it and leaves it in place.
 
 checksum:
   name_template: "checksums.txt"

@@ -410,10 +410,6 @@ jobs:
           TOKENBOARD_TIMEZONE: UTC
           TOKENBOARD_SINCE: all
           TOKENBOARD_STATE_DIR: ${{ runner.temp }}/shadow-state
-          # The claude-code and codex paths run ccusage; point both sides at
-          # the copy the collector dependency already installed, so neither
-          # downloads one and both run the same binary.
-          TOKENBOARD_CCUSAGE_BIN: ${{ github.workspace }}/packages/collector/node_modules/.bin/ccusage
         run: |
           set -euo pipefail
           # The list is derived from the shared source declaration, not repeated
@@ -424,9 +420,9 @@ jobs:
           #
           # The ccusage tool family is included deliberately: the runner has
           # none of these tools installed, so both sides must agree on an
-          # empty result. A wrong subcommand name is what this catches —
-          # ccusage exits 2 on an unknown command, which fails the Go source
-          # while the TS side reports "not installed", so the run diverges.
+          # empty result. A wrong subcommand name is what this catches — the
+          # TS side reports "not installed" while a Go source that names a
+          # command the tool does not have fails instead, so the run diverges.
           sources=$(node --input-type=module -e \
             "import('./skills/tokenboard/scripts/usage-sources.mjs').then((m) => console.log(m.usageSources.filter((source) => !source.startsWith('antigravity')).join(' ')))")
           for source in $sources; do
@@ -435,9 +431,8 @@ jobs:
             echo "::endgroup::"
           done
 
-      # Production runs the incremental hook path for the two ccusage-backed
-      # sources, not the full preview above, so the hook path gets its own
-      # comparison. Each run needs its own fresh state directory: a hook run
+      # Production runs the incremental hook path for claude-code and codex,
+      # not the full preview above, so the hook path gets its own comparison. Each run needs its own fresh state directory: a hook run
       # is driven by its cursor, and a reused one would only re-read what an
       # earlier run already acknowledged.
       - name: shadow diff (hook path)
@@ -445,7 +440,6 @@ jobs:
           TOKENBOARD_COLLECTOR_DIR: ${{ github.workspace }}
           TOKENBOARD_TIMEZONE: UTC
           TOKENBOARD_SINCE: all
-          TOKENBOARD_CCUSAGE_BIN: ${{ github.workspace }}/packages/collector/node_modules/.bin/ccusage
         run: |
           set -euo pipefail
           for source in claude-code codex; do
@@ -477,8 +471,8 @@ jobs:
 
   # The release pipeline itself is otherwise untested until the first tag:
   # a snapshot build exercises GoReleaser's config, the ldflags stamp, the
-  # ccusage bundling and the archive layout, and asserts the artifact names
-  # that internal/release constructs before anything is published.
+  # archive layout, and asserts the artifact names that internal/release
+  # constructs before anything is published.
   release-dry-run:
     name: Release dry run
     runs-on: ubuntu-latest
@@ -491,17 +485,6 @@ jobs:
         with:
           go-version-file: clients/go/go.mod
           cache-dependency-path: clients/go/go.sum
-
-      # setup-node enables package-manager caching from package.json's
-      # packageManager field, which makes it look for pnpm on PATH.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-
-      - name: bundle ccusage
-        run: node clients/go/scripts/bundle-ccusage.mjs
 
       - uses: goreleaser/goreleaser-action@v7
         with:
@@ -531,12 +514,19 @@ jobs:
           for archive in ./*.tar.gz; do
             entries=$(tar -tzf "$archive")
             case "$archive" in
-              *windows*) binary=tokenboard.exe; ccusage=ccusage.exe ;;
-              *)         binary=tokenboard;     ccusage=ccusage ;;
+              *windows*) binary=tokenboard.exe ;;
+              *)         binary=tokenboard ;;
             esac
-            for entry in "$binary" "$ccusage" README.md LICENSE.ccusage; do
+            for entry in "$binary" README.md; do
               echo "$entries" | grep -qx "$entry" \
                 || { echo "$archive is missing $entry"; exit 1; }
+            done
+            # The client collects in process: a ccusage or its notice in the
+            # archive would be a bundle nobody uses.
+            for entry in ccusage ccusage.exe LICENSE.ccusage; do
+              if echo "$entries" | grep -qx "$entry"; then
+                echo "$archive unexpectedly carries $entry"; exit 1
+              fi
             done
           done
           # The stamped version is what self-update compares against; a build
@@ -552,9 +542,9 @@ jobs:
             || { echo "unexpected version line: $version"; exit 1; }
 
       # The upgrade path end to end: serve a release the way GitHub does, run
-      # self-update against it, and assert the swap, the backup, the bundled
-      # ccusage and the no-op second run. Needs dist/ and dist-ccusage/ from
-      # the steps above.
+      # self-update against it, and assert the swap, the backup, that a
+      # ccusage copy from an earlier release is left in place, and the no-op
+      # second run. Needs dist/ from the steps above.
       - name: self-update end to end
         run: node clients/go/scripts/e2e-self-update.mjs
 
@@ -579,20 +569,6 @@ jobs:
         with:
           go-version-file: clients/go/go.mod
           cache-dependency-path: clients/go/go.sum
-
-      # setup-node enables package-manager caching from package.json's
-      # packageManager field, which makes it look for pnpm on PATH.
-      - uses: pnpm/action-setup@v6
-
-      # Spec §4.1: the tarballs bundle the platform ccusage binaries so a fresh
-      # install works offline. The script pins the version from
-      # internal/ccusage and verifies each npm tarball's sha512.
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .node-version
-
-      - name: bundle ccusage
-        run: node clients/go/scripts/bundle-ccusage.mjs
 
       # Pinned rather than `~> v2`: the config's archive and checksum names are
       # a contract with `internal/release`, and a template change across

@@ -1,9 +1,9 @@
 // End-to-end check for the binary client's upgrade path (spec §9 M6):
 // serve a release the way GitHub does, run `tokenboard self-update` against
-// it, and assert the client swapped itself, kept a backup, installed the
-// bundled ccusage, and treats a second run as a no-op.
+// it, and assert the client swapped itself, kept a backup, treats a second
+// run as a no-op, and leaves a ccusage copy from an earlier release alone.
 //
-// Run after `goreleaser release --snapshot` and `bundle-ccusage.mjs`:
+// Run after `goreleaser release --snapshot`:
 //
 //	node clients/go/scripts/e2e-self-update.mjs
 //
@@ -33,7 +33,6 @@ import { dirname } from 'node:path'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const goDir = join(repoRoot, 'clients', 'go')
-const distCcusage = join(repoRoot, 'dist-ccusage')
 const tag = 'v9.9.9'
 const version = '9.9.9'
 const goos = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform]
@@ -69,11 +68,6 @@ try {
     }
   )
   copyFileSync(join(repoRoot, 'README.md'), join(staged, 'README.md'))
-  const ccusageDir = join(distCcusage, `ccusage_${goos}_${goarch}`)
-  for (const entry of readdirSync(ccusageDir)) {
-    copyFileSync(join(ccusageDir, entry), join(staged, entry))
-  }
-  copyFileSync(join(distCcusage, 'LICENSE.ccusage'), join(staged, 'LICENSE.ccusage'))
 
   const releaseDir = join(root, 'MisonL', 'TokenBoard', 'releases', 'download', tag)
   mkdirSync(releaseDir, { recursive: true })
@@ -114,7 +108,12 @@ try {
   const binDir = join(root, 'bin')
   const configDir = join(root, 'config')
   mkdirSync(binDir, { recursive: true })
-  mkdirSync(configDir, { recursive: true })
+  mkdirSync(join(configDir, 'bin'), { recursive: true })
+  // A pre-S5 install left a ccusage copy beside the client. The update must
+  // not touch it, and must say so once rather than reporting a bundled install.
+  const legacyCcusage = join(configDir, 'bin', ccusageName)
+  writeFileSync(legacyCcusage, '#!/bin/sh\necho "ccusage 20.0.33 (left by an earlier release)"\n')
+  chmodSync(legacyCcusage, 0o755)
   const client = join(binDir, clientName)
   // Install the "previous release": the snapshot binary from dist/, whose
   // version differs from the one being served.
@@ -156,11 +155,13 @@ try {
   const backups = readdirSync(binDir).filter((entry) => entry.includes('.backup-'))
   if (backups.length !== 1) fail(`expected exactly one backup, found ${backups.length}`)
 
-  const installedCcusage = join(configDir, 'bin', ccusageName)
-  if (!existsSync(installedCcusage)) fail('the bundled ccusage was not installed')
-  if (goos !== 'windows') chmodSync(installedCcusage, 0o755)
-  const ccusageVersion = execFileSync(installedCcusage, ['--version'], { encoding: 'utf8' }).trim()
-  if (!/^ccusage \d/.test(ccusageVersion)) fail(`bundled ccusage reports ${ccusageVersion}`)
+  const leftovers = readFileSync(legacyCcusage, 'utf8')
+  if (!leftovers.includes('left by an earlier release')) {
+    fail('self-update replaced the ccusage copy an earlier release installed')
+  }
+  if (!first.stderr.includes('no longer bundles or uses ccusage')) {
+    fail(`self-update did not report the ccusage copy it left in place: ${first.stderr.trim()}`)
+  }
 
   // Already at the published version: the second run must not re-download.
   const downloadsBefore = hits.filter((path) => path.includes('/releases/download/')).length
@@ -169,7 +170,7 @@ try {
   const downloadsAfter = hits.filter((path) => path.includes('/releases/download/')).length
   if (downloadsAfter !== downloadsBefore) fail('the second run downloaded an archive it did not need')
 
-  console.log(`self-update: ${before} -> ${after}, backup kept, ${ccusageVersion} installed, second run a no-op`)
+  console.log(`self-update: ${before} -> ${after}, backup kept, legacy ccusage left in place, second run a no-op`)
   server.close()
   cleanup()
 } catch (error) {

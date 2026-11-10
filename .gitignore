@@ -15,9 +15,5 @@ apps/web/db/migrations/meta/
 coverage/
 .turbo/
 
-# ccusage binaries staged for the Go release archives by
-# clients/go/scripts/bundle-ccusage.mjs; the release job rebuilds them.
-dist-ccusage/
-
 # Local handoff notes are working artifacts, not part of the repository history.
 HANDOFF-*.md
