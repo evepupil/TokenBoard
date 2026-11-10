@@ -575,7 +575,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	server := fake.server(t)
 
 	configDir := t.TempDir()
-	ccusagePath := filepath.Join(configDir, "bin", "ccusage")
+	ccusagePath := filepath.Join(configDir, "bin", ccusageBinaryName())
 	if err := os.MkdirAll(filepath.Dir(ccusagePath), 0o700); err != nil {
 		t.Fatal(err)
 	}
