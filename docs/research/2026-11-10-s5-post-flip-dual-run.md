@@ -14,14 +14,17 @@ TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON='["<HOME>/.codex/archived_sessions.local"]' 
 
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source claude-code --until 2026-11-09
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source claude-code --hook
+node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source grok-build --since all
+node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source deepseek-harness --since all
 
-# 工具族：只有 kimi 与 zcode 在本机有数据，且工具源不接受 --until
+# 工具族：只有 kimi / zcode / amp 在本机有数据，且工具源不接受 --until
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source kimi --since all
 node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source zcode --since all
+node skills/tokenboard/scripts/shadow-dual-run.mjs --client /tmp/tb-a81450b --source amp --since all
 ```
 
-claude-code 的 preview 与 hook 两次都判为 `diff`，zcode 也是 `diff`，harness 按设计 **exit 1**
-（`exitCodeForDualRun`：任一 `diff`/`error` 即失败）。
+claude-code 的 preview 与 hook 两次都判为 `diff`，zcode 与 amp 也是 `diff`，harness 按设计
+**exit 1**（`exitCodeForDualRun`：任一 `diff`/`error` 即失败）。
 结构化明细由同一二进制直接产出：
 
 ```bash
@@ -41,6 +44,8 @@ TOKENBOARD_COLLECTOR_DIR=$PWD TOKENBOARD_TIMEZONE=Asia/Shanghai \
 | hook | `shadow-dual-run.mjs --client /tmp/tb-a81450b --source codex --hook` | `match`，18 快照，`liveWrite` 1 |
 
 翻转后 codex 的真实数据等价性在全量与增量两条路径上都成立。
+同一次补跑中 `grok-build` 与 `deepseek-harness` 也各拿到 4 快照、全部 **match**
+（`--since all`；默认 7 天窗口内无数据，这是已知的窗口问题，见 spec §11）。
 
 ## 3. claude-code：preview 与 hook 同口径，131 条只差 `costUsd`
 
@@ -109,15 +114,18 @@ harness 只能看到「字段不同」，无法判断差异是否可归因。人
 因此 claude-code 的翻转后双跑结论是：**语义等价成立；成本差异全部落在 G2 口径边界内**，
 但「单行可达 2 倍」是这条边界的新证据，发布说明需如实写。
 
-## 5. 工具族：kimi match，zcode 四条 cost-only 差异
+## 5. 工具族：kimi match，zcode 与 amp 是 cost-only 差异
 
-12 个工具来源里本机只有三处有数据（`--since all`，Go 原生侧计数）：`kimi` 2 条、`zcode` 5 条；
-`goose` / `copilot` / `openclaw` / `gemini-cli` 返回 0 条，其余六个目录不存在。
+12 个工具来源里本机只有三处有数据（`--since all`）：`kimi` 2 条、`zcode` 5 条、`amp` 2 条。
+其余九个（`droid` / `codebuff` / `hermes` / `goose` / `kilo` / `copilot` / `gemini-cli` /
+`qwen` / `openclaw`）逐个双跑，全部得到 `empty`（两侧一致空集，能钉住子命令名映射，但不是
+有数据的等价性验证）。
 
 | 来源 | 结果 |
 |---|---|
 | kimi | `match`，2 快照 |
 | zcode | `diff`，5 快照中 4 条差异，全部只差 `costUsd` |
+| amp | `diff`，2 快照全部差异，全部只差 `costUsd` |
 
 zcode 的 4 条是 `2026-10-23 / 10-26 / 10-30` 的 `GLM-5.3-Flash` 与 `2026-10-25` 的 `GLM-5.3`，
 TS 侧 0、Go 侧非零。**三路对照**：用同一份动态配置（`~/.tokenboard/ccusage.dynamic.json`）跑
@@ -129,14 +137,43 @@ TS 侧 0、Go 侧非零。**三路对照**：用同一份动态配置（`~/.toke
 > 差异的原因是**动态目录给 GLM-5.3 系补了价，而在线表没有**，与 claude 侧 `kimi-k3.1` 同属
 > G2 口径边界（方向相反：这次是 Go 侧有钱、在线侧没有）。
 
+### 5.1 amp：同一模型，Go 反而更便宜（0.53× / 0.67×）
+
+`amp` 的两条都在 `grok-code-fast-1` 上：
+
+| usageDate | TS（在线） | Go（原生） | 倍率 go/ts |
+|---|---|---|---|
+| 2025-10-28 | 1.1106968199999998 | 0.5941133200000004 | 0.53× |
+| 2025-10-29 | 2.050008900000001 | 1.3800499000000002 | 0.67× |
+
+`shadow` 只报 `costUsd` 一个差异字段，token 与 `sessionCount` 全等。三路对照：
+
+```bash
+# Go 侧实际使用的配置 → 与 Go 逐位一致
+AMP_DATA_DIR=$HOME/.local/share/amp ~/.tokenboard/bin/ccusage amp daily --json \
+  --offline --config ~/.tokenboard/ccusage.dynamic.json --since 2025-10-27 --until 2025-10-30
+# → 2025-10-29 grok-code-fast-1 cost = 1.3800499000000002
+
+# 在线（TS 生产路径）
+AMP_DATA_DIR=$HOME/.local/share/amp ~/.tokenboard/bin/ccusage amp daily --json \
+  --since 2025-10-28 --until 2025-10-28
+# → 2025-10-28 grok-code-fast-1 cost = 1.1106968199999998
+```
+
+差异来源是动态目录里的 override
+（`defaults/pricingOverrides/xai/grok-code-fast-1`：input 2e-7 / output 1.5e-6 / cacheRead 2e-8）
+比在线表便宜，所以这次方向与 zcode 相反：**Go 记的钱少于在线**。同属 G2 口径边界。
+注意 amp 的数据根是 `~/.local/share/amp`（`adapters/tools/amp.go:18` 的 `ampDefaultDataDir`），
+不是 `~/.amp`——按后者去找会误判成「本机没有 amp 数据」。
+
 ## 6. 未覆盖
 
 - codex 与 claude-code 的 hook 路径都已跑（codex match；claude-code 与 preview 同口径），
   但两侧都用**全新临时 state dir**（`clients/go/internal/cli/shadow.go:126,132` 各建一个
   `tokenboard-shadow-{go,ts}-*` 并 `defer os.RemoveAll`），测的是冷 cursor 上的增量行为；
   生产的热 cursor（只有少量文件变更、窄 ccusage 窗口）仍无端到端证据。
-- 工具族只有 kimi / zcode 有数据（§5）；其余十个来源在本机不存在或返回 0 条，它们的等价性
-  只能依赖冻结金样本与 2026-11-09 的 parity 证据，**没有**双跑证据。
+- 工具族只有 kimi / zcode / amp 有数据（§5），其余九个逐个双跑均为两侧一致 `empty`，
+  它们的等价性只能依赖冻结金样本与 2026-11-09 的 parity 证据，**没有**有数据的双跑证据。
 - preview 窗口截止 2026-11-09（避开活写竞态），不是全历史；`--hook` 与 `--until` 互斥，
   所以 hook 那次必然包含当天，其 diff 里已由 harness 单列 `liveWrite`。
 - 只在本机、darwin 上验证。
