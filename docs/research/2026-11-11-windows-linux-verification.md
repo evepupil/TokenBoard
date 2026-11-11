@@ -7,8 +7,8 @@
   macOS/darwin amd64 上做过；CI 的 windows-latest / ubuntu-latest 跑的是同一套测试，
   但没有覆盖真实用户数据，也没有在真机上执行过自更新换入。
 - 机器：
-  - Linux：`<linux-host>`，Ubuntu，kernel 6.8.0-146-generic，x86_64，24 核 / 31 GiB。
-  - Windows：`<windows-host>`，用户 `<user>`（管理员），Git Bash（MINGW64），MinGW gcc 15.1.0、
+  - Linux：Ubuntu，kernel 6.8.0-146-generic，x86_64，24 核 / 31 GiB。
+  - Windows：Windows amd64，管理员账户，Git Bash（MINGW64），MinGW gcc 15.1.0、
     `CGO_ENABLED=1`（race 检测器可用）。
 
 ## 1. 环境准备（两机相同口径）
@@ -83,8 +83,8 @@ Windows 的 `-race` 是真正的原生 race 检测（MinGW gcc + `CGO_ENABLED=1`
 
 ## 5. Windows 真机自更新换入
 
-用一个模拟 GitHub 布局的发布源（Linux 上 `http://<linux-host>:18080`：
-`/MisonL/TokenBoard/releases/latest` 302 → `/releases/tag/v2.0.0`，资产与 `checksums.txt` 静态提供），
+用一台 Linux 主机上的模拟 GitHub 布局发布源（`/MisonL/TokenBoard/releases/latest` 302 →
+`/releases/tag/v2.0.0`，资产与 `checksums.txt` 静态提供，端口转发给 Windows），
 Windows 上以带版本戳的 v1.0.0 二进制作为「旧版」，发布资产为 v2.0.0。
 
 | 用例 | 结果 |
