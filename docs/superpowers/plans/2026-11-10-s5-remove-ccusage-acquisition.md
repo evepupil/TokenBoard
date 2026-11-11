@@ -304,7 +304,7 @@
 
 1. `useNativeClaude` / `useNativeCodex` / `useNativeTools` 全部为 `true`，各自独立提交且可单独回滚。
 2. `git grep -n 'ccusage' clients/go` 只剩金样本冻结说明、语义出处注释与 `gen-*` 的只读校验；`go list -deps ./cmd/tokenboard` 不含获取/执行层。
-3. 三平台 `go build ./...`、`go test ./...`、`go vet`、`gofmt` 全绿；CI 除 macOS 外全绿（含 shadow、release dry-run、skill windows 套件）。**macOS 作业在 2026-11-10 晚连续三轮（`be3afce`、`33c5194`、`7f76378`）都以 `runner_id=0`、`steps=[]` 被取消——从未分配到 runner，非测试失败；其三条命令已在本机等价执行通过（`gofmt` 干净、`go vet` exit 0、`go test ./... -race` 43 包全绿）。这一格需在有 runner 时补跑。**
+3. 三平台 `go build ./...`、`go test ./...`、`go vet`、`gofmt` 全绿；CI 全绿（含 shadow、release dry-run、skill windows 套件）。最终 tip `91f5b89` 的 10 个作业全部实跑通过，macOS 也拿到 runner。此前 `be3afce`、`33c5194`、`7f76378` 三轮的 macOS 作业是 `runner_id=0`、`steps=[]`（从未分配到 runner，非测试失败），其间以本机等价执行兜底（`gofmt` 干净、`go vet` exit 0、`go test ./... -race` 43 包全绿）。
 4. `docs/research/2026-11-10-native-vs-ccusage-benchmark.md` 与 `2026-11-10-s5-release-notes.md` 提交，数字有命令出处。
 5. TS collector 行为不变（`packages/collector` 与 `usage-core` 测试全绿，`ccusage` 依赖保留）。
 6. claude 的 parity 口径差异（未覆盖模型、父行分摊）在报告中如实记录，不粉饰。
