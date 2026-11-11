@@ -1335,21 +1335,16 @@ func (r *Rules) scanFile(input scanFileInput) (bool, error) {
 		switch recordType {
 		case "session_meta":
 			identity := readSessionIdentity(record)
-			if identity != "" && sessionIdentity == "" {
+			// A forked Codex file opens with the child's session_meta and then
+			// replays the parent's own meta and history. Releases that predate
+			// session_id cannot be unified by it, so the two identities differ
+			// legitimately; the latest meta names the thread the records belong
+			// to, so adopt it instead of counting the replay against the child
+			// or dropping the rest of the file. Two files under one relative
+			// path that end up naming different threads are a real conflict,
+			// checked once the file is fully read.
+			if identity != "" && (sessionIdentity == "" || archiveAlias != "") {
 				sessionIdentity = scopedSessionIdentity(identity, input.identityPath)
-				if archiveAlias != "" {
-					if previous, ok := input.sessionIdentitiesByAlias[archiveAlias]; ok && previous != sessionIdentity {
-						return fmt.Errorf(
-							"Codex context pricing found conflicting session identities for %s", archiveAlias)
-					}
-					input.sessionIdentitiesByAlias[archiveAlias] = sessionIdentity
-				}
-			} else if identity != "" && sessionIdentity != "" && archiveAlias != "" {
-				observedIdentity := scopedSessionIdentity(identity, input.identityPath)
-				if observedIdentity != sessionIdentity {
-					return fmt.Errorf(
-						"Codex context pricing found conflicting session identities for %s", archiveAlias)
-				}
 			}
 			payload := ReadRecord(record["payload"])
 			source := ReadRecord(payload["source"])
@@ -1573,6 +1568,18 @@ func (r *Rules) scanFile(input scanFileInput) (bool, error) {
 	})
 	if readErr != nil {
 		return false, readErr
+	}
+	// The active and archived copies of one session share a relative path, so
+	// they share an alias. When both declare an identity they must agree: two
+	// different threads under one alias are not copies, and deduplicating them
+	// would silently drop usage. A file without session_meta inherits the
+	// alias' identity and trivially agrees.
+	if archiveAlias != "" && sessionIdentity != "" {
+		if previous, ok := input.sessionIdentitiesByAlias[archiveAlias]; ok && previous != sessionIdentity {
+			return false, fmt.Errorf(
+				"Codex context pricing found conflicting session identities for %s", archiveAlias)
+		}
+		input.sessionIdentitiesByAlias[archiveAlias] = sessionIdentity
 	}
 	return hasRelevantModel, nil
 }

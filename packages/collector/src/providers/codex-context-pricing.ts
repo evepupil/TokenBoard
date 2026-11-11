@@ -1251,20 +1251,16 @@ async function scanFile(input: {
   })) {
     if (record.type === 'session_meta') {
       const identity = readSessionIdentity(record)
-      if (identity && !sessionIdentity) {
+      // A forked Codex file opens with the child's session_meta and then
+      // replays the parent's own meta and history. Releases that predate
+      // session_id cannot be unified by it, so the two identities differ
+      // legitimately; the latest meta names the thread the records belong to,
+      // so adopt it instead of counting the replay against the child or
+      // dropping the rest of the file. Two files under one relative path that
+      // end up naming different threads are a real conflict, checked once the
+      // file is fully read.
+      if (identity && (!sessionIdentity || archiveAlias)) {
         sessionIdentity = scopedSessionIdentity(identity, input.identityPath)
-        if (archiveAlias) {
-          const previous = input.sessionIdentitiesByAlias.get(archiveAlias)
-          if (previous && previous !== sessionIdentity) {
-            throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
-          }
-          input.sessionIdentitiesByAlias.set(archiveAlias, sessionIdentity)
-        }
-      } else if (identity && sessionIdentity && archiveAlias) {
-        const observedIdentity = scopedSessionIdentity(identity, input.identityPath)
-        if (observedIdentity !== sessionIdentity) {
-          throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
-        }
       }
       const payload = readRecord(record.payload)
       const source = readRecord(payload?.source)
@@ -1408,6 +1404,18 @@ async function scanFile(input: {
         contextTier
       })
     }
+  }
+  // The active and archived copies of one session share a relative path, so
+  // they share an alias. When both declare an identity they must agree: two
+  // different threads under one alias are not copies, and deduplicating them
+  // would silently drop usage. A file without session_meta inherits the alias'
+  // identity and trivially agrees.
+  if (archiveAlias && sessionIdentity) {
+    const previous = input.sessionIdentitiesByAlias.get(archiveAlias)
+    if (previous && previous !== sessionIdentity) {
+      throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
+    }
+    input.sessionIdentitiesByAlias.set(archiveAlias, sessionIdentity)
   }
   return hasRelevantModel
 }

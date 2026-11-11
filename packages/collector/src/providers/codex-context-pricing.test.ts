@@ -715,6 +715,59 @@ describe('Codex context pricing', () => {
     }
   })
 
+  test('attributes a legacy fork to the latest session_meta and counts it once', async () => {
+    // Releases before Codex wrote session_id produce a forked file whose first
+    // session_meta names the child and whose second replays the parent, with
+    // no field to unify them. The file's records are the parent's, so adopting
+    // the latest meta must both stop the source from failing and keep the
+    // replay deduplicated against the parent's own file.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-context-legacy-fork-'))
+    const parent = join(root, 'sessions', '2026', '05', '20', 'parent.jsonl')
+    const forked = join(root, 'sessions', '2026', '05', '21', 'forked.jsonl')
+    try {
+      const row = tokenCount('2026-05-01T00:00:00.000Z', { last_token_usage: usage(10) })
+      await Promise.all([
+        writeJsonl(parent, [sessionMeta('parent-session'), row]),
+        writeJsonl(forked, [sessionMeta('child-session'), sessionMeta('parent-session'), row])
+      ])
+
+      await expect(
+        collectCodexContextPricingCostsFromFiles({
+          filePaths: [parent, forked],
+          timezone: 'UTC'
+        })
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects two files claiming one alias with different identities', async () => {
+    // The active copy and the archived copy share a relative path, so they
+    // share an alias. Two different session identities under it mean the files
+    // are not the same session, and deduplicating them would silently drop
+    // usage.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-context-alias-conflict-'))
+    const active = join(root, 'sessions', '2026', '05', '20', 'same-file.jsonl')
+    const archived = join(root, 'archived_sessions', '2026', '05', '20', 'same-file.jsonl')
+    try {
+      const row = tokenCount('2026-05-01T00:00:00.000Z', { last_token_usage: usage(10) })
+      await Promise.all([
+        writeJsonl(active, [sessionMeta('first-session'), row]),
+        writeJsonl(archived, [sessionMeta('second-session'), row])
+      ])
+
+      await expect(
+        collectCodexContextPricingCostsFromFiles({
+          filePaths: [active, archived],
+          timezone: 'UTC'
+        })
+      ).rejects.toThrow(/conflicting session identities/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('keeps anonymous sessions with the same filename separate across profiles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-context-profile-identity-'))
     const firstHome = join(root, 'first')

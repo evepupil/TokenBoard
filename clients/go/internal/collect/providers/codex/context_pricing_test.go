@@ -869,6 +869,51 @@ func TestPrefersTheActiveCopyWhenActiveAndArchivedContentsDiffer(t *testing.T) {
 	}})
 }
 
+func TestAttributesALegacyForkToTheLatestSessionMetaAndCountsItOnce(t *testing.T) {
+	// Releases before Codex wrote session_id produce a forked file whose first
+	// session_meta names the child and whose second replays the parent, with no
+	// field to unify them. The file's records are the parent's, so adopting the
+	// latest meta must both stop the source from failing and keep the replay
+	// deduplicated against the parent's own file.
+	root := t.TempDir()
+	parent := filepath.Join(root, "sessions", "2026", "05", "20", "parent.jsonl")
+	forked := filepath.Join(root, "sessions", "2026", "05", "21", "forked.jsonl")
+	row := tokenCount("2026-05-01T00:00:00.000Z", map[string]any{"last_token_usage": usage(10)}, "gpt-5.6-sol")
+	writeJSONL(t, parent, []map[string]any{sessionMeta("parent-session"), row})
+	writeJSONL(t, forked, []map[string]any{sessionMeta("child-session"), sessionMeta("parent-session"), row})
+
+	costs := mustCostsFromFiles(t, CollectFilesInput{
+		FilePaths: []string{parent, forked},
+		Timezone:  "UTC",
+	})
+	assertCostsEqual(t, costs, []CodexContextPricingCost{{
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
+	}})
+}
+
+func TestRejectsTwoFilesClaimingOneAliasWithDifferentIdentities(t *testing.T) {
+	// The active copy and the archived copy share a relative path, so they share
+	// an alias. Two different session identities under it mean the files are not
+	// the same session, and deduplicating them would silently drop usage.
+	root := t.TempDir()
+	active := filepath.Join(root, "sessions", "2026", "05", "20", "same-file.jsonl")
+	archived := filepath.Join(root, "archived_sessions", "2026", "05", "20", "same-file.jsonl")
+	row := tokenCount("2026-05-01T00:00:00.000Z", map[string]any{"last_token_usage": usage(10)}, "gpt-5.6-sol")
+	writeJSONL(t, active, []map[string]any{sessionMeta("first-session"), row})
+	writeJSONL(t, archived, []map[string]any{sessionMeta("second-session"), row})
+
+	_, err := costsFromFiles(t, CollectFilesInput{
+		FilePaths: []string{active, archived},
+		Timezone:  "UTC",
+	})
+	if err == nil {
+		t.Fatal("expected conflicting identities for one alias to be rejected")
+	}
+	if !strings.Contains(err.Error(), "conflicting session identities") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDeduplicatesAnArchivedCopyWhenOnlyTheActiveSessionHasAnIdentity(t *testing.T) {
 	root := t.TempDir()
 	active := filepath.Join(root, "sessions", "2026", "05", "20", "same-file.jsonl")
