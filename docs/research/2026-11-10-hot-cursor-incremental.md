@@ -161,5 +161,5 @@ Antigravity language server。所以 spec §11 解除暂停条件 2 只满足了
 ## 6. 未覆盖
 
 - 已覆盖 claude-code、codex 的预览与 hook 增量（§2、§4），以及 Antigravity GUI 两源的 SQLite 路由（§5）。
-- 文件「缩小」或整体重写（compaction）的情形未测；本次只测了追加。
-- 未在 Windows / Linux 上跑。
+- ~~文件「缩小」或整体重写（compaction）的情形未测；本次只测了追加。~~ 2026-11-11 已补：缩小、同尺寸改写、整体重写三类场景热 cursor 均与全新冷扫逐字段一致，见 `2026-11-11-hot-cursor-rewrite.md`。
+- 未在 Windows / Linux 上跑（2026-11-11 已在真机补上，见 `2026-11-11-windows-linux-verification.md`）。
