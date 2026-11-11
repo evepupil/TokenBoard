@@ -118,16 +118,48 @@ UUID 决定**，改名后截断副本与完整副本是两个不同会话，比�
 `token_count` 携带**累计总量** `info.total`；`adapters/codex/parser.go:746-757` 用
 「本次 total − 上次 total」取增量，所以补全文件后新增事件的增量会自然接续。
 
-## 4. 未覆盖
+## 5. Antigravity GUI 两源的 SQLite 热 cursor（合成夹具）
 
-- 已覆盖 claude-code 与 codex 两个来源的预览与 hook 增量（§2、§4）。
-- **codex 的热 cursor 仍未验证——不是没试，是夹具不成立**：用同样方法试了四份真实 codex
-  会话（`2026/10/14`、`10/15`、`11/03`、`11/04`），把文件截成两半再比「半份冷扫」与「整份
-  冷扫」的总量，**四份的总量全部相同**，于是截断本身不改变结果，做不出可判定的差异。直接
-  原因是 codex 的用量来自逐轮的 `token_count` 事件，截断尾部常常不产生新的计费事件；其中
-  两份（`11/03`、`11/04`）连总量都是 0，既无 token 也无成本。另外，夹具必须放在源文件真实
-  的 `sessions/YYYY/MM/DD` 目录下——放到 `sessions/2026/01/01/` 时 provider 静默返回空结果
-  且 exit 0，不报错。要验证 codex 热 cursor，需要一个**尾部确实带用量事件**的会话，本机现有
-  样本里没找到。
+本机没装 Antigravity（`/Applications` 与 `~/Applications` 都没有，`~/.gemini/antigravity*`
+也不存在），拿不到真实会话。改用**合成夹具**验证历史库这条路由：按
+`antigravitymeta/parser_test.go` 的 protobuf 形状造 `gen_metadata (idx INTEGER PRIMARY KEY,
+data BLOB)`，`data` 是 root → chatModel → {usage, timestamp, model} 的嵌套消息。
+
+| 指标 | cold（2 行） | hot（补到 4 行） | ref（全新 state） |
+|---|---|---|---|
+| 快照键数 | 1 | 1 | 1 |
+| `totalTokens` | 4600 | **14000** | 14000 |
+| 与 ref 的字段差异 | — | **0** | — |
+
+截断有判别力（4600 < 14000），热跑与全新冷扫逐字段一致——GUI 历史库的 cursor 增量
+（`lastReadRowIndexByCascade` 加文件扫描状态）是正确的。
+
+### 5.1 怎么驱动（CLI 不适用的原因）
+
+CLI 没有给 GUI 源留覆盖会话目录的入口：`clients/go/internal/cli/cli.go:435-446` 构造
+`collect.Options` 时**没有填 `HomeDir`**，而 `antigravitygui/options.go:64-73` 的
+`defaultConversationDir` 在 `HomeDir` 为空时回落到 `os.UserHomeDir()`。于是从 CLI 出发只有改
+`HOME` 一条路，而本机 sandbox 会把 `HOME` 重置回真实家目录，结果一直是
+`category=history-unavailable`（该类别对应「会话目录不存在」）。
+
+可用的两条路：
+
+1. `go run ./cmd/tb-shadow-antigravity <conversationsDir> <outFile>` —— 仓库自带的调试入口，
+   直接传目录，输出事件 JSON。已用它确认夹具可读（2 个事件）。
+2. 在模块内直接调 `antigravitygui.Collect(Options{HomeDir: <含 .gemini 的目录>, StateDir: …})`
+   —— 本次三轮实验用的就是这条，能拿到完整 `contract.Snapshot` 列表做字段比较。
+
+**这不是产品缺陷**：生产环境 `os.UserHomeDir()` 本来就是正确来源；它只意味着 GUI 源无法用
+`TOKENBOARD_*` 指到夹具，做对照实验必须走上面两条路。
+
+### 5.2 仍未覆盖
+
+language-server 路由（`collectLanguageServerUsage`）完全没有验证——它需要一个真实运行的
+Antigravity language server。所以 spec §11 解除暂停条件 2 只满足了一半：SQLite 历史路由已有
+合成夹具的热 cursor 证据，language-server 路由仍只有单测。
+
+## 6. 未覆盖
+
+- 已覆盖 claude-code、codex 的预览与 hook 增量（§2、§4），以及 Antigravity GUI 两源的 SQLite 路由（§5）。
 - 文件「缩小」或整体重写（compaction）的情形未测；本次只测了追加。
 - 未在 Windows / Linux 上跑。
