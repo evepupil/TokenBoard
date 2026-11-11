@@ -81,10 +81,46 @@ export TOKENBOARD_HOOK_MODE=1 TOKENBOARD_TIMEZONE=Asia/Shanghai
 影响面因此限于会话数展示与排行榜的会话统计。
 
 
+## 4. codex（DeepSeek）热 cursor：同样成立
+
+方法同上，只是换 `TOKENBOARD_CODEX_HOMES_JSON` 指到临时 home，且**必须保留原文件名**（见 §4.1）。
+夹具是本机真实会话 `~/.codex/sessions/2026/10/14/rollout-2026-10-14T16-48-23-<uuid>.jsonl`
+（1997 行）的一半：
+
+| 指标 | cold（998 行） | hot（补全 1997 行） | ref（全新冷扫） |
+|---|---|---|---|
+| 快照键数 | 1 | 1 | 1 |
+| `totalTokens` | 11948967 | **27188719** | 27188719 |
+| 与 ref 的字段差异 | — | **0** | — |
+
+截断具有判别力（11948967 < 27188719），且热跑补全后的结果与全新冷扫**逐字段完全一致**——
+codex 的 hook 增量（`providers/codex/hook_profiles.go` 的独立实现）在热 cursor 上也成立。
+
+### 4.1 我先前「codex 截断不改变总量」的结论是夹具缺陷
+
+第一次做 codex 实验时我把夹具**改名**成 `rollout-fixture.jsonl` 放进临时 home，得到的四份会话
+「截断冷扫 == 整份冷扫」。那不是 codex 的性质，是我的夹具造错了：**会话身份由文件名里的时间戳与
+UUID 决定**，改名后截断副本与完整副本是两个不同会话，比较自然没有意义。
+
+正确的做法是保留原文件名、只改内容长度。改成这样之后立刻得到有判别力的结果（见上表）。
+
+另外两条实测约束：
+
+- **目录日期必须是会话的真实日期**（`sessions/YYYY/MM/DD`）。放到 `sessions/2026/01/01/` 时
+  provider 静默返回空结果、`exit 0`、不报错。
+- 只设 `TOKENBOARD_CODEX_HOME` 仍会去读真实的 `~/.codex/archived_sessions` 并因符号链接失败；
+  必须用 `TOKENBOARD_CODEX_HOMES_JSON='["<temp home>"]'`。用空目录验证过隔离性：空 home 得到
+  0 行，说明临时 home 是唯一读取来源。
+
+### 4.2 codex 的用量口径（顺带核实）
+
+真实会话里的事件名是 `token_usage_record`（本机样本 221 条），`event_msg` 里的
+`token_count` 携带**累计总量** `info.total`；`adapters/codex/parser.go:746-757` 用
+「本次 total − 上次 total」取增量，所以补全文件后新增事件的增量会自然接续。
+
 ## 4. 未覆盖
 
-- 只验证 claude-code（hook 路径最复杂、且是生产主力）。codex 的 hook 增量走
-  `providers/codex/hook_profiles.go` 的独立实现，两次尝试都没能构成有效实验，见下条。
+- 已覆盖 claude-code 与 codex 两个来源的预览与 hook 增量（§2、§4）。
 - **codex 的热 cursor 仍未验证——不是没试，是夹具不成立**：用同样方法试了四份真实 codex
   会话（`2026/10/14`、`10/15`、`11/03`、`11/04`），把文件截成两半再比「半份冷扫」与「整份
   冷扫」的总量，**四份的总量全部相同**，于是截断本身不改变结果，做不出可判定的差异。直接
