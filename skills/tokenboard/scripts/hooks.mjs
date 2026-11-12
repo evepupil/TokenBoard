@@ -769,10 +769,21 @@ function probeProcessStartIdentity(pid, expectedIdentity = "") {
   const diskCached = readCachedProcessStartIdentity(pid, expectedIdentity);
   if (diskCached) return diskCached;
   let result;
-  if (process.platform === "linux") result = readLinuxProcessStartIdentity(pid);
-  else if (process.platform === "darwin") result = readDarwinProcessStartIdentity(pid);
-  else if (process.platform === "win32") result = readWindowsProcessStartIdentity(pid);
-  else result = { status: "unknown" };
+  const readPlatformIdentity = () => {
+    if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
+    if (process.platform === "darwin") return readDarwinProcessStartIdentity(pid);
+    if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
+    return { status: "unknown" };
+  };
+  result = readPlatformIdentity();
+  // An indeterminate answer is not evidence of a live worker, but the caller
+  // treats it as one and skips the dispatch (the queued signal then waits for
+  // the next hook event). One bounded retry keeps a single slow probe — a
+  // PowerShell start-up that overruns its timeout on a loaded Windows host, a
+  // tasklist that loses the same race — from turning into a suppressed
+  // notification. The second result is final: an unknown outcome still keeps
+  // the worker, so the duplicate-dispatch guarantee is unchanged.
+  if (result.status === "unknown") result = readPlatformIdentity();
   if (shouldCache) PROCESS_START_IDENTITY_CACHE.set(cacheKey, result);
   if (result.status === "known") writeCachedProcessStartIdentity(pid, result.value);
   return result;
