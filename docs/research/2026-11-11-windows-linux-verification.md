@@ -101,6 +101,29 @@ Windows 上以带版本戳的 v1.0.0 二进制作为「旧版」，发布资产�
 顺带观察：换入时客户端提示「现有的 `C:\Users\<user>\.tokenboard\bin\ccusage.exe` 原地保留」——
 S5 之后升级不再分发 ccusage，但也不删除旧版留下的文件。
 
+### 5.1 真实 release（v0.2.0）换入复验（2026-11-12）
+
+上面的 ± 用例用的是本机造的模拟发布源。**2026-11-12 补上真实发布通道的复验**：fork 发布了
+`v0.2.0`（tag `e00dcac`，GoReleaser 在 GitHub Actions 上产出 6 个平台归档 + `checksums.txt`），
+两台真机各自以带 `-ldflags -X .../internal/cli.Version=0.1.9` 的旧二进制作为起点，直接打真实
+GitHub 端点（`TOKENBOARD_RELEASE_REPO=MisonL/TokenBoard`，不设 `TOKENBOARD_RELEASE_BASE_URL`）：
+
+| 用例 | Windows（172.16.84.251） | Linux（172.16.81.190） |
+|---|---|---|
+| 换入结果 | `{"updated": true, "version": "0.2.0"}`，exit 0 | 同左 |
+| 备份 | `tokenboard.exe.backup-20261112T092618Z`（`version` 报 0.1.9） | `tokenboard.backup-20261112T092801Z`（0.1.9） |
+| 换入后版本 | `tokenboard (go) 0.2.0` | `tokenboard (go) 0.2.0` |
+| 重复运行 | `{"updated": false, "version": "0.2.0"}`，exit 0 | 同左 |
+| 二进制 sha256 前缀 | `fbfa79b4…` = 归档内 `tokenboard.exe` | `13ab4823…` = 归档内 `tokenboard` |
+
+下载到的归档本身也与 `checksums.txt` 对得上（`tokenboard_windows_amd64.tar.gz`
+`c20c19bb…`、`tokenboard_linux_amd64.tar.gz` `462765ab…`）；macOS 本机安装的
+`~/.tokenboard/bin/tokenboard`（`edb8cbb6…`）与 `tokenboard_darwin_amd64.tar.gz`
+（`5a5e45cd…`）解包内容逐位一致，说明三台机器跑的都是发布产物本身，不是本地构建。
+
+这一步把 spec §11 条件 3 从「机制已验证、通道未开放」推进到「真实 release 资产在 Windows/Linux
+上都完成过一次换入」。仍未满足的只剩**官方通道**：上游仓库没有 tag、没有 release。
+
 ## 6. 真实数据发现：旧版 codex fork 文件让 codex 源整体 fail-closed
 
 Windows 全量预览 `preview --source codex --since all` **exit 1、stdout 为空**，stderr：
