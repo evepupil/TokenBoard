@@ -51,6 +51,9 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
   全部在 Go 内完成。
 - **G5 性能量化**：基准工具对同一语料、同一窗口输出 ccusage vs native 的 wall time、max RSS、
   读取字节数；每场景 ≥5 轮取中位数；报告提交到 `docs/research/`。
+  **2026-11-12 补测**：A/B 两个场景此前已测（`docs/research/2026-11-10-native-vs-ccusage-benchmark.md`），
+  本轮补 C（全量）与 D（hook 增量）；E（冷启动到首字节）由 A 覆盖，理由见该报告 §4。
+  **`bytesRead` 不再产出数字**：两侧都没有读取字节计数器，报告如实写 0 并标注「未测量」，不给估计值。
 - **G6 依赖面删除**：`internal/ccusage/{acquire,package_runner,version,credentials,command,normalize,orderedjson}`
   中仅 parity 所需部分保留在 dev-only 路径；三层获取、捆绑脚本、`TOKENBOARD_CCUSAGE_BIN`/
   `TOKENBOARD_FORCE_PACKAGE_RUNNER`/`TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG` 等环境变量退役并写入迁移说明。
