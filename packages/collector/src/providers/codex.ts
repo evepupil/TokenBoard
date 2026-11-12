@@ -582,7 +582,7 @@ async function collectCodexCcusageRangeAttempt(input: {
         codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options)
       })
     : sessions
-  assertCodexContextPricingInventoryStable(
+  reportCodexContextPricingInventoryDrift(
     inventory,
     await discoverCodexContextPricingFiles({
       codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options),
@@ -590,7 +590,8 @@ async function collectCodexCcusageRangeAttempt(input: {
       captureFingerprints: true,
       allowFileOverflow: true,
       fingerprintMemo
-    })
+    }),
+    input.options.stderr
   )
   const rawUsages = await collectCodexContextPricingUsagesFromFiles({
     filePaths: inventory.filePaths,
@@ -607,7 +608,7 @@ async function collectCodexCcusageRangeAttempt(input: {
     until: input.until,
     stderr: input.options.stderr
   })
-  assertCodexContextPricingInventoryStable(
+  reportCodexContextPricingInventoryDrift(
     inventory,
     await discoverCodexContextPricingFiles({
       codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options),
@@ -615,7 +616,8 @@ async function collectCodexCcusageRangeAttempt(input: {
       captureFingerprints: true,
       allowFileOverflow: true,
       fingerprintMemo
-    })
+    }),
+    input.options.stderr
   )
   return applyCollectedCodexContextPricing({
     snapshots: projected,
@@ -626,31 +628,49 @@ async function collectCodexCcusageRangeAttempt(input: {
   })
 }
 
-function assertCodexContextPricingInventoryStable(
+function reportCodexContextPricingInventoryDrift(
   before: CodexContextPricingFileInventory,
-  after: CodexContextPricingFileInventory
+  after: CodexContextPricingFileInventory,
+  stderr?: (line: string) => void
 ) {
-  if (before.overflow !== after.overflow) {
-    throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
-  }
-  if (before.filePaths.length !== after.filePaths.length) {
-    throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
-  }
+  // An unbounded collect reads every session file, so on a machine that is in
+  // use the set changes while the scan runs: a session starts, an archived
+  // file rotates away, an active session appends. Failing the whole source on
+  // that would make Codex collection fail exactly when the machine is busy, so
+  // the drift is reported and the snapshot read so far is kept; the next sync
+  // recomputes the same rows from a later state.
+  let added = 0
+  let vanished = 0
+  let modified = 0
+  const beforeKeys = new Set<string>()
+  if (before.overflow !== after.overflow) modified += 1
   for (const filePath of before.filePaths) {
     const key = resolve(filePath)
+    beforeKeys.add(key)
     const beforeFingerprint = before.fingerprints.get(key)
     const afterFingerprint = after.fingerprints.get(key)
-    if (
-      !beforeFingerprint ||
-      !afterFingerprint ||
-      !sameCodexContextPricingFingerprint(beforeFingerprint, afterFingerprint)
-    ) {
-      throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
+    if (!beforeFingerprint) {
+      modified += 1
+      continue
     }
-    if (before.identityPaths.get(key) !== after.identityPaths.get(key)) {
-      throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
+    if (!afterFingerprint) {
+      vanished += 1
+      continue
+    }
+    if (
+      !sameCodexContextPricingFingerprint(beforeFingerprint, afterFingerprint) ||
+      before.identityPaths.get(key) !== after.identityPaths.get(key)
+    ) {
+      modified += 1
     }
   }
+  for (const filePath of after.filePaths) {
+    if (!beforeKeys.has(resolve(filePath))) added += 1
+  }
+  if (added === 0 && vanished === 0 && modified === 0) return
+  stderr?.(
+    `Codex session files changed during unbounded collection (added ${added}, vanished ${vanished}, modified ${modified}); reporting the files as they were read, the next sync reconciles the rest`
+  )
 }
 
 function sameCodexContextPricingFingerprint(left: CodexSessionFileFingerprint, right: CodexSessionFileFingerprint) {

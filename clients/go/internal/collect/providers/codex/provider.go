@@ -1096,8 +1096,9 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := assertCodexContextPricingInventoryStable(inventory, after); err != nil {
-		return nil, err
+	if drift := describeCodexContextPricingInventoryDrift(inventory, after); !drift.Empty() {
+		emitStderr(run.stderr, "Codex session files changed during unbounded collection ("+
+			drift.String()+"); reporting the files as they were read, the next sync reconciles the rest")
 	}
 	usages, err := run.rules.CollectCodexContextPricingUsagesFromFiles(CollectFilesInput{
 		FilePaths:             inventory.FilePaths,
@@ -1117,8 +1118,9 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := assertCodexContextPricingInventoryStable(inventory, after); err != nil {
-		return nil, err
+	if drift := describeCodexContextPricingInventoryDrift(inventory, after); !drift.Empty() {
+		emitStderr(run.stderr, "Codex session files changed while reading context pricing ("+
+			drift.String()+"); reporting the files as they were read, the next sync reconciles the rest")
 	}
 	return applyCollectedCodexContextPricing(struct {
 		Snapshots   []contract.Snapshot

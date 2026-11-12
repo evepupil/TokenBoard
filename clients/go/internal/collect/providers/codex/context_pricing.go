@@ -858,6 +858,15 @@ func (r *Rules) CollectCodexContextPricingUsagesFromFiles(input CollectFilesInpu
 		if !allowMixedModelPricing {
 			scan.canonicalModelsByDate = input.CanonicalModelsByDate
 		}
+		// A file that vanished between discovery and this read (an archived
+		// session rotated away, a cleanup pass) is skipped rather than failing
+		// the source: its rows come from the next sync, which discovers the
+		// file where it lives then.
+		if _, statErr := os.Stat(filePath); statErr != nil && os.IsNotExist(statErr) {
+			emitStderr(input.Stderr, "Skipped a Codex session file that vanished during the scan: "+
+				filepath.Base(filePath))
+			continue
+		}
 		relevant, err := r.scanFile(scan)
 		if err != nil {
 			return nil, err

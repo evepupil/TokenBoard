@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { lstat } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -605,6 +606,14 @@ export async function collectCodexContextPricingUsagesFromFiles(input: {
     // bounded model scan. A session can switch models within one JSONL file,
     // so retain files that contain both model classes for event-level parsing.
     if (canonicalModel && !isCodexContextPricingModel(canonicalModel) && !allowMixedModelPricing) continue
+    // A file that vanished between discovery and this read (an archived
+    // session rotated away, a cleanup pass) is skipped rather than failing the
+    // source: its rows come from the next sync, which discovers the file where
+    // it lives then.
+    if (!existsSync(filePath)) {
+      input.stderr?.(`Skipped a Codex session file that vanished during the scan: ${basename(filePath)}`)
+      continue
+    }
     const relevant = await scanFile({
       ...input,
       filePath,

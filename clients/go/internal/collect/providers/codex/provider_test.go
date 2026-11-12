@@ -587,9 +587,11 @@ func TestProviderPricesAnExplicitlyNamedContextRowWithoutATurnContextRecord(t *t
 	assertCloseTo(t, context.CostUSD, 20*4.0/1_000_000, 12)
 }
 
-// The session file changes while ccusage is answering: the unbounded
-// collection must notice on its second inventory pass and retry once.
-func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconciliation(t *testing.T) {
+// The session file changes while ccusage is answering. On a machine that is in
+// use this is the normal case, so the collection reports the drift and keeps
+// the snapshot it read instead of failing the source and retrying the same
+// multi-minute scan into the same moving target.
+func TestProviderReportsASessionThatChangesDuringReconciliationInsteadOfRetrying(t *testing.T) {
 	codexHome := provEmptyCodexHome(t)
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "pricing.jsonl")
 	provWriteJSONL(t, sessionPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
@@ -611,9 +613,11 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 
+	var diagnostics []string
 	snapshots, err := provCollect(t, Options{
 		CodexHome: provHome(codexHome),
 		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
 		Runner:    runner.run,
 	}, map[string]string{
 		"TOKENBOARD_SINCE":         "",
@@ -623,11 +627,20 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.callsWith("daily")) != 2 {
+	if len(runner.callsWith("daily")) != 1 {
 		t.Errorf("daily calls = %s", runner.callsWith("daily").summary())
 	}
-	if len(runner.callsWith("session")) != 2 {
+	if len(runner.callsWith("session")) != 1 {
 		t.Errorf("session calls = %s", runner.callsWith("session").summary())
+	}
+	foundDrift := false
+	for _, line := range diagnostics {
+		if strings.Contains(line, "Codex session files changed during unbounded collection") {
+			foundDrift = true
+		}
+	}
+	if !foundDrift {
+		t.Errorf("diagnostics = %q", diagnostics)
 	}
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshots = %+v", snapshots)
@@ -637,6 +650,107 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 		t.Errorf("snapshot = %+v", got)
 	}
 	assertCloseTo(t, got.CostUSD, 10*4.0/1_000_000, 12)
+}
+
+// A session file that appears while the reports run is not read: it is not in
+// the inventory this pass committed to, and the next sync discovers it. The
+// source still succeeds and says what happened.
+func TestProviderReportsASessionThatAppearsDuringReconciliation(t *testing.T) {
+	codexHome := provEmptyCodexHome(t)
+	sessionPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "pricing.jsonl")
+	provWriteJSONL(t, sessionPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
+	latePath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "late.jsonl")
+
+	sessionCalls := 0
+	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
+		if call.hasArg("daily") {
+			return provJSON(t, `{"data":[{"date":"2026-05-01","models":["gpt-5.6-sol"],
+				"inputTokens":10,"outputTokens":0,"cacheCreationInputTokens":0,
+				"cacheReadInputTokens":0,"costUSD":0.01}]}`), nil
+		}
+		if !call.hasArg("session") {
+			return nil, fmt.Errorf("Unexpected ccusage command")
+		}
+		sessionCalls++
+		if sessionCalls == 1 {
+			provWriteJSONL(t, latePath, provTokenEvent("2026-05-01T00:05:00.000Z", 5, "gpt-5.6-sol"))
+		}
+		return provJSON(t, `{"sessions":[]}`), nil
+	}}
+
+	var diagnostics []string
+	snapshots, err := provCollect(t, Options{
+		CodexHome: provHome(codexHome),
+		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
+		Runner:    runner.run,
+	}, map[string]string{
+		"TOKENBOARD_SINCE":         "",
+		"TOKENBOARD_DEFAULT_SINCE": "",
+		"TOKENBOARD_UNTIL":         "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(diagnostics, "\n")
+	if !strings.Contains(joined, "Codex session files changed during unbounded collection") ||
+		!strings.Contains(joined, "added 1") {
+		t.Errorf("diagnostics = %q", diagnostics)
+	}
+	if len(snapshots) == 0 {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
+}
+
+// A session file that vanishes between discovery and the read is skipped with
+// a diagnostic instead of failing the source; its rows arrive on the next sync.
+func TestProviderSkipsASessionFileThatVanishesDuringTheScan(t *testing.T) {
+	codexHome := provEmptyCodexHome(t)
+	keptPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "kept.jsonl")
+	vanishingPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "vanishing.jsonl")
+	provWriteJSONL(t, keptPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
+	provWriteJSONL(t, vanishingPath, provTokenEvent("2026-05-01T00:01:00.000Z", 4, "gpt-5.6-sol"))
+
+	removed := false
+	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
+		if call.hasArg("daily") {
+			if !removed {
+				removed = true
+				if err := os.Remove(vanishingPath); err != nil {
+					t.Fatalf("remove: %v", err)
+				}
+			}
+			return provJSON(t, `{"data":[{"date":"2026-05-01","models":["gpt-5.6-sol"],
+				"inputTokens":10,"outputTokens":0,"cacheCreationInputTokens":0,
+				"cacheReadInputTokens":0,"costUSD":0.01}]}`), nil
+		}
+		if call.hasArg("session") {
+			return provJSON(t, `{"sessions":[]}`), nil
+		}
+		return nil, fmt.Errorf("Unexpected ccusage command")
+	}}
+
+	var diagnostics []string
+	snapshots, err := provCollect(t, Options{
+		CodexHome: provHome(codexHome),
+		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
+		Runner:    runner.run,
+	}, map[string]string{
+		"TOKENBOARD_SINCE":         "",
+		"TOKENBOARD_DEFAULT_SINCE": "",
+		"TOKENBOARD_UNTIL":         "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(diagnostics, "\n")
+	if !strings.Contains(joined, "Skipped a Codex session file that vanished during the scan") {
+		t.Errorf("diagnostics = %q", diagnostics)
+	}
+	if len(snapshots) == 0 {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
 }
 
 // The first daily report does not yet carry the canonical row the context

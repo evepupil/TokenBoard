@@ -432,30 +432,68 @@ func codexInventoryPathLocation(identityPath string, codexHomes []string) (int, 
 	return 0, "", false
 }
 
-// assertCodexContextPricingInventoryStable ports
-// assertCodexContextPricingInventoryStable.
-func assertCodexContextPricingInventoryStable(before, after CodexContextPricingFileInventory) error {
-	const message = "Codex session inventory changed during unbounded collection; retry the sync"
-	if before.Overflow != after.Overflow || len(before.FilePaths) != len(after.FilePaths) {
-		return fmt.Errorf("%s", message)
-	}
+// codexContextPricingInventoryDrift counts how the discovered session set
+// changed between two passes of one unbounded collection.
+type codexContextPricingInventoryDrift struct {
+	Added    int
+	Vanished int
+	Modified int
+}
+
+// Empty reports whether the two passes found the same files in the same state.
+func (d codexContextPricingInventoryDrift) Empty() bool {
+	return d.Added == 0 && d.Vanished == 0 && d.Modified == 0
+}
+
+func (d codexContextPricingInventoryDrift) String() string {
+	return fmt.Sprintf("added %d, vanished %d, modified %d", d.Added, d.Vanished, d.Modified)
+}
+
+// describeCodexContextPricingInventoryDrift ports the comparison the TS
+// implementation performs in assertCodexContextPricingInventoryStable, but
+// reports the difference instead of rejecting it.
+//
+// An unbounded collect reads every session file, so on a machine that is in
+// use the set is expected to change while the scan runs: a session starts
+// (added), an archived file is rotated (vanished), an active session appends
+// (modified). The TS behaviour — fail the whole source and ask the caller to
+// retry — makes Codex collection fail exactly when the machine is busy, and
+// the retry re-runs the same multi-minute scan into the same moving target.
+// The Go client reports the drift and keeps the snapshot it read: every row
+// comes from a file as it existed when the scanner reached it, and the next
+// sync recomputes the same rows from a later state. Deterministic inputs
+// (tests, fixtures) never take this path.
+func describeCodexContextPricingInventoryDrift(
+	before, after CodexContextPricingFileInventory,
+) codexContextPricingInventoryDrift {
+	drift := codexContextPricingInventoryDrift{}
+	inBefore := make(map[string]bool, len(before.FilePaths))
 	for _, filePath := range before.FilePaths {
 		key := filepath.Clean(filePath)
+		inBefore[key] = true
 		beforeFingerprint, ok := before.Fingerprints[key]
 		if !ok {
-			return fmt.Errorf("%s", message)
+			// A file discovered without a fingerprint was never readable;
+			// count it as modified rather than claiming it vanished.
+			drift.Modified++
+			continue
 		}
 		afterFingerprint, ok := after.Fingerprints[key]
-		if !ok || !SameCodexSessionFileFingerprint(comparableOfFingerprint(beforeFingerprint), afterFingerprint) {
-			return fmt.Errorf("%s", message)
+		if !ok {
+			drift.Vanished++
+			continue
 		}
-		beforeIdentity, beforeOK := before.IdentityPaths[key]
-		afterIdentity, afterOK := after.IdentityPaths[key]
-		if !beforeOK || !afterOK || beforeIdentity != afterIdentity {
-			return fmt.Errorf("%s", message)
+		if before.IdentityPaths[key] != after.IdentityPaths[key] ||
+			!SameCodexSessionFileFingerprint(comparableOfFingerprint(beforeFingerprint), afterFingerprint) {
+			drift.Modified++
 		}
 	}
-	return nil
+	for _, filePath := range after.FilePaths {
+		if !inBefore[filepath.Clean(filePath)] {
+			drift.Added++
+		}
+	}
+	return drift
 }
 
 // isRejectedSessionRootSymlink ports isRejectedSessionRootSymlink.

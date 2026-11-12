@@ -1056,7 +1056,7 @@ describe('collectCodexUsage', () => {
     }
   })
 
-  test('retries unbounded context pricing when a session changes during ccusage reconciliation', async () => {
+  test('reports a session that changes during ccusage reconciliation instead of retrying', async () => {
     const codexHome = await createEmptyCodexHome()
     const sessionPath = join(codexHome, 'sessions', '2026', '05', '01', 'pricing.jsonl')
     const calls: string[][] = []
@@ -1068,9 +1068,11 @@ describe('collectCodexUsage', () => {
 
     try {
       await writeJsonl(sessionPath, [tokenCountEvent('2026-05-01T00:00:00.000Z', 10, 'gpt-5.6-sol')])
+      const diagnostics: string[] = []
       const snapshots = await collectCodexUsage({
         codexHome,
         timezone: 'UTC',
+        stderr: (line) => diagnostics.push(line),
         async runner(_command, args) {
           calls.push(args)
           if (args.includes('daily')) {
@@ -1095,8 +1097,11 @@ describe('collectCodexUsage', () => {
         }
       })
 
-      expect(calls.filter((args) => args.includes('daily'))).toHaveLength(2)
-      expect(calls.filter((args) => args.includes('session'))).toHaveLength(2)
+      expect(calls.filter((args) => args.includes('daily'))).toHaveLength(1)
+      expect(calls.filter((args) => args.includes('session'))).toHaveLength(1)
+      expect(diagnostics.some((line) => line.includes('Codex session files changed during unbounded collection'))).toBe(
+        true
+      )
       expect(snapshots).toEqual([
         expect.objectContaining({
           usageDate: '2026-05-01',
