@@ -98,17 +98,17 @@ func (f fakeRelease) server(t *testing.T) *httptest.Server {
 		sums = fmt.Sprintf("%s  %s\n", strings.Repeat("0", 64), archiveName)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/MisonL/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/MisonL/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
+	mux.HandleFunc("/evepupil/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/evepupil/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("<html>release " + f.tag + "</html>"))
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
 		func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(f.tarball)
 		})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
 		func(w http.ResponseWriter, r *http.Request) {
 			if f.omitChecksums {
 				http.NotFound(w, r)
@@ -177,7 +177,7 @@ func runAgainst(t *testing.T, server *httptest.Server, target, tag string) (Resu
 func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag, configDir string) (Result, error) {
 	t.Helper()
 	return Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Tag:        tag,
 		Target:     target,
 		Platform:   "darwin",
@@ -217,7 +217,7 @@ func TestRunDoesNotDowngradeWhenTheFeedPointsBelowTheInstalledVersion(t *testing
 
 	var lines []string
 	result, err := Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Target:     target,
 		Platform:   "darwin",
 		Arch:       "arm64",
@@ -584,7 +584,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	var lines []string
 	if _, err := Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Target:     target,
 		Platform:   "darwin",
 		Arch:       "arm64",

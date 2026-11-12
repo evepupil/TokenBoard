@@ -59,8 +59,9 @@ checksum:
   algorithm: sha256
 
 release:
-  # The fork cuts releases; the default (origin) follows whatever remote the
-  # CI checkout uses, which keeps the config working for both.
+  # Releases are cut on the upstream repository, which is also the client's
+  # default feed (`release.DefaultRepo`). The config itself is repo-agnostic:
+  # goreleaser publishes to whichever repository the version tag is pushed to.
   draft: false
   prerelease: auto
   # A bare commit list does not tell an operator what a tag does or does not
@@ -85,7 +86,8 @@ release:
 
     That installs the current release to `~/.tokenboard/bin/` and sets
     `clientType: binary`. The skill's install paths take a `--release-repo`
-    / `TOKENBOARD_RELEASE_REPO` override; this repository is their default.
+    / `TOKENBOARD_RELEASE_REPO` override; the upstream repository is their
+    default.
     To roll a machine back, set `clientType` to `"git"` — a `perSource` map
     cannot mix clients under `--source all`, which fails closed by design.
 

@@ -28,7 +28,7 @@ import { basename, dirname, join } from 'node:path'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
-export const defaultReleaseRepo = 'MisonL/TokenBoard'
+export const defaultReleaseRepo = 'evepupil/TokenBoard'
 export const defaultReleaseBaseUrl = 'https://github.com'
 
 // Bounds mirror internal/release: a few megabytes of binary, capped so a
