@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-11-12 回填）：9 个 Task 已全部交付。** 执行期进度由 ledger 跟踪、结束后按流程删除，
+> 本文件的步骤复选框未回填——**未勾选不代表未完成**。交付证据：`clients/go/internal/nativepricing/`
+> （含 `goldens/` 与 `data/` 的冻结语料）、`clients/go/cmd/parity`、`clients/go/cmd/bench-collect`、
+> CI「native pricing engine」作业（金样本漂移检查 + arm64 FMADDD 门禁），性能基线见
+> `docs/research/2026-11-03-native-vs-ccusage-baseline.md`。
+
 **Goal:** 在 Go 客户端内实现自足的定价引擎（冻结 ccusage 20.0.33 的语料与计费语义），并提供 parity 与 benchmark 工具，使后续每个来源适配器都能立即验证数值一致性与性能差异。
 
 **Architecture:** 新增 `internal/nativepricing`（纯计算，无网络、无文件）承载费率查找与计费公式；语料 vendor 到 `internal/nativepricing/data/` 并在构建期嵌入；`cmd/parity` 与 `cmd/bench-collect` 作为 dev-only 命令（不进入 goreleaser 产物）。现有 `internal/pricing`（动态目录与 ccusage 配置生成）保持不变，`nativepricing` 只消费它已产出的 overrides（**camelCase 键**）。

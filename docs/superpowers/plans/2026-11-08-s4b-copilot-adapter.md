@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-11-12 回填）：7 个 Task 已全部交付。** 执行期进度由 ledger 跟踪、结束后按流程删除，
+> 本文件的步骤复选框未回填——**未勾选不代表未完成**。交付证据：`clients/go/internal/collect/adapters/copilot/`、
+> `clients/go/internal/collect/providers/ccusagetool/copilot-goldens/`（含上游夹具快照）、
+> `docs/research/2026-11-09-copilot-native-parity.md`。
+
 **Goal:** 用纯 Go 原生实现替换 `ccusage copilot daily|session --json` 子进程——读取 `~/.copilot/otel/**/*.jsonl`（OTel 导出）与 `~/.copilot/session-state/<dir>/events.jsonl`（累计快照），复刻 ccusage v20.0.33 的 OTel 分类去重、快照区间差分、OTel 替换判定与 credit gap 对账，产出同形状报表 JSON。
 
 **Architecture:** 新增 `clients/go/internal/collect/adapters/copilot`（按 agent 调研的分层：`paths.go`、`otel.go`、`session_state.go`、`reconcile.go`（纯函数）、`loader.go`、`report.go`）。复用 S4a 的 `adapters/tools` 共享层（读文件/宽容字段/时间戳/报表行/定价）。`reconcile.go` 做成输入 `[]Entry, []CreditSnapshot, bounds` → 输出 `{intervals, otelAfter, attributedNano, gaps}` 的纯函数，这是唯一能低成本复刻 Rust 25 个 loader 测试的形态。

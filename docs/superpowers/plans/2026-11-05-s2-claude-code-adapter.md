@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-11-12 回填）：9 个 Task 已全部交付。** 执行期进度由 ledger 跟踪、结束后按流程删除，
+> 本文件的步骤复选框未回填——**未勾选不代表未完成**。交付证据：`clients/go/internal/collect/adapters/claude/`
+> （含 `goldens/claude-reports.json`）、`clients/go/internal/collect/providers/claudecode/`、
+> `docs/research/2026-11-05-claude-native-parity.md`。
+
 **Goal:** 用纯 Go 原生实现替换 claude-code 来源对 ccusage 的调用——读取 Claude Code 本地 JSONL，复刻 ccusage v20.0.33 的解析/去重/成本语义，产出与 `claude daily --json --breakdown` / `claude session --json` **同形状的报告 JSON**，经现有 `ccusage.NormalizeCcusageDailyJSON` 转成 `contract.Snapshot`。
 
 **Architecture:** 新增 `internal/collect/adapters/claude`（发现 / 行解析 / 去重 / 聚合 / 报表 JSON），成本走 S1 的 `internal/nativepricing`（冻结语料 + `pricing.Prepare` 的服务端 override）。`providers/claudecode` 同时保留 ccusage 旧路径与原生路径，用**未导出**的内部开关选择，默认仍指向 ccusage；只有 parity 全绿后另起独立提交翻转。原生 provider 无条件注册进 `collect.RegisterNative`，使 `cmd/parity`/`bench-collect` 始终能对比原生实现。行级金样本由 ccusage 20.0.33 对固定夹具树一次性生成并提交，CI 只跑 native 比对。

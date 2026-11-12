@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-11-12 回填）：9 个 Task 已全部交付。** 执行期进度由 ledger 跟踪、结束后按流程删除，
+> 本文件的步骤复选框未回填——**未勾选不代表未完成**。交付证据：`clients/go/internal/collect/adapters/codex/`
+> （含 `goldens/codex-reports.json`）、`clients/go/internal/collect/providers/codex/`、
+> `docs/research/2026-11-08-codex-native-parity.md`。
+
 **Goal:** 用纯 Go 原生实现替换 codex 来源对 ccusage 的调用——读取 Codex 本地 `sessions/**/*.jsonl[.zst]`，复刻 ccusage v20.0.33 的解析/重放差分/去重/聚合/成本语义，产出与 `codex daily --json` / `codex session --json` **同形状的报表 JSON**，经现有 `ccusage.NormalizeCcusageDailyJSON` 转成 `contract.Snapshot`。
 
 **Architecture:** 新增 `internal/collect/adapters/codex`（路径发现 / zstd 与行预筛 / 行解析与状态机 / fork 重放计划 / 聚合 / 报表与分桶成本）。成本查表走 S1 的 `internal/nativepricing`（本次扩展 `FindAt` 与 `long_context_split_threshold`），但**分桶公式实现在适配器内**（ccusage 的 Codex 成本不是单一 `calculate_cost_for_usage`：它按 service_tier 分桶、按每请求长上下文档位、以 `× (multiplier−1)` 增量叠加，无法复用 `nativepricing.Cost` 的整模型公式）。`providers/codex` 保留 ccusage 旧路径，用未导出 `useNativeCodex = false` 选择；`RegisterNative` 无条件注册。S2 的 `providers/claudecode/native.go` 是接线样板。

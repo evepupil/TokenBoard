@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态（2026-11-12 回填）：15 个 Task 已全部交付。** 执行期进度由 ledger 跟踪、结束后按流程删除，
+> 本文件的步骤复选框未回填——**未勾选不代表未完成**。交付证据：`clients/go/internal/collect/adapters/tools/`
+> （11 个来源适配器与 `goldens/tool-reports.json`）、`clients/go/internal/collect/providers/ccusagetool/`、
+> `docs/research/2026-11-09-tools-native-parity.md`。
+
 **Goal:** 用纯 Go 原生实现替换 11 个 ccusage 工具来源（amp、droid、codebuff、hermes、goose、kilo、gemini、kimi、qwen、zcode、openclaw）对 `ccusage <tool> daily|session --json` 子进程的调用——读取各自本地日志（JSON/JSONL/SQLite），复刻 ccusage v20.0.33 的解析、去重、日期归属与成本语义，产出与 ccusage 报表**同形状的 JSON**，经现有 `ccusage.NormalizeCcusageDailyJSON` 转 Snapshot。copilot 单列 S4b（spec D8）。
 
 **Architecture:** 新增 `clients/go/internal/collect/adapters/tools`（共享层：根解析、文件发现、宽容字段解码、时间戳、entry→report 行、session 累加器、report_from_rows）+ 每源一文件（`amp.go`、`droid.go`…）。SQLite 源复用 `internal/collect/sqlite`。成本查表走 `internal/nativepricing`（本计划扩展 `FindExactWithFallback`、builtin context limits 三档、missingPricing 零 token 门）。`providers/ccusagetool` 保留 ccusage 旧路径，用未导出 `useNativeTools = false` 选择；12 源共用一个包（现状），逐源注册 `RegisterNative`。S2/S3 的 `native.go` 是接线样板。
