@@ -200,6 +200,12 @@ note（「`--since/--until` 只过滤报表输出、不过滤扫描」）在本�
 `cmd/bench-collect -scenario full` 在**活跃** `~/.codex` 上被 native 侧的 inventory 稳定性
 护栏拒绝（`Codex session inventory changed during unbounded collection; retry the sync`——
 25 分钟扫描期间本机 Codex 自身写入了新会话，这是 fail-closed 设计在真机上的证据，不是挂死）。
+
+> **2026-11-12 更新：这条护栏已按真机证据改写。** 活跃机器上「扫描期间会话清单变化」是常态，
+> 整源失败并重试一次只会把同一次多分钟扫描重跑进同一个移动目标（本轮实测：full 场景跑了
+> 2 小时 17 分钟后以该错误退出）。现在两侧都改为输出漂移诊断（added/vanished/modified）并保留
+> 已读到的结果，消失的文件跳过，下一轮同步自愈；确定性输入不走这条分支。改动与理由见
+> `docs/research/2026-11-12-codex-inventory-drift.md`。
 在 APFS clone 冻结副本上，native 侧的 `Collect` 又在 §2.3 的 context pricing 守卫处
 fail-closed（与 TS 生产同款），所以 `bench-collect` 的 native 栏没有可记录的中位数。
 **这不是 S3 引入的问题**：`full` 无窗口路径在本机数据面上就是生产双侧都拒绝的路径。
