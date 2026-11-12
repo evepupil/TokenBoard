@@ -38,6 +38,29 @@ codex 的无界（range）采集在读取 daily/session 报表前后各做一次
 - **真正的错误仍然 fail-closed**：文件不可读、权限错误、JSONL 损坏、超限行、定价对账不一致
   等仍按原语义报错。
 
+### 3.1 连带处理：raw cost 对不上 daily 快照时不再整源失败
+
+同一轮实测（2026-11-12 晚，修复清单漂移后重跑 codex full）又撞到下一道同族护栏：
+
+```
+Codex context pricing cannot match raw cost for 2026-07-10/gpt-5.6-sol
+```
+
+含义是：daily 报表里 `2026-07-10/gpt-5.6-sol` 有 token，但会话文件里重建不出无歧义的
+逐请求成本（历史文件被归档/压缩过，或某文件在扫描中被跳过）。这与清单漂移同源——**历史数据不完整
+是常态**，而原实现让整源失败。
+
+现在两侧都改为：
+
+| 情形 | 处理 |
+|---|---|
+| raw cost 找不到对应 daily 快照 | 诊断（`... leaving the day's aggregate cost as reported`），该成本不参与改写 |
+| daily 快照找不到无歧义 raw cost（含一个 alias 成本可套多个同日快照） | 诊断（`... keeping the day's aggregate cost`），该行保留 ccusage 日报成本 |
+| 同一天同一模型出现重复 daily 快照 | **仍然报错**——这是数据/实现异常，不是历史不完整 |
+
+语义后果：这类行退回「不做 context 分档修正」，即 ccusage 日报的原值；不会凭空多算或少算。
+确定性输入下匹配总是成功，行为与之前一致。
+
 ## 4. 与 TS 的一致性
 
 TS collector 同样修改，因此 `tokenboard shadow` 的两侧在活跃机器上都能给出结果，不会出现

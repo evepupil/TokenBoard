@@ -1636,25 +1636,43 @@ func TestFiltersRawEventsByTheConfiguredTimezoneAndInclusiveDateBounds(t *testin
 	}})
 }
 
-func TestFailsWhenACollectedRawCostHasNoMatchingDailySnapshot(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
-		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", TotalTokens: floatPtr(10)}},
+func TestReportsACollectedRawCostWithNoMatchingDailySnapshot(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
+		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 7, TotalTokens: floatPtr(10)}},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: 1}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match daily snapshot") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0].CostUSD != 7 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
+	if len(diagnostics) != 2 ||
+		!strings.Contains(diagnostics[0], "usage without a matching daily snapshot") ||
+		!strings.Contains(diagnostics[1], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
-func TestFailsWhenRawContextPricingAttributesADateToADifferentModel(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
-		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-terra", TotalTokens: floatPtr(10)}},
+func TestReportsRawContextPricingThatAttributesADateToADifferentModel(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
+		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-terra", CostUSD: 3, TotalTokens: floatPtr(10)}},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 1}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match daily snapshot") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0].CostUSD != 3 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
+	if len(diagnostics) != 2 ||
+		!strings.Contains(diagnostics[0], "usage without a matching daily snapshot") ||
+		!strings.Contains(diagnostics[1], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
@@ -1713,17 +1731,26 @@ func TestKeepsSameDayGPT56AliasesAsIndependentCostMatches(t *testing.T) {
 	}
 }
 
-func TestFailsInsteadOfAssigningOneAliasRawCostToMultipleSameDaySnapshots(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
+func TestReportsOneAliasRawCostThatWouldFitMultipleSameDaySnapshots(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
 		[]CostSnapshot{
-			{UsageDate: "2026-05-01", Model: "gpt-5.6", TotalTokens: floatPtr(10)},
-			{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", TotalTokens: floatPtr(20)},
+			{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: 5, TotalTokens: floatPtr(10)},
+			{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 6, TotalTokens: floatPtr(20)},
 		},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 2}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match raw cost") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// The exact key still matches its own snapshot; only the alias is left
+	// without an unambiguous raw cost, and it keeps the aggregate value.
+	if result[0].CostUSD != 5 || result[1].CostUSD != 2 {
+		t.Fatalf("result = %+v, want [5 2]", result)
+	}
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
@@ -1741,18 +1768,21 @@ func TestFailsInsteadOfAssigningOneExactRawCostToDuplicateSnapshots(t *testing.T
 	}
 }
 
-func TestFailsWhenAPricedDailySnapshotHasNoRawContextPricingCost(t *testing.T) {
+func TestKeepsTheAggregateCostWhenAPricedDailySnapshotHasNoRawContextPricingCost(t *testing.T) {
 	diagnostics := []string{}
-	_, err := ApplyCodexContextPricingCosts(
+	result, err := ApplyCodexContextPricingCosts(
 		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 7, TotalTokens: floatPtr(10)}},
 		nil,
 		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match raw cost") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(result) != 1 || result[0].CostUSD != 7 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
 	want := []string{
-		"Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01",
+		"Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost",
 	}
 	if !reflect.DeepEqual(diagnostics, want) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)

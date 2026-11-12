@@ -837,22 +837,27 @@ export function applyCodexContextPricingCosts<
     unresolvedSnapshots.push(...snapshotIndexes)
   }
 
+  // A raw cost with no daily snapshot cannot be applied, and a snapshot with
+  // no unambiguous raw cost cannot be split. Both are expected on a machine
+  // whose session history is incomplete — an archived file rotated away, a
+  // compaction pass trimmed a day, the inventory changed mid-scan and the
+  // file was skipped — so the row keeps the daily aggregate cost and the
+  // mismatch is reported instead of failing the whole source.
   for (const key of unmatchedCostKeys) {
     const cost = costsByKey.get(key)
     if (cost === undefined) throw new Error('Codex context pricing matching lost a raw cost')
     const [usageDate, model] = splitContextPricingKey(key)
-    stderr?.(`Codex context pricing found ${model} usage without a matching daily snapshot for ${usageDate}`)
-    throw new Error(`Codex context pricing cannot match daily snapshot for ${usageDate}/${model}`)
+    stderr?.(
+      `Codex context pricing found ${model} usage without a matching daily snapshot for ${usageDate}; leaving the day's aggregate cost as reported`
+    )
   }
 
-  const snapshotIndex = unresolvedSnapshots[0]
-  if (snapshotIndex !== undefined) {
+  for (const snapshotIndex of unresolvedSnapshots) {
     const snapshot = snapshots[snapshotIndex]
     if (!snapshot) throw new Error('Codex context pricing matching lost a daily snapshot')
     stderr?.(
-      `Codex context pricing found ${snapshot.model} daily usage without an unambiguous raw cost for ${snapshot.usageDate}`
+      `Codex context pricing found ${snapshot.model} daily usage without an unambiguous raw cost for ${snapshot.usageDate}; keeping the day's aggregate cost`
     )
-    throw new Error(`Codex context pricing cannot match raw cost for ${snapshot.usageDate}/${snapshot.model}`)
   }
 
   return snapshots.map((snapshot, index) => {

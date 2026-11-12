@@ -665,6 +665,12 @@ func (r *Rules) ApplyCodexContextPricingCosts(
 		unresolvedSnapshots = append(unresolvedSnapshots, snapshotIndexes...)
 	}
 
+	// A raw cost with no daily snapshot cannot be applied, and a snapshot with
+	// no unambiguous raw cost cannot be split. Both are expected on a machine
+	// whose session history is incomplete — an archived file rotated away, a
+	// compaction pass trimmed a day, the inventory changed mid-scan and the
+	// file was skipped — so the row keeps the daily aggregate cost and the
+	// mismatch is reported instead of failing the whole source.
 	for _, key := range unmatchedCostKeys.order() {
 		if _, ok := costsByKey.values[key]; !ok {
 			return nil, errors.New("Codex context pricing matching lost a raw cost")
@@ -674,18 +680,14 @@ func (r *Rules) ApplyCodexContextPricingCosts(
 			return nil, err
 		}
 		emitStderr(stderr, fmt.Sprintf(
-			"Codex context pricing found %s usage without a matching daily snapshot for %s", model, usageDate))
-		return nil, fmt.Errorf(
-			"Codex context pricing cannot match daily snapshot for %s/%s", usageDate, model)
+			"Codex context pricing found %s usage without a matching daily snapshot for %s; leaving the day's aggregate cost as reported", model, usageDate))
 	}
 
-	if len(unresolvedSnapshots) > 0 {
-		snapshot := snapshots[unresolvedSnapshots[0]]
+	for _, index := range unresolvedSnapshots {
+		snapshot := snapshots[index]
 		emitStderr(stderr, fmt.Sprintf(
-			"Codex context pricing found %s daily usage without an unambiguous raw cost for %s",
+			"Codex context pricing found %s daily usage without an unambiguous raw cost for %s; keeping the day's aggregate cost",
 			snapshot.Model, snapshot.UsageDate))
-		return nil, fmt.Errorf(
-			"Codex context pricing cannot match raw cost for %s/%s", snapshot.UsageDate, snapshot.Model)
 	}
 
 	out := make([]CostSnapshot, len(snapshots))

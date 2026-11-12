@@ -1607,22 +1607,32 @@ describe('Codex context pricing', () => {
     }
   })
 
-  test('fails when a collected raw cost has no matching daily snapshot', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 0, totalTokens: 10 }],
-        [{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: 1 }]
-      )
-    ).toThrow('Codex context pricing cannot match daily snapshot')
+  test('reports a collected raw cost with no matching daily snapshot', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
+      [{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: 1 }],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }])
+    expect(diagnostics).toEqual([
+      "Codex context pricing found gpt-5.6-sol usage without a matching daily snapshot for 2026-05-02; leaving the day's aggregate cost as reported",
+      "Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
+    ])
   })
 
-  test('fails when raw context pricing attributes a date to a different model', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 0, totalTokens: 10 }],
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 1 }]
-      )
-    ).toThrow('Codex context pricing cannot match daily snapshot')
+  test('reports raw context pricing that attributes a date to a different model', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 3, totalTokens: 10 }],
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 1 }],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 3, totalTokens: 10 }])
+    expect(diagnostics).toEqual([
+      "Codex context pricing found gpt-5.6-sol usage without a matching daily snapshot for 2026-05-01; leaving the day's aggregate cost as reported",
+      "Codex context pricing found gpt-5.6-terra daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
+    ])
   })
 
   test('matches ccusage aliases to the canonical context-pricing model', () => {
@@ -1684,16 +1694,22 @@ describe('Codex context pricing', () => {
     expect(result.map((snapshot) => snapshot.costUsd)).toEqual([1, 2])
   })
 
-  test('fails instead of assigning one alias raw cost to multiple same-day snapshots', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [
-          { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: 0, totalTokens: 10 },
-          { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 0, totalTokens: 20 }
-        ],
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 2 }]
-      )
-    ).toThrow('Codex context pricing cannot match raw cost')
+  test('reports one alias raw cost that would fit multiple same-day snapshots', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [
+        { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: 5, totalTokens: 10 },
+        { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 6, totalTokens: 20 }
+      ],
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 2 }],
+      (line) => diagnostics.push(line)
+    )
+    // The exact key still matches its own snapshot; only the alias is left
+    // without an unambiguous raw cost, and it keeps the aggregate value.
+    expect(result.map((snapshot) => snapshot.costUsd)).toEqual([5, 2])
+    expect(diagnostics).toEqual([
+      'Codex context pricing found gpt-5.6 daily usage without an unambiguous raw cost for 2026-05-01; keeping the day\'s aggregate cost'
+    ])
   })
 
   test('fails instead of assigning one exact raw cost to duplicate snapshots', () => {
@@ -1708,17 +1724,16 @@ describe('Codex context pricing', () => {
     ).toThrow('Codex context pricing cannot match duplicate daily snapshots')
   })
 
-  test('fails when a priced daily snapshot has no raw context-pricing cost', () => {
+  test('keeps the aggregate cost when a priced daily snapshot has no raw context-pricing cost', () => {
     const diagnostics: string[] = []
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
-        [],
-        (line) => diagnostics.push(line)
-      )
-    ).toThrow('Codex context pricing cannot match raw cost')
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
+      [],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }])
     expect(diagnostics).toEqual([
-      'Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01'
+      "Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
     ])
   })
 
