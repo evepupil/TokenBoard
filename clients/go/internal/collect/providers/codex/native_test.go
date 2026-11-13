@@ -463,18 +463,20 @@ func TestNativeRunnerParsesOncePerMatchingDailySessionPair(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parses := len(runner.grouped)
+	// The cache holds at most one grouping set; a second parse would replace it
+	// with a different map, which is what this pointer comparison detects.
+	afterDaily := runner.grouped
+	if afterDaily == nil {
+		t.Fatal("the daily report left no grouping cached")
+	}
 	sessions, err := runner.Run(context.Background(), "ccusage",
 		[]string{"codex", "session", "--json", "--config", prepared.ConfigPath},
 		ccusage.CommandOptions{Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(runner.grouped); got != parses {
-		t.Fatalf("groupings cached after the session report = %d, want %d (a second parse ran)", got, parses)
-	}
-	if parses != 1 {
-		t.Fatalf("groupings cached after the daily report = %d, want 1", parses)
+	if fmt.Sprintf("%p", runner.grouped) != fmt.Sprintf("%p", afterDaily) {
+		t.Fatal("the session report replaced the cached groupings, so it parsed again instead of reusing the daily pass")
 	}
 
 	// Both reports must equal a fresh, dedicated parse each.

@@ -79,10 +79,13 @@ type nativeReportRunner struct {
 	prepared pricing.PreparedConfig
 	// pricing caches the corpus and cost mode per report name.
 	pricing map[string]nativeReportPricing
-	// grouped caches the daily and session groupings from one shared parse,
-	// keyed by the discovery and window they were built from. It is read by the
-	// second report of a matching pair and dropped when a report does not match.
-	grouped map[string]map[adapter.ReportKind]map[string]*adapter.Group
+	// grouped is the daily and session groupings from the most recent shared
+	// parse, together with the key describing the discovery and window it
+	// covered. Only one parse is ever retained: the cache exists to answer the
+	// second report of a matching daily/session pair, and a report that does not
+	// match replaces it.
+	groupedKey string
+	grouped    map[adapter.ReportKind]map[string]*adapter.Group
 }
 
 type nativeReportPricing struct {
@@ -171,8 +174,9 @@ func (runner *nativeReportRunner) groupings(
 	call nativeCodexCommand,
 	sources []adapter.FileGroup,
 ) (map[adapter.ReportKind]map[string]*adapter.Group, error) {
-	if cached, ok := runner.grouped[call.groupingsKey(sources)]; ok {
-		return cached, nil
+	key := call.groupingsKey(sources)
+	if runner.grouped != nil && runner.groupedKey == key {
+		return runner.grouped, nil
 	}
 	daily, sessions, err := adapter.LoadGroupsPerKindContext(ctx, sources, call.timezone, call.since, call.until)
 	if err != nil {
@@ -182,17 +186,13 @@ func (runner *nativeReportRunner) groupings(
 		adapter.ReportDaily:   daily,
 		adapter.ReportSession: sessions,
 	}
-	if runner.grouped == nil {
-		runner.grouped = map[string]map[adapter.ReportKind]map[string]*adapter.Group{}
-	}
-	runner.grouped[call.groupingsKey(sources)] = grouped
+	runner.groupedKey, runner.grouped = key, grouped
 	return grouped, nil
 }
 
 // groupingsKey identifies the discovery result and window a parse covered. The
 // discovery is compared by its file list because a new scope copy materializes
-// different paths; a single unmatched report replaces the cache rather than
-// growing it.
+// different paths; the runner keeps at most one such grouping set.
 func (call nativeCodexCommand) groupingsKey(sources []adapter.FileGroup) string {
 	var builder strings.Builder
 	builder.WriteString(call.timezone)
