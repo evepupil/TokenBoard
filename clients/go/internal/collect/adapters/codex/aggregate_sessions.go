@@ -1,5 +1,13 @@
 package codex
 
+import (
+	"context"
+	"errors"
+	"runtime"
+	"sync"
+	"time"
+)
+
 // One parse, two report kinds, parsed concurrently.
 //
 // The native report source answers `codex daily` and `codex session` as two
@@ -19,16 +27,8 @@ package codex
 // Parsing is per-file and independent, so files are parsed concurrently; the
 // aggregation is a single ordered stream and is fed one file at a time, in file
 // order, as soon as each file's turn comes. That keeps the result independent of
-// which worker finishes first, and keeps memory flat: a file parsed ahead of its
-// turn waits in a window of `workers+1` entries, not in a buffer holding the
-// whole corpus.
-
-import (
-	"context"
-	"runtime"
-	"sync"
-	"time"
-)
+// which worker finishes first, and keeps memory bounded: a file parsed ahead of
+// its turn waits with a read slot, and the pass holds at most 2*workers files.
 
 // perKindAggregation holds one aggregation per report kind, all fed from the
 // same event stream.
@@ -76,30 +76,183 @@ func loadGroupsPerKindWorkers(ctx context.Context, sources []FileGroup, timezone
 		plan = NewReplayPlan(sources)
 	}
 	location := reportTimezone(timezone)
+	if workers < 1 {
+		workers = 1
+	}
 	aggregation := newPerKindAggregation()
-	fileOffset := 0
-	err := streamFilesInOrder(ctx, pruned, plan, workers,
-		func(events []Event) error {
-			for _, event := range events {
-				if err := aggregation.addEvent(event, fileOffset, location, since, until); err != nil {
-					return err
-				}
+	if err := parseFiles(ctx, pruned, plan, workers, func(fileIndex int, events []Event) error {
+		for _, event := range events {
+			if err := aggregation.addEvent(event, fileIndex, location, since, until); err != nil {
+				return err
 			}
-			fileOffset++
-			return nil
-		},
-		func() {},
-	)
-	if err != nil {
+		}
+		return nil
+	}, nil); err != nil {
 		return nil, nil, err
 	}
 	aggregation.applyRecordedUsage(location, since, until)
 	return aggregation.daily.groups, aggregation.sessions.groups, nil
 }
 
-// addEvent books one event into both kinds in a fixed order. The replayed-
-// compaction filter is kind-independent, so moving it from the per-file visitor
-// to this point does not change which events are booked.
+// parsedFile is one file's events, in the order the parser produced them.
+type parsedFile struct {
+	events []Event
+}
+
+// parseFiles reads every eligible file, at most `workers` at a time, and hands
+// each file's events to consume in file order. A cancelled context stops the
+// workers and returns its error; the first parse error wins, and one from
+// consume ends the pass the same way.
+//
+// Memory is bounded by a read budget of 2*workers slots. A worker takes one slot
+// before claiming a file and keeps it until the aggregation has booked that
+// file; a completed file that finished ahead of its turn waits with its slot.
+// A worker takes the slot before the job, so when the budget is full the next
+// job cannot be the earliest unbooked file: that file is already being parsed
+// or waiting in its ready channel, either of which lets the consumption side
+// release a slot. There is no interleaving in which every worker waits for a
+// slot while the aggregation waits for a file no worker has claimed.
+//
+// onParsed, when supplied, runs after each successful parse. It lets a test
+// measure how far the readers ran ahead of the aggregation.
+func parseFiles(
+	ctx context.Context,
+	pruned []FileGroup,
+	plan *ReplayPlan,
+	workers int,
+	consume func(fileIndex int, events []Event) error,
+	onParsed func(),
+) error {
+	if onParsed == nil {
+		onParsed = func() {}
+	}
+	type job struct {
+		index       int
+		sessionsDir string
+		file        string
+	}
+	jobs := make(chan job)
+	// The file order is fixed before the workers start, so the consumption
+	// below never depends on which worker finished first.
+	order := []job{}
+	for _, group := range pruned {
+		for _, file := range group.Files {
+			order = append(order, job{index: len(order), sessionsDir: group.Dir, file: file})
+		}
+	}
+	ready := make([]chan parsedFile, len(order))
+	for i := range ready {
+		ready[i] = make(chan parsedFile, 1)
+	}
+	budget := make(chan struct{}, 2*workers)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// takeSlot makes a worker wait for a read slot or a cancellation, whichever
+	// comes first. It reports false when the slot was not taken. A slot is
+	// released only after the aggregation has booked that file.
+	takeSlot := func() bool {
+		select {
+		case budget <- struct{}{}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	var firstErr error
+	var errMu sync.Mutex
+	fail := func(err error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		errMu.Unlock()
+		cancel()
+	}
+
+	var pending sync.WaitGroup
+	pending.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func() {
+			defer pending.Done()
+			for {
+				// The slot is taken before the file is claimed, so the worker
+				// holding the earliest file due is never the one waiting for
+				// budget while later files (from other workers) fill it.
+				if !takeSlot() {
+					return
+				}
+				item, ok := <-jobs
+				if !ok {
+					return
+				}
+				events := make([]Event, 0, 16)
+				err := ParseFile(item.sessionsDir, item.file, plan.Prefix(item.file), func(event Event) error {
+					events = append(events, event)
+					return nil
+				})
+				if err != nil {
+					fail(err)
+					return
+				}
+				onParsed()
+				// A failed parse keeps its slot: the pass is ending anyway. On the
+				// success path every slot a worker takes is either released after
+				// the file is booked or still held when the pass is cancelled.
+				select {
+				case ready[item.index] <- parsedFile{events: events}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	// The feed runs alongside the consumption: the workers stop taking slots
+	// once every one belongs to a completed file, and the consumption frees the
+	// earliest one. Feeding from this goroutine instead would let it block on
+	// the jobs channel while nobody reads, which is the same deadlock one level
+	// down.
+	go func() {
+		defer close(jobs)
+		for _, item := range order {
+			select {
+			case jobs <- item:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	for i := range order {
+		select {
+		case file := <-ready[i]:
+			err := consume(i, file.events)
+			<-budget
+			if err != nil {
+				fail(err)
+			}
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	pending.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	// No parse failed, so a cancelled context is the caller's: report it.
+	if err := ctx.Err(); err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return err
+	}
+	return nil
+}
+
+// addEvent books one event into both kinds. The plan's replayed-compaction
+// filter is applied here, in file order, so it sees the same sequence a
+// sequential parse would.
 func (a *perKindAggregation) addEvent(event Event, fileIndex int, location *time.Location, since, until string) error {
 	if err := a.daily.addEvent(event, ReportDaily, location, since, until, fileIndex); err != nil {
 		return err
@@ -111,169 +264,6 @@ func (a *perKindAggregation) addEvent(event Event, fileIndex int, location *time
 func (a *perKindAggregation) applyRecordedUsage(location *time.Location, since, until string) {
 	a.daily.applyRecordedUsage(ReportDaily, location, since, until)
 	a.sessions.applyRecordedUsage(ReportSession, location, since, until)
-}
-
-// fileJob is one eligible file and its position in the scan.
-type fileJob struct {
-	index       int
-	sessionsDir string
-	file        string
-}
-
-// parsedEvents is one parsed file waiting for its turn in the aggregation.
-type parsedEvents struct {
-	index  int
-	events []Event
-}
-
-// streamFilesInOrder parses every eligible file with up to `workers` concurrent
-// readers and hands each file's events to `consume` in file order, as soon as
-// that file is the next one due. A file that finishes ahead of its turn waits in
-// a window of workers+1 entries, so a slow file at the front cannot let the
-// whole corpus pile up in memory.
-//
-// The order is fixed before the workers start, so which worker finishes first
-// never affects what `consume` sees. `onParsed` runs after each successful parse,
-// which lets a test observe how far ahead the readers ran.
-func streamFilesInOrder(
-	ctx context.Context,
-	pruned []FileGroup,
-	plan *ReplayPlan,
-	workers int,
-	consume func(events []Event) error,
-	onParsed func(),
-) error {
-	if workers < 1 {
-		workers = 1
-	}
-	if onParsed == nil {
-		onParsed = func() {}
-	}
-	order := []fileJob{}
-	for _, group := range pruned {
-		for _, file := range group.Files {
-			order = append(order, fileJob{index: len(order), sessionsDir: group.Dir, file: file})
-		}
-	}
-	if len(order) == 0 {
-		return nil
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var firstErr error
-	var errMu sync.Mutex
-	var pending sync.WaitGroup
-
-	// ready carries one parsed file per send. Its capacity is the window: a
-	// worker blocks once it is more than workers+1 files ahead of the
-	// aggregation, which bounds the memory the readers can hold.
-	// slots is the read-ahead window: a worker holds one slot from the start of
-	// a file's parse until the aggregation has taken that file. At most
-	// workers+1 files (one in flight per worker plus the one being booked) are
-	// ever parsed ahead of the aggregation.
-	slots := make(chan struct{}, workers+1)
-	ready := make(chan parsedEvents)
-	// jobs is unbuffered so each worker picks up the next file only after it
-	// finished the previous one; the sender below is the only writer and always
-	// closes it.
-	jobs := make(chan fileJob)
-
-	pending.Add(workers)
-	for worker := 0; worker < workers; worker++ {
-		go func() {
-			defer pending.Done()
-			for item := range jobs {
-				if ctx.Err() != nil {
-					return
-				}
-				// Claim a slot before parsing. Without this a worker that finds the
-				// window full still parses its next file and holds the events on
-				// its own stack, so the read-ahead grows to workers extra files
-				// beyond the window.
-				select {
-				case slots <- struct{}{}:
-				case <-ctx.Done():
-					return
-				}
-				events := make([]Event, 0, 16)
-				err := ParseFile(item.sessionsDir, item.file, plan.Prefix(item.file), func(event Event) error {
-					events = append(events, event)
-					return nil
-				})
-				if err != nil {
-					<-slots
-					errMu.Lock()
-					if firstErr == nil {
-						firstErr = err
-						cancel()
-					}
-					errMu.Unlock()
-					return
-				}
-				onParsed()
-				select {
-				case ready <- parsedEvents{index: item.index, events: events}:
-				case <-ctx.Done():
-					<-slots
-					return
-				}
-			}
-		}()
-	}
-
-	// The aggregation runs on its own goroutine so the readers keep going while
-	// it books events; it only ever sees files in index order.
-	consumeErr := make(chan error, 1)
-	go func() {
-		waiting := map[int][]Event{}
-		for next := 0; next < len(order); next++ {
-			events, ok := waiting[next]
-			if ok {
-				delete(waiting, next)
-			} else {
-				for {
-					select {
-					case got := <-ready:
-						if got.index == next {
-							events, ok = got.events, true
-						} else {
-							waiting[got.index] = got.events
-						}
-					case <-ctx.Done():
-						consumeErr <- ctx.Err()
-						return
-					}
-					if ok {
-						break
-					}
-				}
-			}
-			<-slots
-			if err := consume(events); err != nil {
-				cancel()
-				consumeErr <- err
-				return
-			}
-		}
-		consumeErr <- nil
-	}()
-
-	for _, item := range order {
-		select {
-		case jobs <- item:
-		case <-ctx.Done():
-		}
-	}
-	close(jobs)
-	pending.Wait()
-	consumeDone := <-consumeErr
-	// A parse error is the real failure; the context error it triggered is only
-	// its consequence.
-	if firstErr != nil {
-		return firstErr
-	}
-	return consumeDone
 }
 
 // codexParseWorkers is the number of rollout files parsed concurrently. The

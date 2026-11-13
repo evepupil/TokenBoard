@@ -101,52 +101,88 @@ func TestParallelParseReportsAFileError(t *testing.T) {
 func TestParallelParseHonoursCancellation(t *testing.T) {
 	root := t.TempDir()
 	files := writeManyFiles(t, root, 20)
+	sources := []FileGroup{{Dir: root, Files: files}}
+
+	// Already-cancelled: nothing is parsed.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := loadGroupsPerKindWorkers(ctx, []FileGroup{{Dir: root, Files: files}}, "UTC", "", "", 4)
-	if err == nil {
+	if _, _, err := loadGroupsPerKindWorkers(ctx, sources, "UTC", "", "", 4); err == nil {
 		t.Fatal("want a cancelled parse to return the context error")
+	}
+
+	// Cancelled mid-pass: the pass must return once the first file is booked
+	// rather than read the remaining files first.
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	booked := 0
+	err := parseFiles(ctx, sources, NewReplayPlan(sources), 4, func(int, []Event) error {
+		booked++
+		cancel()
+		return nil
+	}, nil)
+	if err == nil {
+		t.Fatal("want the cancelled pass to report the context error")
+	}
+	if booked != 1 {
+		t.Fatalf("booked %d files after cancellation, want 1", booked)
 	}
 }
 
-// The readers must not run arbitrarily far ahead of the aggregation. Holding the
-// whole corpus would turn a flat per-file memory profile into a peak
+// The readers must not run arbitrarily far ahead of the aggregation. Holding
+// the whole corpus would turn a flat per-file memory profile into a peak
 // proportional to the whole scan, which on this machine's Codex history is
-// several gigabytes. The probe stalls the first consume call until the readers
-// have had time to run ahead, then records how many files were parsed: it must
-// stay within the window the channel capacity allows, not grow to every file.
+// several gigabytes. The probe stalls the first booking until the readers have
+// had time to run ahead, then records how many files were parsed.
 func TestParallelParseKeepsTheReadAheadWindowBounded(t *testing.T) {
 	root := t.TempDir()
-	files := writeManyFiles(t, root, 48)
-	pruned := []FileGroup{{Dir: root, Files: files}}
-	plan := NewReplayPlan(pruned)
+	files := writeManyFiles(t, root, 64)
+	sources := []FileGroup{{Dir: root, Files: files}}
 	const workers = 4
+	limit := int64(2 * workers)
 
 	parsed := int64(0)
 	parsedAtFirstConsume := int64(-1)
-	err := streamFilesInOrder(context.Background(), pruned, plan, workers,
-		func(events []Event) error {
-			if atomic.LoadInt64(&parsedAtFirstConsume) < 0 {
-				// Give the readers a generous moment to run ahead, then look.
-				time.Sleep(150 * time.Millisecond)
-				atomic.StoreInt64(&parsedAtFirstConsume, atomic.LoadInt64(&parsed))
-			}
-			return nil
-		},
-		func() { atomic.AddInt64(&parsed, 1) },
-	)
+	err := parseFiles(context.Background(), sources, NewReplayPlan(sources), workers, func(int, []Event) error {
+		if atomic.LoadInt64(&parsedAtFirstConsume) < 0 {
+			// Give the readers a generous moment to run ahead, then look.
+			time.Sleep(150 * time.Millisecond)
+			atomic.StoreInt64(&parsedAtFirstConsume, atomic.LoadInt64(&parsed))
+		}
+		return nil
+	}, func() { atomic.AddInt64(&parsed, 1) })
 	if err != nil {
 		t.Fatal(err)
 	}
 	readAhead := atomic.LoadInt64(&parsedAtFirstConsume)
-	// The bound is a constant of the worker count: at most workers files in
-	// flight, the entry being booked, and the one already queued behind it.
-	limit := int64(workers + 2)
+	// The bound is the read budget itself: every parsed file holds a slot until
+	// the aggregation books it, and the first booking has not released one yet.
 	if readAhead > limit {
-		t.Fatalf("readers were %d files ahead before the aggregation booked the first file, want at most %d", readAhead, limit)
+		t.Fatalf("readers were %d files ahead before the first file was booked, want at most %d", readAhead, limit)
 	}
-	// Well under the corpus: 48 files would mean the whole corpus was parsed.
 	if readAhead >= int64(len(files))/2 {
 		t.Fatalf("readers were %d files ahead of %d, want a bounded window", readAhead, len(files))
+	}
+}
+
+// A completed file is stored by its own index, so however the workers
+// interleave, every file is replayed exactly once and no worker writes another
+// worker's slot. The two groupings must be identical under repeated runs with
+// many workers over more files than there are workers.
+func TestParallelParseIsStableAcrossInterleavings(t *testing.T) {
+	root := t.TempDir()
+	files := writeManyFiles(t, root, 40)
+	sources := []FileGroup{{Dir: root, Files: files}}
+	wantDaily, wantSessions, err := LoadGroupsPerKind(sources, "UTC", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 20; round++ {
+		gotDaily, gotSessions, err := loadGroupsPerKindWorkers(context.Background(), sources, "UTC", "", "", 8)
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		if !reflect.DeepEqual(gotDaily, wantDaily) || !reflect.DeepEqual(gotSessions, wantSessions) {
+			t.Fatalf("round %d: groupings differ; a worker interleaved another file's slot", round)
+		}
 	}
 }
