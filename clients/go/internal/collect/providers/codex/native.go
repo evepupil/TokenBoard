@@ -79,6 +79,10 @@ type nativeReportRunner struct {
 	prepared pricing.PreparedConfig
 	// pricing caches the corpus and cost mode per report name.
 	pricing map[string]nativeReportPricing
+	// grouped caches the daily and session groupings from one shared parse,
+	// keyed by the discovery and window they were built from. It is read by the
+	// second report of a matching pair and dropped when a report does not match.
+	grouped map[string]map[adapter.ReportKind]map[string]*adapter.Group
 }
 
 type nativeReportPricing struct {
@@ -131,16 +135,18 @@ func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []stri
 		kind = adapter.ReportSession
 	}
 	sources := adapter.CollectDedupedSources(adapter.UsageSources(homes))
-	// LoadGroups prunes with FilterByEligibility itself (Task 5: it takes the
-	// unpruned discovery output), and the bounded replay plan sees the same
-	// discovery set, exactly like codex_replay_plan::for_bounded_files.
-	groups, err := adapter.LoadGroupsContext(ctx, sources, kind, call.timezone, call.since, call.until)
+	// The daily and session reports cover the same files over the same window,
+	// so the first of the two parses both groupings and the second answers from
+	// that result. Without this the full scan read every rollout twice; the
+	// shared pass produces byte-identical groupings (aggregate_sessions.go).
+	grouped, err := runner.groupings(ctx, call, sources)
 	if err != nil {
 		if budgetCtx != nil && budgetCtx.Err() == context.DeadlineExceeded {
 			return nil, nativeTimeoutError(options.TimeoutMs, args)
 		}
 		return nil, err
 	}
+	groups := grouped[kind]
 	speed := adapter.ResolveSpeedPolicy(pricingForCall.speed, homes)
 	document := adapter.ReportJSON(groups, kind, pricingForCall.corpus, speed, pricingForCall.mode)
 	// Round-trip through JSON so the provider sees exactly what the subprocess
@@ -154,6 +160,55 @@ func (runner *nativeReportRunner) Run(ctx context.Context, _ string, args []stri
 		return nil, fmt.Errorf("codex native report: %w", err)
 	}
 	return decoded, nil
+}
+
+// groupings answers the report call from a shared parse of the daily and
+// session groupings. A call whose discovery or window differs from the cached
+// one starts a new parse: the cache exists to answer the second of a matching
+// daily/session pair, never to widen or narrow what a report covers.
+func (runner *nativeReportRunner) groupings(
+	ctx context.Context,
+	call nativeCodexCommand,
+	sources []adapter.FileGroup,
+) (map[adapter.ReportKind]map[string]*adapter.Group, error) {
+	if cached, ok := runner.grouped[call.groupingsKey(sources)]; ok {
+		return cached, nil
+	}
+	daily, sessions, err := adapter.LoadGroupsPerKindContext(ctx, sources, call.timezone, call.since, call.until)
+	if err != nil {
+		return nil, err
+	}
+	grouped := map[adapter.ReportKind]map[string]*adapter.Group{
+		adapter.ReportDaily:   daily,
+		adapter.ReportSession: sessions,
+	}
+	if runner.grouped == nil {
+		runner.grouped = map[string]map[adapter.ReportKind]map[string]*adapter.Group{}
+	}
+	runner.grouped[call.groupingsKey(sources)] = grouped
+	return grouped, nil
+}
+
+// groupingsKey identifies the discovery result and window a parse covered. The
+// discovery is compared by its file list because a new scope copy materializes
+// different paths; a single unmatched report replaces the cache rather than
+// growing it.
+func (call nativeCodexCommand) groupingsKey(sources []adapter.FileGroup) string {
+	var builder strings.Builder
+	builder.WriteString(call.timezone)
+	builder.WriteByte(0)
+	builder.WriteString(call.since)
+	builder.WriteByte(0)
+	builder.WriteString(call.until)
+	for _, group := range sources {
+		builder.WriteByte(0)
+		builder.WriteString(group.Dir)
+		for _, file := range group.Files {
+			builder.WriteByte(0)
+			builder.WriteString(file)
+		}
+	}
+	return builder.String()
 }
 
 // pricingFor resolves the corpus and cost mode for one report's scope. ccusage

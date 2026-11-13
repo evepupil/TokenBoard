@@ -441,3 +441,93 @@ func TestNativeReportHonoursTheCommandTimeout(t *testing.T) {
 		t.Fatalf("err = %v, want the ccusage timeout line", err)
 	}
 }
+
+// TestNativeRunnerParsesOncePerMatchingDailySessionPair pins the shared parse:
+// the provider asks for `codex daily` and then `codex session` over the same
+// scope and window, and the second call must answer from the first call's
+// groupings instead of reading every rollout again. The reports themselves must
+// stay exactly what a dedicated parse produces.
+func TestNativeRunnerParsesOncePerMatchingDailySessionPair(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex")
+	nativeFixtureSession(t, codexHome)
+	prepared, err := pricing.Prepare(pricing.PrepareInput{StateDir: t.TempDir(), Stderr: func(string) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := newNativeReportRunner(prepared)
+	env := []string{"CODEX_HOME=" + codexHome}
+	daily, err := runner.Run(context.Background(), "ccusage",
+		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parses := len(runner.grouped)
+	sessions, err := runner.Run(context.Background(), "ccusage",
+		[]string{"codex", "session", "--json", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(runner.grouped); got != parses {
+		t.Fatalf("groupings cached after the session report = %d, want %d (a second parse ran)", got, parses)
+	}
+	if parses != 1 {
+		t.Fatalf("groupings cached after the daily report = %d, want 1", parses)
+	}
+
+	// Both reports must equal a fresh, dedicated parse each.
+	fresh, err := newNativeReportRunner(prepared).Run(context.Background(), "ccusage",
+		[]string{"codex", "session", "--json", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sessions, fresh) {
+		t.Fatalf("shared-parse session report differs from a dedicated parse:\ngot  %#v\nwant %#v", sessions, fresh)
+	}
+	dailyFresh, err := newNativeReportRunner(prepared).Run(context.Background(), "ccusage",
+		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(daily, dailyFresh) {
+		t.Fatalf("shared-parse daily report differs from a dedicated parse:\ngot  %#v\nwant %#v", daily, dailyFresh)
+	}
+}
+
+// A report whose window or discovery differs from the cached one must not
+// answer from that cache: a narrower window over the same files is a different
+// job.
+func TestNativeRunnerReparsesWhenTheWindowDiffers(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex")
+	nativeFixtureSession(t, codexHome)
+	prepared, err := pricing.Prepare(pricing.PrepareInput{StateDir: t.TempDir(), Stderr: func(string) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := newNativeReportRunner(prepared)
+	env := []string{"CODEX_HOME=" + codexHome}
+	if _, err := runner.Run(context.Background(), "ccusage",
+		[]string{"codex", "daily", "--json", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env}); err != nil {
+		t.Fatal(err)
+	}
+	outside, err := runner.Run(context.Background(), "ccusage",
+		[]string{"codex", "daily", "--json", "--since", "20260101", "--until", "20260102", "--config", prepared.ConfigPath},
+		ccusage.CommandOptions{Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, ok := outside.(ccusage.OrderedObject)
+	if !ok {
+		t.Fatalf("report = %T, want an ordered record", outside)
+	}
+	rows, _ := document.Get("daily")
+	if list, ok := rows.([]any); !ok || len(list) != 0 {
+		t.Fatalf("windowed report = %#v, want no rows outside the window", rows)
+	}
+}
