@@ -197,6 +197,20 @@ export function classifyShadowRun({ source, status, stdout, stderr }) {
       ...(report.onlyInGo ?? []),
       ...(report.differing ?? []).map((d) => d.key)
     ].slice(0, 20)
+    // The keys say where a difference is; the field names say what it is. A
+    // costUsd-only row is the documented pricing-basis split, while a token
+    // field is not, and without this list every diff in the log costs a full
+    // re-run to classify. Rows that exist on one side only carry no fields,
+    // so their absence must leave the list unset rather than empty.
+    const fieldNames = new Set()
+    for (const row of report.differing ?? []) {
+      for (const field of row?.fields ?? []) {
+        if (field?.field) fieldNames.add(field.field)
+      }
+    }
+    if (fieldNames.size > 0) {
+      record.fields = [...fieldNames].sort().slice(0, 12)
+    }
     return record
   }
   const message = String(stderr ?? '').trim()

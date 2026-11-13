@@ -85,6 +85,56 @@ test('a differing run logs the counts and the keys, bounded', () => {
   assert.equal(bounded.keys.length, 20)
 })
 
+// A key says where a difference is, not what it is. Without the field names a
+// reviewer reading the log cannot tell a costUsd-only row (the documented
+// pricing-basis split, which is expected) from a token difference (which is
+// not), and every diff costs a full re-run to classify.
+test('a differing run records which fields differ', () => {
+  const key = (model) => ({ source: 'claude-code', usageDate: '2026-11-05', timezone: 'UTC', model })
+  const stdout = report({
+    status: 'diff',
+    differing: [
+      { key: key('a'), fields: [{ field: 'costUsd', ts: 1, go: 2 }] },
+      {
+        key: key('b'),
+        fields: [
+          { field: 'inputTokens', ts: 1, go: 2 },
+          { field: 'costUsd', ts: 3, go: 4 }
+        ]
+      }
+    ]
+  })
+  const record = classifyShadowRun({ source: 'claude-code', status: 1, stdout, stderr: '' })
+  assert.deepEqual(record.fields, ['costUsd', 'inputTokens'])
+})
+
+// The field list is what a reviewer scans first, so it must stay small even on
+// a run where many distinct fields differ.
+test('the recorded field list is bounded and sorted', () => {
+  const key = (model) => ({ source: 'codex', usageDate: '2026-10-20', timezone: 'UTC', model })
+  const names = Array.from({ length: 30 }, (_, index) => `field${String(index).padStart(2, '0')}`)
+  const stdout = report({
+    status: 'diff',
+    differing: [{ key: key('a'), fields: names.map((field) => ({ field, ts: 1, go: 2 })) }]
+  })
+  const record = classifyShadowRun({ source: 'codex', status: 1, stdout, stderr: '' })
+  assert.equal(record.fields.length, 12)
+  assert.deepEqual(record.fields, [...record.fields].sort())
+})
+
+// A row present on only one side has no field list of its own. It must not
+// produce an empty `fields` entry that reads like "nothing differs".
+test('a differing run with only one-sided rows records no field list', () => {
+  const key = (model) => ({ source: 'codex', usageDate: '2026-10-20', timezone: 'UTC', model })
+  const record = classifyShadowRun({
+    source: 'codex',
+    status: 1,
+    stdout: report({ status: 'diff', onlyInTs: [key('a')] }),
+    stderr: ''
+  })
+  assert.equal(record.fields, undefined)
+})
+
 // A source the machine does not have is not a difference and must not fail
 // the run: the Go client prints the same "Skipping unavailable" diagnostic
 // the scheduled sync does.
