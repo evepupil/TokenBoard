@@ -1708,7 +1708,7 @@ describe('Codex context pricing', () => {
     // without an unambiguous raw cost, and it keeps the aggregate value.
     expect(result.map((snapshot) => snapshot.costUsd)).toEqual([5, 2])
     expect(diagnostics).toEqual([
-      'Codex context pricing found gpt-5.6 daily usage without an unambiguous raw cost for 2026-05-01; keeping the day\'s aggregate cost'
+      "Codex context pricing found gpt-5.6 daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
     ])
   })
 
