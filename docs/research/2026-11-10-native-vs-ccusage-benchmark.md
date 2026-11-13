@@ -6,7 +6,8 @@
   （codex 清单漂移改为诊断），原始输出见 §1 列出的 `/tmp/bench-g5/`（临时目录，不入库）
 - 二进制：ccusage `20.0.33`（`~/.tokenboard/bin/ccusage`），Go `go1.27.3 darwin/amd64`
 - 范围：spec §9.3 场景 A（单日）与 B（近 30 天）于 2026-11-10 测量；场景 C（全量）与 D（hook）
-  于 2026-11-12 补测。**全量场景 native 比 ccusage 慢 4.3 倍**——见 §2.3 与 §3.5。
+  于 2026-11-12 补测。**全量场景 native 曾比 ccusage 慢 4.3 倍**（§2.3，§3.5 分析根因）；
+  2026-11-13 的两项优化针对这些成本，端到端复测待补，见 §3.7。
 
 > 本文所有数字来自实际执行，命令与原始文件见 §1 与 artifacts 目录。本机负载在测量期间为
 > 76–142（load average），属于高度共享的机器：**只看 5 轮中位数与最大值，不看单轮**。
@@ -94,8 +95,9 @@ TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON='["~/.codex/archived_sessions.local"]' \
 | ccusage | 2m47.9s | 2m53.0s | 4.13 GiB | 4.17 GiB | 2 |
 | native | **2m22.4s** | 2m25.6s | 3.15 GiB | 3.15 GiB | 1 |
 
-`regression: none`（native −15.2%）。与 §3.5 的 codex 形成对照：同一份"全量三遍扫描"结构，
-claude 侧 native 仍然更快，说明 §3.5 的差距来源不在扫描遍数本身，而在 codex 每条记录的处理成本。
+`regression: none`（native −15.2%）。与 §3.5 的 codex 形成对照：当时两侧都是"全量三遍扫描"的
+结构，claude 侧 native 仍然更快，说明 §3.5 的差距来源不在扫描遍数本身，而在 codex 每条记录的
+处理成本。
 
 > 本场景另有一次更早的测量（`claude-full.txt`，起跑负载 24.9）：ccusage 4m14.8s vs native
 > 3m12.4s。两次方向一致、幅度不同，反映的是机器负载而不是实现差异；上表是 11-12 那一轮。
@@ -125,18 +127,18 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
    长期在 70–140，这一轮测的是「高负载机器上的相对成本」，不是绝对吞吐。中位数的比值在同一天
    同一负载下仍然可比，但不能拿来和 2026-11-03 的基线绝对值横向对比。
 4. **RSS 绝对值同样受本机规模影响**（claude 历史在 GB 级），结论只对「native ≤ ccusage」成立。
-5. **全量场景 codex 反向退化 4.3 倍（§2.3）**。根因在
-   `clients/go/internal/collect/providers/codex/provider.go` 的 `collectUnboundedUsageAttempt`：
-   它对同一份语料扫三遍——`daily` 报表一遍、`collectSessionCounts` 的 `session` 报表一遍、
-   `CollectCodexContextPricingUsagesFromFiles` 的 context pricing 一遍；ccusage 只被调用两次
-   （bench 里 `calls: 2`）。本机语料 `~/.codex/sessions` 6.61 GiB（其中 5.39 GiB 是 zstd）加
-   `archived_sessions.local` 1.90 GiB zstd，压缩比约 4 倍，三遍合计要过约 30 GiB 解压后的文本。
-   已排除的三种解释：(a) 语料不同——`archived_sessions` 是指向 `archived_sessions.local` 的符号
-   链接，两侧读的是同一批文件，同一份单文件语料两侧 `totalTokens` 都是 3317815；(b) zstd 支持
-   不一致——ccusage 读 `.jsonl.zst`（`sessions/` 与 `archived_sessions/` 两处都测过）；
-   (c) 清单漂移触发重试——`codex-full.err` 为空、5 轮全部成功。三遍对两遍只解释 1.5 倍，剩下的
-   约 2.9 倍单遍差距是推断（依据：`sample` 抓到的 CPU 主要落在 `parseFile`/`ClassifyLine` 与
-   zstd 解码），说明 Go 的单遍处理成本高于 ccusage 的 Rust 实现。
+5. **全量场景 codex 反向退化 4.3 倍（§2.3）**，根因是同一份语料被扫三遍；代码已于 2026-11-13
+   处理，端到端复测待补（见 §3.7）。
+   当时的 `collectUnboundedUsageAttempt` 依次跑 `daily` 报表、`collectSessionCounts` 的
+   `session` 报表、`CollectCodexContextPricingUsagesFromFiles` 的 context pricing，ccusage 只被
+   调用两次（bench 里 `calls: 2`）。本机语料 `~/.codex/sessions` 6.61 GiB（其中 5.39 GiB 是
+   zstd）加 `archived_sessions.local` 1.90 GiB zstd，压缩比约 4 倍，三遍合计要过约 30 GiB 解压
+   后的文本。已排除的三种解释：(a) 语料不同——`archived_sessions` 是指向
+   `archived_sessions.local` 的符号链接，两侧读的是同一批文件，同一份单文件语料两侧
+   `totalTokens` 都是 3317815；(b) zstd 支持不一致——ccusage 读 `.jsonl.zst`（`sessions/` 与
+   `archived_sessions/` 两处都测过）；(c) 清单漂移触发重试——`codex-full.err` 为空、5 轮全部成功。
+   三遍对两遍只解释 1.5 倍，剩下的约 2.9 倍单遍差距是推断（依据：`sample` 抓到的 CPU 主要落在
+   `parseFile`/`ClassifyLine` 与 zstd 解码），说明 Go 的单遍处理成本高于 ccusage 的 Rust 实现。
    §2.4 的 claude-code 全量没有退化，所以"全量三遍"本身不是充分原因；区别在 codex 每条 rollout
    记录的解析与分类成本。
 6. **hook 场景 claude-code 冷 cursor 下反向退化 3.8 倍（§2.5）**，codex 同类场景反而快 20%。
@@ -151,6 +153,19 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
    `skills/tokenboard/scripts/notify.mjs` 会把 hook 各阶段耗时写进 run log，热 cursor 的实测不在
    本报告范围。
 
+7. **2026-11-13：上一条的两个原因都处理了（代码已合并，计时待补测）**。
+   ① `LoadGroupsPerKind` 让 `daily` 与 `session` 共用一次解析：同一批事件同时进入两套去重表，
+   语料从三遍降到两遍；`nativeReportRunner` 按下发内容缓存这份结果，第二个报表直接复用。
+   ② 解析按文件并发，worker 上限 8；读者只解析，事件按文件顺序流式交给聚合，预读窗口由槽位
+   限制在 `workers+2` 个文件以内，内存不会随语料线性增长。
+   实测（本机 40 个真实文件、584 MB、1 分钟负载 167）：串行 8.85s、8 路并行 3.24s，**2.13 倍**；
+   解析占总耗时 92%（单独测 40 个大文件：parse-only 7.23s，含聚合 7.85s），所以并行的上限接近
+   核数。等价性由两组测试钉住：共享解析对两次独立解析逐字段相等（1/2/4/16 workers、有窗口与
+   无窗口），以及真实 50 个文件上新旧二进制的 snapshot 逐字段相同。
+   **全量端到端的计时尚未补测**：补测脚本 `~/.tokenboard/observation/codex-bench.sh` 在三个提交点
+   各跑 5 轮，需要 1 分钟负载 < 40，本机白天长期在 140–360，脚本仍在等闸门。所以本节只有
+   组件级数字，不能把「4.3 倍」直接改写成推算后的新值。
+
 ## 4. 取舍记录
 
 - 2026-11-10 时本报告只覆盖 A/B，C 沿用旧记录并注明「全量可能更慢」。2026-11-12 的补测把
@@ -162,13 +177,11 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
 
 ## 5. 未覆盖
 
-- **端到端对比（TS collector 全链路 vs Go 客户端）没有计时结果，但工序已经等价**。拿 native 比
-  ccusage 二进制并不完全公平的担心，经代码核对不成立：TS 的 `collectCodexCcusageRangeAttempt`
-  （`packages/collector/src/providers/codex.ts:481`）也是 ccusage `daily`、ccusage `session`、
-  `collectCodexContextPricingUsagesFromFiles` 三遍，Go 的 `collectUnboundedUsageAttempt` 同样三遍
-  且直接读原文件（带窗口的 `collectScopedUsage` 会先冻结复制会话，全量路径不会）。所以 §2.3 的
-  「native 11m09s 对 ccusage 2m36s」在端到端口径下只会更接近迁移前的真实等待时间，不会更宽松：
-  TS 那三遍里的第三遍是 JS，比 Go 慢。
+- **端到端对比（TS collector 全链路 vs Go 客户端）没有计时结果**。2026-11-13 起 Go 侧已从三遍
+  降到两遍，TS 的 `collectCodexCcusageRangeAttempt`（`packages/collector/src/providers/codex.ts:481`）
+  仍是 ccusage `daily`、ccusage `session`、`collectCodexContextPricingUsagesFromFiles` 三遍，
+  所以「native 对 ccusage 二进制」的比值不再能直接当作迁移前后的等待时间对比——Go 侧现在少一遍。
+  要回答迁移前后谁更快，必须实测 TS 全链路，这一项与 §3.7 的补测一起做。
   2026-11-12 起过一轮同语料计时（`tokenboard preview --source codex` 对
   `tsx src/cli.ts preview --source codex`），native 一侧 27 分钟后因本机进入工作时间、负载升到
   93 而中止，TS 一侧未开跑——本机白天负载长期 70–140，全量单轮就要十几分钟，计时在当前条件下
