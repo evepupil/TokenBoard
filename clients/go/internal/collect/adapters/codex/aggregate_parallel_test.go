@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func writeManyFiles(t *testing.T, root string, count int) []string {
@@ -104,5 +106,47 @@ func TestParallelParseHonoursCancellation(t *testing.T) {
 	_, _, err := loadGroupsPerKindWorkers(ctx, []FileGroup{{Dir: root, Files: files}}, "UTC", "", "", 4)
 	if err == nil {
 		t.Fatal("want a cancelled parse to return the context error")
+	}
+}
+
+// The readers must not run arbitrarily far ahead of the aggregation. Holding the
+// whole corpus would turn a flat per-file memory profile into a peak
+// proportional to the whole scan, which on this machine's Codex history is
+// several gigabytes. The probe stalls the first consume call until the readers
+// have had time to run ahead, then records how many files were parsed: it must
+// stay within the window the channel capacity allows, not grow to every file.
+func TestParallelParseKeepsTheReadAheadWindowBounded(t *testing.T) {
+	root := t.TempDir()
+	files := writeManyFiles(t, root, 48)
+	pruned := []FileGroup{{Dir: root, Files: files}}
+	plan := NewReplayPlan(pruned)
+	const workers = 4
+
+	parsed := int64(0)
+	parsedAtFirstConsume := int64(-1)
+	err := streamFilesInOrder(context.Background(), pruned, plan, workers,
+		func(events []Event) error {
+			if atomic.LoadInt64(&parsedAtFirstConsume) < 0 {
+				// Give the readers a generous moment to run ahead, then look.
+				time.Sleep(150 * time.Millisecond)
+				atomic.StoreInt64(&parsedAtFirstConsume, atomic.LoadInt64(&parsed))
+			}
+			return nil
+		},
+		func() { atomic.AddInt64(&parsed, 1) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readAhead := atomic.LoadInt64(&parsedAtFirstConsume)
+	// The bound is a constant of the worker count: at most workers files in
+	// flight, the entry being booked, and the one already queued behind it.
+	limit := int64(workers + 2)
+	if readAhead > limit {
+		t.Fatalf("readers were %d files ahead before the aggregation booked the first file, want at most %d", readAhead, limit)
+	}
+	// Well under the corpus: 48 files would mean the whole corpus was parsed.
+	if readAhead >= int64(len(files))/2 {
+		t.Fatalf("readers were %d files ahead of %d, want a bounded window", readAhead, len(files))
 	}
 }
