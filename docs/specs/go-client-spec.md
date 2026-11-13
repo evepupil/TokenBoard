@@ -1,6 +1,6 @@
 # TokenBoard Go 客户端（clients/go）实施规格
 
-状态：**实施中**（2026-10-15 用户确认方向；M0 契约层与 M1 上传/锁/CLI 已实现并合入 `feat/model-pricing-maintenance`，见 §11）。上游依据：`docs/research/client-binary-zig-gui-research.md`（调研终稿）。
+状态：**已实现，待上游合并与发版**（2026-10-15 用户确认方向；M0–M7 全部落地在 `feat/native-usage-sources`，S1–S5 原生采集取代 ccusage，收拢为上游 PR #28；发版暂停状态与解除条件见 §11）。上游依据：`docs/research/client-binary-zig-gui-research.md`（调研终稿）。
 本 spec 是实施契约：实施过程中偏离此处必须先更新本文件。
 
 ## 0. 已批准的决策（用户拍板，不重开）

@@ -81,9 +81,9 @@ func TestParallelParseMatchesSequentialWithAWindow(t *testing.T) {
 	}
 }
 
-// A parse error in one file must surface with that file's message, whichever
-// worker found it.
-func TestParallelParseReportsAFileError(t *testing.T) {
+// An error while booking one file must end the pass with that file's message,
+// whichever worker produced the file.
+func TestParallelParseReportsABookingError(t *testing.T) {
 	root := t.TempDir()
 	good := writeSourceFile(t, root, "2026/01/05/good.jsonl", headlessLine("2026-01-05T12:00:00Z", "gpt-5.4", 10, 1))
 	broken := writeSourceFile(t, root, "2026/01/06/bad.jsonl",
