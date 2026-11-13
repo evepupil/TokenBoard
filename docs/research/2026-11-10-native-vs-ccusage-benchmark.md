@@ -162,12 +162,18 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
 
 ## 5. 未覆盖
 
-- **端到端对比（TS collector 全链路 vs Go 客户端）未测完**。拿 native 比 ccusage 二进制并不完全
-  公平：TS collector 在 ccusage 那两遍之外还要自己再扫一遍做 context pricing，也是三遍，只是第三遍
-  用 JS。2026-11-12 起了一轮同语料的 `tokenboard preview --source codex` 对
-  `tsx src/cli.ts preview --source codex` 的计时，native 一侧在 27 分钟后因本机进入工作时间、
-  负载升到 93 而中止，TS 一侧未开跑。这项结论因此**没有**端到端证据，§2.3 的数字是
-  「native 对 ccusage 二进制」的口径，不是「迁移前后用户的等待时间」。
+- **端到端对比（TS collector 全链路 vs Go 客户端）没有计时结果，但工序已经等价**。拿 native 比
+  ccusage 二进制并不完全公平的担心，经代码核对不成立：TS 的 `collectCodexCcusageRangeAttempt`
+  （`packages/collector/src/providers/codex.ts:481`）也是 ccusage `daily`、ccusage `session`、
+  `collectCodexContextPricingUsagesFromFiles` 三遍，Go 的 `collectUnboundedUsageAttempt` 同样三遍
+  且直接读原文件（带窗口的 `collectScopedUsage` 会先冻结复制会话，全量路径不会）。所以 §2.3 的
+  「native 11m09s 对 ccusage 2m36s」在端到端口径下只会更接近迁移前的真实等待时间，不会更宽松：
+  TS 那三遍里的第三遍是 JS，比 Go 慢。
+  2026-11-12 起过一轮同语料计时（`tokenboard preview --source codex` 对
+  `tsx src/cli.ts preview --source codex`），native 一侧 27 分钟后因本机进入工作时间、负载升到
+  93 而中止，TS 一侧未开跑——本机白天负载长期 70–140，全量单轮就要十几分钟，计时在当前条件下
+  不可得。**这条结论是代码结构得出的，不是计时得出的**，如果将来要拿它对外比较，需要一台空闲
+  机器的实测。
 - 12 个 ccusage 工具来源：本机未安装这些工具，两者都返回空结果，测不出差异；其 parity 证据见
   `2026-11-09-tools-native-parity.md`。
 - Windows/Linux 真机未测性能（RSS 采集在 darwin 上验证；Windows 路径由 CI
