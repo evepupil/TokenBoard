@@ -190,6 +190,9 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
    | `114660d` 共享+并发+流式 | ccusage | 281.3s | 417.0s | 488 MiB | 518 MiB | 2 |
    | `114660d` 共享+并发+流式 | native | **319.1s** | 593.1s | 1009 MiB | 1010 MiB | 1 |
 
+   第三点测的 `114660d` 比后来一个正确性修复（`41dfc7b`，共享解析补上 replayed-compaction
+   过滤）早一个提交；那个修复只丢弃本就该丢的事件，不增加扫描或解码工作，所以计时仍然成立。
+
    native 对 ccusage 的倍差从 3.35 倍 → 1.82 倍 → **1.13 倍**；native 绝对墙钟 963.2s →
    381.4s → 319.1s，共 **3.02 倍**。`regression: true` 仍成立（`native median wall 5m19.089s
    exceeds ccusage 4m41.318s (+13.4%)`），但差距已经落在本机轮间噪声附近：native 五轮
