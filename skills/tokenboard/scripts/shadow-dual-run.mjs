@@ -158,6 +158,9 @@ export function buildShadowInvocation({ config, source, since, until, hook = fal
 // difference exits 1 with a JSON report. Returning "not-installed" instead of
 // "diff" is what keeps a machine without Grok Build from logging a daily
 // false alarm.
+//
+// A collector lock timeout arrives as exit 75 (deferred) from a current
+// client and as 1 from an older one; both are classified from the message.
 export function classifyShadowRun({ source, status, stdout, stderr }) {
   const report = parseReport(stdout)
   const record = {
@@ -228,7 +231,9 @@ export function classifyShadowRun({ source, status, stdout, stderr }) {
   // A run that could not take the collector lock was racing a sync on this
   // machine. The comparison is meaningless in that state — the async side may
   // be rewriting cursors while both scans read — and calling it a failure
-  // would train the operator to ignore the log.
+  // would train the operator to ignore the log. A current client defers on it
+  // (exit 75), so the status cannot key on the code alone; the message is
+  // what both clients print, whichever code accompanies it.
   if (/collector lock timed out|TokenBoard collector lock timed out/i.test(message)) {
     record.status = 'busy'
   }
