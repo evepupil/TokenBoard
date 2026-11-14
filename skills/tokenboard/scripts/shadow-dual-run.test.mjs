@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -14,7 +14,8 @@ import {
   readRecentRecords,
   readDualRunConfig,
   summarizeDualRun,
-  summarizeDualRunTrend
+  summarizeDualRunTrend,
+  validateDualRunFlags
 } from './shadow-dual-run.mjs'
 
 const report = (overrides = {}) => JSON.stringify({ status: 'match', snapshots: 12, ...overrides }, null, 2)
@@ -82,6 +83,56 @@ test('a differing run logs the counts and the keys, bounded', () => {
     stderr: ''
   })
   assert.equal(bounded.keys.length, 20)
+})
+
+// A key says where a difference is, not what it is. Without the field names a
+// reviewer reading the log cannot tell a costUsd-only row (the documented
+// pricing-basis split, which is expected) from a token difference (which is
+// not), and every diff costs a full re-run to classify.
+test('a differing run records which fields differ', () => {
+  const key = (model) => ({ source: 'claude-code', usageDate: '2026-11-05', timezone: 'UTC', model })
+  const stdout = report({
+    status: 'diff',
+    differing: [
+      { key: key('a'), fields: [{ field: 'costUsd', ts: 1, go: 2 }] },
+      {
+        key: key('b'),
+        fields: [
+          { field: 'inputTokens', ts: 1, go: 2 },
+          { field: 'costUsd', ts: 3, go: 4 }
+        ]
+      }
+    ]
+  })
+  const record = classifyShadowRun({ source: 'claude-code', status: 1, stdout, stderr: '' })
+  assert.deepEqual(record.fields, ['costUsd', 'inputTokens'])
+})
+
+// The field list is what a reviewer scans first, so it must stay small even on
+// a run where many distinct fields differ.
+test('the recorded field list is bounded and sorted', () => {
+  const key = (model) => ({ source: 'codex', usageDate: '2026-10-20', timezone: 'UTC', model })
+  const names = Array.from({ length: 30 }, (_, index) => `field${String(index).padStart(2, '0')}`)
+  const stdout = report({
+    status: 'diff',
+    differing: [{ key: key('a'), fields: names.map((field) => ({ field, ts: 1, go: 2 })) }]
+  })
+  const record = classifyShadowRun({ source: 'codex', status: 1, stdout, stderr: '' })
+  assert.equal(record.fields.length, 12)
+  assert.deepEqual(record.fields, [...record.fields].sort())
+})
+
+// A row present on only one side has no field list of its own. It must not
+// produce an empty `fields` entry that reads like "nothing differs".
+test('a differing run with only one-sided rows records no field list', () => {
+  const key = (model) => ({ source: 'codex', usageDate: '2026-10-20', timezone: 'UTC', model })
+  const record = classifyShadowRun({
+    source: 'codex',
+    status: 1,
+    stdout: report({ status: 'diff', onlyInTs: [key('a')] }),
+    stderr: ''
+  })
+  assert.equal(record.fields, undefined)
 })
 
 // A source the machine does not have is not a difference and must not fail
@@ -222,16 +273,6 @@ test('buildShadowInvocation only passes --until to the sources that accept it', 
   assert.equal(grok.env.TOKENBOARD_UNTIL, undefined)
 })
 
-// The ccusage-backed sources must run the same ccusage binary on both sides,
-// or the comparison measures two different tools. The others have no ccusage
-// to pin.
-test('buildShadowInvocation pins ccusage only for the sources that use it', () => {
-  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC', ccusageBin: '/bin/ccusage' }
-  assert.equal(buildShadowInvocation({ config, source: 'claude-code' }).env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage')
-  assert.equal(buildShadowInvocation({ config, source: 'codex' }).env.TOKENBOARD_CCUSAGE_BIN, '/bin/ccusage')
-  assert.equal(buildShadowInvocation({ config, source: 'pi' }).env.TOKENBOARD_CCUSAGE_BIN, undefined)
-})
-
 // A machine whose Codex archive is a symlink refuses the scan unless the
 // configured roots are passed through, which is exactly what sync does.
 test('buildShadowInvocation passes the configured codex symlink roots', () => {
@@ -256,24 +297,24 @@ test('buildShadowInvocation strips an inherited hook mode', () => {
   assert.equal(invocation.env.TOKENBOARD_HOOK_MODE, undefined)
 })
 
-test('readDualRunConfig defaults to the installed binary and the pinned ccusage', () => {
+test('readDualRunConfig defaults to the installed binary', () => {
   const root = mkdtempSync(join(tmpdir(), 'dual-run-config-'))
   try {
     const binDir = join(root, 'bin')
     mkdirSync(binDir, { recursive: true })
     const binary = join(binDir, process.platform === 'win32' ? 'tokenboard.exe' : 'tokenboard')
-    const ccusage = join(binDir, process.platform === 'win32' ? 'ccusage.exe' : 'ccusage')
     writeFileSync(binary, '')
-    writeFileSync(ccusage, '')
 
     const previous = process.env.TOKENBOARD_CONFIG_DIR
     process.env.TOKENBOARD_CONFIG_DIR = root
     try {
       const config = readDualRunConfig({ env: {}, config: { timezone: 'UTC' } })
       assert.equal(config.binary, binary)
-      assert.equal(config.ccusageBin, ccusage)
       assert.equal(config.collectorDir, join(root, 'TokenBoard'))
       assert.equal(config.logPath, join(root, 'logs', 'shadow-dual-run.jsonl'))
+      // The client no longer runs ccusage on either side, so the harness has
+      // no binary to pin and must not look for one.
+      assert.equal('ccusageBin' in config, false)
     } finally {
       if (previous === undefined) delete process.env.TOKENBOARD_CONFIG_DIR
       else process.env.TOKENBOARD_CONFIG_DIR = previous
@@ -304,16 +345,39 @@ test('every comparable source is one the client accepts', () => {
   assert.deepEqual(dualRunSources, [
     'claude-code',
     'codex',
-    'grok-build',
-    'deepseek-harness',
+    'antigravity-cli',
     'opencode',
     'pi',
-    'antigravity-cli'
+    'grok-build',
+    'deepseek-harness',
+    // The ccusage tool family, in usage-core's declaration order.
+    'amp',
+    'droid',
+    'codebuff',
+    'hermes',
+    'goose',
+    'kilo',
+    'copilot',
+    'gemini-cli',
+    'kimi',
+    'qwen',
+    'openclaw',
+    'zcode'
   ])
-  assert.equal(
-    readFileSync(new URL('./shadow-dual-run.mjs', import.meta.url), 'utf8').includes('antigravity-ide'),
-    false
-  )
+  // The two GUI sources need a language server, so they stay out of the dual
+  // run. Asserted on the list rather than on the file text: the module names
+  // them to exclude them, which is not the same as comparing them.
+  for (const source of ['antigravity', 'antigravity-ide']) {
+    assert.equal(dualRunSources.includes(source), false, `${source} must stay out of the dual run`)
+  }
+})
+
+test('buildShadowInvocation never injects a ccusage binary', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC' }
+  for (const source of ['amp', 'gemini-cli', 'zcode', 'claude-code', 'codex', 'pi']) {
+    const invocation = buildShadowInvocation({ config, source })
+    assert.equal(invocation.env.TOKENBOARD_CCUSAGE_BIN, undefined, `${source} must not receive a ccusage pin`)
+  }
 })
 
 // The dual run's default comparison is a full preview, but production runs the
@@ -464,4 +528,43 @@ test('the dual-run log path follows the config directory and the log override', 
     dualRunLogPath({ env: { TOKENBOARD_SHADOW_DUAL_RUN_LOG: '/tmp/moved.jsonl' }, root: '/cfg' }),
     '/tmp/moved.jsonl'
   )
+})
+
+// The harness is where both clients' stderr converges into a log line and a terminal echo.
+// It must not assume either side redacted: a provider or ccusage error can carry
+// `tb_upload_…` or `https://user:token@host/…`.
+test('classifyShadowRun redacts credentials from an error message before logging it', () => {
+  const record = classifyShadowRun({
+    source: 'codex',
+    status: 1,
+    stdout: '',
+    stderr: 'upload failed: POST https://ci-user:ci-token@example.invalid/ingest rejected tb_upload_abcdef123456'
+  })
+
+  assert.equal(record.status, 'error')
+  assert.match(record.message, /https:\/\/example\.invalid\/ingest/)
+  assert.doesNotMatch(record.message, /ci-token/)
+  assert.doesNotMatch(record.message, /tb_upload_abcdef123456/)
+})
+
+// A named `--until` that the source cannot honor must not be dropped quietly: the operator
+// asked for a settled-day window and would otherwise read an unbounded comparison as that
+// window. (An `all` run keeps passing --until to the two sources that accept it, which the
+// invocation test above pins down.)
+test('buildShadowInvocation still drops --until for sources that do not accept it', () => {
+  const config = { binary: '/bin/tokenboard', collectorDir: '/repo', timezone: 'UTC' }
+  assert.equal(buildShadowInvocation({ config, source: 'pi', until: '2026-10-20' }).args.includes('--until'), false)
+  assert.equal(buildShadowInvocation({ config, source: 'codex', until: '2026-10-20' }).args.includes('--until'), true)
+})
+
+// A named source that cannot honor `--until` or `--hook` is a usage error, not a silently
+// wider comparison: both would let the operator read the run as evidence for a window or
+// code path it never exercised.
+test('validateDualRunFlags refuses flags a named source cannot honor', () => {
+  assert.match(validateDualRunFlags({ source: 'pi', until: '2026-10-20' }), /--until is only supported/)
+  assert.match(validateDualRunFlags({ source: 'pi', hook: true }), /--hook is only supported/)
+  assert.equal(validateDualRunFlags({ source: 'codex', until: '2026-10-20' }), null)
+  assert.equal(validateDualRunFlags({ source: 'codex', hook: true }), null)
+  // An all-source run is allowed: the two hook sources use the flag, the rest run a preview.
+  assert.equal(validateDualRunFlags({ source: undefined, until: '2026-10-20', hook: true }), null)
 })

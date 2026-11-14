@@ -1,0 +1,2 @@
+{"type":"user","message":"hi"}
+{"type":"assistant","sessionId":"qs-1","timestamp":"2026-05-04T01:02:03.000Z","model":"qwen3-coder","usageMetadata":{"promptTokenCount":1000,"candidatesTokenCount":200,"thoughtsTokenCount":50,"cachedContentTokenCount":300,"totalTokenCount":1550}}

@@ -11,6 +11,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -1458,7 +1459,9 @@ test('preserves relative dependency symlinks when moving across filesystems', ()
     const copiedSymlinkPath = join(destination, 'node_modules', '.bin', 'tsx')
     assert.equal(existsSync(source), false)
     assert.equal(lstatSync(copiedSymlinkPath).isSymbolicLink(), true)
-    assert.equal(readlinkSync(copiedSymlinkPath), target)
+    // What matters is that the link stayed relative and still resolves; the separator
+    // style is the host's (Windows stores a relative link with backslashes).
+    assert.equal(readlinkSync(copiedSymlinkPath).replaceAll('\\', '/'), target)
     assert.equal(existsSync(copiedSymlinkPath), true)
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -1883,6 +1886,13 @@ test('archive fallback recovers the newest orphaned backup and retains older cop
     mkdirSync(newerBackupDir, { recursive: true })
     writeFileSync(join(olderBackupDir, 'sentinel.txt'), 'older collector')
     writeFileSync(join(newerBackupDir, 'sentinel.txt'), 'newer collector')
+    // Name order and mtime order disagree on purpose: the backup whose name sorts
+    // first must still lose to the one that is actually newer. The mtimes are set
+    // explicitly because two directories created back to back share a timestamp on
+    // filesystems with coarse mtime granularity (Windows), which would leave the
+    // tie-break — the name — deciding and silently inverting the assertion.
+    utimesSync(olderBackupDir, new Date('2026-10-01T00:00:00Z'), new Date('2026-10-01T00:00:00Z'))
+    utimesSync(newerBackupDir, new Date('2026-10-02T00:00:00Z'), new Date('2026-10-02T00:00:00Z'))
 
     assert.throws(
       () =>

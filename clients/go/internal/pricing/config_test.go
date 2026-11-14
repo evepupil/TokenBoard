@@ -121,17 +121,28 @@ func TestDoesNotInventCacheReadPriceForGPT54Pro(t *testing.T) {
 func TestPinsOnlyUnambiguousFallbackPricesForFreeAndSingleSourceModels(t *testing.T) {
 	overrides := bundledPricingOverrides(t)
 	pinned := map[string]map[string]float64{
+		// The official longcat row, not the nano-gpt reseller's 0.75/2.95: the catalogue
+		// now prices this id from both, and ccusage's own builtin table already charges
+		// 0.3/1.2. A bundled fallback that disagrees with both is what an offline run bills.
 		"LongCat-2.5-Preview": {
-			"inputCostPerToken":       perMillion(0.75),
-			"outputCostPerToken":      perMillion(2.95),
-			"cacheReadInputTokenCost": perMillion(0.015),
-			"maxInputTokens":          1_000_000,
+			"inputCostPerToken":       perMillion(0.3),
+			"outputCostPerToken":      perMillion(1.2),
+			"cacheReadInputTokenCost": perMillion(0.006),
+			"maxInputTokens":          1_048_576,
 		},
 		"deepseek-flash": {
 			"inputCostPerToken":       perMillion(0.15),
 			"outputCostPerToken":      perMillion(0.6),
 			"cacheReadInputTokenCost": perMillion(0.003),
 			"maxInputTokens":          1_000_000,
+		},
+		// ccusage matches keys case-sensitively and the catalogue publishes this
+		// id under both spellings, so the static fallback carries both too.
+		"longcat-2.5-preview": {
+			"inputCostPerToken":       perMillion(0.3),
+			"outputCostPerToken":      perMillion(1.2),
+			"cacheReadInputTokenCost": perMillion(0.006),
+			"maxInputTokens":          1_048_576,
 		},
 	}
 	for modelID, want := range pinned {

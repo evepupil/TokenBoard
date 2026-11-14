@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { verifyUploadToken } from '../../../features/auth/middleware'
 import { ApiError } from '../../../lib/errors'
 import { clientIpRateLimitSubject, enforceRateLimit } from '../../../lib/rate-limit'
-import { POST } from './ingest'
+import { POST, maxIngestBodyBytes } from './ingest'
 
 vi.mock('../../../features/auth/middleware', () => ({
   verifyUploadToken: vi.fn()
@@ -106,5 +106,36 @@ describe('ingest route', () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } })
+  })
+
+  // Parsing is what materialises the body in memory, so a declared size past the ceiling is
+  // refused from the header alone: a 500-snapshot batch is ~200 KB, and anything at the cap is
+  // a client that is not this collector.
+  test('rejects an oversized body from its Content-Length before parsing', async () => {
+    const declared = String(maxIngestBodyBytes + 1)
+    const context = {
+      env: { DB: {} },
+      req: {
+        raw: new Request('https://tokenboard.example/api/v1/ingest', { method: 'POST' }),
+        header: vi.fn((name: string) => (name.toLowerCase() === 'content-length' ? declared : 'Bearer token')),
+        json: vi.fn(async () => ({ snapshots: [] }))
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+
+    mockedVerifyUploadToken.mockResolvedValue({
+      id: 'user_1',
+      uploadTokenHash: 'token_hash',
+      deviceId: null,
+      installationId: null
+    })
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: { code: 'PAYLOAD_TOO_LARGE', message: 'Request body too large' }
+    })
+    expect(context.req.json).not.toHaveBeenCalled()
   })
 })

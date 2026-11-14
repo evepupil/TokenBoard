@@ -53,10 +53,9 @@ type Options struct {
 	HomeDir           string
 	Stderr            func(line string)
 	Env               func(string) string
-	// Runner runs ccusage; nil means ccusage.RunJSON.
+	// Runner answers one report call; nil means the in-process native source.
+	// Tests inject a stub.
 	Runner ccusage.CommandRunner
-	// ResolveBinary acquires ccusage; nil means ccusage.Resolve.
-	ResolveBinary func(ccusage.AcquireOptions) (ccusage.Binary, error)
 	// PricingFetcher replaces the catalogue HTTP client; tests use it.
 	PricingFetcher func(request *http.Request) (*http.Response, error)
 	// HookAcknowledgement receives the per-scope uploaded file list.
@@ -76,10 +75,6 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	stderr := options.Stderr
 	if stderr == nil {
 		stderr = func(string) {}
-	}
-	runner := options.Runner
-	if runner == nil {
-		runner = ccusage.RunJSON
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -122,9 +117,11 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 		}
 	}
 
-	packageRunner, err := resolveRunner(commandEnv, hookMode, options, stderr)
-	if err != nil {
-		return nil, err
+	// The report source is the in-process native runner; everything around it
+	// (pricing config, rules, scopes, retries) stays as it was. See native.go.
+	var runner ccusage.CommandRunner = newNativeReportRunner(prepared).Run
+	if options.Runner != nil {
+		runner = options.Runner
 	}
 	// The rule set is derived from the same catalogue that priced the ccusage
 	// config: the static table widened by every unambiguously priced catalogue
@@ -133,23 +130,28 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 	// explicitly. Using the static default instead would leave a model the
 	// server newly prices un-repriced, which is exactly the divergence the
 	// catalogue exists to avoid.
+	//
+	// ContextPricingModels is nil when the dynamic config could not be written and
+	// ccusage fell back to the bundled or explicit file: that file carries no
+	// catalogue prices, so widening the rules from the catalogue anyway would make
+	// the two halves of the run disagree. TS rebuilds its rules with an empty model
+	// list on the same branch.
 	rules := CompileRules(BuildCodexContextPricingRules(
-		prepared.Catalogue.Models,
+		prepared.ContextPricingModels,
 		CodexContextPricingRules,
 		pricingStderr,
 		prepared.ExplicitOverrideModelIDs,
 	))
 	collection := providerRun{
-		ctx:           ctx,
-		runner:        runner,
-		packageRunner: packageRunner,
-		timezone:      timezone,
-		collectedAt:   collectedAt,
-		stateDir:      stateDir,
-		env:           commandEnv,
-		options:       options,
-		stderr:        stderr,
-		rules:         rules,
+		ctx:         ctx,
+		runner:      runner,
+		timezone:    timezone,
+		collectedAt: collectedAt,
+		stateDir:    stateDir,
+		env:         commandEnv,
+		options:     options,
+		stderr:      stderr,
+		rules:       rules,
 	}
 
 	var snapshots []contract.Snapshot
@@ -167,59 +169,20 @@ func Collect(ctx context.Context, options Options) ([]contract.Snapshot, error) 
 
 // providerRun is the per-invocation state every collection path shares.
 type providerRun struct {
-	ctx           context.Context
-	runner        ccusage.CommandRunner
-	packageRunner ccusage.PackageRunner
-	timezone      string
-	collectedAt   string
-	stateDir      string
-	env           func(string) string
-	options       Options
-	stderr        func(string)
+	ctx         context.Context
+	runner      ccusage.CommandRunner
+	timezone    string
+	collectedAt string
+	stateDir    string
+	env         func(string) string
+	options     Options
+	stderr      func(string)
 	// rules is the context-pricing rule set for this run: the static table
 	// widened by the models the running catalogue prices (and narrowed by the
 	// user's explicit overrides), exactly as the TS provider scopes its rules
 	// for the lifetime of one collect. Nothing reads DefaultRules directly on
 	// this path, so a model the server newly prices is repriced here too.
 	rules *Rules
-}
-
-// resolveRunner picks the ccusage invocation. Hook mode never downloads: the
-// hook path must stay offline, so a machine with no usable binary reports the
-// source unavailable instead of fetching a package.
-func resolveRunner(
-	env func(string) string,
-	hookMode bool,
-	options Options,
-	stderr func(string),
-) (ccusage.PackageRunner, error) {
-	resolveBinary := options.ResolveBinary
-	if resolveBinary == nil {
-		resolveBinary = ccusage.Resolve
-	}
-	// Boolean(env.X) in TS: any non-empty value, whitespace included.
-	forceRunner := env("TOKENBOARD_FORCE_PACKAGE_RUNNER") != ""
-	var localBinary string
-	if !forceRunner {
-		binary, err := resolveBinary(ccusage.AcquireOptions{
-			Env:      env,
-			HomeDir:  homeDir(options),
-			HookMode: hookMode,
-			Stderr:   stderr,
-		})
-		if err != nil {
-			if hookMode {
-				return ccusage.PackageRunner{}, err
-			}
-			stderr(fmt.Sprintf("TokenBoard ccusage: %s; falling back to the package runner", err.Error()))
-		} else {
-			localBinary = binary.Path
-		}
-	}
-	return ccusage.ResolvePackageRunner(ccusage.RunnerInput{
-		Env:         env,
-		LocalBinary: localBinary,
-	})
 }
 
 func homeDir(options Options) string {
@@ -491,7 +454,7 @@ func (run *providerRun) collectScopedBatch(
 	if err != nil {
 		return scopedBatch{}, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return scopedBatch{}, err
@@ -584,7 +547,7 @@ func (run *providerRun) collectSessionCounts(
 		run.stderr("Codex daily tokens collected, but session counts are unavailable; continuing with sessionCount=0: " + err.Error())
 		return map[string]any{"data": []any{}}, nil
 	}
-	result, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	result, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(env), ReadSessionTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		if required {
@@ -755,7 +718,7 @@ func (run *providerRun) collectFrozenBoundedBatch(
 	if err != nil {
 		return frozenBoundedBatch{}, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return frozenBoundedBatch{}, err
@@ -1078,7 +1041,7 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	daily, err := run.runner(run.ctx, run.packageRunner.Command, args,
+	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
 		PackageCommandOptions(environOf(collectionEnv), ReadDailyTimeoutMs(run.env), run.stderr))
 	if err != nil {
 		return nil, err
@@ -1133,8 +1096,9 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := assertCodexContextPricingInventoryStable(inventory, after); err != nil {
-		return nil, err
+	if drift := describeCodexContextPricingInventoryDrift(inventory, after); !drift.Empty() {
+		emitStderr(run.stderr, "Codex session files changed during unbounded collection ("+
+			drift.String()+"); reporting the files as they were read, the next sync reconciles the rest")
 	}
 	usages, err := run.rules.CollectCodexContextPricingUsagesFromFiles(CollectFilesInput{
 		FilePaths:             inventory.FilePaths,
@@ -1154,8 +1118,9 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := assertCodexContextPricingInventoryStable(inventory, after); err != nil {
-		return nil, err
+	if drift := describeCodexContextPricingInventoryDrift(inventory, after); !drift.Empty() {
+		emitStderr(run.stderr, "Codex session files changed while reading context pricing ("+
+			drift.String()+"); reporting the files as they were read, the next sync reconciles the rest")
 	}
 	return applyCollectedCodexContextPricing(struct {
 		Snapshots   []contract.Snapshot
@@ -1228,21 +1193,22 @@ func envWith(env func(string) string, key, value string) func(string) string {
 // every codex call carries `--config`; omitting it makes ccusage fall back to
 // its own price table and every cost diverges.
 func (run *providerRun) runnerArgs(env func(string) string, packageArgs []string) ([]string, error) {
-	return run.packageRunner.Args(packageArgs, env, nil)
+	return ccusage.WithConfigArgs(packageArgs, env, nil)
 }
 
-// codexCommandEnvKeys are the variables the provider overrides for a ccusage
-// run. The TS side passes `{ ...process.env, CODEX_HOME }`, so everything else
-// the child needs (PATH for the npx shim, HOME, TMPDIR) is inherited.
+// codexCommandEnvKeys are the variables the provider hands the report runner.
+// The TS side passes `{ ...process.env, CODEX_HOME }` to a ccusage child; the
+// native runner reads the same list out of the environment it is given, so the
+// frozen CODEX_HOME and the dynamic config path keep winning over the process
+// environment exactly as they did for the child.
 var codexCommandEnvKeys = []string{
 	"CODEX_HOME", "TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG", "TOKENBOARD_CCUSAGE_CONFIG",
-	"TOKENBOARD_PACKAGE_MANAGER", "TOKENBOARD_STATE_DIR", "TOKENBOARD_ENDPOINT",
+	"TOKENBOARD_STATE_DIR", "TOKENBOARD_ENDPOINT",
 }
 
-// environOf materializes the child environment for a ccusage run: the process
-// environment with the provider's overrides applied last, so a frozen
-// CODEX_HOME always wins over the inherited one. Passing only the overrides
-// strips PATH, and the package runner's npx shim then cannot find node.
+// environOf materializes that environment: the process environment with the
+// provider's overrides applied last, so a frozen CODEX_HOME always wins over
+// the inherited one.
 func environOf(env func(string) string) []string {
 	overrides := make(map[string]string, len(codexCommandEnvKeys))
 	for _, key := range codexCommandEnvKeys {

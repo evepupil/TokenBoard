@@ -73,12 +73,14 @@ function applyNoStore(response: Response) {
 }
 
 // Better Auth does not always set a code, so an unmapped failure still has to land on
-// something a client can switch on. These mirror the codes the app's own routes use.
+// something a client can switch on. These mirror the codes the app's own routes use — 429
+// included: the rate limiter answers `RATE_LIMITED`, and a client that keys on that code
+// should not have to special-case the auth endpoints.
 function fallbackCode(status: number) {
   if (status === 400) return 'BAD_REQUEST'
   if (status === 401) return 'UNAUTHORIZED'
   if (status === 403) return 'FORBIDDEN'
   if (status === 404) return 'NOT_FOUND'
-  if (status === 429) return 'TOO_MANY_REQUESTS'
+  if (status === 429) return 'RATE_LIMITED'
   return 'INTERNAL_SERVER_ERROR'
 }

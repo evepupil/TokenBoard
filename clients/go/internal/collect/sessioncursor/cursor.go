@@ -27,6 +27,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // Snapshot is the cursor-carried projection of a usage snapshot: everything
@@ -154,7 +155,7 @@ func Write(path string, state State) error {
 	if err := os.WriteFile(tmp, append(payload, '\n'), 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

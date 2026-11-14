@@ -13,6 +13,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,11 +30,9 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
 
-// maxBinaryBytes bounds the executable inside the tarball.
+// maxBinaryBytes bounds the executable inside the tarball. The tarball itself
+// is bounded by release.Download's maxDownloadBytes.
 const maxBinaryBytes = 128 * 1024 * 1024
-
-// maxTarballBytes bounds the downloaded tarball.
-const maxTarballBytes = 128 * 1024 * 1024
 
 // binaryName is the executable the tarball ships.
 func binaryName(goos string) string {
@@ -42,10 +42,26 @@ func binaryName(goos string) string {
 	return "tokenboard"
 }
 
-// ccusageBinaryName is the bundled ccusage entry in the tarball, matching the
-// name internal/ccusage's bundled layer looks up.
-func ccusageBinaryName(goos string) string {
-	if goos == "windows" {
+// bundledBinDir is where the client keeps binaries beside itself: the config
+// directory's bin when one is configured, ~/.tokenboard/bin otherwise. It is
+// the location earlier releases installed ccusage into.
+func bundledBinDir(env func(string) string) string {
+	if env == nil {
+		env = os.Getenv
+	}
+	if dir := strings.TrimSpace(env("TOKENBOARD_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, "bin")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".tokenboard", "bin")
+	}
+	return filepath.Join(home, ".tokenboard", "bin")
+}
+
+// ccusageBinaryName is the ccusage entry name an earlier release installed.
+func ccusageBinaryName() string {
+	if runtime.GOOS == "windows" {
 		return "ccusage.exe"
 	}
 	return "ccusage"
@@ -126,10 +142,22 @@ func Run(input Input) (Result, error) {
 	if version == "" {
 		return Result{}, fmt.Errorf("TokenBoard release %s has no usable version", assets.Tag)
 	}
-	if !pinned(input.Tag) && release.Version(CurrentVersion()) == version {
+	currentVersion := release.Version(CurrentVersion())
+	if !pinned(input.Tag) && currentVersion == version {
 		// A scheduled run must stay quiet when there is nothing to do: the
 		// log is long-lived and an "already current" line every hour is noise.
 		return Result{Version: version}, nil
+	}
+	// A feed whose "latest" points below the installed version is not an
+	// update. Installing it would silently reintroduce whatever the newer
+	// version fixed, on every scheduled run, without anyone asking — a tag
+	// rolled back or a release yanked is exactly when that happens. A pinned
+	// --tag is the operator's explicit choice and still installs.
+	if !pinned(input.Tag) && compareReleaseVersions(version, currentVersion) < 0 {
+		stderr(fmt.Sprintf(
+			"TokenBoard %s is newer than the published release %s; leaving the installed binary in place",
+			currentVersion, version))
+		return Result{Version: currentVersion}, nil
 	}
 
 	if client == nil {
@@ -154,16 +182,6 @@ func Run(input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	// Spec §4.1: the tarball also carries the platform's ccusage. It is
-	// optional — an older release without it still updates the client, which
-	// then falls back to PATH and the download layer. A malformed entry is not
-	// the same as an absent one, so a corrupt archive fails the update instead
-	// of silently leaving no ccusage behind.
-	ccusageData, hasCcusage, err := extractOptionalEntry(archiveData, ccusageBinaryName(goos))
-	if err != nil {
-		return Result{}, err
-	}
-
 	dir := filepath.Dir(current)
 	staged := filepath.Join(dir, binaryName(goos)+".new")
 	if err := writeExecutable(staged, binary); err != nil {
@@ -183,30 +201,14 @@ func Run(input Input) (Result, error) {
 	// full copy of the binary, so a machine that updates on every scheduled
 	// sync would otherwise accumulate one per release, forever.
 	pruneBackups(current, backup)
-	// The bundled ccusage lands beside the client, where the three-layer
-	// acquisition looks first. A failure here is reported but does not undo a
-	// client update that already succeeded: the probe and download layers
-	// still cover the machine.
-	//
-	// The target follows the config directory, matching where the skill's
-	// bootstrap install puts it: the client may be pinned at an explicit path
-	// (tests, or a hand-placed binary) while the ccusage it should pair with
-	// lives under TOKENBOARD_CONFIG_DIR/bin.
-	if hasCcusage {
-		ccusageDir := ccusage.BundledBinDir(input.Env, "")
-		if err := os.MkdirAll(ccusageDir, 0o700); err != nil {
-			stderr(fmt.Sprintf("TokenBoard updated to %s, but the bundled ccusage could not be installed: %v", version, err))
-		} else if err := writeExecutable(filepath.Join(ccusageDir, ccusageBinaryName(goos)), ccusageData); err != nil {
-			stderr(fmt.Sprintf("TokenBoard updated to %s, but the bundled ccusage could not be installed: %v", version, err))
-		}
-	} else if stalePath := filepath.Join(ccusage.BundledBinDir(input.Env, ""), ccusageBinaryName(goos)); fileExists(stalePath) {
-		// The release carries no ccusage, so whatever is there stays — a
-		// version this client was never tested against. Say so rather than
-		// report a clean update; the skill's bootstrap install reports the
-		// same thing.
+	// Releases from the ccusage era also carried a ccusage binary beside the
+	// client. The native sources do not use it. Whatever an earlier release
+	// installed is left on disk - a downgrade or rollback may still want it -
+	// but nothing here installs or refreshes one.
+	if stalePath := filepath.Join(bundledBinDir(input.Env), ccusageBinaryName()); fileExists(stalePath) {
 		stderr(fmt.Sprintf(
-			"TokenBoard updated to %s; release %s carries no ccusage, so the existing %s is left in place",
-			version, assets.Tag, stalePath))
+			"TokenBoard updated to %s; the client no longer bundles or uses ccusage, so the existing %s is left in place",
+			version, stalePath))
 	}
 	stderr(fmt.Sprintf("TokenBoard updated to %s (previous binary kept at %s)", version, backup))
 	return Result{Version: version, Updated: true, BackupPath: backup}, nil
@@ -253,6 +255,57 @@ func fileExists(path string) bool {
 }
 
 func pinned(tag string) bool { return strings.TrimSpace(tag) != "" }
+
+// compareReleaseVersions orders two release versions by their leading dotted
+// numeric components. It returns 0 when either side is not a plain version
+// (an unstamped "dev" build, a snapshot stamp, a pre-release suffix): an
+// unparseable version cannot establish that the feed went backwards, and
+// refusing the update on a guess would freeze a machine on a broken build.
+func compareReleaseVersions(left, right string) int {
+	leftParts, ok := numericVersionParts(left)
+	if !ok {
+		return 0
+	}
+	rightParts, ok := numericVersionParts(right)
+	if !ok {
+		return 0
+	}
+	for index := 0; index < len(leftParts) || index < len(rightParts); index++ {
+		var leftPart, rightPart int
+		if index < len(leftParts) {
+			leftPart = leftParts[index]
+		}
+		if index < len(rightParts) {
+			rightPart = rightParts[index]
+		}
+		switch {
+		case leftPart < rightPart:
+			return -1
+		case leftPart > rightPart:
+			return 1
+		}
+	}
+	return 0
+}
+
+// numericVersionParts reads the dotted numeric prefix of a version, stopping at
+// the first non-numeric component ("1.2.3-rc1" → [1 2 3]). A version whose
+// first component is not a number is not a release version.
+func numericVersionParts(version string) ([]int, bool) {
+	fields := strings.Split(strings.TrimSpace(version), ".")
+	parts := make([]int, 0, len(fields))
+	for _, field := range fields {
+		number, err := strconv.Atoi(field)
+		if err != nil || number < 0 {
+			break
+		}
+		parts = append(parts, number)
+	}
+	if len(parts) == 0 {
+		return nil, false
+	}
+	return parts, true
+}
 
 // envValue reads a key through the input's environment, empty when unset.
 func envValue(env func(string) string, key string) string {
@@ -351,6 +404,9 @@ func writeExecutable(path string, data []byte) error {
 // the same contract; production code never assigns it.
 var verifyStaged = verifyExecutable
 
+// versionProbeTimeout bounds the staged binary's version check.
+const versionProbeTimeout = 10 * time.Second
+
 // verifyExecutable runs the staged binary's version check. A binary that
 // cannot answer is not installed: swapping it in would break the next
 // scheduled sync with no way to notice.
@@ -359,7 +415,21 @@ var verifyStaged = verifyExecutable
 // substring test would accept "1.2.30" for "1.2.3", and the staged binary is
 // the only thing standing between a truncated download and a broken install.
 func verifyExecutable(path, want string) error {
-	output, err := exec.Command(path, "version").Output()
+	// A freshly staged binary can block on first run — Gatekeeper quarantine,
+	// antivirus scanning, a broken loader — and an unbounded wait here hangs
+	// self-update entirely (the `--scheduled` exit-zero fallback never runs
+	// because the error branch is never reached). The probe gets a bound, the
+	// same way ccusage's version probe does.
+	ctx, cancel := context.WithTimeout(context.Background(), versionProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
+	cmd.WaitDelay = versionProbeTimeout
+	// The staged binary is a freshly downloaded release artifact and is trusted only after this
+	// probe; the TS side scrubs the same probe (`runsVersion` → `scrubbedChildEnv`). If it were
+	// handed the inherited environment, a tampered feed could read the upload token (or the
+	// release feed's own `user:token@host`) by answering `version` and never touching a run path.
+	cmd.Env = ccusage.ScrubCredentialEnv(os.Environ())
+	output, err := cmd.Output()
 	if err != nil {
 		return err
 	}
@@ -421,19 +491,6 @@ func extractBinary(tarball []byte, name string) ([]byte, error) {
 		return nil, fmt.Errorf("TokenBoard release tarball does not contain %s", name)
 	}
 	return data, nil
-}
-
-// extractOptionalEntry reads an entry that may be absent. An entry that is
-// present but malformed is an error, not a release without the file: skipping
-// it would install a client whose bundled layer then downloads a different
-// version than the release was built with.
-func extractOptionalEntry(tarball []byte, name string) ([]byte, bool, error) {
-	reader, err := gzip.NewReader(bytes.NewReader(tarball))
-	if err != nil {
-		return nil, false, fmt.Errorf("invalid TokenBoard release tarball: %w", err)
-	}
-	defer reader.Close()
-	return readTarballEntry(tar.NewReader(reader), name)
 }
 
 // readTarballEntry reads the first regular file whose base name matches. The

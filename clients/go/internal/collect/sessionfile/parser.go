@@ -2,11 +2,17 @@ package sessionfile
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"fmt"
+	"io"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 // ParseInput describes one session file parse.
@@ -76,7 +82,7 @@ func Parse(input ParseInput, lines []Line) (ParseResult, error) {
 			return ParseResult{}, err
 		}
 	}
-	return finish(state, input), nil
+	return finish(state, input)
 }
 
 // ParseLines consumes the lines of one session file as they are read, the way
@@ -102,7 +108,7 @@ func ParseLines(input ParseInput, lines func(yield func(Line) error) error) (Par
 	if err != nil {
 		return ParseResult{}, err
 	}
-	return finish(state, input), nil
+	return finish(state, input)
 }
 
 type timezoneError struct{ timezone string }
@@ -148,7 +154,7 @@ func consumeLine(state *parseState, input ParseInput, location *time.Location, l
 	return nil
 }
 
-func finish(state *parseState, input ParseInput) ParseResult {
+func finish(state *parseState, input ParseInput) (ParseResult, error) {
 	result := ParseResult{
 		IgnoredUploadSafeRows: state.ignoredUploadSafeRows,
 		MalformedRows:         state.malformedRows,
@@ -165,6 +171,14 @@ func finish(state *parseState, input ParseInput) ParseResult {
 	}
 	snapshots := make([]contract.Snapshot, 0, len(rows))
 	for _, row := range rows {
+		// The TS parser builds each snapshot through usageSnapshotSchema.parse,
+		// so one row the contract rejects fails the whole source there. Checking
+		// the same way here keeps a poisoned snapshot out of the hook cursor,
+		// which would otherwise replay it into an upload batch the server
+		// rejects as a whole.
+		if err := requireIntegerTokenCounts(row); err != nil {
+			return ParseResult{}, fmt.Errorf("%s %s %s: %w", input.Source, row.usageDate, row.model, err)
+		}
 		snapshot := contract.Snapshot{
 			Source:        input.Source,
 			UsageDate:     row.usageDate,
@@ -179,21 +193,80 @@ func finish(state *parseState, input ParseInput) ParseResult {
 			SessionCount:  int64(len(row.sessions)),
 			CollectedAt:   input.CollectedAt,
 		}
+		if err := snapshot.Validate(); err != nil {
+			return ParseResult{}, fmt.Errorf("%s %s %s: %w", input.Source, row.usageDate, row.model, err)
+		}
 		snapshots = append(snapshots, snapshot)
 	}
 	result.Snapshots = snapshots
-	return result
+	return result, nil
 }
 
+// requireIntegerTokenCounts mirrors the schema's integer range check on the
+// float the parser summed. Converting an out-of-range float to int64 is
+// implementation-defined in Go, so the range is enforced before the cast.
+func requireIntegerTokenCounts(row *aggregateRow) error {
+	for _, check := range []struct {
+		name  string
+		value float64
+	}{
+		{"inputTokens", row.inputTokens},
+		{"outputTokens", row.outputTokens},
+		{"cacheCreationTokens", row.cacheCreationTokens},
+		{"cacheReadTokens", row.cacheReadTokens},
+		{"totalTokens", row.totalTokens},
+	} {
+		if check.value < 0 || check.value > contract.MaxSnapshotTokens || check.value != math.Trunc(check.value) {
+			return fmt.Errorf("%s: must be an integer in 0..%d", check.name, contract.MaxSnapshotTokens)
+		}
+	}
+	return nil
+}
+
+// readLineOptions makes encoding/json/v2 decode the way `JSON.parse` does on
+// the shapes transcripts actually carry: a duplicated member keeps the last
+// value. Anything v2 rejects falls back to the v1 decoder, so the input space
+// the hook path accepts is exactly the one it accepted before (v1 tolerates a
+// float64 overflow as ±Inf and replaces invalid UTF-8 instead of failing).
+var readLineOptions = jsonv2.JoinOptions(jsontext.AllowDuplicateNames(true))
+
 func readLineRecord(line string) (map[string]any, bool) {
-	trimmed := strings.TrimSpace(line)
+	// JS `line.trim()` also strips a U+FEFF BOM at either end; TrimJSWhitespace matches that.
+	trimmed := jsonl.TrimJSWhitespace(line)
 	if trimmed == "" {
 		return nil, false
 	}
+	// Ports `JSON.parse`: trailing non-whitespace after the first value is a syntax error,
+	// matching the codex port's jsonlDecodeJSON — a line like `{"a":1}garbage` decodes fine
+	// with v1's first Decode and would otherwise be silently accepted and counted.
+	// v2 enforces that on its own and is ~1.6x faster on real transcript lines.
+	var parsed any
+	if err := jsonv2.Unmarshal([]byte(trimmed), &parsed, readLineOptions); err == nil {
+		record, ok := parsed.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		return record, false
+	}
+	// The slow path decides anything v2 refused. It keeps the accepted input
+	// set identical to the pre-v2 behaviour: a number outside float64's range
+	// still becomes ±Inf (and optionalNumber then ignores it) and invalid UTF-8
+	// is still replaced rather than failing the row.
+	return readLineRecordLegacy(trimmed)
+}
+
+// readLineRecordLegacy is the v1 decoder this function used before v2. It stays
+// as the fallback so a v2-only rejection can never turn an accepted row into a
+// malformed one.
+func readLineRecordLegacy(trimmed string) (map[string]any, bool) {
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	var parsed any
 	if err := decoder.Decode(&parsed); err != nil {
+		return nil, true
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, true
 	}
 	record, ok := parsed.(map[string]any)
@@ -453,14 +526,7 @@ func readTimestamp(record map[string]any) (time.Time, bool) {
 	if value == "" {
 		return time.Time{}, false
 	}
-	trimmed := strings.TrimSpace(value)
-	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", trimmed, time.Local); err == nil {
-		return parsed, true
-	}
-	return time.Time{}, false
+	return jsdate.Parse(value)
 }
 
 func readNumber(record map[string]any, keys ...string) float64 {
@@ -475,17 +541,29 @@ func readNumber(record map[string]any, keys ...string) float64 {
 // optionalNumber reads a JSON number. A numeric string is not a number: the TS
 // parser's typeof check rejects it, and accepting one here would invent usage
 // the other implementation never saw.
+//
+// readLineRecord decodes through encoding/json/v2, which yields float64 for an
+// `any` target; the json.Number arm stays for callers that hand over records
+// decoded by the v1 decoder, so both shapes mean the same thing here.
 func optionalNumber(record map[string]any, key string) (float64, bool) {
 	value, ok := record[key]
 	if !ok {
 		return 0, false
 	}
-	number, ok := value.(json.Number)
-	if !ok {
+	var parsed float64
+	switch number := value.(type) {
+	case float64:
+		parsed = number
+	case json.Number:
+		converted, err := number.Float64()
+		if err != nil {
+			return 0, false
+		}
+		parsed = converted
+	default:
 		return 0, false
 	}
-	parsed, err := number.Float64()
-	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return 0, false
 	}
 	return parsed, true

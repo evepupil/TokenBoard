@@ -9,6 +9,7 @@ import { printHelpIfRequested } from './cli-help.mjs'
 import { errorMessage } from './error-message.mjs'
 import { deviceLinkStatus } from './device-link.mjs'
 import { hookStatus } from './hooks.mjs'
+import { readNotifyWorkerErrors } from './notify.mjs'
 import { scheduledRetryLegacyStatePath, scheduledRetryStatePath } from './scheduled-retry.mjs'
 import { readScheduledSyncState, scheduledSyncStatePath } from './scheduled-sync-state.mjs'
 import { dualRunLogPath, readRecentRecords, summarizeDualRunTrend } from './shadow-dual-run.mjs'
@@ -16,6 +17,9 @@ import { dualRunLogPath, readRecentRecords, summarizeDualRunTrend } from './shad
 // The window mirrors `shadow-dual-run.mjs --summary`'s default so the daily
 // check and the on-demand summary describe the same slice of the log.
 const shadowDualRunWindow = 50
+// A trend whose newest record predates this is treated as from a harness that
+// no longer runs (see collectShadowDualRunSummary).
+const shadowDualRunWindowDays = 7
 
 export function buildStatus({
   configPath,
@@ -27,7 +31,8 @@ export function buildStatus({
   recentRuns,
   uploadBackoff,
   client,
-  shadowDualRun
+  shadowDualRun,
+  notifyWorkerErrors
 }) {
   return {
     configured: true,
@@ -52,6 +57,10 @@ export function buildStatus({
     ...(scheduledSync ? { scheduledSync: publicScheduledSync(scheduledSync) } : {}),
     ...(recentRuns ? { recentRuns } : {}),
     ...(uploadBackoff ? { uploadBackoff } : {}),
+    // Fatal diagnostics from the detached notify worker. The worker's stdio is
+    // ignored, so without this the only sign that a hook stopped dispatching
+    // is the absence of runs.
+    ...(notifyWorkerErrors && notifyWorkerErrors.length > 0 ? { notifyWorkerErrors } : {}),
     // The dual run's verdicts decide whether a source may move onto the Go
     // client. Reporting them here is what turns that log into something an
     // operator actually reads; absent log means no comparison has run.
@@ -151,9 +160,21 @@ function hasValue(value) {
 // can never disagree about what a window of records said. The trend is counts
 // and timestamps only (see summarizeDualRunTrend); a read error here fails
 // status visibly rather than reporting a silently stale trend.
-export function collectShadowDualRunSummary(logPath, { exists = existsSync, read = readRecentRecords } = {}) {
+//
+// A trend whose newest record is older than the window is omitted, not shown.
+// The scheduled comparison moved to its own log (observation-dual-run.jsonl) on
+// 2026-11-12, so this file only gains records when someone runs
+// `shadow-dual-run.mjs` by hand; an old record set would otherwise describe a
+// harness that has not run for weeks exactly like one that ran this morning.
+export function collectShadowDualRunSummary(
+  logPath,
+  { exists = existsSync, read = readRecentRecords, now = Date.now } = {}
+) {
   if (!exists(logPath)) return undefined
-  return summarizeDualRunTrend(read(logPath, shadowDualRunWindow))
+  const trend = summarizeDualRunTrend(read(logPath, shadowDualRunWindow))
+  const lastAtMs = Date.parse(trend.lastAt)
+  if (!Number.isFinite(lastAtMs) || lastAtMs < now() - shadowDualRunWindowDays * 24 * 60 * 60 * 1000) return undefined
+  return trend
 }
 
 function publicHookStatus(hooks) {
@@ -197,6 +218,7 @@ function runCli() {
         scheduledSync: readScheduledSync(source, stateDir),
         recentRuns: collectRecentRunSummary(join(stateDir, 'runs')),
         uploadBackoff: readUploadBackoff(stateDir),
+        notifyWorkerErrors: readNotifyWorkerErrors(stateDir),
         client:
           config.clientType === 'binary'
             ? readClientStatus({ configDir: process.env.TOKENBOARD_CONFIG_DIR?.trim() || dirname(file) })
@@ -210,9 +232,10 @@ function runCli() {
 }
 
 // readClientStatus reports what is actually installed beside the config, for
-// a binary install: the client and the bundled ccusage, with their versions.
-// A version is null when the file is missing or does not answer, which is the
-// signal that the install is not what the config claims.
+// a binary install: the client, plus any ccusage an earlier release left
+// there. The client's version being null (missing or does not answer) is the
+// signal that the install is not what the config claims. The ccusage fields
+// are informational only — since S5 nothing installs or reads that copy.
 export function readClientStatus({ configDir, platform = process.platform, spawn = spawnSync, exists = existsSync }) {
   const binDir = join(configDir, 'bin')
   const clientPath = join(binDir, binaryFileName(platform))

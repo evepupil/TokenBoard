@@ -5,6 +5,7 @@ import { getLeaderboard } from '../../features/leaderboards/service'
 import { resolveViewerTimezone } from '../../features/leaderboards/viewer-timezone'
 import { getOptionalUser } from '../../features/auth/middleware'
 import { jsonError } from '../../lib/http'
+import { clientIpRateLimitSubject, enforceRateLimit, readRateLimitPolicies } from '../../lib/rate-limit'
 
 export const GET = createRoute(async (c) => {
   // The panel's day boundaries depend on the viewer's zone, so the rendered board is
@@ -13,6 +14,12 @@ export const GET = createRoute(async (c) => {
   // its own reasons, and the fragment must not be the cached way around it.
   c.header('Cache-Control', 'no-store')
   try {
+    // The fragment builds the same aggregate the full page does, so it is the same anonymous
+    // read amplifier: cap it at the same ceiling the page now applies.
+    await enforceRateLimit(c.env.DB, {
+      policy: readRateLimitPolicies.publicLeaderboardRead,
+      subject: clientIpRateLimitSubject(c.req.raw.headers)
+    })
     const period = leaderboardPeriodSchema.catch('daily').parse(c.req.query('period'))
     const metric = leaderboardMetricSchema.catch('tokens').parse(c.req.query('metric'))
     // The fetch carries the session cookie when there is one, so this route resolves the zone

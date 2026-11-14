@@ -53,6 +53,9 @@ func TestAFlagWithAValueIsAdoptedOverTheEnvironment(t *testing.T) {
 	t.Setenv("TOKENBOARD_ENDPOINT", "https://scheduler.example/api/v1/ingest")
 	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "scheduler-token")
 	t.Setenv("TOKENBOARD_SINCE", "20260101")
+	// The parse also resolves a timezone, which fails closed on Windows with no
+	// zone available; this test is about flag precedence, so supply one.
+	t.Setenv("TOKENBOARD_TIMEZONE", "UTC")
 	options, err := parseArgs(
 		[]string{"sync", "--endpoint", "https://operator.example/api/v1/ingest", "--token", "operator-token", "--since", "20260202"},
 		os.Getenv,
@@ -76,6 +79,9 @@ func TestAFlagWithAValueIsAdoptedOverTheEnvironment(t *testing.T) {
 func TestSinceEnvironmentChainUsesOrdinaryFallback(t *testing.T) {
 	t.Setenv("TOKENBOARD_SINCE", "")
 	t.Setenv("TOKENBOARD_DEFAULT_SINCE", "2026-01-01")
+	// Same as above: the parse needs a timezone, and Windows fails closed
+	// without one.
+	t.Setenv("TOKENBOARD_TIMEZONE", "UTC")
 	options, err := parseArgs([]string{"sync"}, os.Getenv)
 	if err != nil {
 		t.Fatalf("parseArgs: %v", err)

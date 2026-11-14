@@ -14,7 +14,33 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
+
+const (
+	// A real preview is a few megabytes at most; 64 MiB leaves room for a
+	// full-history scan while keeping a misbehaving child from exhausting
+	// memory before the context timeout would fire.
+	maxShadowStdoutBytes = 64 << 20
+	// shadowTSChildTimeout bounds the TypeScript preview child. A full scan on
+	// a large history can take minutes, so the bound is generous; it exists so
+	// a wedged child (tsx waiting on input, a lock it will never get) cannot
+	// hold the shadow run forever.
+	shadowTSChildTimeout = 15 * time.Minute
+)
+
+// limitedBuffer is a bytes.Buffer that refuses writes past limit.
+type limitedBuffer struct {
+	bytes.Buffer
+	limit int64
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if int64(b.Len())+int64(len(p)) > b.limit {
+		return 0, fmt.Errorf("shadow: TypeScript preview output exceeds %d bytes", b.limit)
+	}
+	return b.Buffer.Write(p)
+}
 
 // shadowTSInput is one TypeScript-side preview invocation.
 type shadowTSInput struct {
@@ -84,7 +110,7 @@ type shadowFieldDiff struct {
 // on the current day even when the implementations agree: the second scan
 // sees the newer bytes, and pro-rata cost allocation shifts with them. Use
 // --until <yesterday> for a stable comparison of settled days.
-func runShadow(ctx context.Context, options Options, env Env, stdout, stderr io.Writer) int {
+func runShadow(ctx context.Context, options Options, env Env, realStateDir string, stdout, stderr io.Writer) int {
 	repoDir := strings.TrimSpace(env("TOKENBOARD_COLLECTOR_DIR"))
 	if repoDir == "" {
 		fmt.Fprintln(stderr,
@@ -109,6 +135,15 @@ func runShadow(ctx context.Context, options Options, env Env, stdout, stderr io.
 		return ExitFailure
 	}
 	defer os.RemoveAll(tsStateDir)
+
+	// A temporary state directory has no pricing catalogue, so without this both
+	// sides fall back to the bundled static config and the comparison never
+	// exercises the dynamic catalogue path — the one that silently drifted from
+	// the TypeScript implementation for eleven days. Seeding the machine's cache
+	// into both directories compares what production actually prices with, and
+	// keeps the run offline: a missing or invalid cache is simply ignored by both
+	// sides, which report the static fallback on their own.
+	seedShadowPricingCache(realStateDir, []string{goStateDir, tsStateDir}, stderr)
 
 	// Shadow always compares one code path on both sides. Without --hook that
 	// is a full preview, and an inherited TOKENBOARD_HOOK_MODE would make the
@@ -342,10 +377,19 @@ func execShadowTS(ctx context.Context, input shadowTSInput) ([]contract.Snapshot
 	if input.Until != "" {
 		args = append(args, "--until", input.Until)
 	}
-	cmd := exec.CommandContext(ctx, node, args...)
+	// The parent context may have no deadline (an interactive `tokenboard
+	// shadow`), so the child gets its own bound regardless.
+	childCtx, cancel := context.WithTimeout(ctx, shadowTSChildTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(childCtx, node, args...)
 	cmd.Dir = filepath.Join(input.RepoDir, "packages", "collector")
 	cmd.Env = shadowChildEnv(input.StateDir, input.HookMode)
-	var stdout bytes.Buffer
+	// The preview array is the child's whole stdout, so it has to be buffered
+	// to parse. A child that starts printing something else (a debug log, a
+	// runaway retry loop) would otherwise grow the buffer without bound; the
+	// cap is far above a real preview and the run fails closed past it.
+	var stdout limitedBuffer
+	stdout.limit = maxShadowStdoutBytes
 	cmd.Stdout = &stdout
 	if input.Stderr != nil {
 		cmd.Stderr = input.Stderr
@@ -358,6 +402,37 @@ func execShadowTS(ctx context.Context, input shadowTSInput) ([]contract.Snapshot
 		return nil, fmt.Errorf("preview output is not a snapshot array: %w", err)
 	}
 	return snapshots, nil
+}
+
+// seedShadowPricingCache copies the machine's pricing catalogue cache into the
+// comparison's temporary state directories. It is deliberately forgiving: the
+// cache is an optimisation, both sides validate it themselves, and a machine
+// that never synced has none — none of those may turn a comparison into a
+// failure. Only a read error other than "not there" and a failed copy are worth
+// a line, and even then the run continues on the static fallback.
+func seedShadowPricingCache(sourceDir string, targets []string, stderr io.Writer) {
+	source := filepath.Join(sourceDir, pricing.CacheFileName)
+	raw, err := os.ReadFile(source)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(stderr, "shadow: could not read the pricing catalogue cache (%v); both sides use static pricing\n", err)
+		}
+		return
+	}
+	for index, dir := range targets {
+		target := filepath.Join(dir, pricing.CacheFileName)
+		if err := os.WriteFile(target, raw, 0o600); err != nil {
+			// A half-seeded run would compare a dynamic side against a static
+			// one and report the difference as drift. Undo the copies instead,
+			// so both sides fall back together.
+			for _, written := range targets[:index] {
+				os.Remove(filepath.Join(written, pricing.CacheFileName))
+			}
+			fmt.Fprintf(stderr, "shadow: could not seed the pricing catalogue cache (%v); both sides use static pricing\n", err)
+			return
+		}
+	}
+	fmt.Fprintf(stderr, "shadow: using the pricing catalogue cache from %s\n", source)
 }
 
 // shadowChildEnv is the process environment with the TypeScript side's state

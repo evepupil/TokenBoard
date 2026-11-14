@@ -38,7 +38,13 @@ export async function sendWebhookRequest(input: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload.body),
-      signal: controller.signal
+      signal: controller.signal,
+      // The provider host, path and token position are pinned by `parseProviderWebhookUrl`, so a
+      // 3xx can only be a deliberate redirect away from the verified endpoint. Following it would
+      // replay the usage payload (and, for DingTalk, the signature) wherever it points. Every
+      // other outbound request in this worker is manual for the same reason; an opaque redirect
+      // arrives as a non-ok response and is recorded as a failed delivery.
+      redirect: 'manual'
     })
     const responseText = await safeResponseText(response)
     if (!response.ok) throw new WebhookHttpError(response.status, responseText)

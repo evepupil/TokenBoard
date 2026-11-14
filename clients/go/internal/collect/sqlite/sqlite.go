@@ -20,6 +20,8 @@ import (
 	"context"
 	dbsql "database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -219,10 +221,15 @@ func runExternal(dbFile, sql string, jsonMode bool, options QueryOptions) (strin
 	defer cancel()
 	command := exec.CommandContext(ctx, sqliteBin, arguments...)
 	command.WaitDelay = timeout
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
+	limit := resolveMaxOutputBytes(options)
+	stdout := &boundedStdout{limit: limit, cancel: cancel}
+	var stderr bytes.Buffer
+	command.Stdout = stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
+		if stdout.exceeded {
+			return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, limit)
+		}
 		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("%s SQLite reader unavailable: %s not found", options.Label, sqliteBin)
 		}
@@ -239,11 +246,37 @@ func runExternal(dbFile, sql string, jsonMode bool, options QueryOptions) (strin
 		}
 		return "", fmt.Errorf("Failed to read %s SQLite data from %s: %s", options.Label, dbFile, message)
 	}
-	if stdout.Len() > resolveMaxOutputBytes(options) {
-		return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, resolveMaxOutputBytes(options))
+	if stdout.exceeded {
+		return "", fmt.Errorf("%s SQLite result exceeded %d bytes", options.Label, limit)
 	}
-	return stdout.String(), nil
+	return stdout.buffer.String(), nil
 }
+
+// boundedStdout enforces the output ceiling while the executable is still
+// running. The post-run length check alone let a runaway result set grow the
+// collector's heap without bound; this writer refuses the chunk that would
+// cross the ceiling and cancels the context, which kills the reader instead of
+// leaving it blocked on a full pipe. The TS side gets the same behaviour from
+// execFile's maxBuffer.
+type boundedStdout struct {
+	buffer   bytes.Buffer
+	limit    int
+	cancel   context.CancelFunc
+	exceeded bool
+}
+
+func (w *boundedStdout) Write(p []byte) (int, error) {
+	if w.buffer.Len()+len(p) > w.limit {
+		w.exceeded = true
+		if w.cancel != nil {
+			w.cancel()
+		}
+		return 0, errStdoutLimitExceeded
+	}
+	return w.buffer.Write(p)
+}
+
+var errStdoutLimitExceeded = errors.New("SQLite output exceeded the byte ceiling")
 
 // missingDatabaseError mirrors the TS isSqliteOpenError: the executable could
 // not open the file, and the file really is gone (rather than merely locked or
@@ -336,15 +369,23 @@ func marshalRow(row map[string]any) ([]byte, error) {
 
 // ParseJSONRows reads the `sqlite3 -json` document shape: nothing at all for
 // an empty result, a JSON array otherwise.
+//
+// The v2 decoder handles the document and is measurably faster on the wide row
+// sets the OpenCode and Antigravity queries return; anything it refuses falls
+// back to the v1 decoder so the accepted input set does not change (v1 ignores
+// trailing content after the first value, for example).
 func ParseJSONRows(stdout, dbFile, label string) ([]map[string]any, error) {
 	trimmed := strings.TrimSpace(stdout)
 	if trimmed == "" {
 		return []map[string]any{}, nil
 	}
-	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	var parsed any
-	if err := decoder.Decode(&parsed); err != nil {
-		return nil, fmt.Errorf("Invalid %s SQLite JSON output from %s: %s", label, dbFile, err.Error())
+	if err := jsonv2.Unmarshal([]byte(trimmed), &parsed, jsonRowsOptions); err != nil {
+		parsed = nil
+		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		if legacyErr := decoder.Decode(&parsed); legacyErr != nil {
+			return nil, fmt.Errorf("Invalid %s SQLite JSON output from %s: %s", label, dbFile, legacyErr.Error())
+		}
 	}
 	items, ok := parsed.([]any)
 	if !ok {
@@ -360,6 +401,10 @@ func ParseJSONRows(stdout, dbFile, label string) ([]map[string]any, error) {
 	}
 	return rows, nil
 }
+
+// jsonRowsOptions reproduces the v1 decoder's duplicate rule on the document
+// shape: the last member wins rather than the decode failing.
+var jsonRowsOptions = jsonv2.JoinOptions(jsontext.AllowDuplicateNames(true))
 
 // DatabaseMtimeMs is the latest mtime across a SQLite database and its WAL
 // sidecars. A database in WAL mode commits into `-wal` first and only updates

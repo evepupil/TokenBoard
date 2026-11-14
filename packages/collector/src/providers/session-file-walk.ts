@@ -1,4 +1,5 @@
-import { lstat, readdir } from 'node:fs/promises'
+import { lstat, opendir } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { resolveCodexSessionRoot } from './codex-symlink-policy'
 
@@ -62,11 +63,12 @@ async function* walkDirectory(
     throw new Error(`Session directory ${currentDir} exceeds the ${maxDepth}-level scan depth limit`)
   }
   if (!(await assertSessionDirectory(currentDir))) return
-  const entries = await readDirectoryEntries(currentDir)
-  if (!entries) return
-  if (entries.length > maxEntries) {
+  const listing = await readDirectoryEntries(currentDir, maxEntries)
+  if (!listing) return
+  if (listing.exceeded) {
     throw new Error(`Session directory ${currentDir} exceeds the ${maxEntries}-entry scan limit`)
   }
+  const entries = listing.entries
   for (const entry of entries.sort((left, right) => compareDirectoryEntries(rootDir, currentDir, left, right))) {
     const entryPath = join(currentDir, entry.name)
     if (entry.isSymbolicLink()) {
@@ -97,13 +99,28 @@ async function assertSessionDirectory(path: string) {
   return true
 }
 
-async function readDirectoryEntries(currentDir: string) {
+async function readDirectoryEntries(
+  currentDir: string,
+  maxEntries: number
+): Promise<{ entries: Dirent[]; exceeded: boolean } | null> {
+  let directory
   try {
-    return await readdir(currentDir, { withFileTypes: true })
+    // `opendir` streams, so the entry cap is enforced while reading instead of after a
+    // directory with an unbounded number of entries has already been loaded whole.
+    directory = await opendir(currentDir)
+    const entries: Dirent[] = []
+    while (entries.length <= maxEntries) {
+      const entry = await directory.read()
+      if (!entry) return { entries, exceeded: false }
+      entries.push(entry)
+    }
+    return { entries, exceeded: true }
   } catch (error) {
     const cause = error as NodeJS.ErrnoException
     if (cause.code === 'ENOENT') return null
     throw new Error(`Unable to read session directory ${currentDir}: ${cause.message}`)
+  } finally {
+    await directory?.close().catch(() => {})
   }
 }
 

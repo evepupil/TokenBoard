@@ -11,8 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // Port of prepareDynamicCcusageConfig: the ccusage config ccusage is pointed at
@@ -32,8 +35,14 @@ type PrepareInput struct {
 
 // PreparedConfig is the result the provider consumes.
 type PreparedConfig struct {
-	ConfigPath      string
-	Catalogue       Catalogue
+	ConfigPath string
+	Catalogue  Catalogue
+	// Overrides is the bundled static layer, or the catalogue-derived one when
+	// the dynamic catalogue loaded. It is NOT what an in-process pricer must
+	// bill from: it omits the user's explicit config and the on-disk merge. No
+	// production code reads it today (the Codex rules take ContextPricingModels
+	// and ExplicitOverrideModelIDs instead); it is kept for the native Codex
+	// work in S3.
 	Overrides       map[string]any
 	CoveredModelIDs map[string]bool
 	// ExplicitOverrideModelIDs names the models the user's own config prices.
@@ -43,6 +52,36 @@ type PreparedConfig struct {
 	// config. The TS side derives the same set with
 	// `new Set(Object.keys(explicitPricingOverrides))`.
 	ExplicitOverrideModelIDs map[string]bool
+	// MergedPricingOverrides is exactly the defaults.pricingOverrides block the
+	// merged ccusage config carries - bundled, dynamic catalogue and the user's
+	// explicit config, with the non-representable entries already dropped. A
+	// consumer that prices in process (the native providers) must use this, not
+	// Overrides: Overrides is only the bundled/dynamic layer, and the explicit
+	// config's rates reach ccusage solely through the merged file. Reading
+	// Overrides there would silently bill a user who set
+	// TOKENBOARD_CCUSAGE_CONFIG differently from the ccusage path.
+	//
+	// It is the root defaults layer only. Scoped sections
+	// (commands.<...>, <agent>.defaults) reach ccusage through the merged file
+	// too, so an in-process pricer must resolve them with ResolveScope rather
+	// than reading this field directly.
+	MergedPricingOverrides map[string]any
+	// ContextPricingModels is the catalogue the Codex context-pricing rules may
+	// widen the static table with, and it is nil when the dynamic config could not
+	// be written.
+	//
+	// ccusage is then pointed at the bundled or explicit config, which carries no
+	// catalogue prices, so letting the rules keep pricing from the catalogue would
+	// make the two halves of one run disagree: ccusage would bill from the static
+	// file while the context rules re-priced from the catalogue. The TS side
+	// rebuilds its rules with an empty model list on the same branch, and the two
+	// clients are diffed against each other on real data, so this has to match.
+	ContextPricingModels []Model
+	// ccusageConfig is the config file ccusage is actually pointed at, as
+	// parsed, or nil when it reads none. ResolveScope derives a report's
+	// effective options from it, so an in-process pricer sees exactly the
+	// layers a ccusage invocation would apply.
+	ccusageConfig map[string]any
 }
 
 // Prepare ports prepareDynamicCcusageConfig. The returned path is always a
@@ -78,8 +117,16 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 	} else {
 		overrides = createCcusagePricingOverrides(catalogue.Models)
 	}
-	merged := mergeCcusageConfig(staticConfig, overrides, explicitConfig,
+	merged, err := mergeCcusageConfig(staticConfig, overrides, explicitConfig,
 		nonRepresentableContextPricingModelIDs(catalogue.Models, overrides))
+	if err != nil {
+		return PreparedConfig{}, err
+	}
+	// The override block the merged file carries, which is what an in-process
+	// pricer has to bill from. It differs from overrides whenever an explicit
+	// config is present, and it also lacks the dynamic rows whose long-context
+	// tiers cannot be represented in the ccusage shape.
+	mergedOverrides := readPricingOverrides(merged)
 
 	explicitOverrides := map[string]any{}
 	if explicitConfig != nil {
@@ -116,19 +163,36 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 				"TokenBoard model pricing: bundled ccusage config write failed (%s); using %s",
 				err.Error(), describeFallback(fallback)))
 			return PreparedConfig{
-				ConfigPath:               fallback,
-				Catalogue:                catalogue,
-				Overrides:                overrides,
+				ConfigPath: fallback,
+				Catalogue:  catalogue,
+				Overrides:  overrides,
+				// The merged file was never written, so ccusage reads either the
+				// explicit file (nil here - this branch requires
+				// explicitConfig == nil) or no config at all. Either way it
+				// loads none of the bundled layer, so neither may the native
+				// path.
+				MergedPricingOverrides:   readPricingOverrides(explicitConfig),
 				CoveredModelIDs:          covered,
 				ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+				ContextPricingModels:     nil,
+				// Nothing was written and there is no explicit file here, so
+				// ccusage reads no config at all.
+				ccusageConfig: nil,
 			}, nil
 		}
 		return PreparedConfig{
-			ConfigPath:               bundledPath,
-			Catalogue:                catalogue,
-			Overrides:                overrides,
+			ConfigPath: bundledPath,
+			Catalogue:  catalogue,
+			Overrides:  overrides,
+			// No explicit config: merged is the bundled layer plus its own
+			// non-representable filtering, so this is the same pricing view.
+			MergedPricingOverrides:   mergedOverrides,
 			CoveredModelIDs:          covered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     catalogue.Models,
+			// ccusage reads the materialized bundled file, which is the parsed
+			// static config.
+			ccusageConfig: staticConfig,
 		}, nil
 	}
 
@@ -146,11 +210,20 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 			fallbackCovered[modelID] = true
 		}
 		return PreparedConfig{
-			ConfigPath:               fallback,
-			Catalogue:                catalogue,
-			Overrides:                overrides,
+			ConfigPath: fallback,
+			Catalogue:  catalogue,
+			Overrides:  overrides,
+			// The merged file was never written. ccusage was pointed at the
+			// explicit file (or at nothing), so it reads only that file's
+			// overrides - the bundled and dynamic layers never load. An
+			// in-process pricer has to see the same set, or it bills rates
+			// ccusage does not apply.
+			MergedPricingOverrides:   readPricingOverrides(explicitConfig),
 			CoveredModelIDs:          fallbackCovered,
 			ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+			ContextPricingModels:     nil,
+			// ccusage was pointed at the explicit file, or at nothing.
+			ccusageConfig: explicitConfig,
 		}, nil
 	}
 	stderr(fmt.Sprintf("TokenBoard model pricing: prepared ccusage config at %s", configPath))
@@ -158,8 +231,11 @@ func Prepare(input PrepareInput) (PreparedConfig, error) {
 		ConfigPath:               configPath,
 		Catalogue:                catalogue,
 		Overrides:                overrides,
+		MergedPricingOverrides:   mergedOverrides,
 		CoveredModelIDs:          covered,
 		ExplicitOverrideModelIDs: explicitOverrideModelIDs(explicitOverrides),
+		ContextPricingModels:     catalogue.Models,
+		ccusageConfig:            merged,
 	}, nil
 }
 
@@ -191,7 +267,7 @@ func materializeBundledConfig(path string) error {
 	if err := os.WriteFile(tmp, bundledConfig, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -248,15 +324,24 @@ func mergeCcusageConfig(
 	dynamicOverrides map[string]any,
 	explicit map[string]any,
 	nonRepresentable map[string]bool,
-) map[string]any {
+) (map[string]any, error) {
 	bundledDefaults, _ := bundled["defaults"].(map[string]any)
 	if bundledDefaults == nil {
 		bundledDefaults = map[string]any{}
 	}
 	explicitDefaults := map[string]any{}
 	if explicit != nil {
-		if value, ok := explicit["defaults"].(map[string]any); ok && value != nil {
-			explicitDefaults = value
+		// A non-object `defaults` is a hard error: the TypeScript collector's
+		// asRecord throws on it, and silently dropping the user's section would
+		// let the Go client write and bill a config the TS client refuses.
+		// ccusage itself would ignore the section, but it never gets to see
+		// this file when the collector refuses to prepare it.
+		if value, present := explicit["defaults"]; present && value != nil {
+			record, ok := value.(map[string]any)
+			if !ok {
+				return nil, errors.New("Model pricing explicit defaults must be an object")
+			}
+			explicitDefaults = record
 		}
 	}
 	pricingOverrides := mergePricingOverrides(
@@ -284,19 +369,27 @@ func mergeCcusageConfig(
 		}
 	}
 	merged["defaults"] = defaults
-	merged["codex"] = mergeCodexSection(bundled, explicit)
-	return merged
+	codexSection, err := mergeCodexSection(bundled, explicit)
+	if err != nil {
+		return nil, err
+	}
+	merged["codex"] = codexSection
+	return merged, nil
 }
 
-func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
+func mergeCodexSection(bundled, explicit map[string]any) (map[string]any, error) {
 	bundledCodex, _ := bundled["codex"].(map[string]any)
 	if bundledCodex == nil {
 		bundledCodex = map[string]any{}
 	}
 	explicitCodex := map[string]any{}
 	if explicit != nil {
-		if value, ok := explicit["codex"].(map[string]any); ok && value != nil {
-			explicitCodex = value
+		if value, present := explicit["codex"]; present && value != nil {
+			record, ok := value.(map[string]any)
+			if !ok {
+				return nil, errors.New("Model pricing explicit codex must be an object")
+			}
+			explicitCodex = record
 		}
 	}
 	merged := map[string]any{}
@@ -310,9 +403,13 @@ func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
 	if bundledCodexDefaults == nil {
 		bundledCodexDefaults = map[string]any{}
 	}
-	explicitCodexDefaults, _ := explicitCodex["defaults"].(map[string]any)
-	if explicitCodexDefaults == nil {
-		explicitCodexDefaults = map[string]any{}
+	explicitCodexDefaults := map[string]any{}
+	if value, present := explicitCodex["defaults"]; present && value != nil {
+		record, ok := value.(map[string]any)
+		if !ok {
+			return nil, errors.New("Model pricing explicit codex defaults must be an object")
+		}
+		explicitCodexDefaults = record
 	}
 	defaults := map[string]any{}
 	for key, value := range bundledCodexDefaults {
@@ -322,7 +419,7 @@ func mergeCodexSection(bundled, explicit map[string]any) map[string]any {
 		defaults[key] = value
 	}
 	merged["defaults"] = defaults
-	return merged
+	return merged, nil
 }
 
 var longContextOverrideKeys = []string{
@@ -400,7 +497,135 @@ func createCcusagePricingOverrides(models []Model) map[string]any {
 			overrides[model.ModelID] = override
 		}
 	}
+	for modelID, override := range officialAnchorOverrides(models, overrides) {
+		overrides[modelID] = override
+	}
+	applyCaseVariantAliases(models, overrides)
 	return overrides
+}
+
+// applyCaseVariantAliases ports applyCaseVariantAliases: ccusage matches an
+// override key case-sensitively, and the catalogue publishes several spellings
+// of the same id, so every published spelling gets the collapsed price. Only
+// ids that already have an emitted override are aliased — a group the collapse
+// dropped for disagreeing rows stays dropped, and no spelling the catalogue
+// never publishes is invented.
+func applyCaseVariantAliases(models []Model, overrides map[string]any) {
+	spellings := map[string]map[string]bool{}
+	for _, model := range models {
+		key := strings.ToLower(strings.TrimSpace(model.ModelID))
+		set := spellings[key]
+		if set == nil {
+			set = map[string]bool{}
+			spellings[key] = set
+		}
+		set[model.ModelID] = true
+	}
+	for key, override := range overrides {
+		for spelling := range spellings[strings.ToLower(strings.TrimSpace(key))] {
+			if _, exists := overrides[spelling]; !exists {
+				overrides[spelling] = override
+			}
+		}
+	}
+}
+
+// officialAnchorOverrides ports officialAnchorOverrides: ccusage matches an
+// override key to the observed model name by folding provider prefixes and
+// variant suffixes, so `xiaomi/mimo-v2.6-flash-uncensored` can price a plain
+// `mimo-v2.6-flash` day. When the base id is unresolved its reseller rows
+// disagree and that folding key is the only one left, so it wins — one machine
+// billed 3.6x the official rate for mimo-v2.6-flash this way. An exact key beats
+// a folding one, so the official vendor row is emitted as the base id's own key.
+//
+// Only an official row qualifies: falling back to a reseller row would
+// re-introduce the ambiguity the unresolved id was dropped for.
+func officialAnchorOverrides(models []Model, emitted map[string]any) map[string]any {
+	foldBases := map[string]bool{}
+	for _, model := range models {
+		if base := foldToBaseModelID(model.ModelID); base != strings.ToLower(strings.TrimSpace(model.ModelID)) {
+			foldBases[base] = true
+		}
+	}
+	if len(foldBases) == 0 {
+		return nil
+	}
+
+	haveExact := map[string]bool{}
+	for key := range emitted {
+		haveExact[strings.ToLower(strings.TrimSpace(key))] = true
+	}
+
+	rowsByID := map[string][]Model{}
+	order := []string{}
+	for _, model := range models {
+		id := strings.ToLower(strings.TrimSpace(model.ModelID))
+		if !foldBases[id] || haveExact[id] {
+			continue
+		}
+		if _, ok := rowsByID[id]; !ok {
+			order = append(order, id)
+		}
+		rowsByID[id] = append(rowsByID[id], model)
+	}
+
+	anchors := map[string]any{}
+	for _, id := range order {
+		rows := rowsByID[id]
+		official := pickAnchorOfficialRow(rows)
+		if official == nil {
+			continue
+		}
+		if override := toCcusagePricingOverride(*official); override != nil {
+			anchors[rows[0].ModelID] = override
+		}
+	}
+	return anchors
+}
+
+// pickAnchorOfficialRow ports pickAnchorOfficialRow: several official vendors
+// can price one id differently — an international and a domestic endpoint of
+// the same vendor is the common case. Taking the first match would make the
+// anchor depend on the order rows arrive in, and that order comes from the
+// server's ORDER BY; a change there would silently move what every collector
+// bills. Sort first so the choice is a property of this function.
+func pickAnchorOfficialRow(rows []Model) *Model {
+	officials := make([]*Model, 0, len(rows))
+	for index := range rows {
+		row := &rows[index]
+		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(row.Provider))] && priceRowIsPositive(*row) {
+			officials = append(officials, row)
+		}
+	}
+	if len(officials) == 0 {
+		return nil
+	}
+	sort.SliceStable(officials, func(left, right int) bool {
+		leftProvider := strings.ToLower(strings.TrimSpace(officials[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(officials[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return officials[left].ModelID < officials[right].ModelID
+	})
+	return officials[0]
+}
+
+// foldToBaseModelID ports foldToBaseModelId: the bases ccusage may fold a key
+// onto — drop `:tag` segments, drop the provider prefix, then drop a fine-tune
+// variant suffix. Deliberately narrow: only the folding case observed on real
+// data, because over-folding would anchor ids ccusage never conflates.
+func foldToBaseModelID(modelID string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(modelID))
+	segments := strings.Split(trimmed, "/")
+	base := segments[len(segments)-1]
+	if index := strings.Index(base, ":"); index >= 0 {
+		base = base[:index]
+	}
+	for _, suffix := range []string{"-uncensored", "-abliterated"} {
+		base = strings.TrimSuffix(base, suffix)
+	}
+	return base
 }
 
 // toCcusagePricingOverride converts a catalogue row to ccusage's per-token
@@ -722,28 +947,34 @@ var officialVendorProviderIDs = map[string]bool{
 	"alibaba": true, "xai": true, "minimax": true, "nvidia": true, "longcat": true,
 }
 
+// pickCollapsedRepresentative ports pickCollapsedRepresentative: prefer the
+// official vendor row, then the alphabetically first provider. It walks the
+// group the agreement check compared, never the full entry list — an official
+// vendor's $0 placeholder row lives outside that group and would otherwise win
+// the pick and silently price the model as free.
+//
+// The tie-break is explicit rather than "whatever came first": rows that agree
+// on price can disagree on context window, the representative carries its own
+// into maxInputTokens, and arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(group []Model, entries []Model) int {
-	for index, entry := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(entry.Provider))] {
-			for candidateIndex, candidate := range group {
-				if sameModelIdentity(candidate, entry) {
-					return indexInOriginal(entries, candidateIndex, group, entry)
-				}
-			}
-			return index
+	candidates := make([]Model, len(group))
+	copy(candidates, group)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[left].Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(candidates[right].Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
-	for index, entry := range entries {
-		if sameModelIdentity(entry, group[0]) {
-			return index
+		leftProvider := strings.ToLower(strings.TrimSpace(candidates[left].Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(candidates[right].Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
 		}
-	}
-	return 0
-}
-
-func indexInOriginal(entries []Model, _ int, group []Model, target Model) int {
+		return candidates[left].ModelID < candidates[right].ModelID
+	})
+	chosen := candidates[0]
 	for index, entry := range entries {
-		if sameModelIdentity(entry, target) {
+		if sameModelIdentity(entry, chosen) {
 			return index
 		}
 	}

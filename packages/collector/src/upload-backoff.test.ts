@@ -7,6 +7,8 @@ import {
   loadUploadBackoff,
   recordUploadFailure,
   recordUploadSuccess,
+  redactUrls,
+  summarize,
   uploadFailurePauseThreshold
 } from './upload-backoff'
 
@@ -64,6 +66,33 @@ describe('upload backoff', () => {
       await writeFile(join(stateDir, 'upload-backoff.json'), '{"consecutiveFailures": ')
       expect(await loadUploadBackoff(stateDir)).toBeNull()
       expect(await isUploadPaused(stateDir)).toBeNull()
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  // The backoff file outlives the request. A transport error embeds the full
+  // request URL, and the endpoint can carry a query string or userinfo, so the
+  // persisted summary keeps only the origin — the same reduction the Go client
+  // applies (upload.RedactURLs).
+  test('summarize reduces URLs to their origin before persisting', async () => {
+    expect(redactUrls('Post "https://tokenboard.example/api/v1/ingest?token=secret": EOF')).toBe(
+      'Post "https://tokenboard.example": EOF'
+    )
+    expect(redactUrls('dial tcp: https://user:pass@host.example:8443/x failed.')).toBe(
+      'dial tcp: https://host.example:8443 failed.'
+    )
+    expect(redactUrls('no url here')).toBe('no url here')
+    expect(redactUrls('fetch http://[::1 failed')).toBe('fetch https://<redacted> failed')
+
+    const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-redact-'))
+    try {
+      const state = await recordUploadFailure(
+        stateDir,
+        new Error('request to https://tokenboard.example/ingest?token=secret failed'),
+        new Date('2026-10-14T00:00:00.000Z')
+      )
+      expect(state.lastErrorSummary).toBe('request to https://tokenboard.example failed')
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }

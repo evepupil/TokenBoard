@@ -2,6 +2,7 @@ import {
   maxUsageModelNameLength,
   snapshotHashPayload,
   snapshotKey,
+  uploadIsoDateIssue,
   usageSourceSchema,
   type UsageSnapshot,
   type UsageSnapshotKey
@@ -27,18 +28,50 @@ export type ExistingSnapshotHash = UsageSnapshotKey & {
 export async function uploadSnapshots(
   config: CollectorConfig,
   snapshots: UsageSnapshot[],
-  fetcher: Fetcher = fetch
+  fetcher: Fetcher = fetch,
+  options: { now?: Date; stderr?: (line: string) => void } = {}
 ): Promise<unknown> {
-  if (snapshots.length === 0) {
-    const upserted = await uploadSnapshotBatch(config, [], fetcher)
-    return { upserted, skipped: 0 }
+  // The server rejects a whole batch when any snapshot's usageDate falls outside
+  // [minUploadIsoDate, today + 1], and the client cannot retry its way out of that: the
+  // date is a property of the row, not of the request. Left in, one such row fails the
+  // batch it lands in on every run, and five consecutive non-transient failures pause
+  // uploads for 24 hours — a single bad date taking the whole machine offline.
+  //
+  // Dropping it here is not a silent downgrade: the caller gets the count and the
+  // offending dates back through `stderr`, and a snapshot that can never be accepted is
+  // not data this run could have delivered.
+  const now = options.now ?? new Date()
+  const uploadable: UsageSnapshot[] = []
+  const rejected: Array<{ snapshot: UsageSnapshot; issue: string }> = []
+  for (const snapshot of snapshots) {
+    const issue = uploadIsoDateIssue(snapshot.usageDate, now)
+    if (issue === null) uploadable.push(snapshot)
+    else rejected.push({ snapshot, issue })
+  }
+  if (rejected.length > 0) {
+    for (const { snapshot, issue } of rejected.slice(0, 10)) {
+      options.stderr?.(
+        `TokenBoard upload: dropping ${snapshot.source} ${snapshot.model} with usageDate ${snapshot.usageDate} (${issue}); the server rejects any batch containing it`
+      )
+    }
+    if (rejected.length > 10) {
+      options.stderr?.(`TokenBoard upload: ${rejected.length - 10} more snapshots dropped for the same reason`)
+    }
+  }
+
+  if (uploadable.length === 0) {
+    // Nothing left to send. Still post the empty batch when the caller had snapshots at
+    // all, so the server's `upserted: 0` keeps answering the same way it does for a
+    // genuinely empty run, but never send the rows it would reject.
+    const upserted = snapshots.length === 0 ? await uploadSnapshotBatch(config, [], fetcher) : 0
+    return withRejectionCount({ upserted, skipped: 0 }, rejected.length)
   }
 
   let upserted = 0
   let skipped = 0
   let uploaded = false
 
-  for (const batch of chunkSnapshots(snapshots, snapshotBatchSize)) {
+  for (const batch of chunkSnapshots(uploadable, snapshotBatchSize)) {
     const checked = await filterChangedSnapshots(batch, (keys) => fetchExistingSnapshotHashes(config, keys, fetcher))
     skipped += checked.skipped
 
@@ -50,11 +83,20 @@ export async function uploadSnapshots(
     uploaded = true
   }
 
+  // The empty batch is the keep-alive the server answers with `upserted: 0`; it is posted
+  // when nothing needed uploading, which covers both "every snapshot was already there"
+  // and the genuinely-empty run handled above.
   if (!uploaded) {
     upserted += await uploadSnapshotBatch(config, [], fetcher)
   }
 
-  return { upserted, skipped }
+  return withRejectionCount({ upserted, skipped }, rejected.length)
+}
+
+// Only surfaces the count when something was actually dropped, so a clean run's result
+// keeps the shape callers have always seen.
+function withRejectionCount(result: { upserted: number; skipped: number }, rejected: number) {
+  return rejected > 0 ? { ...result, rejectedUsageDates: rejected } : result
 }
 
 export async function filterChangedSnapshots(
@@ -226,7 +268,11 @@ async function runWithinRequestDeadline<T>(
 
   try {
     const response = await awaitWithAbort(
-      fetcher.call(globalThis, url, { ...init, signal: controller.signal }),
+      // The upload carries the bearer token. `redirect: 'manual'` stops fetch from
+      // replaying the request — and the header — at a Location the server chose; the
+      // pricing fetch already refuses redirects the same way. A 3xx then reaches
+      // isRetryableResponse as a non-retryable status and surfaces as an error.
+      fetcher.call(globalThis, url, { ...init, signal: controller.signal, redirect: 'manual' }),
       controller.signal
     )
     return await awaitWithAbort(consumeResponse(response), controller.signal)

@@ -41,7 +41,7 @@ test('notify handler preserves legacy signal append when queued signal rename fa
   assert.match(source, /let queueError;/)
   assert.match(
     source,
-    /if \(queueError\) \{\s+appendFileSync\(join\(STATE_DIR, "notify\.signal"\), signalPayload, "utf8"\);/
+    /if \(queueError\) \{\s+appendFileSync\(join\(STATE_DIR, "notify\.signal"\), signalPayload, \{ encoding: "utf8", mode: 0o600 \}\);/
   )
   assert.match(source, /unlinkSync\(tempPath\);/)
 })

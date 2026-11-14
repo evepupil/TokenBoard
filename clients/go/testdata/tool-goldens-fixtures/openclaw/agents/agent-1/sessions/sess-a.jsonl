@@ -1,0 +1,2 @@
+{"type":"model_change","modelId":"claude-sonnet-4-5","provider":"anthropic"}
+{"type":"message","id":"m1","message":{"role":"assistant","timestamp":1777856400000,"usage":{"input":1000,"output":200,"cacheRead":300,"cacheWrite":50,"cost":{"total":0.0123}}}}

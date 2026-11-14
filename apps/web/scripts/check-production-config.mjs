@@ -86,6 +86,7 @@ validateRequiredCronTrigger(config)
 validateWorkerFirstAssetRoutes(config)
 validateNoInlineAuthSecret(config)
 validateNoInlineWebhookEncryptionKey(config)
+validateNoInlineGithubClientSecret(config)
 
 // `BETTER_AUTH_SECRET` must come from `wrangler secret put`, never from `vars`, which is
 // committed to the repository in plain text. The runtime refuses to sign sessions without
@@ -108,6 +109,18 @@ function validateNoInlineWebhookEncryptionKey(config) {
   if (typeof inline === 'string' && inline.trim()) {
     fail(
       `${CONFIG_FILE} sets vars.WEBHOOK_ENCRYPTION_KEY. Configure it as a Worker secret instead (\`wrangler secret put WEBHOOK_ENCRYPTION_KEY\`), so the value is not committed.`
+    )
+  }
+}
+
+// `GITHUB_CLIENT_SECRET` is the third credential that must be a Worker secret, not a var:
+// `vars` is committed, and the OAuth client secret is what mints sessions. `GITHUB_CLIENT_ID`
+// stays allowed in `vars` — it is public by design.
+function validateNoInlineGithubClientSecret(config) {
+  const inline = config.vars?.GITHUB_CLIENT_SECRET
+  if (typeof inline === 'string' && inline.trim()) {
+    fail(
+      `${CONFIG_FILE} sets vars.GITHUB_CLIENT_SECRET. Configure it as a Worker secret instead (\`wrangler secret put GITHUB_CLIENT_SECRET\`), so the value is not committed.`
     )
   }
 }

@@ -1,5 +1,6 @@
 import { resolve, win32 as windowsPath } from 'node:path'
 import { cpSync, renameSync, rmSync, statSync } from 'node:fs'
+import { scrubbedChildEnv } from './child-env.mjs'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 export { errorMessage }
@@ -15,6 +16,12 @@ const childOutputMaxBuffer = 64 * 1024 * 1024
 function spawnRedacted(runtime, command, args, { forwardStdout = true, stdio, ...options } = {}) {
   const result = runtime.spawn(command, args, {
     ...options,
+    // These children are third-party code paths: `git clone`/`fetch` runs
+    // credential helpers and hooks, and `pnpm install` runs dependency
+    // lifecycle scripts. The parent may carry an upload token or a pairing
+    // code in its environment (exporting them is a documented setup usage);
+    // neither belongs in this child.
+    env: scrubbedChildEnv(options.env ?? process.env),
     // stdin stays on the parent's stream by default, but a capture-only caller reads the
     // child's stdout as data: a git credential helper that prompts on stdin would otherwise
     // read the operator's terminal and hang instead of failing on EOF.
@@ -290,7 +297,7 @@ function fetchOriginDefaultBranch(runtime, branchName, options) {
 }
 
 function checkoutDefaultBranch(runtime, branchName, remoteBranch, options) {
-  const localBranch = runtime.spawn('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], {
+  const localBranch = spawnRedacted(runtime, 'git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], {
     stdio: 'ignore',
     shell: false,
     ...options
@@ -305,7 +312,7 @@ function checkoutDefaultBranch(runtime, branchName, remoteBranch, options) {
 
 function fetchBranchOrRef(step, runtime) {
   const ref = String(step.args[0] ?? '')
-  const branchFetch = runtime.spawn('git', ['fetch', '--depth', '1', 'origin', `refs/heads/${ref}`], {
+  const branchFetch = spawnRedacted(runtime, 'git', ['fetch', '--depth', '1', 'origin', `refs/heads/${ref}`], {
     stdio: 'ignore',
     shell: false,
     ...step.options

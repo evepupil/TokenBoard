@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { buildStatus, collectRecentRunSummary, readClientStatus } from './status.mjs'
@@ -674,7 +674,7 @@ test('aggregates the last 7 days of run logs by filename prefix', () => {
     now: new Date('2026-10-14T00:00:00.000Z'),
     readdir: () => Object.keys(files),
     readFile: (path) => {
-      const name = path.split('/').pop()
+      const name = basename(path)
       if (!(name in files)) throw new Error('unexpected ' + name)
       return files[name]
     }
@@ -735,11 +735,29 @@ test('status surfaces an active upload pause and omits an absent one', () => {
   assert.deepEqual(paused.uploadBackoff, { pausedUntil: '2026-10-15T00:00:00.000Z', consecutiveFailures: 5 })
 })
 
+// The notify worker runs detached with stdio ignored; a fatal error there used
+// to be invisible. Status reports the recorded messages so an operator can see
+// why hooks stopped dispatching.
+test('status surfaces fatal notify-worker errors and omits an empty list', () => {
+  const base = { activeServer: 'https://tokenboard.example', timezone: 'Asia/Shanghai', source: 'all' }
+  assert.equal(
+    'notifyWorkerErrors' in buildStatus({ configPath: '/c.json', config: base, notifyWorkerErrors: [] }),
+    false
+  )
+  const reported = buildStatus({
+    configPath: '/c.json',
+    config: base,
+    notifyWorkerErrors: [{ message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }]
+  })
+  assert.deepEqual(reported.notifyWorkerErrors, [
+    { message: 'TokenBoard config is not valid JSON: /c.json', at: '2026-10-30T00:00:00.000Z' }
+  ])
+})
+
 // A binary install's health is not visible from clientType alone: the client
-// or the bundled ccusage can be missing or be a version the client was never
-// tested against (an install from a tag without a bundled copy leaves the
-// previous one in place). Status reports what is actually on disk.
-test('status reports the installed binary and bundled ccusage', () => {
+// can be missing. A ccusage copy is still reported when one sits beside it —
+// an earlier release may have left one — but it is informational only.
+test('status reports the installed binary and any ccusage left beside it', () => {
   const status = buildStatus({
     configPath: '/home/user/.tokenboard/config.json',
     config: { clientType: 'binary', timezone: 'UTC', source: 'all' },
@@ -778,7 +796,7 @@ test('status omits the client block for a git install', () => {
 
 // The probe reports what is on disk, not what the config claims: a deleted
 // binary or an unreadable one must not look like a healthy install.
-test('readClientStatus reports a real installed client and bundled ccusage', () => {
+test('readClientStatus reports a real installed client and any ccusage beside it', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-status-'))
   try {
     mkdirSync(join(dir, 'bin'), { recursive: true })
@@ -846,12 +864,18 @@ test('status reports the dual-run trend from the log the harness writes', () => 
   try {
     writeFileSync(join(root, 'config.json'), '{}\n')
     mkdirSync(join(root, 'logs'), { recursive: true })
+    // Relative to now: the summary is omitted once its newest record is older
+    // than a week (see collectShadowDualRunSummary), so fixed dates would turn
+    // this test into a calendar bomb.
+    const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
+    const firstAt = hoursAgo(30)
+    const lastAt = hoursAgo(20)
     writeFileSync(
       join(root, 'logs', 'shadow-dual-run.jsonl'),
       [
-        JSON.stringify({ at: '2026-10-22T10:34:05.576Z', source: 'claude-code', status: 'match', snapshots: 40 }),
+        JSON.stringify({ at: firstAt, source: 'claude-code', status: 'match', snapshots: 40 }),
         JSON.stringify({
-          at: '2026-10-23T03:41:16.038Z',
+          at: lastAt,
           source: 'claude-code',
           status: 'diff',
           message: '/home/user/private'
@@ -869,18 +893,45 @@ test('status reports the dual-run trend from the log the harness writes', () => 
     const status = JSON.parse(result.stdout)
     assert.deepEqual(status.shadowDualRun, {
       records: 2,
-      firstAt: '2026-10-22T10:34:05.576Z',
-      lastAt: '2026-10-23T03:41:16.038Z',
+      firstAt,
+      lastAt,
       match: 1,
       empty: 0,
       diff: 1,
       notInstalled: 0,
       busy: 0,
       error: 0,
-      lastDiffAt: '2026-10-23T03:41:16.038Z'
+      lastDiffAt: lastAt
     })
     assert.equal(JSON.stringify(status).includes('/home/user/private'), false)
     assert.equal(JSON.stringify(status).includes('shadow-dual-run.jsonl'), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('status omits the dual-run trend when the harness log is older than a week', () => {
+  // The scheduled comparison moved to observation-dual-run.jsonl on 2026-11-12;
+  // shadow-dual-run.jsonl now only receives manual `shadow-dual-run.mjs` runs.
+  // A stale record set keeps describing the old harness long after it stopped,
+  // so one whose newest record is older than the window is dropped instead.
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-stale-'))
+  try {
+    writeFileSync(join(root, 'config.json'), '{}\n')
+    mkdirSync(join(root, 'logs'), { recursive: true })
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    writeFileSync(
+      join(root, 'logs', 'shadow-dual-run.jsonl'),
+      `${JSON.stringify({ at: eightDaysAgo, source: 'pi', status: 'match', snapshots: 1 })}\n`
+    )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: { ...process.env, TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0)
+    assert.equal('shadowDualRun' in JSON.parse(result.stdout), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -894,7 +945,7 @@ test('status finds a moved dual-run log and omits the trend when none exists', (
     const logPath = join(moved, 'shadow-dual-run.jsonl')
     writeFileSync(
       logPath,
-      `${JSON.stringify({ at: '2026-10-23T13:15:14.327Z', source: 'pi', status: 'empty', snapshots: 0 })}\n`
+      `${JSON.stringify({ at: new Date().toISOString(), source: 'pi', status: 'empty', snapshots: 0 })}\n`
     )
 
     const script = fileURLToPath(new URL('./status.mjs', import.meta.url))

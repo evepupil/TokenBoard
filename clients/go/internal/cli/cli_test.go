@@ -14,6 +14,7 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
 func run(t *testing.T, env map[string]string, args ...string) (int, string, string) {
@@ -91,6 +92,11 @@ func TestUnknownCommandIsUsageError(t *testing.T) {
 	if !strings.Contains(stderr, "Usage:") {
 		t.Errorf("stderr %q lacks usage", stderr)
 	}
+	// The usage line already starts with "Usage: "; wrapping it in another
+	// prefix printed "Usage: Usage: tokenboard ..." on every unknown command.
+	if strings.Contains(stderr, "Usage: Usage:") {
+		t.Errorf("stderr %q repeats the Usage prefix", stderr)
+	}
 }
 
 func TestNoArgsShowsUsageOnStderr(t *testing.T) {
@@ -104,7 +110,9 @@ func TestNoArgsShowsUsageOnStderr(t *testing.T) {
 }
 
 func TestInvalidSourceIsUsageError(t *testing.T) {
-	code, _, stderr := run(t, nil, "preview", "--source", "kimi")
+	// A literal that cannot become a source name; "kimi" joined the closed
+	// set with the ccusage tool family.
+	code, _, stderr := run(t, nil, "preview", "--source", "not-a-source")
 	if code != ExitUsage || !strings.Contains(stderr, "Invalid source") {
 		t.Errorf("code=%d stderr=%q", code, stderr)
 	}
@@ -126,17 +134,36 @@ func TestPreviewUnimplementedConcreteSourceFailsFast(t *testing.T) {
 	}
 }
 
+// Every source the contract declares must have a registered provider, because
+// the failure mode without one is silent: an all-source run skips a source
+// with no provider as "not implemented in this client yet" and still exits 0.
+// That is exactly how the twelve ccusage tool sources drifted out of this
+// client after upstream PR #25 added them TS-side — adding a source to
+// contract without a provider must fail here, not ship.
+func TestEveryContractSourceHasAProvider(t *testing.T) {
+	for _, source := range contract.AllSources() {
+		if _, ok := collect.Lookup(source); !ok {
+			t.Errorf("source %q has no registered provider", source)
+		}
+	}
+}
+
 // An all-source preview over a home with no sessions prints an empty array:
 // every missing store is skipped as unavailable, not reported as a failure.
 func TestPreviewAllSourcesWithNoSessionsPrintsEmptyArray(t *testing.T) {
 	// Every provider home is pointed at an empty temp directory: a developer
 	// machine that has real sessions would otherwise be read by the all-source
-	// run and this would stop being a test of the empty case. Claude Code and
-	// Codex have no local directory to point at (ccusage owns the scan), so
-	// their providers are stubbed instead of running a real ccusage over the
-	// machine's home.
+	// run and this would stop being a test of the empty case. Claude Code,
+	// Codex and the ccusage tool family have no local directory to point at
+	// (ccusage owns those scans), so their providers are stubbed instead of
+	// running a real ccusage over the machine's home — the tools now include
+	// widely used ones (amp, kimi, zcode) that a developer machine may well
+	// have data for.
 	stubSource(t, contract.SourceClaudeCode, stubProvider{})
 	stubSource(t, contract.SourceCodex, stubProvider{})
+	for _, source := range contract.CcusageToolSources() {
+		stubSource(t, source, stubProvider{})
+	}
 	code, stdout, _ := run(t, map[string]string{
 		"TOKENBOARD_TIMEZONE":     "UTC",
 		"TOKENBOARD_GROK_HOME":    t.TempDir(),
@@ -224,6 +251,19 @@ func TestSyncUploadsAndReportsCounts(t *testing.T) {
 	}
 	if _, ok := result["upserted"]; !ok {
 		t.Errorf("result lacks upserted: %v", result)
+	}
+	// The TS collector prints per-phase timings next to the upload result and
+	// the skill's notify forwards them into the coordinator run record; a Go
+	// sync that printed none would silently lose the phase attribution once
+	// the client switch happens.
+	timings, ok := result["timings"].(map[string]any)
+	if !ok {
+		t.Fatalf("result lacks timings: %v", result)
+	}
+	for _, phase := range []string{"collect", "upload", "cursorAck"} {
+		if value, ok := timings[phase].(float64); !ok || value < 0 {
+			t.Errorf("timings[%s] = %v, want a non-negative number", phase, timings[phase])
+		}
 	}
 }
 
@@ -413,6 +453,54 @@ func TestWarmHooksReportsPlannedSources(t *testing.T) {
 	}
 }
 
+// withRunLock re-execs the command through a context flag so the recursive run
+// does not retake the lock it already holds. Without that, a hook sync that
+// could not get collector-run.lock inside its window failed; the coordinator
+// saw a plain failure, cleared the source's queued signal and scheduled no
+// retry, so the usage stayed uncollected until the next scheduled sync. The
+// hook wrapper is entitled to one whole 35s lock wait on top of its own 60s
+// coordinator wait, the same way the TS collector's recursive call does.
+func TestLockTimeoutDefersInsteadOfFailing(t *testing.T) {
+	stateDir := t.TempDir()
+	_ = os.Chmod(stateDir, 0o700)
+	held, err := state.Acquire(filepath.Join(stateDir, "collector-run.lock"), time.Second)
+	if err != nil || held == nil {
+		t.Fatalf("holding lock: lock=%v err=%v", held, err)
+	}
+	defer func() { _ = held.Release() }()
+
+	code, _, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":     "UTC",
+		"TOKENBOARD_STATE_DIR":    stateDir,
+		"TOKENBOARD_ENDPOINT":     "https://tokenboard.example",
+		"TOKENBOARD_UPLOAD_TOKEN": "tb_x",
+	}, "sync", "--source", "grok-build")
+	if code != ExitTransient {
+		t.Fatalf("code = %d stderr=%q, want %d", code, stderr, ExitTransient)
+	}
+	// The message stays the TS collector's literal: the skill's dual-run
+	// harness classifies "collector lock timed out" as busy, not a failure.
+	if !strings.Contains(stderr, "TokenBoard collector lock timed out") {
+		t.Fatalf("stderr = %q, want the lock timeout message", stderr)
+	}
+}
+
+// A late hook run behaves exactly like a second invocation of the same
+// command: the warm mark is stamped at process start either way, so it may
+// continue under the held lock instead of waiting for it again.
+func TestHeldLockContinuesWarmHooks(t *testing.T) {
+	code, stdout, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":            "UTC",
+		"TOKENBOARD_COLLECTOR_LOCK_HELD": "1",
+	}, "warm-hooks")
+	if code != ExitOK {
+		t.Fatalf("code = %d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "claude-code") || !strings.Contains(stdout, "codex") {
+		t.Errorf("warm-hooks output %q", stdout)
+	}
+}
+
 // A request deadline must defer (75), not count as a plain failure: the
 // scheduled runner retries transient exits on its next tick.
 func TestSyncRequestTimeoutExits75(t *testing.T) {
@@ -488,6 +576,8 @@ func TestCursorScopeFromEndpoint(t *testing.T) {
 		{"", "", false},
 		{"not a url", "", true},
 		{"/only/a/path", "", true},
+		// new URL() throws on a host UTS #46 rejects (a lone zero-width joiner).
+		{"https://\u200d.example", "", true},
 	}
 	for _, tc := range cases {
 		got, err := cursorScopeFromEndpoint(tc.endpoint)
@@ -531,6 +621,9 @@ func TestCursorScopeFromEndpointEdgeForms(t *testing.T) {
 		{"http://h.example:0080", "http://h.example"},
 		{"https://h.example:443", "https://h.example"},
 		{"https://user:pw@H.example:8443/x?q=1", "https://h.example:8443"},
+		{"https://\u00fcnicode.example", "https://xn--nicode-2ya.example"},
+		{"https://B\u00fccher.EXAMPLE:443/x", "https://xn--bcher-kva.example"},
+		{"https://\u4f8b\u5b50.\u6d4b\u8bd5:8443/api", "https://xn--fsqu00a.xn--0zwm56d:8443"},
 	}
 	for _, tc := range cases {
 		got, err := cursorScopeFromEndpoint(tc.endpoint)
@@ -540,6 +633,36 @@ func TestCursorScopeFromEndpointEdgeForms(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Errorf("%q: got %q want %q", tc.endpoint, got, tc.want)
+		}
+	}
+}
+
+// Windows has neither /etc/timezone nor an /etc/localtime symlink, and Go
+// reports the system zone as the literal "Local" there, so the Unix
+// last-resort UTC fallback would silently shift every usageDate by the host's
+// real offset and fork the server's dedup key against a TS collector on the
+// same machine. The fallback has to fail closed instead of guessing.
+func TestFallbackTimezoneFailsClosedOnWindows(t *testing.T) {
+	name, err := fallbackTimezone("windows")
+	if err == nil {
+		t.Fatalf("fallbackTimezone(windows) = %q, want an error", name)
+	}
+	if !strings.Contains(err.Error(), "TOKENBOARD_TIMEZONE") {
+		t.Errorf("err = %q, want it to name TOKENBOARD_TIMEZONE", err)
+	}
+}
+
+// The UTC fallback stays correct where the conventional files are the whole
+// story: a Unix host with no TZ, no named Local and no system zone file is a
+// container running UTC.
+func TestFallbackTimezoneKeepsUTCOnUnix(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		name, err := fallbackTimezone(goos)
+		if err != nil {
+			t.Fatalf("fallbackTimezone(%s): %v", goos, err)
+		}
+		if name != "UTC" {
+			t.Errorf("fallbackTimezone(%s) = %q, want UTC", goos, name)
 		}
 	}
 }

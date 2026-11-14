@@ -38,11 +38,11 @@ describe('collectCodexUsage scoped scans', () => {
       })
 
       expect(snapshots).toEqual([
-        expect.objectContaining({ model: 'deepseek-v4-flash', totalTokens: 0, costUsd: 0 }),
+        expect.objectContaining({ model: 'deepseek-v4-flash', totalTokens: 0, costUsd: expect.closeTo(0, 12) }),
         expect.objectContaining({
           model: 'gpt-5.6-sol',
           totalTokens: 20,
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         })
       ])
     } finally {
@@ -645,7 +645,7 @@ function mixedModelDailyResult() {
           'deepseek-v4-flash': { inputTokens: 20, outputTokens: 0, totalTokens: 20 }
         },
         totalTokens: 20,
-        costUSD: (20 * 5) / 1_000_000
+        costUSD: 20 * (4 / 1_000_000)
       }
     ]
   }

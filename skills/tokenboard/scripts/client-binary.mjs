@@ -12,6 +12,7 @@
 //   - the previous binary is kept until the new one has answered `version`.
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { scrubbedChildEnv } from './child-env.mjs'
 import {
   chmodSync,
   existsSync,
@@ -27,7 +28,7 @@ import { basename, dirname, join } from 'node:path'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
-export const defaultReleaseRepo = 'MisonL/TokenBoard'
+export const defaultReleaseRepo = 'evepupil/TokenBoard'
 export const defaultReleaseBaseUrl = 'https://github.com'
 
 // Bounds mirror internal/release: a few megabytes of binary, capped so a
@@ -35,6 +36,10 @@ export const defaultReleaseBaseUrl = 'https://github.com'
 const maxDownloadBytes = 128 * 1024 * 1024
 const maxRedirects = 5
 const childOutputMaxBuffer = 64 * 1024 * 1024
+// A binary that cannot answer `version` must not hang the caller: the staged-file probe runs
+// inside the sync lock, so an unbounded wait there holds sync.lock until the process dies.
+// Go's selfupdate uses the same 10s bound; this is the git-side counterpart.
+const versionProbeTimeoutMs = 10_000
 
 export function binaryFileName(platform = process.platform) {
   return platform === 'win32' ? 'tokenboard.exe' : 'tokenboard'
@@ -143,14 +148,49 @@ export async function latestTag({ repo, baseUrl, fetcher = fetch }) {
   throw new Error(`TokenBoard release lookup redirected more than ${maxRedirects} times`)
 }
 
+// releaseRedirectHosts are the hosts a GitHub release download may land on:
+// the origin itself and the asset CDN GitHub redirects to. Same rule the Go
+// client's internal/release applies, so both installers trust the same hops.
+const releaseRedirectHosts = ['objects.githubusercontent.com', 'release-assets.githubusercontent.com']
+
+// sameRedirectHost keeps the port: hostname alone would treat two servers on
+// the same address (a proxy, a test server, a local mirror) as one host.
+function sameRedirectHost(origin, target) {
+  if (origin.host.toLowerCase() === target.host.toLowerCase()) return true
+  return releaseRedirectHosts.includes(target.hostname.toLowerCase())
+}
+
 // downloadBytes fetches an asset into memory, bounded the same way
 // internal/release bounds its downloads.
 //
 // The bound is enforced while reading, not after: a host that answers with a
 // chunked body and no Content-Length would otherwise be buffered in full
 // before the size check could refuse it.
+//
+// Redirects are followed by hand and pinned to the release host. A caller that
+// let fetch follow them would accept a chain to an arbitrary host — the tarball
+// and its checksums cannot vouch for each other when both arrive from a host
+// the release page never named.
 export async function downloadBytes({ url, name, fetcher = fetch }) {
-  const response = await fetcher(url)
+  const origin = new URL(url)
+  let current = origin
+  let response
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    response = await fetcher(current.toString(), { redirect: 'manual' })
+    if (response.status < 300 || response.status >= 400) break
+    const location = response.headers?.get?.('location')
+    if (!location) {
+      throw new Error(`download ${name} returned HTTP ${response.status} without a Location`)
+    }
+    const next = new URL(location, current)
+    if (!sameRedirectHost(origin, next)) {
+      throw new Error(`download ${name} redirected to ${next.host}, which is not the release host`)
+    }
+    current = next
+    if (hop === maxRedirects) {
+      throw new Error(`download ${name} redirected more than ${maxRedirects} times`)
+    }
+  }
   if (!response.ok) {
     throw new Error(`download ${name} returned HTTP ${response.status}`)
   }
@@ -216,21 +256,18 @@ export function verifyChecksum(data, name, checksums) {
   }
 }
 
-function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, quiet = false }) {
+function runExternal(command, args, { spawn, platform = process.platform, log = () => {}, cwd }) {
   const result = spawn(command, args, {
     shell: platform === 'win32' && /\.(cmd|bat)$/i.test(command),
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    maxBuffer: childOutputMaxBuffer
+    maxBuffer: childOutputMaxBuffer,
+    ...(cwd ? { cwd } : {})
   })
   const stdout = String(result.stdout ?? '')
   const stderr = String(result.stderr ?? '')
-  // A caller that expects the command to fail (an optional archive member that
-  // may be absent) must not have its stderr reported as a diagnostic.
-  if (!quiet) {
-    if (stdout) log(redactUrlCredentials(stdout))
-    if (stderr) log(redactUrlCredentials(stderr))
-  }
+  if (stdout) log(redactUrlCredentials(stdout))
+  if (stderr) log(redactUrlCredentials(stderr))
   if (result.error?.code === 'ENOBUFS') {
     throw new Error(`${command} produced more than 64 MiB of output and was stopped`)
   }
@@ -240,45 +277,38 @@ function runExternal(command, args, { spawn, platform = process.platform, log = 
   return result
 }
 
+// runTarExtract unpacks one member with the platform's tar.
+//
+// The archive is always named relatively, from the archive's own directory.
+// An absolute Windows path such as `C:\...` reads as a remote host to GNU tar
+// (the tar Git for Windows puts first on PATH), which then tries to open an
+// rsh connection to a host named "C" and fails with "Cannot connect to C:
+// resolve failed" — every binary install on such a machine failed this way.
+// `--force-local` would fix GNU tar but Windows' own bsdtar rejects the flag,
+// and bsdtar accepts a forward-slash destination while GNU tar rejects a
+// backslash one, so the one shape both parsers agree on is: bare file name,
+// cwd at the archive's directory, forward-slash destination. That shape is
+// also exactly what the POSIX tars accept, so there is no platform branch
+// here and CI exercises the same code path on every OS.
+function runTarExtract({ archivePath, extractDir, name, platform = process.platform, spawn, log }) {
+  return runExternal('tar', ['-xzf', basename(archivePath), '-C', toTarPath(extractDir), name], {
+    spawn,
+    platform,
+    log,
+    cwd: dirname(archivePath)
+  })
+}
+
+function toTarPath(value) {
+  return value.replaceAll('\\', '/')
+}
+
 // extractBinary unpacks the release tarball and returns the executable's
 // bytes. Extraction shells out to the platform's tar (present on macOS, Linux
 // and Windows 10+), the way the archive fallback already shells out to unzip.
 export function extractBinary({ archivePath, extractDir, name, platform = process.platform, spawn = spawnSync, log }) {
   mkdirSync(extractDir, { recursive: true })
-  runExternal('tar', ['-xzf', archivePath, '-C', extractDir, name], { spawn, platform, log })
-  return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
-}
-
-// extractOptionalEntry unpacks an entry that a release may not carry (an older
-// tag has no bundled ccusage) and returns null when it is absent. A present
-// entry is still validated: an empty or non-file entry is a malformed archive,
-// not a release without the file.
-//
-// tar exits non-zero both for an absent member and for a corrupt archive, and
-// cannot distinguish the two here — but `verifyChecksum` has already pinned the
-// whole tarball to the release's checksums.txt before extraction, so a corrupt
-// archive never reaches this helper. The catch therefore only ever sees the
-// legitimate absent-member case.
-export function extractOptionalEntry({
-  archivePath,
-  extractDir,
-  name,
-  platform = process.platform,
-  spawn = spawnSync,
-  log
-}) {
-  mkdirSync(extractDir, { recursive: true })
-  // tar exits non-zero when the member is absent; that is the case this
-  // helper exists for, so the exit status is not treated as fatal here.
-  try {
-    runExternal('tar', ['-xzf', archivePath, '-C', extractDir, name], { spawn, platform, log, quiet: true })
-  } catch {
-    return null
-  }
-  const extracted = join(extractDir, name)
-  if (!existsSync(extracted)) {
-    return null
-  }
+  runTarExtract({ archivePath, extractDir, name, platform, spawn, log })
   return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
 }
 
@@ -304,7 +334,12 @@ export function verifyExecutable(path, version, { spawn = spawnSync } = {}) {
   const result = spawn(path, ['version'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
-    maxBuffer: childOutputMaxBuffer
+    maxBuffer: childOutputMaxBuffer,
+    timeout: versionProbeTimeoutMs,
+    // The staged binary is probed before it is trusted, and this is the one
+    // spawn in the upgrade path that used to inherit the full environment.
+    // A substituted or half-written download must not get the upload token.
+    env: scrubbedChildEnv()
   })
   if (result.error) throw new Error(`the downloaded TokenBoard binary does not run: ${errorMessage(result.error)}`)
   if (result.status !== 0) {
@@ -377,19 +412,10 @@ export async function installClientBinary({
       spawn,
       log
     })
-    // Spec §4.1: the tarball carries the platform's ccusage beside the client.
-    // It is unpacked before the client is swapped in so a malformed entry
-    // fails the install while the machine is still untouched — the Go
-    // self-update extracts it before its own swap for the same reason.
+    // Releases no longer carry a bundled ccusage (S5): the client collects
+    // in process. A copy an earlier release installed stays on disk untouched,
+    // and the install says so once instead of reporting a clean machine.
     const ccusageName = platform === 'win32' ? 'ccusage.exe' : 'ccusage'
-    const ccusage = extractOptionalEntry({
-      archivePath,
-      extractDir,
-      name: ccusageName,
-      platform,
-      spawn,
-      log
-    })
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
     const staged = `${target}.new`
     rmSync(staged, { force: true })
@@ -404,36 +430,14 @@ export async function installClientBinary({
       rmSync(staged, { force: true })
       throw error
     }
-    // A fresh install places the bundled copy where the bundled layer looks,
-    // so the first run works offline; an older release without it simply
-    // installs no bundled copy and the probe/download layers take over. The
-    // client is already live at this point, so a write failure here warns
-    // instead of failing an install that succeeded — the Go self-update
-    // treats it the same way.
-    if (ccusage !== null) {
-      const ccusagePath = join(configDir, 'bin', ccusageName)
-      try {
-        writeFileSync(ccusagePath, ccusage, { mode: 0o755 })
-        chmodSync(ccusagePath, 0o755)
-        log(`TokenBoard bundled ccusage installed at ${ccusagePath}`)
-      } catch (error) {
-        log(
-          `TokenBoard client ${release.version} installed, but the bundled ccusage could not be written: ${errorMessage(error)}`
-        )
-      }
+    const staleCcusage = join(configDir, 'bin', ccusageName)
+    if (existsSync(staleCcusage)) {
+      log(
+        `TokenBoard client ${release.version} installed at ${target}; the client no longer bundles or uses ccusage, so the existing ${staleCcusage} is left in place`
+      )
     } else {
-      // The release carries no ccusage. A copy from an earlier install stays
-      // on disk, and the client will happily run it — so say which version
-      // that is instead of reporting a clean install.
-      const ccusagePath = join(configDir, 'bin', ccusageName)
-      const staleVersion = readVersion(ccusagePath, spawn)
-      if (staleVersion !== null) {
-        log(
-          `TokenBoard client ${release.version} installed; release ${release.tag} carries no ccusage, so the existing ${ccusagePath} (${staleVersion}) is left in place`
-        )
-      }
+      log(`TokenBoard client ${release.version} installed at ${target}`)
     }
-    log(`TokenBoard client ${release.version} installed at ${target}`)
     return { version: release.version, path: target, tag: release.tag }
   } finally {
     rmSync(work, { recursive: true, force: true })
@@ -497,7 +501,15 @@ export function recoverOrphanedBinary({
 // a truncated write left unrunnable.
 function runsVersion(path, spawn) {
   try {
-    const result = spawn(path, ['version'], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
+    const result = spawn(path, ['version'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      maxBuffer: childOutputMaxBuffer,
+      timeout: versionProbeTimeoutMs,
+      // The staged binary is a downloaded release artifact; it is probed before it is trusted,
+      // so it must not see the upload token either.
+      env: scrubbedChildEnv()
+    })
     return !result.error && result.status === 0
   } catch {
     return false
@@ -514,7 +526,14 @@ function runsVersion(path, spawn) {
 export function readVersion(path, spawn = spawnSync, args = ['--version']) {
   let result
   try {
-    result = spawn(path, args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 5000 })
+    // The probed binary is third-party (ccusage) on the status path, so it must not inherit
+    // the upload token the way every other child of this skill is prevented from doing.
+    result = spawn(path, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 5000,
+      env: scrubbedChildEnv()
+    })
   } catch {
     return null
   }

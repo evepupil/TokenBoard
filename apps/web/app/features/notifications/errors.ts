@@ -7,6 +7,7 @@ export const notificationFormErrorMessages = {
   'invalid-schedule-weekday': 'Invalid schedule weekday',
   'invalid-timezone': 'Invalid timezone',
   'invalid-webhook-name': 'Invalid webhook name',
+  'too-many-webhooks': 'Too many webhook subscriptions',
   'webhook-url-must-use-https': 'Webhook URL must use HTTPS',
   'webhook-url-not-supported': 'Webhook URL host or path is not supported for this provider'
 } as const

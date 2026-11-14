@@ -442,11 +442,19 @@ func (r *Rules) ReportUnrecoverablePendingCodexPricing(snapshots []contract.Snap
 }
 
 // reportUnpricedCodexSnapshots ports reportUnpricedCodexSnapshots.
+//
+// Only a snapshot with real usage and a zero cost is worth a line: ccusage prices
+// models from its own builtin catalogue, so a model missing from the TokenBoard
+// override set still arrives with a real cost. The TS side was fixed first
+// (bcd4004) and this port missed the filter.
 func reportUnpricedCodexSnapshots(snapshots []contract.Snapshot, covered map[string]bool, stderr func(string)) {
 	seen := map[string]bool{}
 	order := []string{}
 	for _, snapshot := range snapshots {
 		if snapshot.Source != contract.SourceCodex || snapshot.TotalTokens <= 0 {
+			continue
+		}
+		if snapshot.CostUSD > 0 {
 			continue
 		}
 		if covered[snapshot.Model] || seen[snapshot.Model] {
@@ -512,6 +520,32 @@ func isCodexReconciliationChange(err error) bool {
 // covered" means the same thing on both sides of the merge.
 func codexSnapshotGroupKey(snapshot contract.Snapshot) string {
 	return snapshot.AckGroupKey()
+}
+
+// codexSnapshotScopeKey is the same grouping without the model: the widest
+// claim ccusage can make about a day.
+func codexSnapshotScopeKey(snapshot contract.Snapshot) string {
+	return string(snapshot.Source) + "\x00" + snapshot.UsageDate + "\x00" + snapshot.Timezone
+}
+
+// codexUnknownModelLabel mirrors the session JSONL parser's fallback when a
+// token_count row carries no model (sessionfile/parser.go `readCodexMetric`).
+const codexUnknownModelLabel = "all"
+
+// isCodexSnapshotCoveredByCcusage reports whether a reusable pending snapshot
+// is already inside what ccusage reported. An exact (source, date, timezone,
+// model) group match covers it; an unknown-model snapshot ("all") is covered by
+// any snapshot for the same day, because ccusage never reports that label and
+// the day's figures are what the pending copy duplicates.
+func isCodexSnapshotCoveredByCcusage(
+	snapshot contract.Snapshot,
+	coveredKeys map[string]bool,
+	coveredScopes map[string]bool,
+) bool {
+	if coveredKeys[codexSnapshotGroupKey(snapshot)] {
+		return true
+	}
+	return snapshot.Model == codexUnknownModelLabel && coveredScopes[codexSnapshotScopeKey(snapshot)]
 }
 
 // codexSnapshotIdentity is the snapshot identity the reusable-pending filter

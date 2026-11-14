@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ func TestCodexScopeSplitsContextPricedUsageFromANonContextCanonicalModelInFullSc
 		}
 		return provJSON(t, `{"daily":[{"date":"2026-05-09","models":{
 			"deepseek-v4-flash":{"inputTokens":20,"outputTokens":0,"totalTokens":20}},
-			"totalTokens":20,"costUSD":0.0001}]}`), nil
+			"totalTokens":20,"costUSD":0.00008}]}`), nil
 	}}
 	snapshots, err := provCollect(t, Options{
 		CodexHome:   provHome(codexHome),
@@ -62,14 +63,15 @@ func TestCodexScopeSplitsContextPricedUsageFromANonContextCanonicalModelInFullSc
 		t.Fatalf("snapshots = %+v", snapshots)
 	}
 	canonical := provSnapshotFor(t, snapshots, "2026-05-09", "deepseek-v4-flash")
-	if canonical.TotalTokens != 0 || canonical.CostUSD != 0 {
+	if canonical.TotalTokens != 0 {
 		t.Errorf("canonical = %+v", canonical)
 	}
+	assertCloseTo(t, canonical.CostUSD, 0, 12)
 	context := provSnapshotFor(t, snapshots, "2026-05-09", "gpt-5.6-sol")
 	if context.TotalTokens != 20 {
 		t.Errorf("context = %+v", context)
 	}
-	assertCloseTo(t, context.CostUSD, 20*5.0/1_000_000, 14)
+	assertCloseTo(t, context.CostUSD, 20*4.0/1_000_000, 14)
 }
 
 // A full scan runs in batches, and every batch carries the frozen CODEX_HOME.
@@ -100,11 +102,9 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 		StateDir:    stateDir,
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "all",
-			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
-			"TOKENBOARD_CODEX_BATCH_SIZE":     "2",
+			"TOKENBOARD_SINCE":            "all",
+			"TOKENBOARD_DEFAULT_SINCE":    "20260501",
+			"TOKENBOARD_CODEX_BATCH_SIZE": "2",
 		}),
 	})
 	if err != nil {
@@ -113,7 +113,7 @@ func TestCodexScopeAllowsExplicitFullScanInBatches(t *testing.T) {
 	configArgs := provConfigArgs(stateDir)
 	call := func(report string) []string {
 		return append([]string{
-			"ccusage@20.0.33", "codex", report, "--json", "--offline", "--single-thread",
+			"codex", report, "--json", "--offline", "--single-thread",
 			"--timezone", "Asia/Shanghai",
 		}, configArgs...)
 	}
@@ -206,8 +206,7 @@ func TestCodexScopePersistsFrozenChildUsageUnderTheOriginalSourceIdentity(t *tes
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -275,8 +274,7 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForAFilenameWithItsExtension(t 
 		Timezone:  "Asia/Shanghai",
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -302,8 +300,7 @@ func TestCodexScopeWarmsCanonicalAttributionCacheForADirectoryQualifiedSessionID
 		Timezone:  "Asia/Shanghai",
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER": "",
-			"TOKENBOARD_SINCE":           "all",
+			"TOKENBOARD_SINCE": "all",
 		})),
 	}); err != nil {
 		t.Fatal(err)
@@ -428,9 +425,8 @@ func TestCodexScopeMapsHistoricalSubagentModelNamesToCcusageCanonicalModels(t *t
 	assertCloseTo(t, got.CostUSD, 10*2.0/1_000_000, 14)
 }
 
-// The selected package manager and the explicit since window both reach every
-// frozen bounded report.
-func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(t *testing.T) {
+// The explicit since window reaches every frozen bounded report.
+func TestCodexScopeUsesSinceForFrozenBoundedReports(t *testing.T) {
 	codexHome := provEmptyCodexHome(t)
 	stateDir := t.TempDir()
 	provWriteJSONL(t, filepath.Join(codexHome, "sessions", "2026", "05", "09", "active.jsonl"),
@@ -443,10 +439,7 @@ func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "bun",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_BUNX_BIN":             "/opt/bin/bunx",
-			"TOKENBOARD_SINCE":                "20260509",
+			"TOKENBOARD_SINCE": "20260509",
 		}),
 	}); err != nil {
 		t.Fatal(err)
@@ -456,19 +449,19 @@ func TestCodexScopeUsesSinceAndTheSelectedPackageManagerForFrozenBoundedReports(
 		t.Fatalf("calls = %+v", runner.calls)
 	}
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260509",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260509",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 	}, configArgs...))
 	for _, call := range runner.calls {
-		if call.command != "/opt/bin/bunx" {
-			t.Errorf("command = %q", call.command)
+		if call.command != ccusage.ReportCommand {
+			t.Errorf("command = %q, want the report label", call.command)
 		}
 	}
 }
@@ -492,7 +485,6 @@ func TestCodexScopeCapsTheConfiguredBatchSize(t *testing.T) {
 		StateDir:  t.TempDir(),
 		Runner:    runner.run,
 		Env: provEnv(provForceEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":  "",
 			"TOKENBOARD_SINCE":            "all",
 			"TOKENBOARD_CODEX_BATCH_SIZE": "2",
 		})),

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionscan"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/zstdframes"
@@ -106,7 +107,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 			// A real read failure (corrupt frame, oversize log) fails the
 			// source; only a torn trailing frame from a session still being
 			// written is tolerated inside the frame reader.
-			err := readUsageEvents(filePath, func(seq int64, hasSeq bool, event sessionusage.Event) {
+			err := readUsageEvents(filePath, options.Stderr, func(seq int64, hasSeq bool, event sessionusage.Event) {
 				if hasSeq {
 					if seenSeqs[seq] {
 						return
@@ -129,7 +130,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 	if scannedFiles == 0 {
 		return nil, errors.New("No " + label + " sessions found: " + root)
 	}
-	return aggregate.Snapshots(), nil
+	return aggregate.Snapshots()
 }
 
 // readUsageEvents yields one usage event per assistant message that reported
@@ -142,9 +143,13 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 // and the sequence number are read. hasSeq is false when the envelope does
 // not carry a usable sequence, which the caller treats as "cannot be
 // deduplicated".
-func readUsageEvents(filePath string, yield func(seq int64, hasSeq bool, event sessionusage.Event)) error {
+func readUsageEvents(
+	filePath string,
+	stderr func(line string),
+	yield func(seq int64, hasSeq bool, event sessionusage.Event),
+) error {
 	sessionID := filepath.Base(filepath.Dir(filePath))
-	return readLogLines(filePath, func(line string) error {
+	return readLogLines(filePath, stderr, func(line string) error {
 		record := sessionusage.ParseJSONLine(line)
 		if record == nil || record["type"] != assistantMessageEvent {
 			return nil
@@ -198,9 +203,9 @@ func readEventSeq(value any) (int64, bool) {
 // default and its frames are appended in batches, so the whole file has to be
 // decoded before the lines are readable. Plain logs stay streamed line by
 // line.
-func readLogLines(filePath string, yield func(line string) error) error {
+func readLogLines(filePath string, stderr func(line string), yield func(line string) error) error {
 	if !strings.HasSuffix(filePath, ".zstd") {
-		return sessionscan.ReadLines(filePath, yield)
+		return sessionscan.ReadLines(filePath, sessionscan.OversizedLineReporter(label, filePath, stderr), yield)
 	}
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -300,7 +305,7 @@ func readModel(data map[string]any) string {
 	message := sessionusage.ReadRecordAt(data["message"])
 	provenance := sessionusage.ReadRecordAt(message["source"])
 	for _, candidate := range []any{provenance["model"], message["model"], data["model"]} {
-		if text, ok := candidate.(string); ok && strings.TrimSpace(text) != "" {
+		if text, ok := candidate.(string); ok && jsonl.TrimJSWhitespace(text) != "" {
 			return text
 		}
 	}
@@ -344,13 +349,6 @@ func lookupSet(env func(string) string, key string) (string, bool) {
 	}
 	value := env(key)
 	return value, value != ""
-}
-
-func lookupEnv(env func(string) string, key string) string {
-	if env == nil {
-		return os.Getenv(key)
-	}
-	return env(key)
 }
 
 // defaultHome is the TS fallback `join(homedir(), '.dsh')`: the user's home

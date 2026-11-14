@@ -127,7 +127,8 @@ export async function collectCodexUsage(options: CollectCodexUsageOptions = {}):
     commandEnv.TOKENBOARD_PACKAGE_MANAGER,
     process.platform,
     existsSync,
-    commandEnv
+    commandEnv,
+    isHookMode(env)
   )
   const collectedAt = options.collectedAt ?? new Date().toISOString()
   const snapshots = await withCodexContextPricingRules(prepared.contextPricingRules, async () => {
@@ -193,6 +194,9 @@ export async function collectCodexUsage(options: CollectCodexUsageOptions = {}):
   return snapshots
 }
 
+// Same rule as the Claude side: a model outside the TokenBoard override set is still priced by
+// ccusage's builtin catalogue, so only a zero-cost snapshot with real usage signals a model
+// nothing could price.
 function reportUnpricedCodexSnapshots(
   snapshots: readonly UsageSnapshot[],
   coveredModelIds: ReadonlySet<string>,
@@ -201,6 +205,7 @@ function reportUnpricedCodexSnapshots(
   const models = new Set(
     snapshots
       .filter((snapshot) => snapshot.source === 'codex' && snapshot.totalTokens > 0)
+      .filter((snapshot) => !(snapshot.costUsd > 0))
       .map((snapshot) => snapshot.model)
       .filter((model) => !coveredModelIds.has(model))
   )
@@ -375,10 +380,20 @@ async function collectCodexHookUsageAttempt(
   // it. Only the reusable copies are subject to this: a snapshot restored for a file that is
   // gone is not in the tree ccusage scanned, so dropping it would lose real usage.
   const coveredKeys = new Set(snapshots.map(codexSnapshotGroupKey))
+  // A pending snapshot whose turn carried no model id is labelled `all`. ccusage reports the
+  // day's usage under concrete model ids, so an exact group-key match would never fire for it
+  // and the cached copy would be added on top of a figure that already contains it — which is
+  // what happens for real codex logs, where `token_count` events carry no `info.model`. An
+  // `all` snapshot therefore covers on (source, date, timezone) alone, the same widening
+  // `assertHookReconciliationSnapshots` applies when it matches an `all` key against the date.
+  const coveredScopes = new Set(snapshots.map(codexSnapshotScopeKey))
   const reusableIds = new Set((incremental.reusablePendingSnapshots ?? []).map(codexSnapshotIdentity))
   const cachedSnapshots = incremental.cachedSnapshots.filter(
     (snapshot) =>
-      !(reusableIds.has(codexSnapshotIdentity(snapshot)) && coveredKeys.has(codexSnapshotGroupKey(snapshot))) &&
+      !(
+        reusableIds.has(codexSnapshotIdentity(snapshot)) &&
+        isCodexSnapshotCoveredByCcusage(snapshot, coveredKeys, coveredScopes)
+      ) &&
       !unresolvedSnapshotKeys.has(codexSnapshotIdentity(snapshot)) &&
       !isUnresolvedCodexContextPricingSnapshot(snapshot)
   )
@@ -400,6 +415,24 @@ function reportUnrecoverablePendingCodexPricing(snapshots: readonly UsageSnapsho
 // does when the two lists are combined.
 function codexSnapshotGroupKey(snapshot: UsageSnapshot) {
   return [snapshot.source, snapshot.usageDate, snapshot.timezone, snapshot.model].join('\0')
+}
+
+// The same grouping without the model, i.e. the widest claim ccusage can make about a day.
+function codexSnapshotScopeKey(snapshot: UsageSnapshot) {
+  return [snapshot.source, snapshot.usageDate, snapshot.timezone].join('\0')
+}
+
+// The unknown-model label the session JSONL parser uses when a token_count row carries no
+// model (`session-jsonl-parser.ts` `readCodexMetric`), mirrored here so the two stay in step.
+const codexUnknownModelLabel = 'all'
+
+function isCodexSnapshotCoveredByCcusage(
+  snapshot: UsageSnapshot,
+  coveredKeys: ReadonlySet<string>,
+  coveredScopes: ReadonlySet<string>
+) {
+  if (coveredKeys.has(codexSnapshotGroupKey(snapshot))) return true
+  return snapshot.model === codexUnknownModelLabel && coveredScopes.has(codexSnapshotScopeKey(snapshot))
 }
 
 function codexSnapshotIdentity(snapshot: UsageSnapshot) {
@@ -549,7 +582,7 @@ async function collectCodexCcusageRangeAttempt(input: {
         codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options)
       })
     : sessions
-  assertCodexContextPricingInventoryStable(
+  reportCodexContextPricingInventoryDrift(
     inventory,
     await discoverCodexContextPricingFiles({
       codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options),
@@ -557,7 +590,8 @@ async function collectCodexCcusageRangeAttempt(input: {
       captureFingerprints: true,
       allowFileOverflow: true,
       fingerprintMemo
-    })
+    }),
+    input.options.stderr
   )
   const rawUsages = await collectCodexContextPricingUsagesFromFiles({
     filePaths: inventory.filePaths,
@@ -574,7 +608,7 @@ async function collectCodexCcusageRangeAttempt(input: {
     until: input.until,
     stderr: input.options.stderr
   })
-  assertCodexContextPricingInventoryStable(
+  reportCodexContextPricingInventoryDrift(
     inventory,
     await discoverCodexContextPricingFiles({
       codexHomes: input.codexHomes ?? resolveCodexHomesFromOptions(input.options),
@@ -582,7 +616,8 @@ async function collectCodexCcusageRangeAttempt(input: {
       captureFingerprints: true,
       allowFileOverflow: true,
       fingerprintMemo
-    })
+    }),
+    input.options.stderr
   )
   return applyCollectedCodexContextPricing({
     snapshots: projected,
@@ -593,31 +628,49 @@ async function collectCodexCcusageRangeAttempt(input: {
   })
 }
 
-function assertCodexContextPricingInventoryStable(
+function reportCodexContextPricingInventoryDrift(
   before: CodexContextPricingFileInventory,
-  after: CodexContextPricingFileInventory
+  after: CodexContextPricingFileInventory,
+  stderr?: (line: string) => void
 ) {
-  if (before.overflow !== after.overflow) {
-    throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
-  }
-  if (before.filePaths.length !== after.filePaths.length) {
-    throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
-  }
+  // An unbounded collect reads every session file, so on a machine that is in
+  // use the set changes while the scan runs: a session starts, an archived
+  // file rotates away, an active session appends. Failing the whole source on
+  // that would make Codex collection fail exactly when the machine is busy, so
+  // the drift is reported and the snapshot read so far is kept; the next sync
+  // recomputes the same rows from a later state.
+  let added = 0
+  let vanished = 0
+  let modified = 0
+  const beforeKeys = new Set<string>()
+  if (before.overflow !== after.overflow) modified += 1
   for (const filePath of before.filePaths) {
     const key = resolve(filePath)
+    beforeKeys.add(key)
     const beforeFingerprint = before.fingerprints.get(key)
     const afterFingerprint = after.fingerprints.get(key)
-    if (
-      !beforeFingerprint ||
-      !afterFingerprint ||
-      !sameCodexContextPricingFingerprint(beforeFingerprint, afterFingerprint)
-    ) {
-      throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
+    if (!beforeFingerprint) {
+      modified += 1
+      continue
     }
-    if (before.identityPaths.get(key) !== after.identityPaths.get(key)) {
-      throw new Error('Codex session inventory changed during unbounded collection; retry the sync')
+    if (!afterFingerprint) {
+      vanished += 1
+      continue
+    }
+    if (
+      !sameCodexContextPricingFingerprint(beforeFingerprint, afterFingerprint) ||
+      before.identityPaths.get(key) !== after.identityPaths.get(key)
+    ) {
+      modified += 1
     }
   }
+  for (const filePath of after.filePaths) {
+    if (!beforeKeys.has(resolve(filePath))) added += 1
+  }
+  if (added === 0 && vanished === 0 && modified === 0) return
+  stderr?.(
+    `Codex session files changed during unbounded collection (added ${added}, vanished ${vanished}, modified ${modified}); reporting the files as they were read, the next sync reconciles the rest`
+  )
 }
 
 function sameCodexContextPricingFingerprint(left: CodexSessionFileFingerprint, right: CodexSessionFileFingerprint) {

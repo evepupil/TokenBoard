@@ -6,6 +6,9 @@ package sessionusage
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -13,7 +16,9 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/collate"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 )
 
 // UnknownModel is the label for usage whose model cannot be determined.
@@ -120,7 +125,14 @@ func (a *Aggregate) Add(event Event) {
 
 // Snapshots returns the folded rows sorted by (date, model), in the same
 // collation the TS aggregate uses — localeCompare, not byte order.
-func (a *Aggregate) Snapshots() []contract.Snapshot {
+//
+// Every folded row is checked against the snapshot contract before it is
+// returned. TS gets this from `usageSnapshotSchema.parse` inside its aggregate;
+// without it here, one corrupted row (a huge count, a sum past int64, a
+// negative cost) leaves the collector intact, the server rejects the whole
+// upload batch, and the upload failure is non-transient — pausing uploads for
+// every source on the machine, not just the one with the bad row.
+func (a *Aggregate) Snapshots() ([]contract.Snapshot, error) {
 	rows := make([]*aggregateRow, 0, len(a.rows))
 	for _, row := range a.rows {
 		rows = append(rows, row)
@@ -137,7 +149,7 @@ func (a *Aggregate) Snapshots() []contract.Snapshot {
 		if a.costAvailable {
 			costUSD = row.costUSD
 		}
-		snapshots = append(snapshots, contract.Snapshot{
+		snapshot := contract.Snapshot{
 			Source:        a.source,
 			UsageDate:     row.usageDate,
 			Timezone:      a.timezoneName,
@@ -150,17 +162,30 @@ func (a *Aggregate) Snapshots() []contract.Snapshot {
 			CostUSD:       costUSD,
 			SessionCount:  int64(len(row.sessions)),
 			CollectedAt:   a.collectedAt,
-		})
+		}
+		if err := snapshot.Validate(); err != nil {
+			return nil, fmt.Errorf("%s %s %s: %w", a.source, row.usageDate, row.model, err)
+		}
+		snapshots = append(snapshots, snapshot)
 	}
-	return snapshots
+	return snapshots, nil
 }
 
 // ReadTokenCount is a non-negative integer count, tolerating string-encoded
-// numbers.
+// numbers. TS keeps an oversized count as a float (`Math.trunc`) and lets the
+// schema reject the row at validation; Go cannot keep it — `int64(x)` for x past
+// int64 range is undefined and wraps on amd64, usually to a negative that folds
+// cleanly and poisons the whole upload batch. So a finite count beyond the
+// contract's bound is clamped one past it: the folded row then fails the
+// snapshot's own Validate — which fails that one source, the same blast radius
+// TS has — instead of uploading a wrapped number.
 func ReadTokenCount(value any) int64 {
 	parsed, ok := ReadFiniteNumber(value)
 	if !ok || parsed <= 0 {
 		return 0
+	}
+	if parsed > float64(contract.MaxSnapshotTokens) {
+		return contract.MaxSnapshotTokens + 1
 	}
 	return int64(parsed)
 }
@@ -169,17 +194,20 @@ func ReadTokenCount(value any) int64 {
 func ReadFiniteNumber(value any) (float64, bool) {
 	switch typed := value.(type) {
 	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return 0, false
+		}
 		return typed, true
 	case json.Number:
-		if parsed, err := typed.Float64(); err == nil {
+		if parsed, err := typed.Float64(); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
 			return parsed, true
 		}
 	case string:
-		trimmed := strings.TrimSpace(typed)
+		trimmed := jsonl.TrimJSWhitespace(typed)
 		if trimmed == "" {
 			return 0, false
 		}
-		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		if parsed, err := strconv.ParseFloat(trimmed, 64); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
 			return parsed, true
 		}
 	}
@@ -190,6 +218,15 @@ func ReadFiniteNumber(value any) (float64, bool) {
 // timestamp for any plausible date is far larger, so the two cannot be
 // confused.
 const secondsThreshold = 100_000_000_000
+
+// maxJSDateMilliseconds is the largest time value (|t| ≤ 8.64e15 ms) a JS Date
+// holds; `new Date(x)` is invalid beyond it, and TS's readEventTimestamp returns
+// null for those, falling back to the session timestamp.
+const maxJSDateMilliseconds = 8.64e15
+
+func inJSDateRange(milliseconds float64) bool {
+	return milliseconds >= -maxJSDateMilliseconds && milliseconds <= maxJSDateMilliseconds
+}
 
 // ReadEventTimestamp reads epoch seconds, epoch milliseconds, or a timestamp
 // string as a time.Time. The string forms follow the JS Date parser for the
@@ -205,20 +242,22 @@ func ReadEventTimestamp(value any) (time.Time, bool) {
 		if numeric < secondsThreshold {
 			milliseconds = numeric * 1000
 		}
+		// Without the bound, int64(milliseconds) is undefined past 2^63 and
+		// time.UnixMilli renders whatever it produced, so a five-digit year would
+		// reach the snapshot and fail validation for the whole source.
+		if !inJSDateRange(milliseconds) {
+			return time.Time{}, false
+		}
 		return time.UnixMilli(int64(milliseconds)), true
 	}
 	text, ok := value.(string)
 	if !ok || strings.TrimSpace(text) == "" {
 		return time.Time{}, false
 	}
-	trimmed := strings.TrimSpace(text)
-	if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", trimmed, time.Local); err == nil {
-		return parsed, true
-	}
-	if parsed, err := time.Parse("2006-01-02", trimmed); err == nil {
+	// `new Date` does not trim, so a padded timestamp is an invalid date there too; jsdate.Parse
+	// uses the value as given and rejects the same padding. It also rolls a day past the month's
+	// length the way JS does ("2026-02-30" is March 2), which time.Parse would reject outright.
+	if parsed, ok := jsdate.Parse(text); ok {
 		return parsed, true
 	}
 	return time.Time{}, false
@@ -265,7 +304,7 @@ func BoundedModel(value any) string {
 	if !ok {
 		return UnknownModel
 	}
-	model := strings.TrimSpace(text)
+	model := jsonl.TrimJSWhitespace(text)
 	if model == "" {
 		return UnknownModel
 	}
@@ -300,7 +339,11 @@ func truncateUTF16(value string, limit int) string {
 // ParseJSONLine parses one JSONL line into an object; anything else
 // (blank, malformed, array, scalar) is not an object.
 func ParseJSONLine(line string) map[string]any {
-	trimmed := strings.TrimSpace(line)
+	// `line.trim()` in JS strips U+FEFF from both ends, so a session file stamped by an editor
+	// or a PowerShell `>` redirect parses there. TrimJSWhitespace matches that set; Go's
+	// TrimSpace does not remove U+FEFF, so a leading BOM would reject the very first line of such
+	// a file and a trailing one would reject a row the TS side accepts.
+	trimmed := jsonl.TrimJSWhitespace(line)
 	if trimmed == "" {
 		return nil
 	}
@@ -308,6 +351,12 @@ func ParseJSONLine(line string) map[string]any {
 	decoder.UseNumber()
 	var parsed any
 	if err := decoder.Decode(&parsed); err != nil {
+		return nil
+	}
+	// `JSON.parse` rejects trailing content, so a line like `{"a":1}garbage` is malformed
+	// there. A bare first Decode accepts it and would count the row the TS side drops.
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil
 	}
 	record, ok := parsed.(map[string]any)
@@ -384,4 +433,34 @@ type DateFilterError struct {
 
 func (e *DateFilterError) Error() string {
 	return "Invalid " + e.Field + ": " + e.Value + ". Expected YYYYMMDD or YYYY-MM-DD."
+}
+
+// AssertValidDateFilterRange ports iso-calendar-date.ts
+// assertValidDateFilterRange: validate a --since/--until pair and reject a
+// reversed window. An empty bound or an explicit "all" means "no bound" and
+// is never forwarded to ccusage.
+func AssertValidDateFilterRange(since, until, sinceField, untilField string) (string, string, error) {
+	normalizedSince := ""
+	trimmedSince := strings.TrimSpace(since)
+	if since != "" && trimmedSince != "all" {
+		value, err := AssertValidDateFilter(since, sinceField, true)
+		if err != nil {
+			return "", "", err
+		}
+		normalizedSince = value
+	}
+	normalizedUntil := ""
+	if until != "" {
+		value, err := AssertValidDateFilter(until, untilField, false)
+		if err != nil {
+			return "", "", err
+		}
+		normalizedUntil = value
+	}
+	if normalizedSince != "" && normalizedUntil != "" &&
+		strings.ReplaceAll(normalizedSince, "-", "") > strings.ReplaceAll(normalizedUntil, "-", "") {
+		return "", "", fmt.Errorf(
+			"Invalid %s/%s: since date must not be after until date.", sinceField, untilField)
+	}
+	return normalizedSince, normalizedUntil, nil
 }

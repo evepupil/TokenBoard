@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionscan"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -70,7 +71,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 		},
 	}, func(file sessionscan.ScannedSessionFile) error {
 		scannedFiles++
-		return readUsageEvents(file.Path, seenEntryIDs, func(event sessionusage.Event) {
+		return readUsageEvents(file.Path, seenEntryIDs, options.Stderr, func(event sessionusage.Event) {
 			if sinceDate != "" && sessionusage.FormatDate(event.OccurredAt, timezone) < sinceDate {
 				return
 			}
@@ -86,7 +87,7 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 	if scannedFiles == 0 {
 		return nil, errors.New("No " + label + " sessions found: " + root)
 	}
-	return aggregate.Snapshots(), nil
+	return aggregate.Snapshots()
 }
 
 // readUsageEvents yields one usage event per usage-carrying entry.
@@ -97,11 +98,16 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 //
 // A session file is a tree keyed by id/parentId, and a fork copies shared
 // history into the new file, so an entry id is only counted once per scan.
-func readUsageEvents(filePath string, seenEntryIDs map[string]bool, yield func(sessionusage.Event)) error {
+func readUsageEvents(
+	filePath string,
+	seenEntryIDs map[string]bool,
+	stderr func(line string),
+	yield func(sessionusage.Event),
+) error {
 	sessionID := strings.TrimSuffix(filepath.Base(filePath), ".jsonl")
 	var sessionTimestamp *time.Time
 
-	return sessionscan.ReadLines(filePath, func(line string) error {
+	return sessionscan.ReadLines(filePath, sessionscan.OversizedLineReporter(label, filePath, stderr), func(line string) error {
 		entry := sessionusage.ParseJSONLine(line)
 		if entry == nil {
 			return nil
@@ -236,8 +242,8 @@ func readModel(message map[string]any) string {
 		return sessionusage.UnknownModel
 	}
 	for _, key := range []string{"responseModel", "model", "modelId"} {
-		if value, ok := message[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		if value, ok := message[key].(string); ok && jsonl.TrimJSWhitespace(value) != "" {
+			return jsonl.TrimJSWhitespace(value)
 		}
 	}
 	return sessionusage.UnknownModel

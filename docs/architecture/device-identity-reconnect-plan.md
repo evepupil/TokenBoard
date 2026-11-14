@@ -78,7 +78,7 @@ pairing、reconnect、token rotate/revoke、installation/device revoke 均已接
 
 示例：
 
-- `Mison iMac`
+- `<device>`
 - `GZ016518DC`
 - `Ubuntu server`
 
@@ -104,6 +104,7 @@ CREATE TABLE device_installations (
   platform TEXT NOT NULL,
   hostname TEXT,
   client_version TEXT,
+  install_claim_hash TEXT,
   first_seen_at TEXT NOT NULL,
   last_seen_at TEXT,
   revoked_at TEXT,

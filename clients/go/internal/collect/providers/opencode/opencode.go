@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/jsonl"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sqlite"
@@ -137,7 +137,14 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 
 	snapshots := make([]contract.Snapshot, 0, len(aggregates))
 	for _, row := range aggregates {
-		snapshots = append(snapshots, toSnapshot(row, timezone, collectedAt))
+		snapshot := toSnapshot(row, timezone, collectedAt)
+		// TS ends `toSnapshot` in `usageSnapshotSchema.parse`; this is the same gate.
+		// A row beyond the contract must fail the source here, not surface later as a
+		// server-side batch rejection that pauses uploads for every source.
+		if err := snapshot.Validate(); err != nil {
+			return nil, fmt.Errorf("%s %s %s: %w", source, row.usageDate, row.model, err)
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 	return sessioncursor.MergeSnapshots(snapshots), nil
 }
@@ -220,12 +227,17 @@ func readCount(value any) float64 {
 	if !ok || parsed <= 0 {
 		return 0
 	}
+	// Same clamp as sessionusage.ReadTokenCount: `int64(x)` for x past int64 wraps,
+	// and a wrapped count folds instead of failing validation.
+	if parsed > float64(contract.MaxSnapshotTokens) {
+		return float64(contract.MaxSnapshotTokens + 1)
+	}
 	return float64(int64(parsed))
 }
 
 func sessionSet(value any) map[string]bool {
 	text, ok := value.(string)
-	if !ok || strings.TrimSpace(text) == "" {
+	if !ok || jsonl.TrimJSWhitespace(text) == "" {
 		return map[string]bool{}
 	}
 	return map[string]bool{text: true}

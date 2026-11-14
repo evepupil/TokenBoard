@@ -1,0 +1,1 @@
+{"message":{"type":"StatusUpdate","payload":{"message_id":"old-1","token_usage":{"input_other":100,"output":50,"input_cache_creation":10,"input_cache_read":20,"total":200}}},"timestamp":1777942800.75}

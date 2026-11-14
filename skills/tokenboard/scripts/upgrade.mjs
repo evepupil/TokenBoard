@@ -12,9 +12,11 @@ import {
   readConfig,
   readPackageManager
 } from './config.mjs'
-import { printHelpIfRequested } from './cli-help.mjs'
+import { hasHelpFlag, printHelpIfRequested } from './cli-help.mjs'
 import { defaultReleaseRepo, installClientBinary } from './client-binary.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
+import { scrubbedChildEnv } from './child-env.mjs'
+import { assertSupportedNodeVersion } from './node-version.mjs'
 import { recoverOrphanedBackup, runArchiveFallback, selectAvailableBackupPath } from './upgrade-archive.mjs'
 import {
   buildCloneSteps,
@@ -259,10 +261,18 @@ export function runUpgrade({
   return { collectorDir: collector, skillDir, repoUrl, repoRef, packageManager }
 }
 
+// The probes below shell out to `git` in the checkout. Git runs hooks and
+// credential helpers for read-only plumbing too (a `core.fsmonitor` hook runs
+// on `git status`), and those are code from the checkout, not from this skill:
+// none of them gets the upload token or a pairing code the parent may hold.
+function runGitProbe(spawn, args, options) {
+  return spawn('git', args, { ...options, env: scrubbedChildEnv() })
+}
+
 // Archive fallbacks and checkoutless installs have no HEAD to name; record null rather than
 // failing an otherwise successful upgrade.
 function resolveCurrentCommit({ collectorDir, spawn }) {
-  const result = spawn('git', ['rev-parse', 'HEAD'], { cwd: collectorDir, encoding: 'utf8' })
+  const result = runGitProbe(spawn, ['rev-parse', 'HEAD'], { cwd: collectorDir, encoding: 'utf8' })
   const commit = typeof result.stdout === 'string' ? result.stdout.trim() : ''
   return result.status === 0 && /^[0-9a-f]{40}$/.test(commit) ? commit : null
 }
@@ -309,7 +319,7 @@ export function refreshInstalledNotifyHandler({
 }
 
 export function assertCleanGitWorktree({ collectorDir, spawn = spawnSync }) {
-  const result = spawn('git', ['status', '--porcelain', '--untracked-files=all'], {
+  const result = runGitProbe(spawn, ['status', '--porcelain', '--untracked-files=all'], {
     cwd: collectorDir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -360,7 +370,7 @@ function resolveAutomaticUpgradeBranch({ collectorDir, repoRef, spawn }) {
     return explicitRef.startsWith('refs/') ? '' : explicitRef
   }
 
-  const result = spawn('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], {
+  const result = runGitProbe(spawn, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], {
     cwd: collectorDir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -372,7 +382,7 @@ function resolveAutomaticUpgradeBranch({ collectorDir, repoRef, spawn }) {
 }
 
 function readGitBranch({ collectorDir, spawn }) {
-  const result = spawn('git', ['branch', '--show-current'], {
+  const result = runGitProbe(spawn, ['branch', '--show-current'], {
     cwd: collectorDir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -507,5 +517,20 @@ function runCli() {
 }
 
 if (isMainModule(import.meta.url)) {
+  // The manual and automatic upgrade paths download over Node `fetch` — a release tarball for
+  // `--to-binary`, and a ZIP archive fallback for a checkout upgrade. Both trust TLS hostname
+  // validation for the origin before the checksums are compared, so an unsupported Node (with
+  // the hostname-verification bypass) makes a hostile host able to serve matching checksums.
+  // sync.mjs's preflight covers automatic upgrades; a manual `upgrade.mjs` is a fifth TLS
+  // entrypoint and needs the same bound. `--help` stays a pure read on any runtime, matching
+  // the CLI contract.
+  if (!hasHelpFlag(process.argv.slice(2))) {
+    try {
+      assertSupportedNodeVersion(process.versions.node)
+    } catch (error) {
+      console.error(errorMessage(error))
+      process.exit(1)
+    }
+  }
   runCli()
 }

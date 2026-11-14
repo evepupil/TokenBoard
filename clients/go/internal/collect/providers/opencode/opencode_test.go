@@ -409,3 +409,22 @@ func seedDatabase(t *testing.T, realDB string) {
 		t.Fatal(err)
 	}
 }
+
+// TS's opencode `toSnapshot` ends in `usageSnapshotSchema.parse`, so a folded row
+// beyond the contract fails this one source. The Go aggregate is the only gate
+// between a corrupted message row and the upload batch: without it the server
+// rejects the whole request as a non-transient failure.
+func TestCollectFailsClosedWhenFoldedRowsExceedTheContract(t *testing.T) {
+	_, err := runCollect(t, []map[string]any{dbRow(map[string]any{"inputTokens": 1e30})}, nil)
+	if err == nil {
+		t.Fatal("Collect accepted rows the server would reject")
+	}
+}
+
+// An ordinary row still produces a snapshot; the gate is not over-eager.
+func TestCollectStillReturnsValidSnapshots(t *testing.T) {
+	snapshots := mustCollect(t, []map[string]any{dbRow(nil)}, nil)
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
+	}
+}

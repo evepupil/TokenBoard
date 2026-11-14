@@ -9,6 +9,10 @@ import (
 
 func init() {
 	collect.Register(contract.SourceClaudeCode, provider{})
+	// The native seam is registered unconditionally. The parity harness looks
+	// the native side up here; an empty registration would report the source
+	// as "not implemented" instead of exercising the adapter.
+	collect.RegisterNative(contract.SourceClaudeCode, nativeProvider{})
 }
 
 type provider struct{}

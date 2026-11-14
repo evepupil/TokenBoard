@@ -8,6 +8,7 @@ import { requireDeviceStepUp } from '../../features/device/step-up'
 import { getCanonicalPublicOrigin, getProfileTimezoneSettings } from '../../features/settings/service'
 import { ApiError } from '../../lib/errors'
 import { jsonError } from '../../lib/http'
+import { enforceRateLimit, writeRateLimitPolicies } from '../../lib/rate-limit'
 import { normalizeTimezone, parseTimezone } from '../../lib/timezone'
 
 export const GET = createRoute(async (c) => {
@@ -34,6 +35,13 @@ export const GET = createRoute(async (c) => {
 export const POST = createRoute(async (c) => {
   try {
     const user = await requireUser(c)
+    // This form mints the same one-time pairing code as POST /api/v1/device/pairing-codes, so it
+    // carries the same per-user ceiling: leaving it out would let the API limit be bypassed by
+    // posting the form instead.
+    await enforceRateLimit(c.env.DB, {
+      policy: writeRateLimitPolicies.pairingCode,
+      subject: { kind: 'user', value: user.id }
+    })
     const form = await c.req.parseBody()
     const publicOrigin = getCanonicalPublicOrigin({
       configuredOrigin: c.env.BETTER_AUTH_URL,

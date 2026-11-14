@@ -98,17 +98,17 @@ func (f fakeRelease) server(t *testing.T) *httptest.Server {
 		sums = fmt.Sprintf("%s  %s\n", strings.Repeat("0", 64), archiveName)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/MisonL/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/MisonL/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
+	mux.HandleFunc("/evepupil/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/evepupil/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("<html>release " + f.tag + "</html>"))
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
 		func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(f.tarball)
 		})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
 		func(w http.ResponseWriter, r *http.Request) {
 			if f.omitChecksums {
 				http.NotFound(w, r)
@@ -171,12 +171,13 @@ func runAgainst(t *testing.T, server *httptest.Server, target, tag string) (Resu
 }
 
 // runAgainstWithConfigDir pins TOKENBOARD_CONFIG_DIR to a test directory. The
-// bundled ccusage install follows that variable, and without it the test would
-// write into the machine's real ~/.tokenboard/bin.
+// update probes that directory's bin for a ccusage copy left by an earlier
+// release, and without it the test would inspect the machine's real
+// ~/.tokenboard/bin.
 func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag, configDir string) (Result, error) {
 	t.Helper()
 	return Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Tag:        tag,
 		Target:     target,
 		Platform:   "darwin",
@@ -192,6 +193,70 @@ func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag,
 			return ""
 		},
 		Stderr: func(string) {},
+	})
+}
+
+// A feed whose "latest" points below the installed version (a yanked release,
+// a tag rolled back) must not silently downgrade the machine. A downgrade
+// reintroduces whatever the newer version fixed, and the scheduled path would
+// do it on every run without anyone asking.
+func TestRunDoesNotDowngradeWhenTheFeedPointsBelowTheInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	installed := stubBinary("2.0.0")
+	if err := os.WriteFile(target, installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("2.0.0")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	var downloads int
+	fake := fakeRelease{tag: "v1.9.0", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.9.0"))}
+	server := fake.server(t)
+	server.Config.Handler = countingDownloads(server.Config.Handler, &downloads)
+
+	var lines []string
+	result, err := Run(Input{
+		Repo:       "evepupil/TokenBoard",
+		Target:     target,
+		Platform:   "darwin",
+		Arch:       "arm64",
+		HTTPClient: server.Client(),
+		Env: func(key string) string {
+			if key == "TOKENBOARD_RELEASE_BASE_URL" {
+				return server.URL
+			}
+			return ""
+		},
+		Stderr: func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Updated {
+		t.Fatal("a release older than the installed version must not be installed")
+	}
+	if result.Version != "2.0.0" {
+		t.Errorf("result.Version = %q, want the installed 2.0.0", result.Version)
+	}
+	if downloads != 0 {
+		t.Errorf("downloads = %d, want none: the archive must not even be fetched", downloads)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "newer") {
+		t.Errorf("stderr = %q, want a line saying the installed version is newer", strings.Join(lines, "\n"))
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, installed) {
+		t.Errorf("the installed binary was replaced: %q", got)
+	}
+}
+
+// countingDownloads wraps a release handler and counts archive downloads.
+func countingDownloads(next http.Handler, downloads *int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			*downloads++
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -439,48 +504,6 @@ func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
 	}
 }
 
-// Spec §4.1: the release tarball carries the platform's ccusage binary beside
-// the client. An update that installed only the client would leave a machine
-// whose ccusage version never follows the one the new client expects.
-func TestRunInstallsTheBundledCcusage(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "tokenboard")
-	if err := os.WriteFile(target, stubBinary("0.0.1"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	SetCurrentVersion("0.0.1")
-	t.Cleanup(func() { SetCurrentVersion("dev") })
-
-	tarball := buildTarballWithFiles(t, map[string][]byte{
-		"tokenboard": stubBinary("1.2.3"),
-		"ccusage":    []byte("#!/bin/sh\necho 'ccusage 20.0.33'\n"),
-	})
-	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: tarball}
-	server := fake.server(t)
-
-	configDir := t.TempDir()
-	if _, err := runAgainstWithConfigDir(t, server, target, "", configDir); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	// The bundled layer looks under the config directory (BundledBinDir), which
-	// is where the skill's bootstrap install puts it too.
-	bundled, err := os.ReadFile(filepath.Join(configDir, "bin", "ccusage"))
-	if err != nil {
-		t.Fatalf("the bundled ccusage was not installed: %v", err)
-	}
-	if !bytes.Contains(bundled, []byte("ccusage 20.0.33")) {
-		t.Errorf("installed ccusage is not the bundled one: %q", bundled)
-	}
-	info, err := os.Stat(filepath.Join(configDir, "bin", "ccusage"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Windows has no execute bit; a file runs by extension there.
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("ccusage is not executable: %v", info.Mode())
-	}
-}
-
 // A release without ccusage (an older tag) must still update the client: the
 // three-layer acquisition falls back to PATH and the download layer.
 func TestRunAcceptsAReleaseWithoutCcusage(t *testing.T) {
@@ -536,36 +559,8 @@ func buildTarballWithFiles(t *testing.T, files map[string][]byte) []byte {
 	return buffer.Bytes()
 }
 
-// A tarball whose ccusage entry is malformed must fail the update, not install
-// a client whose bundled layer then downloads a different version.
-func TestRunRefusesAMalformedCcusageEntry(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "tokenboard")
-	if err := os.WriteFile(target, stubBinary("0.0.1"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	SetCurrentVersion("0.0.1")
-	t.Cleanup(func() { SetCurrentVersion("dev") })
-
-	tarball := buildTarballWithFiles(t, map[string][]byte{
-		"tokenboard": stubBinary("1.2.3"),
-		"ccusage":    nil, // a present-but-empty entry is malformed
-	})
-	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: tarball}
-	server := fake.server(t)
-
-	configDir := t.TempDir()
-	if _, err := runAgainstWithConfigDir(t, server, target, "", configDir); err == nil {
-		t.Fatal("an empty ccusage entry must fail the update")
-	}
-	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("the original binary must stay in place: %v", err)
-	}
-}
-
-// A release that carries no ccusage leaves the existing copy in place, and the
-// update must say so: that copy is now a version the new client was never
-// tested against, and a silent update would hide it.
+// A copy of ccusage left by an earlier release stays where it is, and the
+// update says so once: the client no longer installs, uses or removes it.
 func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tokenboard")
@@ -580,7 +575,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	server := fake.server(t)
 
 	configDir := t.TempDir()
-	ccusagePath := filepath.Join(configDir, "bin", "ccusage")
+	ccusagePath := filepath.Join(configDir, "bin", ccusageBinaryName())
 	if err := os.MkdirAll(filepath.Dir(ccusagePath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +584,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	var lines []string
 	if _, err := Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Target:     target,
 		Platform:   "darwin",
 		Arch:       "arm64",
@@ -609,11 +604,43 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	found := false
 	for _, line := range lines {
-		if strings.Contains(line, "carries no ccusage") && strings.Contains(line, ccusagePath) {
+		if strings.Contains(line, "no longer bundles or uses ccusage") && strings.Contains(line, ccusagePath) {
 			found = true
 		}
 	}
 	if !found {
 		t.Errorf("stderr = %v, want a report of the ccusage left in place", lines)
+	}
+}
+
+// The staged binary is probed before it is trusted, so it must not see the upload token: a
+// tampered feed could answer `version` and read the credentials from its own environment. The
+// TS side scrubs this same probe (`client-binary.mjs` `runsVersion` → `scrubbedChildEnv`).
+func TestVerifyExecutableDoesNotHandCredentialsToTheStagedBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	envCapture := filepath.Join(dir, "staged-env")
+	staged := filepath.Join(dir, "tokenboard")
+	script := "#!/bin/sh\n" +
+		"printf '%s|%s|%s' \"$TOKENBOARD_UPLOAD_TOKEN\" \"$TOKENBOARD_PAIRING_CODE\" \"$TOKENBOARD_RELEASE_BASE_URL\" > '" + envCapture + "'\n" +
+		"echo \"tokenboard (go) 1.2.3\"\n"
+	if err := os.WriteFile(staged, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_secret")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_secret")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:pw@feed.example")
+
+	if err := verifyExecutable(staged, "1.2.3"); err != nil {
+		t.Fatalf("verifyExecutable: %v", err)
+	}
+	captured, err := os.ReadFile(envCapture)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	if string(captured) != "||" {
+		t.Errorf("staged binary saw credentials: %q, want all stripped", string(captured))
 	}
 }

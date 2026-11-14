@@ -59,6 +59,3 @@ export const snapshotCheckRequestSchema = z.object({
     .min(1)
     .max(maxSnapshotCheckBatchSize)
 })
-
-export type IngestRequest = z.infer<typeof ingestRequestSchema>
-export type SnapshotCheckRequest = z.infer<typeof snapshotCheckRequestSchema>

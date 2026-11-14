@@ -31,6 +31,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/codexusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionwalk"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
@@ -128,17 +129,31 @@ type CodexContextPricingFileModelHints map[string]string
 
 // CodexContextPricingRules is the static rule set: the provider-published
 // per-token rates represented in the server catalogue.
+//
+// The divisor must be a runtime division, not a constant-folded one, so Go's
+// double arithmetic matches the JS collector exactly (0.4/1e6 etc.). This is
+// critical for gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna: their static rows are
+// used when the catalogue has no price agreement, and even a 1 ULP difference
+// changes snapshotHash() and breaks shadow/diff tests across clients.
+//
+// A `var` rather than a `const` is load-bearing: Go evaluates an untyped constant
+// expression in exact rational arithmetic and rounds once, while JS rounds the
+// double operand and then rounds again after the division. The two disagree by
+// 1 ULP for 0.2, 0.4, 0.8 and 1.8, which is precisely the set of fractional
+// rows these rules carry.
+var codexDivisor = 1_000_000.0
+
 var CodexContextPricingRules = []CodexContextPricingRule{
 	{
 		ModelIDs:  []string{"gpt-5.6-sol", "gpt-5.6"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 30.0 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 6.25 / 1_000_000,
+			Input: 4.0 / codexDivisor, Output: 20.0 / codexDivisor,
+			CacheRead: 0.4 / codexDivisor, CacheCreation: 5.0 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 10.0 / 1_000_000, Output: 45.0 / 1_000_000,
-			CacheRead: 1.0 / 1_000_000, CacheCreation: 12.5 / 1_000_000,
+			Input: 8.0 / codexDivisor, Output: 30.0 / codexDivisor,
+			CacheRead: 0.8 / codexDivisor, CacheCreation: 10.0 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -146,12 +161,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.6-terra"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 2.0 / 1_000_000, Output: 12.0 / 1_000_000,
-			CacheRead: 0.2 / 1_000_000, CacheCreation: 2.5 / 1_000_000,
+			Input: 2.0 / codexDivisor, Output: 12.0 / codexDivisor,
+			CacheRead: 0.2 / codexDivisor, CacheCreation: 2.5 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 4.0 / 1_000_000, Output: 18.0 / 1_000_000,
-			CacheRead: 0.4 / 1_000_000, CacheCreation: 5.0 / 1_000_000,
+			Input: 4.0 / codexDivisor, Output: 18.0 / codexDivisor,
+			CacheRead: 0.4 / codexDivisor, CacheCreation: 5.0 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -159,12 +174,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.6-luna"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 0.2 / 1_000_000, Output: 1.2 / 1_000_000,
-			CacheRead: 0.02 / 1_000_000, CacheCreation: 0.25 / 1_000_000,
+			Input: 0.2 / codexDivisor, Output: 1.2 / codexDivisor,
+			CacheRead: 0.02 / codexDivisor, CacheCreation: 0.25 / codexDivisor,
 		},
 		LongContext: PricingRates{
-			Input: 0.4 / 1_000_000, Output: 1.8 / 1_000_000,
-			CacheRead: 0.04 / 1_000_000, CacheCreation: 0.5 / 1_000_000,
+			Input: 0.4 / codexDivisor, Output: 1.8 / codexDivisor,
+			CacheRead: 0.04 / codexDivisor, CacheCreation: 0.5 / codexDivisor,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -172,12 +187,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.5"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 30.0 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 0,
+			Input: 5.0 / codexDivisor, Output: 30.0 / codexDivisor,
+			CacheRead: 0.5 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 10.0 / 1_000_000, Output: 45.0 / 1_000_000,
-			CacheRead: 1.0 / 1_000_000, CacheCreation: 0,
+			Input: 10.0 / codexDivisor, Output: 45.0 / codexDivisor,
+			CacheRead: 1.0 / codexDivisor, CacheCreation: 0,
 		},
 		FastMultiplier: float64Pointer(2.5),
 	},
@@ -185,11 +200,11 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.5-pro"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 30.0 / 1_000_000, Output: 180.0 / 1_000_000,
+			Input: 30.0 / codexDivisor, Output: 180.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 60.0 / 1_000_000, Output: 270.0 / 1_000_000,
+			Input: 60.0 / codexDivisor, Output: 270.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 	},
@@ -197,12 +212,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.4"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 2.5 / 1_000_000, Output: 15.0 / 1_000_000,
-			CacheRead: 0.25 / 1_000_000, CacheCreation: 0,
+			Input: 2.5 / codexDivisor, Output: 15.0 / codexDivisor,
+			CacheRead: 0.25 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 5.0 / 1_000_000, Output: 22.5 / 1_000_000,
-			CacheRead: 0.5 / 1_000_000, CacheCreation: 0,
+			Input: 5.0 / codexDivisor, Output: 22.5 / codexDivisor,
+			CacheRead: 0.5 / codexDivisor, CacheCreation: 0,
 		},
 		FastMultiplier: float64Pointer(2),
 	},
@@ -210,11 +225,11 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"gpt-5.4-pro"},
 		Threshold: 272_000,
 		Standard: PricingRates{
-			Input: 30.0 / 1_000_000, Output: 180.0 / 1_000_000,
+			Input: 30.0 / codexDivisor, Output: 180.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 60.0 / 1_000_000, Output: 270.0 / 1_000_000,
+			Input: 60.0 / codexDivisor, Output: 270.0 / codexDivisor,
 			CacheRead: 0, CacheCreation: 0,
 		},
 	},
@@ -222,12 +237,12 @@ var CodexContextPricingRules = []CodexContextPricingRule{
 		ModelIDs:  []string{"grok-4.5"},
 		Threshold: defaultLongContextThreshold,
 		Standard: PricingRates{
-			Input: 2.0 / 1_000_000, Output: 6.0 / 1_000_000,
-			CacheRead: 0.3 / 1_000_000, CacheCreation: 0,
+			Input: 2.0 / codexDivisor, Output: 6.0 / codexDivisor,
+			CacheRead: 0.3 / codexDivisor, CacheCreation: 0,
 		},
 		LongContext: PricingRates{
-			Input: 4.0 / 1_000_000, Output: 12.0 / 1_000_000,
-			CacheRead: 0.6 / 1_000_000, CacheCreation: 0,
+			Input: 4.0 / codexDivisor, Output: 12.0 / codexDivisor,
+			CacheRead: 0.6 / codexDivisor, CacheCreation: 0,
 		},
 	},
 }
@@ -314,12 +329,6 @@ func (r *Rules) IsCodexContextPricingModel(model string) bool {
 	return ok
 }
 
-// IsCodexContextPricingModel reports whether the model has a pricing rule in
-// the default rule set.
-func IsCodexContextPricingModel(model string) bool {
-	return DefaultRules().IsCodexContextPricingModel(model)
-}
-
 // IsCodexContextPricingCostGuaranteedZero reports whether every published
 // rate for the model is zero, so a non-zero cost proves the snapshot was never
 // repriced.
@@ -329,11 +338,6 @@ func (r *Rules) IsCodexContextPricingCostGuaranteedZero(model string) bool {
 		return false
 	}
 	return ratesAreZero(rule.Standard) && ratesAreZero(rule.LongContext)
-}
-
-// IsCodexContextPricingCostGuaranteedZero is the default-rule form.
-func IsCodexContextPricingCostGuaranteedZero(model string) bool {
-	return DefaultRules().IsCodexContextPricingCostGuaranteedZero(model)
 }
 
 func ratesAreZero(rates PricingRates) bool {
@@ -661,6 +665,12 @@ func (r *Rules) ApplyCodexContextPricingCosts(
 		unresolvedSnapshots = append(unresolvedSnapshots, snapshotIndexes...)
 	}
 
+	// A raw cost with no daily snapshot cannot be applied, and a snapshot with
+	// no unambiguous raw cost cannot be split. Both are expected on a machine
+	// whose session history is incomplete — an archived file rotated away, a
+	// compaction pass trimmed a day, the inventory changed mid-scan and the
+	// file was skipped — so the row keeps the daily aggregate cost and the
+	// mismatch is reported instead of failing the whole source.
 	for _, key := range unmatchedCostKeys.order() {
 		if _, ok := costsByKey.values[key]; !ok {
 			return nil, errors.New("Codex context pricing matching lost a raw cost")
@@ -670,18 +680,14 @@ func (r *Rules) ApplyCodexContextPricingCosts(
 			return nil, err
 		}
 		emitStderr(stderr, fmt.Sprintf(
-			"Codex context pricing found %s usage without a matching daily snapshot for %s", model, usageDate))
-		return nil, fmt.Errorf(
-			"Codex context pricing cannot match daily snapshot for %s/%s", usageDate, model)
+			"Codex context pricing found %s usage without a matching daily snapshot for %s; leaving the day's aggregate cost as reported", model, usageDate))
 	}
 
-	if len(unresolvedSnapshots) > 0 {
-		snapshot := snapshots[unresolvedSnapshots[0]]
+	for _, index := range unresolvedSnapshots {
+		snapshot := snapshots[index]
 		emitStderr(stderr, fmt.Sprintf(
-			"Codex context pricing found %s daily usage without an unambiguous raw cost for %s",
+			"Codex context pricing found %s daily usage without an unambiguous raw cost for %s; keeping the day's aggregate cost",
 			snapshot.Model, snapshot.UsageDate))
-		return nil, fmt.Errorf(
-			"Codex context pricing cannot match raw cost for %s/%s", snapshot.UsageDate, snapshot.Model)
 	}
 
 	out := make([]CostSnapshot, len(snapshots))
@@ -854,6 +860,15 @@ func (r *Rules) CollectCodexContextPricingUsagesFromFiles(input CollectFilesInpu
 		if !allowMixedModelPricing {
 			scan.canonicalModelsByDate = input.CanonicalModelsByDate
 		}
+		// A file that vanished between discovery and this read (an archived
+		// session rotated away, a cleanup pass) is skipped rather than failing
+		// the source: its rows come from the next sync, which discovers the
+		// file where it lives then.
+		if _, statErr := os.Stat(filePath); statErr != nil && os.IsNotExist(statErr) {
+			emitStderr(input.Stderr, "Skipped a Codex session file that vanished during the scan: "+
+				filepath.Base(filePath))
+			continue
+		}
 		relevant, err := r.scanFile(scan)
 		if err != nil {
 			return nil, err
@@ -958,11 +973,6 @@ func (r *Rules) CollectCodexContextPricingUsagesFromHomes(input CollectHomesInpu
 		Until:                 input.Until,
 		Stderr:                input.Stderr,
 	})
-}
-
-// CollectCodexContextPricingUsagesFromHomes is the default-rule form.
-func CollectCodexContextPricingUsagesFromHomes(input CollectHomesInput) ([]CodexContextPricingUsage, error) {
-	return DefaultRules().CollectCodexContextPricingUsagesFromHomes(input)
 }
 
 // DiscoverInput configures one bounded file discovery.
@@ -1336,21 +1346,16 @@ func (r *Rules) scanFile(input scanFileInput) (bool, error) {
 		switch recordType {
 		case "session_meta":
 			identity := readSessionIdentity(record)
-			if identity != "" && sessionIdentity == "" {
+			// A forked Codex file opens with the child's session_meta and then
+			// replays the parent's own meta and history. Releases that predate
+			// session_id cannot be unified by it, so the two identities differ
+			// legitimately; the latest meta names the thread the records belong
+			// to, so adopt it instead of counting the replay against the child
+			// or dropping the rest of the file. Two files under one relative
+			// path that end up naming different threads are a real conflict,
+			// checked once the file is fully read.
+			if identity != "" && (sessionIdentity == "" || archiveAlias != "") {
 				sessionIdentity = scopedSessionIdentity(identity, input.identityPath)
-				if archiveAlias != "" {
-					if previous, ok := input.sessionIdentitiesByAlias[archiveAlias]; ok && previous != sessionIdentity {
-						return fmt.Errorf(
-							"Codex context pricing found conflicting session identities for %s", archiveAlias)
-					}
-					input.sessionIdentitiesByAlias[archiveAlias] = sessionIdentity
-				}
-			} else if identity != "" && sessionIdentity != "" && archiveAlias != "" {
-				observedIdentity := scopedSessionIdentity(identity, input.identityPath)
-				if observedIdentity != sessionIdentity {
-					return fmt.Errorf(
-						"Codex context pricing found conflicting session identities for %s", archiveAlias)
-				}
 			}
 			payload := ReadRecord(record["payload"])
 			source := ReadRecord(payload["source"])
@@ -1574,6 +1579,18 @@ func (r *Rules) scanFile(input scanFileInput) (bool, error) {
 	})
 	if readErr != nil {
 		return false, readErr
+	}
+	// The active and archived copies of one session share a relative path, so
+	// they share an alias. When both declare an identity they must agree: two
+	// different threads under one alias are not copies, and deduplicating them
+	// would silently drop usage. A file without session_meta inherits the
+	// alias' identity and trivially agrees.
+	if archiveAlias != "" && sessionIdentity != "" {
+		if previous, ok := input.sessionIdentitiesByAlias[archiveAlias]; ok && previous != sessionIdentity {
+			return false, fmt.Errorf(
+				"Codex context pricing found conflicting session identities for %s", archiveAlias)
+		}
+		input.sessionIdentitiesByAlias[archiveAlias] = sessionIdentity
 	}
 	return hasRelevantModel, nil
 }
@@ -1915,28 +1932,13 @@ var (
 )
 
 // parseTimestamp mirrors `new Date(value)`: an explicit offset is honoured, a
-// bare date is UTC, and a date-time without an offset is the local zone.
+// bare date is UTC, and a date-time without an offset is the local zone. The
+// shared jsdate package carries the JS parser's per-shape quirks (lowercase
+// t/z, an offset without the colon, an omitted seconds field, hour 24, and a
+// day past the month's length rolling forward) that the previous hand-written
+// layouts rejected, so a row the TS side keeps is not dropped here.
 func parseTimestamp(value string) (time.Time, bool) {
-	switch {
-	case isoDateOnly.MatchString(value):
-		parsed, err := time.Parse("2006-01-02", value)
-		return parsed, err == nil
-	case isoDateTimeWithZone.MatchString(value):
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05Z07:00"} {
-			if parsed, err := time.Parse(layout, value); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
-	case isoDateTimeWithoutZone.MatchString(value):
-		for _, layout := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02T15:04:05", "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
-			if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
-				return parsed, true
-			}
-		}
-		return time.Time{}, false
-	}
-	return time.Time{}, false
+	return jsdate.Parse(value)
 }
 
 func readSessionIdentity(record UnknownRecord) string {
@@ -2091,6 +2093,15 @@ func BuildCodexContextPricingRules(
 		}
 	}
 
+	// Skips are collected and reported once per reason class below: the
+	// catalogue gains and loses these models daily, and a line per model ran to
+	// hundreds per scan and buried real warnings in the sync log.
+	var multiTierSkipped []string
+	type cacheSkip struct {
+		modelID string
+		missing []string
+	}
+	var cacheSkipped []cacheSkip
 	for _, model := range SelectUnambiguousDynamicPricingModels(models) {
 		normalizedModelID := normalizeModelIDWithBases(model.ModelID, baseModelBases)
 		if excluded[strings.ToLower(strings.TrimSpace(model.ModelID))] || excluded[normalizedModelID] {
@@ -2105,9 +2116,7 @@ func BuildCodexContextPricingRules(
 			// stale rates.
 			if hasChangingDynamicContextTiers(model.Pricing) {
 				removeContextPricingRuleForModel(&rules, ruleByID, normalizedModelID, baseModelBases)
-				emitStderr(stderr, fmt.Sprintf(
-					"TokenBoard model pricing: skipping dynamic Codex context rule for %s; multiple changing context tiers cannot be represented by the request-level rule",
-					model.ModelID))
+				multiTierSkipped = append(multiTierSkipped, model.ModelID)
 			}
 			continue
 		}
@@ -2141,9 +2150,7 @@ func BuildCodexContextPricingRules(
 			if standardCacheCreationMissing || longCacheCreationMissing {
 				missingCachePrices = append(missingCachePrices, "cache-write")
 			}
-			emitStderr(stderr, fmt.Sprintf(
-				"TokenBoard model pricing: skipping dynamic Codex context rule for %s; cache pricing is incomplete (%s)",
-				model.ModelID, strings.Join(missingCachePrices, ", ")))
+			cacheSkipped = append(cacheSkipped, cacheSkip{modelID: model.ModelID, missing: missingCachePrices})
 			continue
 		}
 		if existing != nil {
@@ -2166,11 +2173,56 @@ func BuildCodexContextPricingRules(
 		rules = append(rules, dynamicRule)
 		ruleByID[normalizedModelID] = dynamicRule
 	}
+	if len(multiTierSkipped) > 0 {
+		emitStderr(stderr, skipSummaryLine("with multiple changing context tiers (cannot be represented by the request-level rule)", multiTierSkipped))
+	}
+	// One line per distinct missing-price set, so `cache-read` alone stays
+	// distinguishable from `cache-read, cache-write`.
+	missingSeen := map[string]bool{}
+	var missingOrder []string
+	byMissing := map[string][]string{}
+	for _, skip := range cacheSkipped {
+		key := strings.Join(skip.missing, ", ")
+		if !missingSeen[key] {
+			missingSeen[key] = true
+			missingOrder = append(missingOrder, key)
+		}
+		byMissing[key] = append(byMissing[key], skip.modelID)
+	}
+	for _, key := range missingOrder {
+		emitStderr(stderr, skipSummaryLine("with incomplete cache pricing ("+key+")", byMissing[key]))
+	}
 	out := make([]CodexContextPricingRule, 0, len(rules))
 	for _, rule := range rules {
 		out = append(out, *rule)
 	}
 	return out
+}
+
+// skipSummaryLine is the one-line form of a dynamic-context-rule skip:
+// "TokenBoard model pricing: skipping dynamic Codex context rule for N models
+// <reason>: <model ids>". A model id is catalogue data, but the line lands in
+// the sync log, so oneLineForLog keeps a crafted id from injecting line breaks.
+func skipSummaryLine(reason string, modelIDs []string) string {
+	cleaned := make([]string, len(modelIDs))
+	for index, modelID := range modelIDs {
+		cleaned[index] = oneLineForLog(modelID)
+	}
+	plural := "models"
+	if len(cleaned) == 1 {
+		plural = "model"
+	}
+	return fmt.Sprintf("TokenBoard model pricing: skipping dynamic Codex context rule for %d %s %s: %s",
+		len(cleaned), plural, reason, strings.Join(cleaned, ", "))
+}
+
+func oneLineForLog(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, value)
 }
 
 func removeContextPricingRuleForModel(
@@ -2569,13 +2621,29 @@ var officialVendorProviderIDs = map[string]bool{
 	"longcat": true,
 }
 
+// pickCollapsedRepresentative prefers the official vendor row, then the
+// alphabetically first provider. Rows that agree on price can disagree on
+// context window, and the representative carries its own into the rule, so the
+// tie-break has to be explicit: arrival order is the catalogue's ORDER BY.
 func pickCollapsedRepresentative(models []pricing.Model, entries []int) int {
-	for _, index := range entries {
-		if officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(models[index].Provider))] {
-			return index
+	candidates := make([]int, len(entries))
+	copy(candidates, entries)
+	sort.SliceStable(candidates, func(left, right int) bool {
+		leftModel := models[candidates[left]]
+		rightModel := models[candidates[right]]
+		leftOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(leftModel.Provider))]
+		rightOfficial := officialVendorProviderIDs[strings.ToLower(strings.TrimSpace(rightModel.Provider))]
+		if leftOfficial != rightOfficial {
+			return leftOfficial
 		}
-	}
-	return entries[0]
+		leftProvider := strings.ToLower(strings.TrimSpace(leftModel.Provider))
+		rightProvider := strings.ToLower(strings.TrimSpace(rightModel.Provider))
+		if leftProvider != rightProvider {
+			return leftProvider < rightProvider
+		}
+		return leftModel.ModelID < rightModel.ModelID
+	})
+	return candidates[0]
 }
 
 // CodexSessionFingerprintMemo memoizes fingerprint computation within a single

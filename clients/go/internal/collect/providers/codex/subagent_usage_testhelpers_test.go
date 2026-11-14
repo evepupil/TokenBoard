@@ -6,7 +6,6 @@ package codex
 // helpers (writeJSONL, sessionMeta, tokenCount, childUsageEvent, ...).
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
@@ -307,13 +306,4 @@ func subagentWriteCachedChildSession(t *testing.T, filePath, id string) {
 			"",
 		),
 	})
-}
-
-func subagentJSONBytes(t *testing.T, value any) []byte {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return encoded
 }

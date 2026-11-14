@@ -677,3 +677,23 @@ func ReadSessionFileRow(row any) (directory, sessionFile, sessionID string, ok b
 	}
 	return readString("directory"), readString("sessionFile"), readString("sessionId"), true
 }
+
+// HasDailyRows ports the TS hasDailyRows: true only when the report is an
+// object with a non-empty `daily` array. It is deliberately stricter than
+// extractDailyRows. The ccusage tool family exits 0 with `{"daily":[]}` for a
+// tool that is not installed, and that empty report is what lets a provider
+// skip the second (session) spawn on machines with no such tool. Accepting the
+// normalizer's wider row shapes here would turn "not installed" into an extra
+// ccusage run, so the two checks are kept apart on purpose.
+func HasDailyRows(input any) bool {
+	record, ok := normalizeDecodedValue(input).(*orderedRecord)
+	if !ok || record == nil {
+		return false
+	}
+	value, ok := record.Get("daily")
+	if !ok {
+		return false
+	}
+	rows, ok := value.([]any)
+	return ok && len(rows) > 0
+}

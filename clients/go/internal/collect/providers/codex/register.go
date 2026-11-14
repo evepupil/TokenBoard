@@ -9,6 +9,9 @@ import (
 
 func init() {
 	collect.Register(contract.SourceCodex, provider{})
+	// The native seam is registered alongside the provider. The parity harness
+	// looks the native side up here by name.
+	collect.RegisterNative(contract.SourceCodex, nativeProvider{})
 }
 
 type provider struct{}

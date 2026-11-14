@@ -1,0 +1,90 @@
+{
+  "source": "claude-code",
+  "scenario": "single",
+  "timezone": "Asia/Shanghai",
+  "window": {
+    "since": "20261103",
+    "until": "20261103"
+  },
+  "rounds": 5,
+  "ccusageBin": "~/.tokenboard/bin/ccusage",
+  "platform": "darwin/amd64",
+  "ccusage": {
+    "kind": "ccusage",
+    "status": "measured",
+    "rounds": [
+      {
+        "round": 1,
+        "wallMs": 100863.38695,
+        "peakRssBytes": 3384643584,
+        "outputBytes": 107195,
+        "bytesRead": 0,
+        "bytesReadPending": true,
+        "calls": 2
+      },
+      {
+        "round": 2,
+        "wallMs": 102690.40254099999,
+        "peakRssBytes": 3423936512,
+        "outputBytes": 107195,
+        "bytesRead": 0,
+        "bytesReadPending": true,
+        "calls": 2
+      },
+      {
+        "round": 3,
+        "wallMs": 109283.26838299999,
+        "peakRssBytes": 3397554176,
+        "outputBytes": 107195,
+        "bytesRead": 0,
+        "bytesReadPending": true,
+        "calls": 2
+      },
+      {
+        "round": 4,
+        "wallMs": 106800.881287,
+        "peakRssBytes": 3404951552,
+        "outputBytes": 107195,
+        "bytesRead": 0,
+        "bytesReadPending": true,
+        "calls": 2
+      },
+      {
+        "round": 5,
+        "wallMs": 103572.457764,
+        "peakRssBytes": 3417931776,
+        "outputBytes": 107195,
+        "bytesRead": 0,
+        "bytesReadPending": true,
+        "calls": 2
+      }
+    ],
+    "medianWallMs": 103572.457764,
+    "maxWallMs": 109283.26838299999,
+    "medianPeakRssBytes": 3404951552,
+    "maxPeakRssBytes": 3423936512,
+    "medianOutputBytes": 107195,
+    "maxOutputBytes": 107195,
+    "rssSource": "wait4-rusage",
+    "bytesRead": 0,
+    "bytesReadPending": true
+  },
+  "native": {
+    "kind": "native",
+    "status": "notImplemented",
+    "medianWallMs": 0,
+    "maxWallMs": 0,
+    "medianPeakRssBytes": 0,
+    "maxPeakRssBytes": 0,
+    "medianOutputBytes": 0,
+    "maxOutputBytes": 0,
+    "bytesRead": 0,
+    "bytesReadPending": false
+  },
+  "regression": false,
+  "notes": [
+    "native: notImplemented — S1 registers no native provider for this source, so this run is a ccusage baseline",
+    "ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs",
+    "bytesRead is pending until the S2 adapter read counter lands"
+  ]
+}
