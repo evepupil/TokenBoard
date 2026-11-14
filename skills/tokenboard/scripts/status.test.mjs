@@ -864,12 +864,18 @@ test('status reports the dual-run trend from the log the harness writes', () => 
   try {
     writeFileSync(join(root, 'config.json'), '{}\n')
     mkdirSync(join(root, 'logs'), { recursive: true })
+    // Relative to now: the summary is omitted once its newest record is older
+    // than a week (see collectShadowDualRunSummary), so fixed dates would turn
+    // this test into a calendar bomb.
+    const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
+    const firstAt = hoursAgo(30)
+    const lastAt = hoursAgo(20)
     writeFileSync(
       join(root, 'logs', 'shadow-dual-run.jsonl'),
       [
-        JSON.stringify({ at: '2026-10-22T10:34:05.576Z', source: 'claude-code', status: 'match', snapshots: 40 }),
+        JSON.stringify({ at: firstAt, source: 'claude-code', status: 'match', snapshots: 40 }),
         JSON.stringify({
-          at: '2026-10-23T03:41:16.038Z',
+          at: lastAt,
           source: 'claude-code',
           status: 'diff',
           message: '/home/user/private'
@@ -887,18 +893,45 @@ test('status reports the dual-run trend from the log the harness writes', () => 
     const status = JSON.parse(result.stdout)
     assert.deepEqual(status.shadowDualRun, {
       records: 2,
-      firstAt: '2026-10-22T10:34:05.576Z',
-      lastAt: '2026-10-23T03:41:16.038Z',
+      firstAt,
+      lastAt,
       match: 1,
       empty: 0,
       diff: 1,
       notInstalled: 0,
       busy: 0,
       error: 0,
-      lastDiffAt: '2026-10-23T03:41:16.038Z'
+      lastDiffAt: lastAt
     })
     assert.equal(JSON.stringify(status).includes('/home/user/private'), false)
     assert.equal(JSON.stringify(status).includes('shadow-dual-run.jsonl'), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('status omits the dual-run trend when the harness log is older than a week', () => {
+  // The scheduled comparison moved to observation-dual-run.jsonl on 2026-11-12;
+  // shadow-dual-run.jsonl now only receives manual `shadow-dual-run.mjs` runs.
+  // A stale record set keeps describing the old harness long after it stopped,
+  // so one whose newest record is older than the window is dropped instead.
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-stale-'))
+  try {
+    writeFileSync(join(root, 'config.json'), '{}\n')
+    mkdirSync(join(root, 'logs'), { recursive: true })
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    writeFileSync(
+      join(root, 'logs', 'shadow-dual-run.jsonl'),
+      `${JSON.stringify({ at: eightDaysAgo, source: 'pi', status: 'match', snapshots: 1 })}\n`
+    )
+
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./status.mjs', import.meta.url))], {
+      env: { ...process.env, TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      encoding: 'utf8'
+    })
+
+    assert.equal(result.status, 0)
+    assert.equal('shadowDualRun' in JSON.parse(result.stdout), false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -912,7 +945,7 @@ test('status finds a moved dual-run log and omits the trend when none exists', (
     const logPath = join(moved, 'shadow-dual-run.jsonl')
     writeFileSync(
       logPath,
-      `${JSON.stringify({ at: '2026-10-23T13:15:14.327Z', source: 'pi', status: 'empty', snapshots: 0 })}\n`
+      `${JSON.stringify({ at: new Date().toISOString(), source: 'pi', status: 'empty', snapshots: 0 })}\n`
     )
 
     const script = fileURLToPath(new URL('./status.mjs', import.meta.url))
