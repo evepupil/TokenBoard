@@ -54,6 +54,9 @@ ccusage v20.0.33 是 MIT 许可的 Rust 实现（~70K LOC），语义可完全�
   **2026-11-12 补测**：A/B 两个场景此前已测（`docs/research/2026-11-10-native-vs-ccusage-benchmark.md`），
   本轮补 C（全量）与 D（hook 增量）；E（冷启动到首字节）由 A 覆盖，理由见该报告 §4。
   **`bytesRead` 不再产出数字**：两侧都没有读取字节计数器，报告如实写 0 并标注「未测量」，不给估计值。
+  **2026-11-14 完成**：C（全量）的三个提交点各 5 轮中位已测——native 963.2s → 381.4s → 319.1s，
+  对 ccusage 的倍差 3.35 → 1.82 → 1.13；峰值 RSS 528 → 1000 → 1009 MiB，与 §9.2「GB → 数十~数百 MB」
+  的预期不符（见报告 §3.7 对内存台阶的解释）。
 - **G6 依赖面删除**：`internal/ccusage/{acquire,package_runner,version,credentials,command,normalize,orderedjson}`
   中仅 parity 所需部分保留在 dev-only 路径；三层获取、捆绑脚本、`TOKENBOARD_CCUSAGE_BIN`/
   `TOKENBOARD_FORCE_PACKAGE_RUNNER`/`TOKENBOARD_DYNAMIC_CCUSAGE_CONFIG` 等环境变量退役并写入迁移说明。
