@@ -229,10 +229,12 @@ claude-code `regression: true`（+281.5%），codex `regression: none`（−20.3
 
 ## 5. 未覆盖
 
-- **端到端对比（TS collector 全链路 vs Go 客户端）没有计时结果**。2026-11-13 起 Go 侧已从三遍
-  降到两遍，TS 的 `collectCodexCcusageRangeAttempt`（`packages/collector/src/providers/codex.ts:481`）
-  仍是 ccusage `daily`、ccusage `session`、`collectCodexContextPricingUsagesFromFiles` 三遍，
-  所以「native 对 ccusage 二进制」的比值不再能直接当作迁移前后的等待时间对比——Go 侧现在少一遍。
+- **端到端对比（TS collector 全链路 vs Go 客户端）没有计时结果**。2026-11-13 起 Go 侧的
+  ccusage 报表调用从两遍（daily + session）降到一遍（共享解析），加上 context pricing 共两遍；
+  TS 的 `collectCodexCcusageRangeAttempt`（`packages/collector/src/providers/codex.ts:481`）
+  是 ccusage `daily`、ccusage `session`、`collectCodexContextPricingUsagesFromFiles` 三遍，
+  所以「native 对 ccusage 二进制」的比值不再能直接当作迁移前后的等待时间对比——Go 侧的报表
+  少一次 ccusage 调用（bench 里 `calls: 1` 对 `calls: 2`）。
   要回答迁移前后谁更快，必须实测 TS 全链路；§3.7 的三个点都完成了，这一项仍然没有。
   2026-11-12 起过一轮同语料计时（`tokenboard preview --source codex` 对
   `tsx src/cli.ts preview --source codex`），native 一侧 27 分钟后因本机进入工作时间、负载升到
