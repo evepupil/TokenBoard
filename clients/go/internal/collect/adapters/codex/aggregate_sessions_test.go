@@ -148,3 +148,39 @@ func TestLoadGroupsPerKindMatchesBoundedWindow(t *testing.T) {
 	)
 	assertBothKindsMatch(t, []FileGroup{{Dir: sessions, Files: []string{parent, child}}}, "UTC", "2026-01-05", "2026-01-05")
 }
+
+// A local compaction's usage can be absorbed by the parent's cumulative
+// token_count snapshot, so the parent never emits a response-id record for it;
+// the fork's child then copies the record and marker as a pair. The replay plan
+// is what stops that copy from being billed again, and both report kinds must
+// apply it - the sequential aggregateFile path does (aggregate.go), so the
+// shared pass must too.
+func TestLoadGroupsPerKindMatchesReplayedCompaction(t *testing.T) {
+	root := t.TempDir()
+	sessions := filepath.Join(root, "sessions")
+	settings := `{"type":"event_msg","timestamp":"2026-01-05T00:00:00.000Z","payload":{"type":"thread_settings_applied","thread_settings":{"service_tier":"standard"}}}`
+	// The record's usage equals the last_token_usage of the token_count that
+	// absorbs it, which is what keeps the parent from emitting the record.
+	record := `{"type":"token_usage_record","timestamp":"2026-01-05T00:10:00.000Z","payload":{"response_id":"resp-1","model":"gpt-5.4","usage":{"input_tokens":100,"total_tokens":100}}}`
+	marker := `{"type":"compacted","payload":{"compaction_response_id":"resp-1"}}`
+	parent := writeReplayFile(t, sessions, "2026/01/05/parent.jsonl",
+		sessionMeta("2026-01-05T00:00:00.000Z", "parent", ""),
+		settings,
+		lastUsageLine("2026-01-05T00:00:01.000Z", 5),
+		record,
+		lastUsageLine("2026-01-05T00:10:00.000Z", 100),
+		marker,
+	)
+	child := writeReplayFile(t, sessions, "2026/01/05/child.jsonl",
+		sessionMeta("2026-01-05T00:20:00.000Z", "child", "parent"),
+		settings,
+		lastUsageLine("2026-01-05T00:20:01.000Z", 5),
+		record,
+		marker,
+	)
+	sources := []FileGroup{{Dir: sessions, Files: []string{parent, child}}}
+	if !NewReplayPlan(sources).IsReplayedCompaction(child, "resp-1") {
+		t.Fatal("precondition: the child's copy must be a replayed compaction")
+	}
+	assertBothKindsMatch(t, sources, "UTC", "", "")
+}

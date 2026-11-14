@@ -189,6 +189,12 @@ func parseFiles(
 				}
 				events := make([]Event, 0, 16)
 				err := ParseFile(item.sessionsDir, item.file, plan.Prefix(item.file), func(event Event) error {
+					// aggregateFile drops the compaction records a fork copied from
+					// its parent (aggregate.go); the filter is kind-independent, so
+					// it runs here, before the event reaches either grouping.
+					if plan.IsReplayedCompaction(item.file, event.ResponseID) {
+						return nil
+					}
 					events = append(events, event)
 					return nil
 				})
@@ -197,9 +203,10 @@ func parseFiles(
 					return
 				}
 				onParsed()
-				// A failed parse keeps its slot: the pass is ending anyway. On the
-				// success path every slot a worker takes is either released after
-				// the file is booked or still held when the pass is cancelled.
+				// A failed parse returns without releasing its slot; fail cancels
+				// the pass, so no worker waits on that slot again. On the success
+				// path every slot is released after the file is booked or is still
+				// held when the pass is cancelled.
 				select {
 				case ready[item.index] <- parsedFile{events: events}:
 				case <-ctx.Done():
@@ -250,9 +257,8 @@ func parseFiles(
 	return nil
 }
 
-// addEvent books one event into both kinds. The plan's replayed-compaction
-// filter is applied here, in file order, so it sees the same sequence a
-// sequential parse would.
+// addEvent books one event into both kinds, in file order, after parseFiles has
+// dropped the compaction records a fork copied from its parent.
 func (a *perKindAggregation) addEvent(event Event, fileIndex int, location *time.Location, since, until string) error {
 	if err := a.daily.addEvent(event, ReportDaily, location, since, until, fileIndex); err != nil {
 		return err
