@@ -63,9 +63,11 @@ ccusage 的 LiteLLM 实时价表。
 | claude 单日 | 3m51.4s | **2m42.9s** | 2.81 GiB | **1.74 GiB** |
 | claude 近 30 天 | 5m42.7s | **4m12.3s** | 3.40 GiB | **3.16 GiB** |
 
-Codex 是量级差（墙钟 −72%～−89%），claude 是中等差（−26%～−30%）。**全量历史场景可能更慢**：
-2026-11-05 的记录显示 native 墙钟比 ccusage 高约 22%，S5 未改变该路径，本次也未重测。方法、原始
-输出与未覆盖边界见 `docs/research/2026-11-10-native-vs-ccusage-benchmark.md`。
+Codex 是量级差（墙钟 −72%～−89%），claude 是中等差（−26%～−30%）。**全量历史场景在 S5 当时更慢**：
+2026-11-12 补测为 native 963.2s vs ccusage 287.4s（3.35 倍），根因是同一份语料被扫三遍。2026-11-13
+的两项优化（daily/session 共享解析 + 按文件并发）把倍差压到 **1.13 倍**（319.1s vs 281.3s），峰值
+RSS 则从 528 MiB 升到 1009 MiB——仍未追平，发布说明按「略慢于 ccusage、峰值内存约 2 倍」表述。
+方法、原始输出与未覆盖边界见 `docs/research/2026-11-10-native-vs-ccusage-benchmark.md` §3.7。
 
 ### 2.4 回滚
 
