@@ -381,7 +381,7 @@ func TestRemovesAStaleStaticRuleWhenALaterContextTierChangesTheEffectiveRates(t 
 		t.Fatalf("rules = %+v, want %+v", rules, want)
 	}
 	wantDiagnostics := []string{
-		"TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-multi-tier; multiple changing context tiers cannot be represented by the request-level rule",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier",
 	}
 	if !reflect.DeepEqual(diagnostics, wantDiagnostics) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, wantDiagnostics)
@@ -641,10 +641,79 @@ func TestSkipsADynamicContextRuleWhenCachePricesAreIncompleteWithoutAStaticFallb
 		t.Fatalf("rules = %+v, want none", rules)
 	}
 	want := []string{
-		"TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-cache-unknown; cache pricing is incomplete (cache-read, cache-write)",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown",
 	}
 	if !reflect.DeepEqual(diagnostics, want) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)
+	}
+}
+
+// TestAggregatesDynamicContextRuleSkips pins the diagnostic shape for models
+// whose dynamic context rule is skipped: one line per reason class, naming
+// every affected model, in catalogue order. The catalogue changes daily, and a
+// line per model ran to ~2600 identical-looking lines per scan in the
+// scheduled-sync log, burying real warnings. A model id is catalogue data, not
+// a local path, but it still goes through oneLineForLog so a crafted id cannot
+// inject line breaks into that log.
+func TestAggregatesDynamicContextRuleSkips(t *testing.T) {
+	models := []pricing.Model{
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-multi-tier-a"
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-cache-unknown-a"
+			model.CacheReadCostPerMillion = nil
+			model.CacheWriteCostPerMillion = nil
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-multi-tier-b"
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-cache-unknown-b"
+			model.CacheReadCostPerMillion = nil
+			model.CacheWriteCostPerMillion = nil
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			}}
+		}),
+	}
+	var diagnostics []string
+	rules := BuildCodexContextPricingRules(models, []CodexContextPricingRule{},
+		func(line string) { diagnostics = append(diagnostics, line) }, nil)
+
+	if len(rules) != 0 {
+		t.Fatalf("rules = %+v, want none", rules)
+	}
+	want := []string{
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 2 models with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier-a, gpt-6-multi-tier-b",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 2 models with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown-a, gpt-6-cache-unknown-b",
+	}
+	if !reflect.DeepEqual(diagnostics, want) {
+		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)
+	}
+
+	// A model id carrying a newline must not split the line.
+	diagnostics = nil
+	BuildCodexContextPricingRules([]pricing.Model{pricedModel(func(model *pricing.Model) {
+		model.ModelID = "gpt-6-multi\ntier"
+		model.Pricing = map[string]any{"tiers": []any{
+			map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+		}}
+	})}, []CodexContextPricingRule{}, func(line string) { diagnostics = append(diagnostics, line) }, nil)
+	if len(diagnostics) != 1 || strings.Contains(diagnostics[0], "\n") {
+		t.Fatalf("diagnostics = %q, want one single-line summary", diagnostics)
 	}
 }
 

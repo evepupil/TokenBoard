@@ -2093,6 +2093,15 @@ func BuildCodexContextPricingRules(
 		}
 	}
 
+	// Skips are collected and reported once per reason class below: the
+	// catalogue gains and loses these models daily, and a line per model ran to
+	// hundreds per scan and buried real warnings in the sync log.
+	var multiTierSkipped []string
+	type cacheSkip struct {
+		modelID string
+		missing []string
+	}
+	var cacheSkipped []cacheSkip
 	for _, model := range SelectUnambiguousDynamicPricingModels(models) {
 		normalizedModelID := normalizeModelIDWithBases(model.ModelID, baseModelBases)
 		if excluded[strings.ToLower(strings.TrimSpace(model.ModelID))] || excluded[normalizedModelID] {
@@ -2107,9 +2116,7 @@ func BuildCodexContextPricingRules(
 			// stale rates.
 			if hasChangingDynamicContextTiers(model.Pricing) {
 				removeContextPricingRuleForModel(&rules, ruleByID, normalizedModelID, baseModelBases)
-				emitStderr(stderr, fmt.Sprintf(
-					"TokenBoard model pricing: skipping dynamic Codex context rule for %s; multiple changing context tiers cannot be represented by the request-level rule",
-					model.ModelID))
+				multiTierSkipped = append(multiTierSkipped, model.ModelID)
 			}
 			continue
 		}
@@ -2143,9 +2150,7 @@ func BuildCodexContextPricingRules(
 			if standardCacheCreationMissing || longCacheCreationMissing {
 				missingCachePrices = append(missingCachePrices, "cache-write")
 			}
-			emitStderr(stderr, fmt.Sprintf(
-				"TokenBoard model pricing: skipping dynamic Codex context rule for %s; cache pricing is incomplete (%s)",
-				model.ModelID, strings.Join(missingCachePrices, ", ")))
+			cacheSkipped = append(cacheSkipped, cacheSkip{modelID: model.ModelID, missing: missingCachePrices})
 			continue
 		}
 		if existing != nil {
@@ -2168,11 +2173,56 @@ func BuildCodexContextPricingRules(
 		rules = append(rules, dynamicRule)
 		ruleByID[normalizedModelID] = dynamicRule
 	}
+	if len(multiTierSkipped) > 0 {
+		emitStderr(stderr, skipSummaryLine("with multiple changing context tiers (cannot be represented by the request-level rule)", multiTierSkipped))
+	}
+	// One line per distinct missing-price set, so `cache-read` alone stays
+	// distinguishable from `cache-read, cache-write`.
+	missingSeen := map[string]bool{}
+	var missingOrder []string
+	byMissing := map[string][]string{}
+	for _, skip := range cacheSkipped {
+		key := strings.Join(skip.missing, ", ")
+		if !missingSeen[key] {
+			missingSeen[key] = true
+			missingOrder = append(missingOrder, key)
+		}
+		byMissing[key] = append(byMissing[key], skip.modelID)
+	}
+	for _, key := range missingOrder {
+		emitStderr(stderr, skipSummaryLine("with incomplete cache pricing ("+key+")", byMissing[key]))
+	}
 	out := make([]CodexContextPricingRule, 0, len(rules))
 	for _, rule := range rules {
 		out = append(out, *rule)
 	}
 	return out
+}
+
+// skipSummaryLine is the one-line form of a dynamic-context-rule skip:
+// "TokenBoard model pricing: skipping dynamic Codex context rule for N models
+// <reason>: <model ids>". A model id is catalogue data, but the line lands in
+// the sync log, so oneLineForLog keeps a crafted id from injecting line breaks.
+func skipSummaryLine(reason string, modelIDs []string) string {
+	cleaned := make([]string, len(modelIDs))
+	for index, modelID := range modelIDs {
+		cleaned[index] = oneLineForLog(modelID)
+	}
+	plural := "models"
+	if len(cleaned) == 1 {
+		plural = "model"
+	}
+	return fmt.Sprintf("TokenBoard model pricing: skipping dynamic Codex context rule for %d %s %s: %s",
+		len(cleaned), plural, reason, strings.Join(cleaned, ", "))
+}
+
+func oneLineForLog(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, value)
 }
 
 func removeContextPricingRuleForModel(

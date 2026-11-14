@@ -327,6 +327,11 @@ export function buildCodexContextPricingRules(
     }
   }
 
+  // Skips are collected and reported once per reason class below: the
+  // catalogue gains and loses these models daily, and a line per model ran to
+  // hundreds per scan and buried real warnings in the sync log.
+  const multiTierSkipped: string[] = []
+  const cacheSkipped: { modelId: string; missing: string[] }[] = []
   for (const model of selectUnambiguousDynamicPricingModels(models)) {
     const normalizedModelId = normalizeModelIdWithBases(model.modelId, baseModelBases)
     if (excluded.has(model.modelId.trim().toLowerCase()) || excluded.has(normalizedModelId)) continue
@@ -338,9 +343,7 @@ export function buildCodexContextPricingRules(
       // static rule instead of silently repricing it with stale rates.
       if (hasChangingDynamicContextTiers(model.pricing)) {
         removeContextPricingRuleForModel(rules, ruleById, normalizedModelId, baseModelBases)
-        stderr?.(
-          `TokenBoard model pricing: skipping dynamic Codex context rule for ${model.modelId}; multiple changing context tiers cannot be represented by the request-level rule`
-        )
+        multiTierSkipped.push(model.modelId)
       }
       continue
     }
@@ -351,9 +354,7 @@ export function buildCodexContextPricingRules(
         standard?.cacheRead === undefined || longContext?.cacheRead === undefined ? 'cache-read' : null,
         standard?.cacheCreation === undefined || longContext?.cacheCreation === undefined ? 'cache-write' : null
       ].filter((value): value is string => value !== null)
-      stderr?.(
-        `TokenBoard model pricing: skipping dynamic Codex context rule for ${model.modelId}; cache pricing is incomplete (${missingCachePrices.join(', ')})`
-      )
+      cacheSkipped.push({ modelId: model.modelId, missing: missingCachePrices })
       continue
     }
     if (existing) removeContextPricingRuleForModel(rules, ruleById, normalizedModelId, baseModelBases)
@@ -368,7 +369,40 @@ export function buildCodexContextPricingRules(
     rules.push(dynamicRule)
     ruleById.set(normalizedModelId, dynamicRule)
   }
+  if (multiTierSkipped.length > 0) {
+    stderr?.(
+      skipSummaryLine(
+        'with multiple changing context tiers (cannot be represented by the request-level rule)',
+        multiTierSkipped
+      )
+    )
+  }
+  // One line per distinct missing-price set, so `cache-read` alone stays
+  // distinguishable from `cache-read, cache-write`.
+  const byMissing = new Map<string, string[]>()
+  for (const skip of cacheSkipped) {
+    const key = skip.missing.join(', ')
+    const ids = byMissing.get(key)
+    if (ids) ids.push(skip.modelId)
+    else byMissing.set(key, [skip.modelId])
+  }
+  for (const [key, modelIds] of byMissing) {
+    stderr?.(skipSummaryLine(`with incomplete cache pricing (${key})`, modelIds))
+  }
   return rules
+}
+
+// skipSummaryLine is the one-line form of a dynamic-context-rule skip:
+// "TokenBoard model pricing: skipping dynamic Codex context rule for N models
+// <reason>: <model ids>". A model id is catalogue data, but the line lands in
+// the sync log, so oneLineForLog keeps a crafted id from injecting line breaks.
+function skipSummaryLine(reason: string, modelIds: readonly string[]): string {
+  const plural = modelIds.length === 1 ? 'model' : 'models'
+  return `TokenBoard model pricing: skipping dynamic Codex context rule for ${modelIds.length} ${plural} ${reason}: ${modelIds.map(oneLineForLog).join(', ')}`
+}
+
+function oneLineForLog(value: string): string {
+  return value.replace(/[\r\n]/g, ' ')
 }
 
 function removeContextPricingRuleForModel(

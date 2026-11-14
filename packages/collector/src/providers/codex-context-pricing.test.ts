@@ -258,7 +258,7 @@ describe('Codex context pricing', () => {
       }
     ])
     expect(diagnostics).toEqual([
-      'TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-multi-tier; multiple changing context tiers cannot be represented by the request-level rule'
+      'TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier'
     ])
 
     return withCodexContextPricingRules(rules, async () => {
@@ -439,7 +439,7 @@ describe('Codex context pricing', () => {
 
     expect(rules).toEqual([])
     expect(diagnostics).toEqual([
-      'TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-cache-unknown; cache pricing is incomplete (cache-read, cache-write)'
+      'TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown'
     ])
   })
 
