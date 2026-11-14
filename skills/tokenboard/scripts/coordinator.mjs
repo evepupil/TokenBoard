@@ -698,7 +698,11 @@ function pruneRunLogs(runsDir, runtime) {
 }
 
 function deriveStatus(result) {
-  if (result.error) return 'error'
+  // A lock timeout is contention, not failure: the trigger was deferred (and a
+  // retry scheduled), so the run record is "skipped" even though the reason
+  // travels in `error`. Counting it as an error made one long sync's own
+  // contention look like a burst of failed runs in status.mjs.
+  if (result.error) return result.skippedSync && result.skippedReason === 'lock-timeout' ? 'skipped' : 'error'
   if (result.skippedSync) return 'skipped'
   const hasCycleError = result.cycles.some((cycle) => cycle && cycle.error)
   return hasCycleError ? 'error' : 'success'

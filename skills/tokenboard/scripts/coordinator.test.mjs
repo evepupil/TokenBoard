@@ -1050,6 +1050,16 @@ test('coordinator schedules a trailing retry when a shared sync lock remains bus
   assert.deepEqual(result.trailingSources, ['codex'])
   assert.deepEqual(trailing, [{ trigger: { kind: 'notify', source: 'codex' }, delayMs: 60_000 }])
   assert.match(fs.files.get('/state/notify.signal.d/codex.json'), /"source":"codex"/)
+
+  // A busy shared lock defers the trigger; it does not fail it. Counting it as
+  // an error made a long sync's own contention look like 4-9 failed runs in a
+  // row and buried real failures in `status.mjs`'s recentRuns.error.
+  const lastRun = JSON.parse(fs.files.get('/state/last-run.json'))
+  assert.equal(lastRun.status, 'skipped')
+  assert.equal(lastRun.coordination.skippedReason, 'lock-timeout')
+  // The message stays in the record: it is what the operator reads when the
+  // timeout repeats and the retry cannot be scheduled.
+  assert.equal(lastRun.error, 'lock timeout')
 })
 
 test('coordinator releases waited lock when pending signal read fails', () => {
