@@ -14,6 +14,7 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
 func run(t *testing.T, env map[string]string, args ...string) (int, string, string) {
@@ -446,6 +447,54 @@ func TestWarmHooksReportsPlannedSources(t *testing.T) {
 	code, stdout, _ := run(t, map[string]string{"TOKENBOARD_TIMEZONE": "UTC"}, "warm-hooks")
 	if code != ExitOK {
 		t.Fatalf("code=%d", code)
+	}
+	if !strings.Contains(stdout, "claude-code") || !strings.Contains(stdout, "codex") {
+		t.Errorf("warm-hooks output %q", stdout)
+	}
+}
+
+// withRunLock re-execs the command through a context flag so the recursive run
+// does not retake the lock it already holds. Without that, a hook sync that
+// could not get collector-run.lock inside its window failed; the coordinator
+// saw a plain failure, cleared the source's queued signal and scheduled no
+// retry, so the usage stayed uncollected until the next scheduled sync. The
+// hook wrapper is entitled to one whole 35s lock wait on top of its own 60s
+// coordinator wait, the same way the TS collector's recursive call does.
+func TestLockTimeoutDefersInsteadOfFailing(t *testing.T) {
+	stateDir := t.TempDir()
+	_ = os.Chmod(stateDir, 0o700)
+	held, err := state.Acquire(filepath.Join(stateDir, "collector-run.lock"), time.Second)
+	if err != nil || held == nil {
+		t.Fatalf("holding lock: lock=%v err=%v", held, err)
+	}
+	defer func() { _ = held.Release() }()
+
+	code, _, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":     "UTC",
+		"TOKENBOARD_STATE_DIR":    stateDir,
+		"TOKENBOARD_ENDPOINT":     "https://tokenboard.example",
+		"TOKENBOARD_UPLOAD_TOKEN": "tb_x",
+	}, "sync", "--source", "grok-build")
+	if code != ExitTransient {
+		t.Fatalf("code = %d stderr=%q, want %d", code, stderr, ExitTransient)
+	}
+	// The message stays the TS collector's literal: the skill's dual-run
+	// harness classifies "collector lock timed out" as busy, not a failure.
+	if !strings.Contains(stderr, "TokenBoard collector lock timed out") {
+		t.Fatalf("stderr = %q, want the lock timeout message", stderr)
+	}
+}
+
+// A late hook run behaves exactly like a second invocation of the same
+// command: the warm mark is stamped at process start either way, so it may
+// continue under the held lock instead of waiting for it again.
+func TestHeldLockContinuesWarmHooks(t *testing.T) {
+	code, stdout, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":            "UTC",
+		"TOKENBOARD_COLLECTOR_LOCK_HELD": "1",
+	}, "warm-hooks")
+	if code != ExitOK {
+		t.Fatalf("code = %d stderr=%q", code, stderr)
 	}
 	if !strings.Contains(stdout, "claude-code") || !strings.Contains(stdout, "codex") {
 		t.Errorf("warm-hooks output %q", stdout)

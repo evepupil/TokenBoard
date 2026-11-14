@@ -130,10 +130,21 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		return ExitFailure
 	}
 	stateDir := state.ResolveDir(env, home)
+	// The hook wrapper holds collector-run.lock and calls its collector child
+	// with this set; retaking the lock there made every late hook run wait out
+	// the wrapper's own hold before it could start. The TS CLI carries the same
+	// flag for the same recursion.
+	lockHeld := env("TOKENBOARD_COLLECTOR_LOCK_HELD") == "1"
+	runLocked := func(body func() int) int {
+		if lockHeld {
+			return body()
+		}
+		return withRunLock(stateDir, stderr, body)
+	}
 
 	switch options.Command {
 	case "warm-hooks":
-		return withRunLock(stateDir, stderr, func() int {
+		return runLocked(func() int {
 			// The TS collector advances the hook cursors' high-water mark after
 			// a full scan so the next hook run does not rescan the whole tree.
 			// Only the two hook-installed sources have a cursor to warm; the
@@ -149,7 +160,7 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 			return ExitOK
 		})
 	case "preview":
-		return withRunLock(stateDir, stderr, func() int {
+		return runLocked(func() int {
 			outcome, abortErr := collectAll(ctx, options, env, stateDir, "", stderr)
 			if abortErr != nil {
 				fmt.Fprintln(stderr, abortErr.Error())
@@ -178,7 +189,7 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		// sides only read the session files.
 		return runShadow(ctx, options, env, stateDir, stdout, stderr)
 	case "sync":
-		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr)
+		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr, runLocked)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", options.Command)
 		return ExitUsage
@@ -195,8 +206,12 @@ func withRunLock(stateDir string, stderr io.Writer, body func() int) int {
 		return ExitFailure
 	}
 	if lock == nil {
+		// Held by a long scan: defer, do not fail. A plain failure is what the
+		// coordinator treats as "this source lost", so it cleared the queued
+		// signal and scheduled no retry. The literal stays the TS collector's
+		// because the skill's dual-run harness classifies it as busy.
 		fmt.Fprintln(stderr, "TokenBoard collector lock timed out")
-		return ExitFailure
+		return ExitTransient
 	}
 	defer func() { _ = lock.Release() }()
 	return body()
@@ -204,7 +219,7 @@ func withRunLock(stateDir string, stderr io.Writer, body func() int) int {
 
 func runSync(
 	ctx context.Context, options Options, env Env, stateDir string,
-	startedAt time.Time, stdout, stderr io.Writer,
+	startedAt time.Time, stdout, stderr io.Writer, runLocked func(func() int) int,
 ) int {
 	missing := requiredSyncConfig(options)
 	if len(missing) > 0 {
@@ -217,7 +232,7 @@ func runSync(
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
-	return withRunLock(stateDir, stderr, func() int {
+	return runLocked(func() int {
 		return syncLocked(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	})
 }
