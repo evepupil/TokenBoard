@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 )
 
 // collectNow is the wall clock every prune test runs against: well after the
@@ -374,6 +376,45 @@ func TestCollectRejectsUnreadableFile(t *testing.T) {
 		Timezone: "UTC", Roots: collectRoots(root), Now: collectNow,
 	}); err == nil {
 		t.Fatalf("Collect swallowed an unreadable transcript")
+	}
+}
+
+// TestStreamChainSkipsVanishedTranscripts pins the discovery/open race: a file
+// ScanFiles listed can be gone by the time it is opened (a temp project on an
+// external volume, a transcript cleanup pass). A vanished file is not a read
+// failure, so it is skipped with one diagnostic and the rest of the batch
+// still counts — mirroring the Codex provider's vanished-file skip. The
+// diagnostic names the file by base name only: the hook path forwards stderr to
+// a log, and the full path would leak the home directory.
+func TestStreamChainSkipsVanishedTranscripts(t *testing.T) {
+	root := t.TempDir()
+	present := writeTranscript(t, root, "proj-a", "sess-a", collectNow,
+		collectLine("sess-a", "msg_a", "req_a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 3, 4, nil))
+	gone := filepath.Join(root, "projects", "-Volumes-Work-orca-temp", "sess-b.jsonl")
+
+	cost, err := NewCostFunc(nil, nativepricing.ModeAuto)
+	if err != nil {
+		t.Fatalf("NewCostFunc: %v", err)
+	}
+	var diagnostics []string
+	entries, err := streamChain(context.Background(), []SessionFile{
+		{Path: gone, SessionID: "sess-b", ProjectPath: "-Volumes-Work-orca-temp", MTime: collectNow, MTimeKnown: true},
+		{Path: present, SessionID: "sess-a", ProjectPath: "-proj-a", MTime: collectNow, MTimeKnown: true},
+	}, ParseLineEntries, cost, NewDedupe(DedupeEntry), func(line string) { diagnostics = append(diagnostics, line) })
+	if err != nil {
+		t.Fatalf("streamChain failed on a vanished transcript: %v", err)
+	}
+	if len(entries) != 1 || entries[0].PathSessionID != "sess-a" {
+		t.Fatalf("entries = %+v, want only the present transcript's entry", entries)
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %q, want exactly one vanished-file line", diagnostics)
+	}
+	if !strings.Contains(diagnostics[0], "vanished") || !strings.Contains(diagnostics[0], "sess-b.jsonl") {
+		t.Fatalf("diagnostic = %q, want the vanished file named", diagnostics[0])
+	}
+	if strings.Contains(diagnostics[0], root) {
+		t.Fatalf("diagnostic leaks the transcript path: %q", diagnostics[0])
 	}
 }
 

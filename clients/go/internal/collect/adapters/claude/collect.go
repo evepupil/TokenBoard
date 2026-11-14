@@ -26,7 +26,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -157,11 +159,11 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 		return nil, nil, err
 	}
 
-	dailyEntries, err := streamChain(ctx, files, ParseDailyLineEntries, cost, NewDedupe(DedupeDaily))
+	dailyEntries, err := streamChain(ctx, files, ParseDailyLineEntries, cost, NewDedupe(DedupeDaily), stderr)
 	if err != nil {
 		return nil, nil, err
 	}
-	sessionEntries, err := streamChain(ctx, files, ParseLineEntries, cost, NewDedupe(DedupeEntry))
+	sessionEntries, err := streamChain(ctx, files, ParseLineEntries, cost, NewDedupe(DedupeEntry), stderr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -201,12 +203,12 @@ const transcriptReadBufferBytes = 256 * 1024
 // streamChain reads every kept transcript in discovery order, parses each line
 // with parse, prices and indexes every resulting entry, and returns the dedupe
 // survivors in first-seen order.
-func streamChain(ctx context.Context, files []SessionFile, parse func(string) []Entry, cost CostFunc, index *Dedupe) ([]Entry, error) {
+func streamChain(ctx context.Context, files []SessionFile, parse func(string) []Entry, cost CostFunc, index *Dedupe, stderr func(string)) ([]Entry, error) {
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := streamFile(ctx, file, parse, cost, index); err != nil {
+		if err := streamFile(ctx, file, parse, cost, index, stderr); err != nil {
 			return nil, err
 		}
 	}
@@ -215,16 +217,26 @@ func streamChain(ctx context.Context, files []SessionFile, parse func(string) []
 
 // streamFile feeds one transcript's lines through the chain.
 //
-// Every error here is a hard error, which is a deliberate divergence from
+// A file that vanished between discovery and this open is skipped with one
+// diagnostic: that race (a temp project on an external volume, a cleanup pass)
+// is not a read failure, and failing the whole collection over it lost every
+// other source's usage in that run. The same skip exists in the Codex provider.
+// Every other error here is a hard error, which is a deliberate divergence from
 // ccusage: its loaders do `let Ok(content) = fs::read(path) else { return
 // empty }` (lib.rs:505, daily.rs:298) and silently treat an unreadable
 // transcript as an empty one. TokenBoard's collection contract is
 // "a real read failure must be reported, never silently dropped"
 // (AGENTS.md), so an unreadable file fails the whole collection instead of
 // under-counting the user's usage.
-func streamFile(ctx context.Context, file SessionFile, parse func(string) []Entry, cost CostFunc, index *Dedupe) error {
+func streamFile(ctx context.Context, file SessionFile, parse func(string) []Entry, cost CostFunc, index *Dedupe, stderr func(string)) error {
 	handle, err := os.Open(file.Path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Base name only: this line reaches the hook's error log, and the
+			// full path would publish the home-directory layout there.
+			stderr("Skipped a Claude session file that vanished during the scan: " + filepath.Base(file.Path))
+			return nil
+		}
 		return fmt.Errorf("claude: open %s: %w", file.Path, err)
 	}
 	// A deferred Close keeps the read path simple; closing a read-only handle
