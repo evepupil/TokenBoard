@@ -385,7 +385,8 @@ WHERE (daily_usage.snapshot_hash IS NULL OR daily_usage.snapshot_hash <> exclude
   缓解：G2 要求首次上线前 parity 全绿（snapshotHash 逐行一致），差异必须在台账中逐条解释，
   从而让这次覆盖是「已知且有意」的，而非静默。
 - AGENTS.md 那句「不重算历史」原本针对的是「**服务端**主动批量重算」；客户端重传覆盖是另一回事。
-  实施时同步在 AGENTS.md/文档中澄清这一区分（避免后人误读）。
+  实施时同步在 AGENTS.md/文档中澄清这一区分（避免后人误读）。**2026-11-15 已完成**：
+  AGENTS.md「开发流程」节的该条已补上述区分，并指向差异台账 `docs/research/2026-11-13-s5-migration-diff-ledger.md`。
 
 **替代方案（备选，若实施时判断风险过高）**：客户端在 `costUsd` 变化的行上打一个 `correction`
 标记（`correction` 字段已在 contract 里，目前只有 `codex-context-pricing` 一个合法值），
@@ -443,7 +444,7 @@ credit gap 对账），并非简单工具族格式。**S4 里 copilot 单独按�
 | D4 | oracle 分两层：行级金样本（永久冻结，S5 前须 14 来源齐全）+ 端到端 snapshotHash 影子双跑（§6.1.4、§8 阻塞项） | 定 S1 生成器与 CI 门禁 |
 | D5 | 12 工具适配器**全部原生**（用户 2026-11-03 决定：彻底移除） | S4 立项 |
 | D6 | TS collector 保持 legacy 至 M7，本设计不涉及 TS 侧移除 | 过渡期天然提供对照基线 |
-| D7 | 接受「重传覆盖历史 cost」为既有语义，不加新保护层；首次全量前 parity 全绿（§9.4.1） | 无需改服务端；差异逐条进台账 |
+| D7 | 接受「重传覆盖历史 cost」为既有语义，不加新保护层；首次全量前 parity 全绿（§9.4.1） | 无需改服务端；差异逐条进台账（汇总台账：`docs/research/2026-11-13-s5-migration-diff-ledger.md`） |
 | D8 | copilot 按「复杂来源」单独排期，不并入参数化工具族（§9.4.2） | S4 拆分与测试口径 |
 | D9 | 过渡期 ccusage 路径**保持可切换**，获取层最后移除且独立成 commit（§10.1） | 每个子项目都是可回滚点 |
 

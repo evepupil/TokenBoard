@@ -595,6 +595,13 @@ skills/tokenboard/
 - 任何新增公开字段，都要同时检查 dashboard、public JSON、SVG 和排行榜的隐私影响。
 - 重要行为变更需要补测试。
 - 动态定价只作用于新采集；不得自动重算历史 `costUsd`。hook 模式不得发起网络请求，应使用缓存或 bundled 静态配置。
+  这句约束针对的是**服务端主动批量重算**。客户端重传覆盖既有行是另一回事，也是 upsert 本来的语义：
+  `snapshotHash` 的 payload 含 `costUsd`（`clients/go/internal/contract/contract.go`），采集端成本口径一变，
+  hash 就变，服务端 `ON CONFLICT … DO UPDATE` 会写入新的 `cost_usd`（`apps/web/app/features/ingest/repository/upsert.ts`）。
+  历史上升级 ccusage 或改 `pricingOverrides` 都会这样覆盖；Go 客户端首次全量上传也会一次性把可见日期换成原生计价。
+  这是有意接受的行为（`docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §9.4.1 的 D7），
+  不加额外保护层；前提是差异逐条进台账（见 `docs/research/2026-11-13-s5-migration-diff-ledger.md`）。
+  改采集端计价时不要以为「不重算历史」会挡住这次覆盖。
 - 部署模型定价前，`deploy.mjs` 的实际顺序是：配置校验 → build → dry-run → **生产路由检查** →
   按序应用全部待执行 migration（当前到 `0038`）→ 四项 schema 校验（`verify-critical-schema.sql`、
   `verify-rate-limit-index.sql`、`verify-retention-index.sql`、`verify-foreign-keys.sql`）→ 发布。
