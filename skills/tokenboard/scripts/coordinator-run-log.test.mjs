@@ -448,6 +448,71 @@ test('coordinator preserves sync evidence when deferred follow-up scheduling fai
   assert.equal(fs.files.has('/state/sync.lock'), false)
 })
 
+// A collector that could not take `collector-run.lock` exits 75 (deferred), because the lock may
+// be held by a long preview or another sync. A hook never retries inline, so the skill turns 75
+// into a plain failure — and the coordinator then recorded an error and scheduled nothing, leaving
+// the source in the signal queue until some later trigger happened to cover it. A transient exit is
+// retryable by definition, so the coordinator has to schedule the retry it decided not to run
+// inline. The failure is still reported: the hook run really did not collect anything.
+test('coordinator schedules a trailing retry after a transient collector exit', () => {
+  const fs = memoryRuntime()
+  const trailing = []
+  const message = 'TokenBoard hook sync failed with exit code 75: TokenBoard collector lock timed out'
+  const result = coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      ...fs,
+      stateDir: '/state',
+      now: () => Date.parse('2026-07-20T00:00:00.000Z'),
+      process: fakeProcess(214),
+      scheduleTrailing: (trigger, delayMs) => {
+        trailing.push({ source: trigger.source, delayMs })
+        return true
+      },
+      executeSync: () => {
+        const error = new Error(message)
+        error.exitCode = 75
+        error.transient = true
+        throw error
+      }
+    }
+  )
+
+  assert.deepEqual(trailing, [{ source: 'codex', delayMs: 60_000 }])
+  assert.equal(result.trailingScheduled, true)
+  assert.deepEqual(result.trailingSources, ['codex'])
+  assert.equal(result.error, message)
+  assert.equal(JSON.parse(fs.files.get('/state/last-run.json')).status, 'error')
+})
+
+// The other half: a genuine source failure must never be retried by a trailing worker. Retrying it
+// would fail the same way and schedule the next retry, chaining unattended background runs for a
+// broken provider.
+test('coordinator schedules no retry for a plain sync failure', () => {
+  const fs = memoryRuntime()
+  const trailing = []
+  const result = coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      ...fs,
+      stateDir: '/state',
+      now: () => Date.parse('2026-07-20T00:00:00.000Z'),
+      process: fakeProcess(215),
+      scheduleTrailing: (trigger, delayMs) => {
+        trailing.push({ source: trigger.source, delayMs })
+        return true
+      },
+      executeSync: () => {
+        throw new Error('TokenBoard hook sync failed with exit code 1: codex transcript unreadable')
+      }
+    }
+  )
+
+  assert.deepEqual(trailing, [])
+  assert.equal(result.trailingScheduled, undefined)
+  assert.equal(result.error, 'TokenBoard hook sync failed with exit code 1: codex transcript unreadable')
+})
+
 for (const failure of [
   { name: 'an empty Error message', value: new Error(''), expected: 'Error' },
   { name: 'a whitespace Error message', value: new Error('   '), expected: 'Error' },

@@ -11,6 +11,7 @@ import { parseScheduleTimes } from './schedule.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { coordinatedSync } from './coordinator.mjs'
 import { errorMessage } from './error-message.mjs'
+import { transientSyncExitCode } from './scheduled-retry.mjs'
 import { currentProcessStartIdentity, probeProcessLiveness, probeProcessStartIdentity } from './process-liveness.mjs'
 
 // The child's stdout/stderr are captured to build the failure message and the run log, so the
@@ -99,6 +100,14 @@ export function executeTokenBoardSync(source, options = {}) {
     const failure = formatSyncFailure(result)
     const error = new Error(failure.message)
     if (failure.diagnostics) error.diagnostics = failure.diagnostics
+    // 75 is the collector's internal "retry me later" (collector-run.lock held by a long scan).
+    // A hook never retries inline, so the sync wrapper turns it into a plain failure; without this
+    // marker the coordinator had no way to tell it from a broken provider and scheduled nothing,
+    // leaving the source queued until some later trigger happened to cover it.
+    if (result.status === transientSyncExitCode) {
+      error.exitCode = transientSyncExitCode
+      error.transient = true
+    }
     throw error
   }
   const timings = parseSyncTimings(result.stdout)
@@ -332,7 +341,17 @@ const notifyWorkerErrorLogMaxBytes = 64 * 1024
 // so a repeating failure cannot grow the file without limit. Diagnostics must
 // never fail the run: the exit code already reports the failure, and a
 // logging error would replace the real message with an unrelated one.
-function recordNotifyWorkerError(logPath, message) {
+//
+// The write is atomic — temp file, then rename — because `status.mjs` reads this
+// file while a detached worker may be appending to it. A plain rewrite truncates
+// before it writes, so a reader landing in between saw an empty or half-written
+// file and silently lost the previous entries (the reader treats a torn line as
+// "no entry"). It also keeps two concurrent workers from clobbering each other.
+export function recordNotifyWorkerError(
+  logPath,
+  message,
+  { writeFile = writeFileSync, rename = renameSync, unlink = unlinkSync, readFile = readFileSync } = {}
+) {
   try {
     if (typeof logPath !== 'string' || !logPath) return
     mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 })
@@ -342,16 +361,28 @@ function recordNotifyWorkerError(logPath, message) {
     const entry = `${JSON.stringify({ message: redactUrlCredentials(String(message)), at: new Date().toISOString() })}\n`
     let existing = ''
     try {
-      existing = readFileSync(logPath, 'utf8')
+      existing = readFile(logPath, 'utf8')
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
     const combined = `${existing}${entry}`
-    writeFileSync(
-      logPath,
-      combined.length > notifyWorkerErrorLogMaxBytes ? combined.slice(-notifyWorkerErrorLogMaxBytes) : combined,
-      { encoding: 'utf8', mode: 0o600 }
-    )
+    const value =
+      combined.length > notifyWorkerErrorLogMaxBytes ? combined.slice(-notifyWorkerErrorLogMaxBytes) : combined
+    // A unique temp name, so two workers appending at once cannot write into the
+    // same temp file and hand a mixed result to `rename`.
+    const temporaryPath = `${logPath}.tmp-${randomBytes(8).toString('hex')}`
+    try {
+      writeFile(temporaryPath, value, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      rename(temporaryPath, logPath)
+    } catch (error) {
+      try {
+        unlink(temporaryPath)
+      } catch {
+        // The temp file may never have been created, or cleanup may itself fail;
+        // the original error is the one that matters.
+      }
+      throw error
+    }
   } catch {
     // A state directory that cannot be written is exactly the failure being
     // reported; the stderr line above already carries it.

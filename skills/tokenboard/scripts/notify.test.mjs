@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +12,7 @@ import {
   executeTokenBoardSync,
   readNotifyCooldownMs,
   readNotifyWorkerErrors,
+  recordNotifyWorkerError,
   releaseDispatchLock,
   runNotify,
   runNotifyCli
@@ -154,6 +155,63 @@ test('the worker error log redacts credentials', async () => {
     assert.doesNotMatch(raw, /tb_upload_secret/)
     assert.doesNotMatch(raw, /user:/)
     assert.match(raw, /https:\/\/host\.example\/ingest/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// `status.mjs` reads this log while a detached worker may be appending to it. A plain rewrite
+// truncates before it writes, so a reader landing in between saw an empty file and lost the
+// earlier entries. The append is therefore a temp file plus rename, which is what these two
+// tests pin: the rename is the only moment the file changes, and a failed one leaves the old
+// content intact with no temp file behind.
+test('the worker error log is replaced atomically', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-atomic-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  const observed = []
+  try {
+    await writeFile(logPath, '{"message":"first","at":null}\n')
+
+    recordNotifyWorkerError(logPath, 'second', {
+      readFile: readFileSync,
+      writeFile: (path, value, options) => {
+        // Mid-write the real log must still hold the previous content: the new
+        // text only becomes visible at the rename.
+        observed.push(readFileSync(logPath, 'utf8'))
+        writeFileSync(path, value, options)
+      },
+      rename: renameSync,
+      unlink: unlinkSync
+    })
+
+    assert.deepEqual(observed, ['{"message":"first","at":null}\n'])
+    const recorded = readNotifyWorkerErrors(root)
+    assert.deepEqual(
+      recorded.map((entry) => entry.message),
+      ['first', 'second']
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed worker error log rename keeps the existing entries and no temp file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-atomic-fail-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    await writeFile(logPath, '{"message":"first","at":null}\n')
+
+    recordNotifyWorkerError(logPath, 'second', {
+      readFile: readFileSync,
+      writeFile: writeFileSync,
+      rename: () => {
+        throw new Error('rename failed')
+      },
+      unlink: unlinkSync
+    })
+
+    assert.equal(readFileSync(logPath, 'utf8'), '{"message":"first","at":null}\n')
+    assert.deepEqual(readdirSync(root), ['notify-worker-errors.log'])
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -1311,6 +1369,41 @@ test('reports a hook sync failure with no stderr without a dangling separator', 
     () => executeTokenBoardSync('codex', { lockToken: 'a'.repeat(32), spawn: () => ({ status: 2, error: undefined }) }),
     (error) => {
       assert.equal(error.message, 'TokenBoard hook sync failed with exit code 2')
+      return true
+    }
+  )
+})
+
+// Exit 75 is the collector saying "the lock was busy, retry later". The hook cannot retry inline,
+// so the error is still thrown — but it carries the marker the coordinator needs to schedule a
+// trailing retry instead of treating the source as lost until some later trigger covers it.
+test('marks a transient collector exit as retryable', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('codex', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({ status: 75, error: undefined, stderr: 'TokenBoard collector lock timed out' })
+      }),
+    (error) => {
+      assert.equal(error.transient, true)
+      assert.equal(error.exitCode, 75)
+      return true
+    }
+  )
+})
+
+// Every other exit code stays a plain failure: a broken provider would fail identically on a
+// retry, and marking it retryable would chain unattended background runs.
+test('leaves a non-transient failure unmarked', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('codex', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({ status: 1, error: undefined, stderr: 'codex transcript unreadable' })
+      }),
+    (error) => {
+      assert.equal(error.transient, undefined)
+      assert.equal(error.exitCode, undefined)
       return true
     }
   )

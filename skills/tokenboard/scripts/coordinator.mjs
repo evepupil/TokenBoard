@@ -159,7 +159,7 @@ function runCoordinator(trigger, runtime, result) {
     }
     completedResult = completed
     writeSuccessfulSyncCheckpoint(completed, runtime)
-    return scheduleDeferredFollowUps(trigger, runtime, completed)
+    return scheduleTransientRetries(trigger, runtime, scheduleDeferredFollowUps(trigger, runtime, completed))
   } catch (error) {
     coordinatorError =
       completedResult && !(error instanceof SuccessfulSyncCheckpointError)
@@ -280,6 +280,12 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
   let hadFollowUp = false
   let error
   let deferredSources = []
+  // Sources whose sync ended in a transient state (the collector could not take
+  // `collector-run.lock` inside its window). They are failures for this run — nothing was
+  // collected — but they are retryable, so the source also goes here and the caller schedules a
+  // trailing retry instead of waiting for the next unrelated trigger to cover it. A provider that
+  // genuinely failed never lands here: re-running it would fail identically and chain retries.
+  const transientSources = new Set()
   const failedSources = new Set()
   let sources = initialSources.length > 0 ? initialSources : [trigger.source]
 
@@ -295,12 +301,16 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
           result: syncResult
         })
         failedSources.delete(source)
+        transientSources.delete(source)
       } catch (cause) {
         error ||= errorMessage(cause)
         failedSources.add(source)
+        const transient = cause?.transient === true
+        if (transient) transientSources.add(source)
         cycles.push({
           source,
           error: errorMessage(cause),
+          ...(transient ? { transient: true } : {}),
           ...(cause?.diagnostics ? { diagnostics: cause.diagnostics } : {})
         })
       }
@@ -323,12 +333,14 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
 
   restoreFailedSources(trigger, runtime, failedSources)
 
+  const transient = [...transientSources]
   return {
     hadFollowUp,
     followUpCount,
     skippedSync: false,
     cycles,
     ...(deferredSources.length > 0 ? { deferredSources } : {}),
+    ...(transient.length > 0 ? { transientSources: transient } : {}),
     ...(error ? { error } : {})
   }
 }
@@ -571,6 +583,26 @@ function scheduleDeferredFollowUps(trigger, runtime, result) {
     trailingScheduled,
     ...(trailingScheduled ? { trailingDelayMs: remainingMs } : {}),
     trailingSources: result.deferredSources
+  }
+}
+
+// A transient cycle failure is retried outside this run: the hook loop cannot wait 35s for a lock
+// it just lost, and a full retry inside the hook would blow its window. The delay is the same one
+// the coordinator-lock timeout uses, because the cause is the same — the collector was busy.
+//
+// This runs even though the run is recorded as failed, deliberately: the failure is real (nothing
+// was collected), but it is also retryable, and the scheduling decision is independent of the
+// status the run reports. Scheduled after `scheduleDeferredFollowUps` so a successful run's own
+// deferral bookkeeping is not overwritten.
+function scheduleTransientRetries(trigger, runtime, result) {
+  if (!result.transientSources?.length) return result
+  const delayMs = lockTimeoutRetryDelayMs(runtime)
+  const trailingScheduled = scheduleTrailingSources(trigger, result.transientSources, runtime, delayMs)
+  return {
+    ...result,
+    trailingScheduled: result.trailingScheduled === true || trailingScheduled,
+    ...(trailingScheduled && result.trailingDelayMs === undefined ? { trailingDelayMs: delayMs } : {}),
+    trailingSources: [...(result.trailingSources || []), ...result.transientSources]
   }
 }
 
