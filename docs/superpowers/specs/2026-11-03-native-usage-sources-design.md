@@ -393,6 +393,17 @@ WHERE (daily_usage.snapshot_hash IS NULL OR daily_usage.snapshot_hash <> exclude
 让服务端可区分「口径修正」与「常规重传」。此方案需改 `usage-core` schema 与服务端，成本更高，
 暂不采用。
 
+**2026-11-15 修订（本节此前与代码不符，已收敛到 D7）**：上面的 SQL 是本节写作时的引用，
+当时 `cost_usd` 的 CASE 里还多一条 `WHEN ? = 0 AND <token 计数全等> THEN daily_usage.cost_usd`
+的「未变测量冻结」臂（2026-10-10 加入）。它正是 D7 决定「不加」的那层保护，且自相矛盾：同一句
+SET 仍无条件写入 `snapshot_hash = excluded.snapshot_hash`，于是「计数相同但成本变了」的重传会留下
+**hash 指向未落库快照**的行（`snapshotHash(row) !== snapshot_hash`），任何从行重算 hash 的路径都会
+把它读成「从未投递」，而计数一旦变化成本照样被覆盖。已按 D7 删除该臂，只保留与价格无关的
+`preserveCodexSessionOnlySql`（零 token 的 session-only 报告覆盖到已有 token 的行）。
+回归测试：`apps/web/app/features/ingest/idempotency.sqlite.test.ts` 的
+`a cost-only re-upload adopts the incoming cost and its hash` 同时钉住「成本跟随 payload」与
+「hash 与行一致」两点。
+
 ### 9.4.2 copilot 的工作量显著高于其余 11 个工具来源
 
 copilot 在来源枚举里属 12 工具族（`packages/usage-core/src/schema.ts:20,39,53`；

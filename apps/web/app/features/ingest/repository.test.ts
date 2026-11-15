@@ -77,7 +77,7 @@ describe('upsertUsageSnapshots', () => {
     expect(batches[1]).toHaveLength(3)
     expect(sqlStatements.some((sql) => sql.includes('INSERT INTO daily_usage_summary'))).toBe(true)
     expect(sqlStatements.some((sql) => sql.includes('INSERT INTO user_usage_totals'))).toBe(true)
-    const upsertBindings = bindings.filter((values) => values.length === 23)
+    const upsertBindings = bindings.filter((values) => values.length === 22)
     expect(upsertBindings.map((values) => values[5]).sort()).toEqual(['claude-opus-4-5', 'claude-sonnet-4-5'])
     expect(upsertBindings.find((values) => values[5] === 'claude-sonnet-4-5')).toEqual([
       'seed-user',
@@ -95,7 +95,6 @@ describe('upsertUsageSnapshots', () => {
       2,
       expect.stringMatching(/^[a-f0-9]{64}$/),
       '2026-04-28T07:00:00.000Z',
-      0,
       0,
       0,
       0,
