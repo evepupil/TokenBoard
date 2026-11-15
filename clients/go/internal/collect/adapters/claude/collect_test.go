@@ -418,6 +418,42 @@ func TestStreamChainSkipsVanishedTranscripts(t *testing.T) {
 	}
 }
 
+// TestCollectStripsALeadingBOM pins the first-line case: a transcript stamped
+// with a UTF-8 BOM (an editor save, a PowerShell redirect) used to lose that
+// whole line, because the parser requires the line to start with `{` and the
+// only trimming was the trailing \r\n. The TS side decodes every line with
+// `new TextDecoder('utf-8', {fatal: true})`, which drops a leading BOM, so
+// ccusage counted the line and this side did not. The shared sessionfile reader
+// drops it explicitly (line_reader.go); this adapter reads through its own
+// ReadBytes loop and has to do the same.
+func TestCollectStripsALeadingBOM(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "proj-a")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bomLine := collectLine("sess-a", "msg_a", "req_a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 1000, 0, nil)
+	plain := collectLine("sess-a", "msg_b", "req_b", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 500, 0, nil)
+	content := []byte("\xef\xbb\xbf" + bomLine + "\n" + plain + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "bom.jsonl"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "bom.jsonl"), collectNow, collectNow); err != nil {
+		t.Fatal(err)
+	}
+
+	dailyJSON, _, err := Collect(context.Background(), Options{
+		Timezone: "UTC", Roots: collectRoots(root), Now: collectNow,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	totals := reportTotals(t, collectReport(t, dailyJSON))
+	if got := numberField(t, totals, "inputTokens"); got != 1500 {
+		t.Fatalf("inputTokens = %v, want 1500 (the BOM line must not be dropped)", got)
+	}
+}
+
 func TestCollectRespectsContextCancellation(t *testing.T) {
 	root := t.TempDir()
 	var lines []string

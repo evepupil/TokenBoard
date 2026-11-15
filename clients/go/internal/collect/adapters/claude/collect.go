@@ -284,12 +284,20 @@ func streamFile(ctx context.Context, file SessionFile, parse func(string) []Entr
 	}
 }
 
-// trimLineEnding drops the \n ReadBytes kept and a trailing \r before it.
+// trimLineEnding drops the \n ReadBytes kept, a trailing \r before it, and a
+// leading UTF-8 BOM.
 //
 // encoding/json (like serde_json) skips trailing whitespace, so a CR would be
 // harmless either way; stripping it keeps the parser input free of a character
 // only a Windows transcript carries.
+//
+// The BOM is not harmless: the parser requires the line to start with `{`, so a
+// stamped BOM silently dropped the entire first line, while the TS side decodes
+// with `new TextDecoder('utf-8', {fatal: true})` (which strips a leading BOM)
+// and counted it. The shared sessionfile reader drops it explicitly for the
+// same reason; this adapter reads through its own ReadBytes loop.
 func trimLineEnding(line []byte) []byte {
 	line = bytes.TrimSuffix(line, []byte("\n"))
-	return bytes.TrimSuffix(line, []byte("\r"))
+	line = bytes.TrimSuffix(line, []byte("\r"))
+	return bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 }
