@@ -24,6 +24,13 @@ export async function forwardGithubSignIn(c: Context) {
 
 export async function forwardAuthSignOut(c: Context) {
   const response = await postAuth(c, 'sign-out', {})
+  // A failed sign-out is not a sign-out. Redirecting regardless left the browser on the
+  // signed-out page while the session cookie was still valid — precisely the state a user
+  // signs out to leave behind. Sign-in already passes failures through (see above); this
+  // path has to as well, and `postAuth` has already put the error into the app's shape.
+  if (!response.ok) {
+    return response
+  }
   return redirectWithCookies(c, response, '/')
 }
 
