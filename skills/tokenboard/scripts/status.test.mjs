@@ -937,6 +937,38 @@ test('status omits the dual-run trend when the harness log is older than a week'
   }
 })
 
+// An empty log, or one whose only line was torn by an interrupted write, must
+// not take the whole health check down: readRecentRecords deliberately tolerates
+// torn lines and can therefore hand back an empty array, and the freshness check
+// this summary gained on 2026-11-15 dereferenced the trend it never got.
+test('status omits the trend for an empty or torn-only dual-run log', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-empty-'))
+  const empty = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-emptyfile-'))
+  const torn = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-torn-'))
+  try {
+    writeFileSync(join(root, 'config.json'), '{}\n')
+    const emptyLog = join(empty, 'shadow-dual-run.jsonl')
+    writeFileSync(emptyLog, '')
+    const tornLog = join(torn, 'shadow-dual-run.jsonl')
+    writeFileSync(tornLog, '{"at":"2026-11-15T00:00:00.000Z","source":"pi","sta')
+
+    const script = fileURLToPath(new URL('./status.mjs', import.meta.url))
+    const run = (env) =>
+      spawnSync(process.execPath, [script], {
+        env: { ...process.env, TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root, ...env },
+        encoding: 'utf8'
+      })
+
+    for (const logPath of [emptyLog, tornLog]) {
+      const result = run({ TOKENBOARD_SHADOW_DUAL_RUN_LOG: logPath })
+      assert.equal(result.status, 0, `status failed for ${logPath}: ${result.stderr}`)
+      assert.equal('shadowDualRun' in JSON.parse(result.stdout), false)
+    }
+  } finally {
+    for (const dir of [root, empty, torn]) rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('status finds a moved dual-run log and omits the trend when none exists', () => {
   const root = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-move-'))
   const moved = mkdtempSync(join(tmpdir(), 'tokenboard-status-shadow-log-'))

@@ -172,6 +172,11 @@ export function collectShadowDualRunSummary(
 ) {
   if (!exists(logPath)) return undefined
   const trend = summarizeDualRunTrend(read(logPath, shadowDualRunWindow))
+  // No readable record: an empty file, or every line torn by an interrupted
+  // append. readRecentRecords tolerates that by skipping the line, so the
+  // summarizer can legitimately return undefined — and dereferencing it here
+  // took the whole health check down instead of omitting one block.
+  if (!trend) return undefined
   const lastAtMs = Date.parse(trend.lastAt)
   if (!Number.isFinite(lastAtMs) || lastAtMs < now() - shadowDualRunWindowDays * 24 * 60 * 60 * 1000) return undefined
   return trend
