@@ -593,9 +593,14 @@ export function buildSyncInvocation({
   const packageManager = readPackageManager(flags, config)
   const since = readSince({ flags, config, env })
   const delimiter = platform === 'win32' ? ';' : ':'
+  // The coordinator-lock flag and token are this process's state, not the
+  // collector's. The collector's own held-lock flag is the opposite: it must
+  // reach the child, or the child retakes collector-run.lock inside the wrapper
+  // that already holds it.
   const {
     TOKENBOARD_COORDINATOR_LOCK_HELD: _coordinatorLockHeld,
     TOKENBOARD_COORDINATOR_LOCK_TOKEN: _coordinatorLockToken,
+    TOKENBOARD_COLLECTOR_LOCK_HELD: collectorLockHeld,
     ...collectorEnv
   } = env
   const onlyWhenUnset = (key, value) => {
@@ -639,7 +644,8 @@ export function buildSyncInvocation({
           TOKENBOARD_HOOK_MODE: '1',
           TOKENBOARD_STATE_DIR: env.TOKENBOARD_STATE_DIR || env.TOKENBOARD_CONFIG_DIR || join(homeDir, '.tokenboard')
         }
-      : {})
+      : {}),
+    ...(collectorLockHeld ? { TOKENBOARD_COLLECTOR_LOCK_HELD: collectorLockHeld } : {})
   }
 
   // A binary install runs the Go client directly: the same subcommand

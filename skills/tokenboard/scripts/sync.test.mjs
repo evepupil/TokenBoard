@@ -534,6 +534,34 @@ test('hook sync forwards hook mode and state directory to the collector', () => 
   assert.equal(invocation.env.TOKENBOARD_COORDINATOR_LOCK_TOKEN, undefined)
 })
 
+// The collector re-execs itself under its own collector-run.lock and passes
+// this flag so the child does not take the same lock again. The Go client
+// honoured the flag but never received it: sync.mjs stripped the coordinator
+// variables (a different lock) without carrying the collector one through, so
+// every hook run waited out its own wrapper's hold before starting.
+test('hook sync forwards the collector lock-held flag to the collector', () => {
+  const invocation = buildSyncInvocation({
+    flags: { hook: true, source: 'codex' },
+    env: {
+      TOKENBOARD_COLLECTOR_LOCK_HELD: '1',
+      TOKENBOARD_COORDINATOR_LOCK_HELD: '1',
+      TOKENBOARD_COORDINATOR_LOCK_TOKEN: 'coordinator-token'
+    },
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo'
+    },
+    homeDir: '/home/user',
+    nodePath: '/usr/local/bin/node',
+    pathEnv: '/usr/bin'
+  })
+
+  assert.equal(invocation.env.TOKENBOARD_COLLECTOR_LOCK_HELD, '1')
+  assert.equal(invocation.env.TOKENBOARD_COORDINATOR_LOCK_HELD, undefined)
+})
+
 test('hook sync preserves an explicit TokenBoard state directory', () => {
   const invocation = buildSyncInvocation({
     flags: { hook: true, source: 'codex' },
