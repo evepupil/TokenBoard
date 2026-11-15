@@ -127,6 +127,14 @@ clients/go/
 
 ## 11. 当前状态与下一步
 
+- **2026-11-15 审查修复轮（全维度 10 份独立审查的确认项，均已修）**：
+  - 服务端 upsert 删掉「token 计数全等则冻结 `cost_usd`」的臂：它与同一句里无条件的 `snapshot_hash = excluded.snapshot_hash` 自相矛盾（hash 指向未落库的快照），也正是 D7 决定不加的那层保护。详见设计 spec §9.4.1 的 2026-11-15 修订与台账 §3。回归测试同时钉住「成本跟随 payload」与「hash 与行一致」。
+  - `/api/public/model-pricing` 的限流此前只在 `server.ts` 按**原始** pathname 精确匹配，而 Hono 会先 percent-decode 再路由，于是 `/%61pi/public/model-pricing` 绕过 120/60s 的闸（修复前实测：130 并发编码请求 → 130 次目录读取、0 次 429）。现路由内也加同一道闸；入口命中即 return，两者互斥，实测仍是一请求一次计数。
+  - `/auth/sign-out` 不再把失败的登出改写成 303：此前 429/401 会让浏览器停在「已登出」页面而会话 cookie 仍有效。
+  - `warm-hooks` 在 `TOKENBOARD_HOOK_MODE=1` 下不再静默空转并打印 `{"warmed":[...]}`，两侧都改为拒绝（Go exit 2、TS exit 1，与 `--until` 的既有口径一致）。
+  - hook 侧 collector 锁超时（exit 75）现在带 `transient` 标记回传协调员并安排一次 trailing 重试；此前只把 source 留在信号队列里等下一次触发，锁争用被记成错误且无限期延后。真实采集失败不带标记、不排重试。
+  - claude 适配器不再丢弃首行带 UTF-8 BOM 的 transcript 行（TS 侧 `TextDecoder` 会剥 BOM 并计数）。
+  - 私人 CF 已部署该版本（`aa570188`，2026-11-15T15:15:55Z）：health/home 200，pricing 两种拼写均为 200 且各贡献一次计数，130 并发编码请求得 119×400 + 11×429。**未上线验证**：upsert 的成本覆盖需要真实上传 token，本机没有指向 431695 的凭证，故只有 SQLite 层测试证据；登出的失败路径在线上无法从外部触发（无会话时 Better Auth 仍回 200），仅有单测证据。
 - [x] 调研完成（见 research 报告）；ccusage 已升 20.0.33（2cc5249，PR #24）
 - [ ] **前置：与上游作者对齐（D8）** —— 开工条件。**事实状态：被绕过，未完成**。实施在未对齐的情况下完成了 M0–M6（PR #24 自 2026-10-04 起挂在上游未合并）。D8 的风险（skill 是上游核心资产，Go 化改变交付模式）因此仍未消解，只是推迟到合并时面对。这不是可自行推进的项：只能由上游作者回应。
 
