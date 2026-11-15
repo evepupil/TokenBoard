@@ -968,6 +968,43 @@ describe('runCollectorCli', () => {
     expect(warmed).toEqual([])
   })
 
+  // The guard above makes a hook run skip the warm, which is right — but applying it to the
+  // `warm-hooks` command itself made that command a silent no-op that still printed its
+  // `{"warmed":[...]}` payload and exited 0. Nothing distinguished it from a real warm, so an
+  // operator could not tell the cursors were never advanced. The combination is meaningless
+  // (only the scheduled scan warms), so it is refused the way `--until` already is.
+  test('rejects warm-hooks in hook mode instead of reporting a warm it did not do', async () => {
+    const stdout: string[] = []
+    const stderr: string[] = []
+
+    const result = await runCollectorCli(
+      ['warm-hooks', '--source', 'all'],
+      { TOKENBOARD_HOOK_MODE: '1', TOKENBOARD_STATE_DIR: '/state' },
+      {
+        stdout: (line) => stdout.push(line),
+        stderr: (line) => stderr.push(line),
+        collectClaudeCodeUsage: async () => {
+          throw new Error('a rejected warm-hooks run must not collect')
+        },
+        collectCodexUsage: async () => {
+          throw new Error('a rejected warm-hooks run must not collect')
+        },
+        uploadSnapshots: async () => {
+          throw new Error('a rejected warm-hooks run must not upload')
+        },
+        warmHookCursorHighWater: async () => {
+          throw new Error('a rejected warm-hooks run must not touch a cursor')
+        }
+      }
+    )
+
+    expect(result).toBe(1)
+    expect(stdout).toEqual([])
+    expect(stderr).toEqual([
+      'warm-hooks is not supported in hook mode; a hook run consumes the hook cursors instead of advancing them'
+    ])
+  })
+
   test('warms hook cursors without collecting or uploading', async () => {
     const warmed: string[] = []
     const output: string[] = []

@@ -324,6 +324,7 @@ function parseArgs(args: string[], env: CliEnv) {
     until: untilFlag ?? '',
     hookMode
   })
+  assertWarmHooksNotInHookMode({ command, hookMode })
   const until = untilFlag ?? (supportsUntil({ command, source, hookMode }) ? (env.TOKENBOARD_UNTIL ?? '') : '')
   const timezone = assertValidTimeZone(
     flags.timezone ?? env.TOKENBOARD_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -352,6 +353,18 @@ function assertSupportedUntil(input: { command: CliCommand; source: CliSource; u
   if (!supportsUntil(input)) {
     throw new Error('--until is only supported for Claude Code and Codex sources')
   }
+}
+
+// warmHookCursors returns immediately for a hook run (advancing the high-water mark from inside a
+// hook would move the cursor past the files that hook is about to read). Applying that guard to
+// the `warm-hooks` command itself turned the command into a silent no-op that still printed
+// `{"warmed":[...]}` and exited 0, indistinguishable from a real warm. The combination cannot do
+// what the command promises, so it is refused — the same stance `--until` takes above.
+function assertWarmHooksNotInHookMode(input: { command: CliCommand; hookMode: boolean }) {
+  if (input.command !== 'warm-hooks' || !input.hookMode) return
+  throw new Error(
+    'warm-hooks is not supported in hook mode; a hook run consumes the hook cursors instead of advancing them'
+  )
 }
 
 function supportsUntil(input: { command: CliCommand; source: CliSource; hookMode: boolean }) {

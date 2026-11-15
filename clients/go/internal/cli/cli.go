@@ -130,10 +130,12 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		return ExitFailure
 	}
 	stateDir := state.ResolveDir(env, home)
-	// The hook wrapper holds collector-run.lock and calls its collector child
-	// with this set; retaking the lock there made every late hook run wait out
-	// the wrapper's own hold before it could start. The TS CLI carries the same
-	// flag for the same recursion.
+	// The collector takes collector-run.lock itself through withRunLock below;
+	// this flag is set by the *client's own recursion* (the skill's sync wrapper
+	// passes it through, and the TS CLI sets it the same way when it re-enters
+	// runCollectorCli under withCursorLock). It is not the hook wrapper: the hook
+	// wrapper holds the coordinator lock, a different file. Without the flag the
+	// inner call would wait out the outer call's own hold and time out.
 	lockHeld := env("TOKENBOARD_COLLECTOR_LOCK_HELD") == "1"
 	runLocked := func(body func() int) int {
 		if lockHeld {
@@ -762,7 +764,25 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	if err := assertSupportedUntil(options); err != nil {
 		return Options{}, err
 	}
+	if err := assertWarmHooksNotInHookMode(options); err != nil {
+		return Options{}, err
+	}
 	return options, nil
+}
+
+// assertWarmHooksNotInHookMode rejects a warm that cannot warm anything.
+//
+// warmHookCursors returns immediately when the run is a hook run (the high-water mark belongs to
+// the scheduled scan, and advancing it from inside a hook collection would move the cursor past
+// files that hook is about to read). The command still printed its `{"warmed":[...]}` payload and
+// exited 0, so a real warm and a silent no-op looked identical from the outside. This is the same
+// class as the --until rejection below: an input warm-hooks cannot honour is refused instead of
+// dropped. The TS collector takes the same position.
+func assertWarmHooksNotInHookMode(options Options) error {
+	if options.Command != "warm-hooks" || !options.HookMode {
+		return nil
+	}
+	return fmt.Errorf("warm-hooks is not supported in hook mode; a hook run consumes the hook cursors instead of advancing them")
 }
 
 // flagOrEnvChain is the `??` + `||` pair TS uses for --since: the flag wins

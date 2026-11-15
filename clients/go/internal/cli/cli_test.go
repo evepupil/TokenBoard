@@ -453,6 +453,34 @@ func TestWarmHooksReportsPlannedSources(t *testing.T) {
 	}
 }
 
+// HOOK_MODE is a no-op for the warm: the run returns before touching a cursor, yet the command
+// still printed `{"warmed":[...]}` and exited 0 — the same success a real warm reports. An
+// operator reading that output has no way to tell "cursors are warm" from "nothing happened",
+// and only an inspection of the state directory would reveal it. The combination is also
+// meaningless (a hook run never warms: it consumes the cursors the scheduled run warmed), so it
+// is rejected the same way warm-hooks already rejects --until instead of silently ignoring it.
+func TestWarmHooksRejectedInHookMode(t *testing.T) {
+	stateDir := t.TempDir()
+	_ = os.Chmod(stateDir, 0o700)
+	code, stdout, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":    "UTC",
+		"TOKENBOARD_HOOK_MODE":   "1",
+		"TOKENBOARD_STATE_DIR":   stateDir,
+		"TOKENBOARD_CLAUDE_HOME": t.TempDir(),
+		"TOKENBOARD_CODEX_HOME":  t.TempDir(),
+	}, "warm-hooks")
+
+	if code != ExitUsage {
+		t.Fatalf("code=%d, want ExitUsage", code)
+	}
+	if strings.Contains(stdout, "warmed") {
+		t.Errorf("a rejected run must not report warmed sources, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "hook mode") {
+		t.Errorf("stderr %q does not explain the hook-mode rejection", stderr)
+	}
+}
+
 // withRunLock re-execs the command through a context flag so the recursive run
 // does not retake the lock it already holds. Without that, a hook sync that
 // could not get collector-run.lock inside its window failed; the coordinator
