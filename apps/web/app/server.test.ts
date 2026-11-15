@@ -135,6 +135,46 @@ describe('worker server', () => {
     expect(mockedGetModelPricing).not.toHaveBeenCalled()
   })
 
+  // Hono percent-decodes the path before route matching, so an encoded spelling of the same path
+  // reaches the pricing route while the entrypoint's canonical-path comparison only recognizes the
+  // exact string and declines it. The ceiling therefore has to exist on the route as well; the two
+  // positions cannot both run for one request (the entrypoint returns a response), so the effective
+  // ceiling stays 120/60s rather than doubling.
+  test.each(['/%61pi/public/model-pricing', '/api/publ%69c/model-pricing'])(
+    'rate-limits the public model pricing alias reached as %s',
+    async (pathname) => {
+      mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+      const env = createEnv({ rateLimitCount: 121 })
+
+      const response = await worker.fetch(
+        workerRequest(`https://tokenboard.example${pathname}?cursor=bogus`),
+        env,
+        createExecutionContext()
+      )
+
+      expect(response.status).toBe(429)
+      expect(response.headers.get('retry-after')).toBeTruthy()
+      expect(mockedGetModelPricing).not.toHaveBeenCalled()
+    }
+  )
+
+  // The two ceilings must not stack. Each `enforceRateLimit` call issues exactly one counter
+  // read and one counter increment, so counting the `api_rate_limits` statements in one request
+  // is a direct measurement of how many times the request was charged: two means a single
+  // request spent two of the 120, which would silently halve the advertised ceiling.
+  test.each([
+    ['the canonical spelling', '/api/public/model-pricing'],
+    ['an encoded spelling', '/%61pi/public/model-pricing']
+  ])('charges one ceiling unit per request for %s', async (_, pathname) => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const env = createEnv()
+
+    await worker.fetch(workerRequest(`https://tokenboard.example${pathname}?limit=2`), env, createExecutionContext())
+
+    const rateLimitStatements = env.sqlStatements.filter((sql) => sql.includes('api_rate_limits'))
+    expect(rateLimitStatements).toHaveLength(2)
+  })
+
   // A HEAD that passes the ceiling still answers without a body — the status and headers
   // describe what a GET would return, the way RFC 9110 §9.3.2 requires.
   test('serves a bodyless HEAD from the public model pricing alias when under the ceiling', async () => {
