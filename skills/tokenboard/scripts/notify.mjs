@@ -379,8 +379,15 @@ const notifyWorkerErrorLogMaxBytes = 64 * 1024
 // silently dropped whenever it landed between the first worker's read and its
 // rename (reproduced: `["initial","worker-A"]`, worker-B gone). One `O_APPEND`
 // write is atomic for the common case and appends rather than replaces, so two
-// workers both land. The size cap still converges: whenever the file outgrows
-// the bound, the next write rewrites it down to the tail.
+// workers both land.
+//
+// The trim is the one remaining read-modify-write, and it can still lose a
+// concurrent entry that lands between its read and its write. That is accepted
+// rather than papered over: it only runs once the file is already over 64 KiB,
+// which takes hundreds of failures, and the file exists to show the *recent*
+// diagnostics (`readNotifyWorkerErrors` reports the last five). Trimming by
+// rotation would avoid the window but would leave a second file for the reader
+// and for anyone looking at the state directory.
 export function recordNotifyWorkerError(
   logPath,
   message,

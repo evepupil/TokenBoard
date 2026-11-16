@@ -197,15 +197,25 @@ test('the worker error log is trimmed once it outgrows the bound', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-bound-'))
   const logPath = join(root, 'notify-worker-errors.log')
   try {
-    // Just under a full page, so one more entry pushes it past the 64 KiB cap.
-    const filler = `${JSON.stringify({ message: 'x'.repeat(60 * 1024), at: null })}\n`
+    // Already over the 64 KiB cap, so this write takes the trim branch. The earlier version of
+    // this test used a 60 KiB filler and never reached it — every assertion passed on the append
+    // path, so the trim could have been deleted without a failure.
+    const filler = `${JSON.stringify({ message: 'x'.repeat(70 * 1024), at: null })}\n`
     await writeFile(logPath, filler)
     const before = readFileSync(logPath, 'utf8').length
+    assert.ok(before > 64 * 1024, `fixture must start over the cap, was ${before} bytes`)
 
-    recordNotifyWorkerError(logPath, 'after-trim')
+    let rewrites = 0
+    recordNotifyWorkerError(logPath, 'after-trim', {
+      writeFile: (...args) => {
+        rewrites += 1
+        return writeFileSync(...args)
+      }
+    })
 
+    assert.equal(rewrites, 1, 'an over-cap log is rewritten, not appended to')
     const after = readFileSync(logPath, 'utf8')
-    assert.ok(after.length <= 64 * 1024, `log grew to ${after.length} bytes from ${before}`)
+    assert.ok(after.length <= 64 * 1024, `log is ${after.length} bytes, over the cap`)
     assert.match(after, /after-trim/)
   } finally {
     await rm(root, { recursive: true, force: true })
