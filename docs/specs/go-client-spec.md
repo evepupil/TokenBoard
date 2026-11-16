@@ -140,6 +140,13 @@ clients/go/
     - **三平台构建/静态检查**：`GOOS=darwin|linux|windows GOARCH=amd64/arm64 go build ./...` 与 `go vet ./...` 全部 exit 0（vet 覆盖 `_test.go`，能发现只在某平台编不过的测试文件）。`linux/386` 编译失败（`contract.go` 的 `MaxSnapshotTokens` 无类型常量溢出），不在 goreleaser 的 3 OS × 2 arch 矩阵内。
     - **notify 原子写未在 Windows 上实测**：`rename` 走 `MOVEFILE_REPLACE_EXISTING`，覆盖本身没问题；风险来自目标被无 `FILE_SHARE_DELETE` 的句柄占用（杀软/索引器）时 `EPERM/EBUSY`，当前实现会吞掉该条诊断。Go 侧的 `renameatomic.IsBusy` 有这类重试，skill 侧没有。
     - 文档与代码的一致性、限流双计推演、绑定计数（22 = 15 列 + 6 臂 + 1 WHERE）均已逐条复核通过。
+    - **2026-11-16 二轮（Codex 四方交叉）又确认并修掉 4 项**，其中前两项是上一轮修复本身的缺陷：
+      1. **transient 标记不可达**（P1 级）：`sync.mjs` 对 hook 把 75 归一成 1，notify 只认 75，所以上一轮新增的重试从未发生；两侧测试各自打桩，中间那段真实组合无覆盖，全绿是假绿。已在 `26e3454` 修（hook 透出 75），并用真实客户端 + 真实锁做端到端验证。
+      2. **重试上限在同进程续跑下失效**：`runNotifyCli` 的 trailing 循环复用同一 env，继承 attempt=1 的 worker 每轮都算出 2（实测序列 `[2,2,2,…]`）。`27c4602` 让循环推进 attempt；`sync.lock` 超时那条入口仍不设上限（早于本轮，单独决策）。
+      3. **BOM 覆盖不全**：`paths.go` 的 session 分组探测用 `encoding/json` 直接解析行，首行带 BOM 时取不到 sessionId，文件名派生的 id 与记录 id 不一致会让该文件并入错误的 session 组，`PruneByMTime` 因此可能裁掉父会话而留下重放的子会话（重放落到父会话不再覆盖的日期）。`6e02d01` 修复。
+      4. **worker 错误日志**：上一轮改成 temp+rename 反而丢并发追加（实测 `worker-B` 消失），`4a10659` 改为单次 `O_APPEND`；超限裁剪仍是 read-modify-write，窗口已写进注释。其裁剪测试原本是空转的（60 KiB 填充未超 64 KiB 上限），`82d8343` 修正。
+    - **登出修复的边界**：better-auth 1.6.23 的 sign-out 捕获 `deleteSession` 失败后仍返回 `{success:true}`，因此 D1 写失败这一路应用侧看不见（浏览器 cookie 仍被清除，残留的是服务端会话行，库内会记 `Failed to delete session from database`）。要从应用侧检出需反签 cookie 再回查 sessions 表，判定为不划算，已写进 `service.ts` 注释与本节。
+    - **计划任务启动失败零诊断**：Node 下限守卫在日志运行时启动前退出，Windows 调度器丢弃 stderr（自 2026-10-30 每天 `LastTaskResult: 1` 且无任何输出），launchd 同样丢弃。`b170de8` 让守卫把原因写进 `daily-sync.err.log`。
   - 私人 CF 已部署该版本（`aa570188`，2026-11-15T15:15:55Z）：health/home 200，pricing 两种拼写均为 200 且各贡献一次计数，130 并发编码请求得 119×400 + 11×429。**未上线验证**：upsert 的成本覆盖需要真实上传 token，本机没有指向 431695 的凭证，故只有 SQLite 层测试证据；登出的失败路径在线上无法从外部触发（无会话时 Better Auth 仍回 200），仅有单测证据。
 - [x] 调研完成（见 research 报告）；ccusage 已升 20.0.33（2cc5249，PR #24）
 - [ ] **前置：与上游作者对齐（D8）** —— 开工条件。**事实状态：被绕过，未完成**。实施在未对齐的情况下完成了 M0–M6（PR #24 自 2026-10-04 起挂在上游未合并）。D8 的风险（skill 是上游核心资产，Go 化改变交付模式）因此仍未消解，只是推迟到合并时面对。这不是可自行推进的项：只能由上游作者回应。
