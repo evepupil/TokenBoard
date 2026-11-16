@@ -69,7 +69,9 @@ if (isMain()) {
     try {
       assertSupportedNodeVersion(process.versions.node)
     } catch (error) {
-      console.error(redactUrlCredentials(errorMessage(error)))
+      const message = redactUrlCredentials(errorMessage(error))
+      console.error(message)
+      recordScheduledFailure(message, process.env)
       process.exit(1)
     }
   }
@@ -130,6 +132,31 @@ async function runCli() {
     return 1
   } finally {
     closeScheduledLogRuntime(logs)
+  }
+}
+
+// recordScheduledFailure mirrors a startup failure into the scheduled sync's error log.
+//
+// The Node-floor guard (and anything else that gives up before `runCli` opens the log runtime)
+// exits while the runner's own capture is the only place the message lands. On Windows that
+// capture is discarded — the task recorded `LastTaskResult: 1` for every run from 2026-10-30 to
+// 2026-11-16 with no output at all — and launchd drops stdout/stderr unless a path is set. Writing
+// the message into `daily-sync.err.log` puts it where an operator already looks. Failures to log
+// are swallowed: the exit code is the contract, and logging must not mask the reason.
+export function recordScheduledFailure(message, env = process.env, { now = new Date() } = {}) {
+  try {
+    const runtime = createScheduledLogRuntime({
+      env,
+      homeDir: homedir(),
+      scheduled: env.TOKENBOARD_SCHEDULED_SYNC === '1',
+      now
+    })
+    if (!runtime) return false
+    writeFileSync(runtime.stderrFd, `${now.toISOString()} ${message}\n`)
+    closeScheduledLogRuntime(runtime, { now })
+    return true
+  } catch {
+    return false
   }
 }
 

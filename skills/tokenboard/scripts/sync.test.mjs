@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
@@ -14,6 +15,7 @@ import {
   refreshBundledCcusageConfig,
   runCollectorProcess,
   runPreCollectUpgrade,
+  recordScheduledFailure,
   runSyncInvocation,
   writeRedactedOutput
 } from './sync.mjs'
@@ -1703,4 +1705,55 @@ test('a hook run propagates the transient code so its caller can schedule a retr
 
   assert.equal(result, 75)
   assert.equal(retryCalls, 0, 'a hook must not run the retry loop inline')
+})
+
+// A scheduled run that dies before `runCli` opens the log runtime had its reason discarded on the
+// platforms whose scheduler drops stderr (Windows recorded exit 1 with no output for weeks).
+// recordScheduledFailure is the seam that puts the reason into the file an operator reads.
+test('a startup failure writes its reason to the scheduled error log', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-startup-failure-'))
+  const logDir = join(root, 'logs')
+  try {
+    const written = recordScheduledFailure(
+      'TokenBoard requires Node.js ^24.22.1',
+      { TOKENBOARD_SCHEDULED_SYNC: '1', TOKENBOARD_LOG_DIR: logDir },
+      { now: new Date('2026-11-16T02:00:00.000Z') }
+    )
+
+    assert.equal(written, true)
+    assert.equal(
+      readFileSync(join(logDir, 'daily-sync.err.log'), 'utf8'),
+      '2026-11-16T02:00:00.000Z TokenBoard requires Node.js ^24.22.1\n'
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// A manual preview (or a hook) must not create scheduled log files: those runs already print to
+// their caller's terminal, and writing a daily-sync log would make status look like a scheduled
+// run happened.
+test('a startup failure in an unscheduled run does not create scheduled logs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-startup-failure-unscheduled-'))
+  const logDir = join(root, 'logs')
+  try {
+    const written = recordScheduledFailure('bad node', { TOKENBOARD_LOG_DIR: logDir })
+
+    assert.equal(written, false)
+    assert.equal(existsSync(join(logDir, 'daily-sync.err.log')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// The helper tests above cannot prove the guard calls it: `isMain()` only runs in a real process,
+// and the floor check reads the real `process.versions.node`. Pin the wiring in the entry block so
+// removing the call cannot quietly restore the zero-diagnosis failure.
+test('the Node version guard calls the scheduled-failure recorder', () => {
+  const source = readFileSync(fileURLToPath(new URL('./sync.mjs', import.meta.url)), 'utf8')
+  const guard = source.slice(source.indexOf('if (isMain())'), source.indexOf('runCli()'))
+
+  assert.match(guard, /assertSupportedNodeVersion\(process\.versions\.node\)/)
+  assert.match(guard, /recordScheduledFailure\(message, process\.env\)/)
+  assert.match(guard, /process\.exit\(1\)/)
 })
