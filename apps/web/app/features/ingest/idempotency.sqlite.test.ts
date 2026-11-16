@@ -163,11 +163,17 @@ describe('ingest idempotency', () => {
   // the token-equality cost freeze gone this holds by construction, and the test stays as the pin
   // that a future shortcut keyed on token equality cannot come back and strand a correction on its
   // first value.
+  //
+  // `source: 'codex'` and the default `sessionCount: 2` are both load-bearing, not decoration: the
+  // session-only preservation rule fires only on codex rows that report a positive session count,
+  // so with the default claude-code source — or a zero session count — this fixture would pass
+  // even if the rule started swallowing corrections.
   test('a second correction adopts the newly derived cost', async () => {
     const { db, path } = createDb(tempDirs)
 
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,
@@ -179,6 +185,7 @@ describe('ingest idempotency', () => {
     ])
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,

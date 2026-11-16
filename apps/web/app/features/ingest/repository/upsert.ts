@@ -111,8 +111,13 @@ const preserveCodexSessionOnlySql = `
  * change reaches history through the client's next upload, and the diff is tracked in
  * `docs/research/2026-11-13-s5-migration-diff-ledger.md` rather than blocked here.
  *
- * `preserveCodexSessionOnlySql` above is a different rule and stays: it is not about price, it is
- * a token-less session-only report arriving over a row that already carries tokens.
+ * Not every branch below keeps `snapshot_hash` equal to the stored row, and it is worth being
+ * precise about that: `preserveCodexSessionOnlySql` deliberately keeps the stored tokens AND cost
+ * while the statement still writes the incoming hash — that is its whole purpose (a token-less
+ * session-only report must not wipe a row's usage), so a recomputation from the row would differ
+ * there by design. The invariant this file guarantees is the narrower, checkable one: **for a row
+ * whose tokens the statement replaced, the stored cost is the payload's cost** — which is what
+ * `idempotency.sqlite.test.ts` asserts.
  */
 const upsertUsageSql = `
   INSERT INTO daily_usage (
