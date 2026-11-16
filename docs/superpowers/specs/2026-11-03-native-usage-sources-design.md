@@ -402,7 +402,14 @@ SET 仍无条件写入 `snapshot_hash = excluded.snapshot_hash`，于是「计�
 `preserveCodexSessionOnlySql`（零 token 的 session-only 报告覆盖到已有 token 的行）。
 回归测试：`apps/web/app/features/ingest/idempotency.sqlite.test.ts` 的
 `a cost-only re-upload adopts the incoming cost and its hash` 同时钉住「成本跟随 payload」与
-「hash 与行一致」两点。
+「hash 等于该 payload 的 hash」两点。
+
+**2026-11-16 复核补充两条边界**：(1) 上面说的「hash 与行一致」**只对 token 被替换的行成立**。
+保留的 `preserveCodexSessionOnlySql` 臂为了挡住无 token 的 session-only 报告清掉已有用量，会保留旧
+token 与旧 cost 却仍写入新 hash——那一臂上从行重算 hash 必然不同，这是它的职责，不是遗漏。因此
+upsert 的注释把不变量收窄成「token 被替换的行，成本跟随 payload」。(2) 冻结臂是随 PR #25 合入
+（`541b417`，2026-10-24）进入本分支历史的，原始引入时间未能在本仓库历史中直接回溯到 2026-10-10，
+上面的日期仅作参考。
 
 ### 9.4.2 copilot 的工作量显著高于其余 11 个工具来源
 

@@ -159,8 +159,10 @@ Cost scope note (2026-11-10): the frozen tables match `ccusage --offline` bit fo
 online ccusage run may price from LiteLLM's live table instead. Over a one-week window on the
 maintainer's machine that difference was -7.7% on total cost, concentrated in the deepseek family;
 it is a rate-source boundary, not a missing model (`docs/research/2026-11-10-s5-flip-coverage.md`).
-New claude/codex/tool usage is priced from the frozen tables; historical `costUsd` is never
-recomputed.
+New claude/codex/tool usage is priced from the frozen tables. The server never recomputes a
+historical `costUsd` on its own; a client that re-uploads the same `(source, date, model)` with a
+different cost does overwrite it, because `snapshot_hash` covers `costUsd` and the upsert writes
+the incoming row (see `docs/research/2026-11-13-s5-migration-diff-ledger.md`).
 For Codex request-level repricing, models explicitly listed in the user's `pricingOverrides` are
 excluded from catalogue and static context rules so the explicit prices remain authoritative.
 
