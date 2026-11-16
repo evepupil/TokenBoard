@@ -925,12 +925,24 @@ test('sync invocation reports a plain failure when an unscheduled run exits tran
   }
 })
 
-test('sync invocation never defers a transient exit code for hook or non-sync runs', async () => {
-  for (const flags of [
-    { mode: 'sync', scheduled: true, hook: true },
-    { mode: 'preview', scheduled: true },
-    { mode: 'sync' }
-  ]) {
+// A hook run never enters the scheduled retry loop, but its caller (notify.mjs) does act on
+// the code: it marks the failure transient and the coordinator schedules one trailing retry.
+// The code therefore has to survive this layer. Preview and unscheduled syncs have no such
+// caller, so for them the internal deferral code is still normalized to a plain failure.
+test('sync invocation surfaces a transient exit code for a hook run but not for other unscheduled runs', async () => {
+  const hookExit = await runSyncInvocation({
+    flags: { mode: 'sync', scheduled: true, hook: true },
+    invocation: { source: 'all', env: {} },
+    stateDir: '/state',
+    writeState: () => {},
+    runWithLock: () => transientSyncExitCode,
+    runRetry: () => {
+      throw new Error('a hook must not enter scheduled retry')
+    }
+  })
+  assert.equal(hookExit, transientSyncExitCode)
+
+  for (const flags of [{ mode: 'preview', scheduled: true }, { mode: 'sync' }]) {
     const exitCode = await runSyncInvocation({
       flags,
       invocation: { source: 'all', env: {} },
@@ -941,9 +953,6 @@ test('sync invocation never defers a transient exit code for hook or non-sync ru
         throw new Error('this invocation must not enter scheduled retry')
       }
     })
-
-    // These runs are never retried, so the internal deferral code is normalized
-    // to a plain failure instead of leaking to the caller.
     assert.equal(exitCode, 1)
   }
 })

@@ -542,3 +542,64 @@ for (const failure of [
     assert.equal(fs.files.has('/state/last-success.json'), false)
   })
 }
+
+// The transient retry runs out of process, and each retry is itself a run that can fail the same
+// way. Without a bound, a collector that keeps its lock for hours would pace one failing sync
+// every ~95s forever, each spawn writing a run log and a signal. The attempt number rides on the
+// spawned trigger; the coordinator stops scheduling once the cap is reached.
+test('coordinator stops scheduling transient retries at the cap', () => {
+  const fs = memoryRuntime()
+  const trailing = []
+  const result = coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      ...fs,
+      stateDir: '/state',
+      now: () => Date.parse('2026-07-20T00:00:00.000Z'),
+      process: fakeProcess(216),
+      transientAttempts: 3,
+      maxTransientRetries: 3,
+      scheduleTrailing: (trigger, delayMs) => {
+        trailing.push({ source: trigger.source, delayMs })
+        return true
+      },
+      executeSync: () => {
+        const error = new Error('TokenBoard hook sync failed with exit code 75: TokenBoard collector lock timed out')
+        error.exitCode = 75
+        error.transient = true
+        throw error
+      }
+    }
+  )
+
+  assert.deepEqual(trailing, [], 'the fourth attempt must not schedule a fifth')
+  assert.equal(result.transientRetriesExhausted, true)
+  assert.deepEqual(result.transientSources, ['codex'])
+})
+
+test('coordinator carries the next attempt number on the spawned trigger', () => {
+  const fs = memoryRuntime()
+  const attempts = []
+  coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      ...fs,
+      stateDir: '/state',
+      now: () => Date.parse('2026-07-20T00:00:00.000Z'),
+      process: fakeProcess(217),
+      transientAttempts: 1,
+      maxTransientRetries: 3,
+      scheduleTrailing: (trigger) => {
+        attempts.push(trigger.transientAttempts)
+        return true
+      },
+      executeSync: () => {
+        const error = new Error('collector lock timed out')
+        error.transient = true
+        throw error
+      }
+    }
+  )
+
+  assert.deepEqual(attempts, [2])
+})

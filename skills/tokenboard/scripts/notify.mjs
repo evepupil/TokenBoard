@@ -63,6 +63,9 @@ export function runNotify(options = {}) {
     nodeVersion: options.nodeVersion,
     runTasklist: options.runTasklist,
     trailingProcess: options.trailingProcess ?? hasTrailingDelay(env),
+    // The attempt number this worker inherited from the coordinator that spawned it; the
+    // coordinator caps the chain with it (see scheduleTransientRetries).
+    transientAttempts: readTransientAttempts(env),
     scheduleTrailing:
       options.scheduleTrailing ||
       ((trigger, delayMs) => scheduleTrailingNotify(trigger, delayMs, { ...options, env, configDir: configDirectory })),
@@ -144,7 +147,7 @@ export function parseSyncTimings(stdout) {
   return Object.fromEntries(names.slice(0, maxSyncTimingPhases).map((name) => [name, timings[name]]))
 }
 
-function scheduleTrailingNotify(trigger, delayMs, options = {}) {
+export function scheduleTrailingNotify(trigger, delayMs, options = {}) {
   const runtime = trailingRuntime(options)
   const lockPath = join(runtime.stateDir, 'trailing.lock')
   const lock = acquireTrailingLock(lockPath, runtime)
@@ -166,6 +169,11 @@ function scheduleTrailingNotify(trigger, delayMs, options = {}) {
         TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: String(delayMs),
         TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: lockPath,
         TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: lock.ownerToken,
+        // Carries the transient-retry attempt number into the worker the coordinator spawned, so
+        // the out-of-process retry chain has a length instead of pacing forever.
+        ...(Number.isSafeInteger(trigger.transientAttempts) && trigger.transientAttempts > 0
+          ? { TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS: String(trigger.transientAttempts) }
+          : {}),
         TOKENBOARD_NOTIFY_DISPATCH_LOCK_PATH: '',
         TOKENBOARD_NOTIFY_DISPATCH_LOCK_TOKEN: '',
         TOKENBOARD_NOTIFY_DISPATCH_WORKER_PATH: ''
@@ -481,6 +489,14 @@ function hasTrailingDelay(env = process.env) {
 
 function trailingDelayMsFromEnvironment(env = process.env) {
   return Number.parseInt(env.TOKENBOARD_NOTIFY_TRAILING_DELAY_MS || '', 10)
+}
+
+// How many transient retries this worker is: 0 for a hook-triggered run, N for a worker the
+// coordinator spawned to retry a busy collector lock. An unparsable value reads as 0, which is
+// the permissive direction (one more retry) rather than silently stopping the chain.
+function readTransientAttempts(env = process.env) {
+  const value = Number.parseInt(env.TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS || '', 10)
+  return Number.isSafeInteger(value) && value > 0 ? value : 0
 }
 
 function trailingContinuationDelay(result, lockPath, runtime = trailingRuntime({})) {

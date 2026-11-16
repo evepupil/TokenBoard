@@ -181,6 +181,15 @@ export async function runSyncInvocation({
     const result = await run()
     const exitCode = typeof result === 'number' ? result : 0
     if (exitCode === transientSyncExitCode) {
+      if (flags.hook === true) {
+        // A hook has a caller that can act on this after all: notify.mjs turns the code into
+        // a `transient` marker and the coordinator schedules a trailing retry. Collapsing it
+        // to 1 here (the pre-2026-11-15 behaviour) made a busy collector lock indistinguishable
+        // from a broken provider, so the source sat in the signal queue until some later
+        // trigger happened to cover it. The hook handler spawns this script detached with
+        // stdio ignored, so the code is read by notify.mjs only.
+        return exitCode
+      }
       if (!canDeferScheduledRun(flags)) {
         // Nothing retries an unscheduled run, so report a plain failure instead
         // of surfacing an internal deferral code the caller cannot act on.

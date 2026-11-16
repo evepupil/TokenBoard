@@ -15,7 +15,8 @@ import {
   recordNotifyWorkerError,
   releaseDispatchLock,
   runNotify,
-  runNotifyCli
+  runNotifyCli,
+  scheduleTrailingNotify
 } from './notify.mjs'
 import { memoryFileMap, memoryPathStartsWith, sameMemoryPath } from './coordinator-test-helpers.mjs'
 
@@ -1521,4 +1522,47 @@ test('a pricing fallback diagnostic is noise in both its spellings', () => {
       return true
     }
   )
+})
+
+// The attempt number has to survive the hop from the coordinator into the spawned worker, or the
+// cap in coordinator.mjs never sees anything but 0 and the chain is unbounded again.
+test('the trailing spawn carries the transient attempt number', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-attempts-'))
+  const spawned = []
+  try {
+    scheduleTrailingNotify({ kind: 'notify', source: 'codex', transientAttempts: 2 }, 60_000, {
+      stateDir: root,
+      configDir: root,
+      env: { TOKENBOARD_STATE_DIR: root, TOKENBOARD_CONFIG_DIR: root },
+      spawnDetached: (command, args, options) => {
+        spawned.push(options.env)
+        return { pid: 4242, unref() {} }
+      }
+    })
+
+    assert.equal(spawned.length, 1)
+    assert.equal(spawned[0].TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS, '2')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a hook-triggered trailing spawn carries no attempt number', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-attempts-none-'))
+  const spawned = []
+  try {
+    scheduleTrailingNotify({ kind: 'notify', source: 'codex' }, 60_000, {
+      stateDir: root,
+      configDir: root,
+      env: { TOKENBOARD_STATE_DIR: root, TOKENBOARD_CONFIG_DIR: root },
+      spawnDetached: (command, args, options) => {
+        spawned.push(options.env)
+        return { pid: 4243, unref() {} }
+      }
+    })
+
+    assert.equal(spawned[0].TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

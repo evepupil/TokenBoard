@@ -20,6 +20,13 @@ import { isWithinScheduleWindow } from './schedule.mjs'
 
 const defaultLockTimeoutMs = 60_000
 const defaultLockTimeoutRetryDelayMs = 60_000
+// A transient failure is retried out of process, and each retry is itself a hook-style run that
+// can fail the same way. A collector lock held by a long scan (a full claude scan runs 20-68s on
+// a large history) is released before the first retry lands, so one retry is the normal case;
+// this cap is for the pathological one — a live process that keeps the lock for far longer — so
+// the chain stops instead of pacing a failing sync every ~95s forever. The sources stay in the
+// signal queue and the scheduled sync covers them.
+const defaultMaxTransientRetries = 3
 const defaultMaxFollowUps = 0
 const defaultMaxRunLogs = 1_024
 
@@ -407,6 +414,8 @@ function buildRuntime(options = {}) {
     scheduleWindow: options.scheduleWindow,
     lockTimeoutMs: numberOrDefault(options.lockTimeoutMs, defaultLockTimeoutMs),
     maxFollowUps: numberOrDefault(options.maxFollowUps, defaultMaxFollowUps),
+    transientAttempts: numberOrDefault(options.transientAttempts, 0),
+    maxTransientRetries: numberOrDefault(options.maxTransientRetries, defaultMaxTransientRetries),
     maxRunLogs: positiveIntegerOrDefault(options.maxRunLogs, defaultMaxRunLogs),
     trailingProcess: options.trailingProcess === true,
     version: options.version || 'unknown',
@@ -596,13 +605,28 @@ function scheduleDeferredFollowUps(trigger, runtime, result) {
 // deferral bookkeeping is not overwritten.
 function scheduleTransientRetries(trigger, runtime, result) {
   if (!result.transientSources?.length) return result
+  const attempt = numberOrDefault(runtime.transientAttempts, 0) + 1
+  if (attempt > numberOrDefault(runtime.maxTransientRetries, defaultMaxTransientRetries)) {
+    // Out of attempts: report it as such rather than scheduling another link in the chain. The
+    // sources are already back in the signal queue (restoreFailedSources), so the next trigger
+    // — the scheduled sync at the latest — still covers them.
+    return { ...result, transientRetriesExhausted: true, transientSources: result.transientSources }
+  }
   const delayMs = lockTimeoutRetryDelayMs(runtime)
-  const trailingScheduled = scheduleTrailingSources(trigger, result.transientSources, runtime, delayMs)
+  // The attempt number rides on the trigger to the spawned worker (`scheduleTrailingNotify`
+  // turns it into TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS), which is what gives the chain a length.
+  const trailingScheduled = scheduleTrailingSources(
+    { ...trigger, transientAttempts: attempt },
+    result.transientSources,
+    runtime,
+    delayMs
+  )
   return {
     ...result,
     trailingScheduled: result.trailingScheduled === true || trailingScheduled,
     ...(trailingScheduled && result.trailingDelayMs === undefined ? { trailingDelayMs: delayMs } : {}),
-    trailingSources: [...(result.trailingSources || []), ...result.transientSources]
+    trailingSources: [...(result.trailingSources || []), ...result.transientSources],
+    transientAttempt: attempt
   }
 }
 

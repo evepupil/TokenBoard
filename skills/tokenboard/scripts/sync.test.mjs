@@ -1681,3 +1681,26 @@ test('perSource rejects an unknown client name', () => {
     /pi/
   )
 })
+
+// A hook run cannot retry inline, but it does have a caller that can act on the code: notify.mjs
+// turns 75 into a `transient` marker and the coordinator schedules a trailing retry. Collapsing
+// it to 1 here (the behaviour before 2026-11-15) made a busy collector lock indistinguishable
+// from a broken provider, so the source sat in the signal queue until some unrelated trigger
+// happened to cover it. This has to be pinned here, at the layer that does the normalizing:
+// the notify and coordinator tests both stub this boundary away, so neither would notice.
+test('a hook run propagates the transient code so its caller can schedule a retry', async () => {
+  let retryCalls = 0
+  const result = await runSyncInvocation({
+    flags: { hook: true, mode: 'sync' },
+    invocation: { source: 'codex' },
+    stateDir: '/state',
+    runWithLock: () => 75,
+    runRetry: async () => {
+      retryCalls += 1
+      return { exitCode: 0 }
+    }
+  })
+
+  assert.equal(result, 75)
+  assert.equal(retryCalls, 0, 'a hook must not run the retry loop inline')
+})
