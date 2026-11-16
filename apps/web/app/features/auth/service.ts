@@ -28,6 +28,17 @@ export async function forwardAuthSignOut(c: Context) {
   // signed-out page while the session cookie was still valid — precisely the state a user
   // signs out to leave behind. Sign-in already passes failures through (see above); this
   // path has to as well, and `postAuth` has already put the error into the app's shape.
+  //
+  // Covered: the auth handler refusing the request (its rate limiter's 429, a 401, a 500).
+  // NOT covered, and not coverable from here: better-auth's own sign-out catches a failed
+  // `deleteSession` and still answers `{success:true}`
+  // (`better-auth/dist/api/routes/sign-out.mjs`), so a D1 write failure reaches this function
+  // as a 200. The browser still has its session cookie cleared — `deleteSessionCookie` runs
+  // either way — so the user is signed out on this device; what survives is the server-side
+  // session row, which a stolen copy of the old cookie could still use until it expires. The
+  // library does log that case (`Failed to delete session from database`), so it is visible in
+  // `wrangler tail`; detecting it here would mean unsigning the cookie and re-reading the
+  // session table after every sign-out, which is a worse trade than leaving it to the library.
   if (!response.ok) {
     return response
   }
