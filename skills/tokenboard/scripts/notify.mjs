@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
-import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
@@ -362,15 +372,19 @@ const notifyWorkerErrorLogMaxBytes = 64 * 1024
 // never fail the run: the exit code already reports the failure, and a
 // logging error would replace the real message with an unrelated one.
 //
-// The write is atomic — temp file, then rename — because `status.mjs` reads this
-// file while a detached worker may be appending to it. A plain rewrite truncates
-// before it writes, so a reader landing in between saw an empty or half-written
-// file and silently lost the previous entries (the reader treats a torn line as
-// "no entry"). It also keeps two concurrent workers from clobbering each other.
+// The append is a single `appendFileSync`, deliberately. An earlier version
+// rewrote the whole file (truncate-then-write), which could hand `status.mjs` an
+// empty file mid-write; replacing that with temp-file-plus-rename fixed the
+// reader but broke concurrent appenders instead — a second worker's entry was
+// silently dropped whenever it landed between the first worker's read and its
+// rename (reproduced: `["initial","worker-A"]`, worker-B gone). One `O_APPEND`
+// write is atomic for the common case and appends rather than replaces, so two
+// workers both land. The size cap still converges: whenever the file outgrows
+// the bound, the next write rewrites it down to the tail.
 export function recordNotifyWorkerError(
   logPath,
   message,
-  { writeFile = writeFileSync, rename = renameSync, unlink = unlinkSync, readFile = readFileSync } = {}
+  { appendFile = appendFileSync, writeFile = writeFileSync, readFile = readFileSync, stat = statSync } = {}
 ) {
   try {
     if (typeof logPath !== 'string' || !logPath) return
@@ -379,30 +393,28 @@ export function recordNotifyWorkerError(
     // error can echo `tb_upload_…` or `https://user:token@host/…`, and this
     // file outlives the process.
     const entry = `${JSON.stringify({ message: redactUrlCredentials(String(message)), at: new Date().toISOString() })}\n`
-    let existing = ''
+
+    // Trim only when the file has actually outgrown the bound. The check is a stat
+    // rather than a read so the common path stays one append and holds no stale
+    // snapshot that a concurrent append could be lost against.
+    let size = 0
     try {
-      existing = readFile(logPath, 'utf8')
+      size = stat(logPath).size
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
-    const combined = `${existing}${entry}`
-    const value =
-      combined.length > notifyWorkerErrorLogMaxBytes ? combined.slice(-notifyWorkerErrorLogMaxBytes) : combined
-    // A unique temp name, so two workers appending at once cannot write into the
-    // same temp file and hand a mixed result to `rename`.
-    const temporaryPath = `${logPath}.tmp-${randomBytes(8).toString('hex')}`
-    try {
-      writeFile(temporaryPath, value, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-      rename(temporaryPath, logPath)
-    } catch (error) {
+    if (size + Buffer.byteLength(entry) > notifyWorkerErrorLogMaxBytes) {
+      let existing = ''
       try {
-        unlink(temporaryPath)
-      } catch {
-        // The temp file may never have been created, or cleanup may itself fail;
-        // the original error is the one that matters.
+        existing = readFile(logPath, 'utf8')
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
       }
-      throw error
+      const combined = `${existing}${entry}`
+      writeFile(logPath, combined.slice(-notifyWorkerErrorLogMaxBytes), { encoding: 'utf8', mode: 0o600 })
+      return
     }
+    appendFile(logPath, entry, { encoding: 'utf8', mode: 0o600 })
   } catch {
     // A state directory that cannot be written is exactly the failure being
     // reported; the stderr line above already carries it.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -161,58 +161,52 @@ test('the worker error log redacts credentials', async () => {
   }
 })
 
-// `status.mjs` reads this log while a detached worker may be appending to it. A plain rewrite
-// truncates before it writes, so a reader landing in between saw an empty file and lost the
-// earlier entries. The append is therefore a temp file plus rename, which is what these two
-// tests pin: the rename is the only moment the file changes, and a failed one leaves the old
-// content intact with no temp file behind.
-test('the worker error log is replaced atomically', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-atomic-'))
+// The append has to be one `O_APPEND` write, not a read-modify-rewrite. Rewriting the whole file
+// truncates before it writes, so `status.mjs` (which reads this while a detached worker appends)
+// could see it empty and drop the earlier entries; temp-file-plus-rename fixed that reader but
+// silently dropped a *concurrent* appender's entry instead. Both halves are pinned here: a second
+// worker's line survives, and the bound still converges by trimming only once the file outgrows it.
+test('a concurrent worker entry survives the append', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-race-'))
   const logPath = join(root, 'notify-worker-errors.log')
-  const observed = []
   try {
-    await writeFile(logPath, '{"message":"first","at":null}\n')
+    await writeFile(logPath, '{"message":"initial","at":null}\n')
 
-    recordNotifyWorkerError(logPath, 'second', {
-      readFile: readFileSync,
-      writeFile: (path, value, options) => {
-        // Mid-write the real log must still hold the previous content: the new
-        // text only becomes visible at the rename.
-        observed.push(readFileSync(logPath, 'utf8'))
-        writeFileSync(path, value, options)
-      },
-      rename: renameSync,
-      unlink: unlinkSync
+    // Worker B lands in the middle of worker A's append — between the point where the old
+    // implementation took its snapshot and where it rewrote the file. With an append-only write
+    // there is no snapshot to be stale, so both entries survive regardless of the interleaving.
+    let injected = false
+    recordNotifyWorkerError(logPath, 'worker-A', {
+      appendFile: (path, value, options) => {
+        if (!injected) {
+          injected = true
+          recordNotifyWorkerError(logPath, 'worker-B')
+        }
+        return appendFileSync(path, value, options)
+      }
     })
 
-    assert.deepEqual(observed, ['{"message":"first","at":null}\n'])
     const recorded = readNotifyWorkerErrors(root)
-    assert.deepEqual(
-      recorded.map((entry) => entry.message),
-      ['first', 'second']
-    )
+    assert.deepEqual(recorded.map((entry) => entry.message).sort(), ['initial', 'worker-A', 'worker-B'])
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
 
-test('a failed worker error log rename keeps the existing entries and no temp file', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-atomic-fail-'))
+test('the worker error log is trimmed once it outgrows the bound', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-bound-'))
   const logPath = join(root, 'notify-worker-errors.log')
   try {
-    await writeFile(logPath, '{"message":"first","at":null}\n')
+    // Just under a full page, so one more entry pushes it past the 64 KiB cap.
+    const filler = `${JSON.stringify({ message: 'x'.repeat(60 * 1024), at: null })}\n`
+    await writeFile(logPath, filler)
+    const before = readFileSync(logPath, 'utf8').length
 
-    recordNotifyWorkerError(logPath, 'second', {
-      readFile: readFileSync,
-      writeFile: writeFileSync,
-      rename: () => {
-        throw new Error('rename failed')
-      },
-      unlink: unlinkSync
-    })
+    recordNotifyWorkerError(logPath, 'after-trim')
 
-    assert.equal(readFileSync(logPath, 'utf8'), '{"message":"first","at":null}\n')
-    assert.deepEqual(readdirSync(root), ['notify-worker-errors.log'])
+    const after = readFileSync(logPath, 'utf8')
+    assert.ok(after.length <= 64 * 1024, `log grew to ${after.length} bytes from ${before}`)
+    assert.match(after, /after-trim/)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
