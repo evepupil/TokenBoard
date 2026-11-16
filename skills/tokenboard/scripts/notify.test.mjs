@@ -16,7 +16,8 @@ import {
   releaseDispatchLock,
   runNotify,
   runNotifyCli,
-  scheduleTrailingNotify
+  scheduleTrailingNotify,
+  waitTrailingDelay
 } from './notify.mjs'
 import { memoryFileMap, memoryPathStartsWith, sameMemoryPath } from './coordinator-test-helpers.mjs'
 
@@ -1624,4 +1625,61 @@ test('the trailing loop advances the transient attempt across its own rounds', a
   })
 
   assert.deepEqual(attempts, [1, 2, 3])
+})
+
+// A single `setTimeout(delayMs)` for a long trailing delay owns no absolute deadline: the
+// timer's clock is suspended while the host sleeps and is not re-anchored when it wakes or
+// when the wall clock is stepped, so a worker can sit past its wake time for hours with an
+// idle event loop (observed on a loaded macOS host: 34 minutes late with 0.23s of CPU). The
+// wait has to be sliced against a deadline taken from the wall clock, so each slice is short
+// enough to be re-evaluated and the total is bounded by real elapsed time, not by one timer.
+test('trailing wait slices a long delay so each sleep is bounded', async () => {
+  const sleeps = []
+  let nowMs = 0
+  await waitTrailingDelay(3 * 60 * 60 * 1000, {
+    now: () => nowMs,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      nowMs += ms
+    },
+    maxSliceMs: 60_000
+  })
+
+  assert.ok(sleeps.length >= 180, `expected the 3h wait to be sliced, got ${sleeps.length} sleeps`)
+  assert.ok(
+    sleeps.every((ms) => ms > 0 && ms <= 60_000),
+    `every slice must be positive and at most 60s, got ${JSON.stringify(sleeps.slice(0, 5))}`
+  )
+  assert.equal(
+    sleeps.reduce((sum, ms) => sum + ms, 0),
+    3 * 60 * 60 * 1000
+  )
+})
+
+test('trailing wait ends on the wall clock even when a slice overruns', async () => {
+  const sleeps = []
+  let nowMs = 0
+  // The first slice overruns its budget by an hour — the shape a suspended host produces.
+  const overruns = [0, 60 * 60 * 1000]
+  await waitTrailingDelay(90 * 60 * 1000, {
+    now: () => nowMs,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      nowMs += ms + (overruns.shift() ?? 0)
+    },
+    maxSliceMs: 60_000
+  })
+
+  // The deadline is reached by elapsed wall time, so the overrun does not add another wake.
+  assert.equal(nowMs >= 90 * 60 * 1000, true)
+  assert.ok(nowMs < 90 * 60 * 1000 + 60 * 60 * 1000, `the wait must not sleep past its deadline, elapsed ${nowMs}`)
+})
+
+test('trailing wait returns immediately for a non-positive delay', async () => {
+  const sleeps = []
+  const sleep = async (ms) => sleeps.push(ms)
+  await waitTrailingDelay(0, { sleep })
+  await waitTrailingDelay(-5, { sleep })
+  await waitTrailingDelay(Number.NaN, { sleep })
+  assert.deepEqual(sleeps, [])
 })

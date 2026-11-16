@@ -508,9 +508,36 @@ function parseCooldownMs(value, errorPrefix) {
   return cooldownMs
 }
 
-async function waitTrailingDelay(delayMs = trailingDelayMsFromEnvironment()) {
+// Default upper bound on one sleep inside a trailing wait. Long enough that a normal delay
+// still costs a single syscall-bounded timer, short enough that a wall-clock step or a host
+// that slept is noticed within a minute rather than never.
+const defaultTrailingWaitSliceMs = 60_000
+
+/**
+ * Waits `delayMs` against a wall-clock deadline, in slices of at most `maxSliceMs`.
+ *
+ * A single `setTimeout(delayMs)` holds no absolute deadline: its clock is suspended while the
+ * host sleeps and is not re-anchored on wake or on a wall-clock step. A worker that scheduled
+ * a two-hour trailing delay then sat for 34 minutes past its wake time on an idle event loop
+ * (0.23s CPU) — the timer simply had not fired. Slicing bounds each sleep's exposure and
+ * re-reads the clock between slices, so elapsed real time decides when the wait ends.
+ */
+export async function waitTrailingDelay(
+  delayMs = trailingDelayMsFromEnvironment(),
+  {
+    now = Date.now,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    maxSliceMs = defaultTrailingWaitSliceMs
+  } = {}
+) {
   if (!Number.isFinite(delayMs) || delayMs <= 0) return
-  await new Promise((resolve) => setTimeout(resolve, delayMs))
+  const sliceMs = Number.isFinite(maxSliceMs) && maxSliceMs > 0 ? maxSliceMs : defaultTrailingWaitSliceMs
+  const deadline = now() + delayMs
+  for (;;) {
+    const remaining = deadline - now()
+    if (remaining <= 0) return
+    await sleep(Math.min(remaining, sliceMs))
+  }
 }
 
 function hasTrailingDelay(env = process.env) {
