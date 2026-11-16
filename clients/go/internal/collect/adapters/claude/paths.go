@@ -728,7 +728,14 @@ func recordedSessionID(path string) (string, bool) {
 			// case-insensitively ("SessionID" hits this field; serde's rename is
 			// exact). Claude Code writes neither, and a wrong id only changes
 			// which stale group a file joins.
-			if json.Unmarshal(line, &probe) == nil && probe.SessionID != nil {
+			//
+			// The BOM has to go first: a stamped first line is the one that
+			// usually carries the id, and encoding/json rejects a BOM where it
+			// expects `{`. Missing the id splits the file off from its
+			// sidechain group, so PruneByMTime can prune a parent and keep a
+			// replayed child. The collect path's line reader strips the same
+			// BOM in trimLineEnding (collect.go).
+			if json.Unmarshal(trimLineEnding(line), &probe) == nil && probe.SessionID != nil {
 				return *probe.SessionID, true
 			}
 		}

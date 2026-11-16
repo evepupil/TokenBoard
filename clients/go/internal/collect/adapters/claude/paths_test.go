@@ -850,3 +850,20 @@ func TestPathSessionParts(t *testing.T) {
 		})
 	}
 }
+
+// A transcript whose first line is stamped with a UTF-8 BOM still records its session id; the
+// probe parses lines with encoding/json, which rejects a BOM where it expects `{`. Losing the id
+// splits the file off from its sidechain group, so PruneByMTime can drop the parent while keeping
+// a replayed child — the replay then counts on a date the parent no longer covers. The Claude
+// adapter's own line reader strips the BOM (trimLineEnding); this probe reads through its own
+// ReadBytes loop and did not.
+func TestRecordedSessionIDStripsABOM(t *testing.T) {
+	root := t.TempDir()
+	withID := filepath.Join(root, "with-id.jsonl")
+	writeFixture(t, withID, "\xef\xbb\xbf"+`{"type":"summary","sessionId":"sess-bom","leafUuid":"x"}`+"\n")
+
+	got, ok := recordedSessionID(withID)
+	if !ok || got != "sess-bom" {
+		t.Fatalf("recordedSessionID = (%q, %v), want (\"sess-bom\", true)", got, ok)
+	}
+}
