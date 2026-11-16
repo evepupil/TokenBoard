@@ -241,6 +241,35 @@ describe('ingest idempotency', () => {
     expect(scalarText(path, 'SELECT total_tokens FROM daily_usage')).toBe('0')
     expect(scalarText(path, 'SELECT input_tokens FROM daily_usage')).toBe('0')
   })
+  // The WHERE clause carries its own copy of the codex shapes, with `session_count = 0` where the
+  // SET arms have `> 0`. That arm decides whether the row is touched at all; the SET arms only
+  // decide what a permitted update writes. Both correction fixtures above use `sessionCount: 2`,
+  // so they exercise the SET side; without a case here, deleting the WHERE arm would still pass.
+  //
+  // A token-less codex report that also reports no sessions, arriving over a row that has usage,
+  // is rejected outright — the row does not even lose its session_count. That is the arm working:
+  // the source has no tokens to report, so its report says nothing about this row's usage.
+  test('a zero-session codex report leaves a populated row entirely untouched', async () => {
+    const { db, path } = createDb(tempDirs)
+
+    await upsertUsageSnapshots(db, [makeRecord({ source: 'codex', costUsd: 0.12 })])
+    await upsertUsageSnapshots(db, [
+      makeRecord({
+        source: 'codex',
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0.5,
+        sessionCount: 0
+      })
+    ])
+
+    expect(scalarText(path, 'SELECT total_tokens FROM daily_usage')).toBe('165')
+    expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.12')
+    expect(scalarText(path, 'SELECT session_count FROM daily_usage')).toBe('2')
+  })
 })
 
 function makeRecord(overrides: Partial<IngestRecord> = {}): IngestRecord {
