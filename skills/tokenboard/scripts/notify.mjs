@@ -64,8 +64,11 @@ export function runNotify(options = {}) {
     runTasklist: options.runTasklist,
     trailingProcess: options.trailingProcess ?? hasTrailingDelay(env),
     // The attempt number this worker inherited from the coordinator that spawned it; the
-    // coordinator caps the chain with it (see scheduleTransientRetries).
-    transientAttempts: readTransientAttempts(env),
+    // coordinator caps the chain with it (see scheduleTransientRetries). `options.transientAttempts`
+    // is how runNotifyCli passes the advanced count for its own in-process continuations.
+    transientAttempts: Number.isSafeInteger(options.transientAttempts)
+      ? options.transientAttempts
+      : readTransientAttempts(env),
     scheduleTrailing:
       options.scheduleTrailing ||
       ((trigger, delayMs) => scheduleTrailingNotify(trigger, delayMs, { ...options, env, configDir: configDirectory })),
@@ -296,6 +299,11 @@ export async function runNotifyCli(options = {}) {
       const config = readCurrentConfig()
       const configuredDir = readConfigDirectory()
       let delayMs = trailingDelayMsFromEnvironment(env)
+      // The attempt number has to advance across this process's own continuations, not only
+      // across spawned workers. The loop below re-runs the coordinator in-process with the same
+      // `env`, so a worker that inherited attempt 1 kept computing 2 on every round and the cap
+      // in coordinator.mjs never bit. Tracked here and handed in per round.
+      let transientAttempts = readTransientAttempts(env)
       while (true) {
         await wait(delayMs)
         const result = notify({
@@ -305,11 +313,15 @@ export async function runNotifyCli(options = {}) {
           configCooldownMs: config.notifyCooldownMs,
           configScheduleTimes: config.scheduleTimes,
           trailingProcess: Boolean(trailingLockPath) || delayMs > 0,
+          transientAttempts,
           version: config.updatedAt || config.createdAt || 'unknown'
         })
         if (result.error) {
           if (!result.trailingScheduled) throw new Error(result.error)
           reportError(`TokenBoard hook sync retry scheduled after error: ${result.error}`)
+        }
+        if (Number.isSafeInteger(result.transientAttempt) && result.transientAttempt > transientAttempts) {
+          transientAttempts = result.transientAttempt
         }
         const nextDelayMs = trailingContinuationDelay(result, trailingLockPath, runtime)
         if (nextDelayMs === null) break

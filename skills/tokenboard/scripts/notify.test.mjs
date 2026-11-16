@@ -1566,3 +1566,58 @@ test('a hook-triggered trailing spawn carries no attempt number', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// The in-process continuation loop re-runs the coordinator with the same `env`, so a worker that
+// inherited attempt 1 kept computing 2 on every round: the coordinator's cap never bit and the
+// chain had no length. The attempt number has to advance here, per round.
+test('the trailing loop advances the transient attempt across its own rounds', async () => {
+  const stateDir = '/state'
+  const trailingLockPath = join(stateDir, 'trailing.lock')
+  const files = memoryFileMap([
+    [join(stateDir, 'last-success.json'), '2026-05-22T10:00:00.000Z'],
+    [trailingLockPath, JSON.stringify({ pid: 802, token: 'owner-a' })]
+  ])
+  const attempts = []
+  const runtime = {
+    stateDir,
+    configDir: stateDir,
+    now: () => Date.parse('2026-05-22T10:00:05.000Z'),
+    process: { pid: 802, kill: () => true },
+    ownerToken: 'owner-a',
+    readFile: memoryFileOps(files).readFile,
+    writeFile: (path, value) => files.set(path, String(value)),
+    unlink: (path) => files.delete(path),
+    rename: memoryFileOps(files).rename,
+    link: memoryFileOps(files).link
+  }
+
+  await runNotifyCli({
+    env: {
+      TOKENBOARD_CONFIG_DIR: stateDir,
+      TOKENBOARD_STATE_DIR: stateDir,
+      TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: trailingLockPath,
+      TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: 'owner-a',
+      TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: '0',
+      TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS: '1'
+    },
+    readConfig: () => ({ updatedAt: 'test-version' }),
+    configDir: () => stateDir,
+    trailingRuntime: runtime,
+    waitTrailingDelay: async () => {},
+    // Stands in for the coordinator: it reports the attempt it was handed and always asks for
+    // one more round, which is what makes the loop's own accounting observable.
+    runNotify: (options) => {
+      attempts.push(options.transientAttempts)
+      if (attempts.length >= 3) return { source: 'codex', exitCode: 0 }
+      return {
+        source: 'codex',
+        exitCode: 0,
+        transientAttempt: (options.transientAttempts || 0) + 1,
+        trailingScheduled: true,
+        trailingDelayMs: 1
+      }
+    }
+  })
+
+  assert.deepEqual(attempts, [1, 2, 3])
+})
