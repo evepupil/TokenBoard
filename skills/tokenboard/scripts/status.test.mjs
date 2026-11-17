@@ -999,3 +999,32 @@ test('status finds a moved dual-run log and omits the trend when none exists', (
     rmSync(moved, { recursive: true, force: true })
   }
 })
+
+// status must surface the recorded client version change: it is the only place
+// an operator can see when the version changed relative to the sync results.
+test('buildStatus reports the recorded client version and when it changed', () => {
+  const status = buildStatus({
+    configPath: '/home/u/.tokenboard/config.json',
+    config: { timezone: 'UTC', source: 'all', clientType: 'binary' },
+    hooks: { claudeCode: 'not-installed', codex: 'not-installed', antigravity: 'not-installed' },
+    deviceLink: { present: false },
+    clientVersion: { version: '0.2.1', since: '2026-11-18T00:00:00.000Z', previous: '0.2.0' }
+  })
+
+  assert.deepEqual(status.clientVersion, {
+    version: '0.2.1',
+    since: '2026-11-18T00:00:00.000Z',
+    previous: '0.2.0'
+  })
+})
+
+test('buildStatus omits the clientVersion field when nothing is recorded', () => {
+  const status = buildStatus({
+    configPath: '/home/u/.tokenboard/config.json',
+    config: { timezone: 'UTC', source: 'all', clientType: 'git' },
+    hooks: { claudeCode: 'not-installed', codex: 'not-installed', antigravity: 'not-installed' },
+    deviceLink: { present: false }
+  })
+
+  assert.equal('clientVersion' in status, false)
+})

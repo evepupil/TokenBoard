@@ -12,6 +12,7 @@ import { hookStatus } from './hooks.mjs'
 import { readNotifyWorkerErrors } from './notify.mjs'
 import { scheduledRetryLegacyStatePath, scheduledRetryStatePath } from './scheduled-retry.mjs'
 import { readScheduledSyncState, scheduledSyncStatePath } from './scheduled-sync-state.mjs'
+import { readClientVersionState } from './client-version-state.mjs'
 import { dualRunLogPath, readRecentRecords, summarizeDualRunTrend } from './shadow-dual-run.mjs'
 
 // The window mirrors `shadow-dual-run.mjs --summary`'s default so the daily
@@ -31,6 +32,7 @@ export function buildStatus({
   recentRuns,
   uploadBackoff,
   client,
+  clientVersion,
   shadowDualRun,
   notifyWorkerErrors
 }) {
@@ -69,7 +71,11 @@ export function buildStatus({
     // could not tell a healthy install from one whose binary or bundled
     // ccusage was deleted, or from an older ccusage left by an install of a
     // release that carried none.
-    ...(client ? { client: publicClientStatus(client) } : {})
+    ...(client ? { client: publicClientStatus(client) } : {}),
+    // When the installed version last changed. `self-update` verifies only that
+    // the new binary runs, so this is what lets an operator correlate a
+    // collection problem with the version it started under.
+    ...(clientVersion ? { clientVersion } : {})
   }
 }
 
@@ -228,6 +234,7 @@ function runCli() {
           config.clientType === 'binary'
             ? readClientStatus({ configDir: process.env.TOKENBOARD_CONFIG_DIR?.trim() || dirname(file) })
             : undefined,
+        clientVersion: readClientVersionState(stateDir),
         shadowDualRun: collectShadowDualRunSummary(dualRunLogPath())
       }),
       null,

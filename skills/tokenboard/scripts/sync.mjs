@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import {
   chmodSync,
@@ -17,9 +17,16 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { isMainModule } from './is-main.mjs'
 import { readConfig, parseArgs, collectorDir, readPackageManager, resolveClientForSource } from './config.mjs'
-import { clientBinaryPath, recoverOrphanedBinary, recoverUnderInstallLock, runSelfUpdate } from './client-binary.mjs'
+import {
+  clientBinaryPath,
+  readVersion,
+  recoverOrphanedBinary,
+  recoverUnderInstallLock,
+  runSelfUpdate
+} from './client-binary.mjs'
 import { printHelpIfRequested, hasHelpFlag } from './cli-help.mjs'
 import { normalizePathEnv } from './schedule.mjs'
+import { recordClientVersion } from './client-version-state.mjs'
 import { readSince } from './sync-options.mjs'
 import { closeScheduledLogRuntime, createScheduledLogRuntime } from './logs.mjs'
 import { runUpgrade } from './upgrade.mjs'
@@ -380,7 +387,43 @@ function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log,
   }
 }
 
+// recordClientVersionForInvocation notes the version this run is about to
+// execute, so status.mjs can report "this version, since then" next to the
+// sync results. A git client has no single binary version; it records nothing.
+// Failures to record are swallowed: a diagnostic must never fail the sync.
+export function recordClientVersionForInvocation({
+  invocation,
+  spawn,
+  now = Date.now,
+  record = recordClientVersion
+} = {}) {
+  if (invocation?.clientType !== 'binary') return null
+  try {
+    // readVersion defaults to the real spawnSync; passing undefined here keeps
+    // a git-only process from ever needing child_process to be reachable.
+    const version = readVersion(invocation.command, spawn ?? spawnSync, ['version'])
+    if (!version) return null
+    const stateDir = invocation.env?.TOKENBOARD_STATE_DIR || invocation.env?.TOKENBOARD_CONFIG_DIR
+    if (!stateDir) return null
+    return record({ stateDir, version, now })
+  } catch {
+    return null
+  }
+}
+
 async function runSync({ flags, invocation, logs }) {
+  // Recorded before the upgrade step: the version noted here is the one this
+  // run actually executes. A version that changed is worth one log line, which
+  // is where an operator looking at "why did collection change" starts.
+  const versionChange = recordClientVersionForInvocation({ invocation })
+  if (versionChange?.changed && logs) {
+    const from = versionChange.previous ? ` (was ${versionChange.previous})` : ''
+    try {
+      writeSync(logs.stdoutFd, `TokenBoard client version ${versionChange.version}${from}\n`)
+    } catch {
+      // A diagnostic line must never fail the sync.
+    }
+  }
   runPreCollectUpgrade({ flags, invocation, logs })
 
   const effectiveInvocation = refreshBundledCcusageConfig(invocation)

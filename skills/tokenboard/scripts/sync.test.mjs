@@ -14,6 +14,7 @@ import {
   readHookSyncTimeoutMs,
   refreshBundledCcusageConfig,
   runCollectorProcess,
+  recordClientVersionForInvocation,
   runPreCollectUpgrade,
   recordScheduledFailure,
   runSyncInvocation,
@@ -1927,4 +1928,86 @@ test('recovery runs when the lock directory does not exist yet', () => {
 
   assert.deepEqual(recoveries, [join(base, 'bin', 'tokenboard')])
   assert.deepEqual(warnings, [])
+})
+
+// The sync path must actually repair the file, not only take the lock: this
+// drives the real recoverOrphanedBinary through runPreCollectUpgrade with no
+// stubs, so a broken wiring between the two would fail here.
+test('a hook run repairs a missing binary from its backup end to end', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-e2e-recover-'))
+  const binaryDir = join(dir, 'bin')
+  mkdirSync(binaryDir, { recursive: true })
+  const binaryPath = join(binaryDir, 'tokenboard')
+  const backup = `${binaryPath}.backup-20260101T000000Z-000001`
+  writeFileSync(backup, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', { mode: 0o755 })
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: binaryPath },
+    selfUpdate: () => {
+      throw new Error('a hook must not self-update')
+    },
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the binary must be back in place')
+  assert.equal(existsSync(backup), false, 'the backup must have been renamed, not copied')
+})
+
+// A state directory that exists but cannot be written is not "no lock
+// directory": another account's self-update may hold it. Recovery is skipped
+// with a warning rather than run blind, and the sync continues.
+test('recovery warns instead of failing when the state directory is not writable', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-ro-state-'))
+  const warn = []
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: join(base, 'missing', 'deep') },
+    invocation: { clientType: 'binary', command: join(base, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warn.push(line)
+  })
+  // The missing directory falls through to recovery, whose own failure is a
+  // warning, never a throw.
+  assert.equal(warn.length, 1)
+  assert.match(warn[0], /recovery skipped/)
+})
+
+// After an upgrade the client cannot say whether the new version collects
+// correctly. Recording the installed version at sync time gives status.mjs the
+// one fact needed to answer that later: which version was running when the
+// failures started.
+test('a sync records the client version it is about to run', async () => {
+  const { readClientVersionState } = await import('./client-version-state.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-record-'))
+  const binaryPath = join(dir, 'bin', 'tokenboard')
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  writeFileSync(binaryPath, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', { mode: 0o755 })
+
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: binaryPath, env: { TOKENBOARD_STATE_DIR: dir } },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' })
+  })
+
+  assert.equal(readClientVersionState(dir)?.version, '0.2.0')
+})
+
+// A git client has no single binary version to record; it must be skipped, not
+// recorded as null.
+test('a git client records no version', async () => {
+  const { readClientVersionState } = await import('./client-version-state.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-git-'))
+
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'git', command: 'node', env: { TOKENBOARD_STATE_DIR: dir } }
+  })
+
+  assert.equal(readClientVersionState(dir), null)
 })
