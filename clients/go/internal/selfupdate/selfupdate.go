@@ -408,18 +408,25 @@ func nextBackupSequence() uint64 { return backupSequence.Add(1) }
 // `recoverOrphanedBinary` in client-binary.mjs); a manual run can always
 // rename the backup back by hand.
 //
-// The renames go through renameatomic: on Windows a scanner or backup tool can
-// hold the freshly written staged file long enough for MoveFileEx to answer
-// EBUSY, and a short retry clears it where a plain os.Rename would fail an
-// update that was about to succeed.
+// The renames go through swapRename (renameatomic in production): on Windows a
+// scanner or backup tool can hold the freshly written staged file long enough
+// for MoveFileEx to answer EBUSY, and a short retry clears it where a plain
+// os.Rename would fail an update that was about to succeed.
 func swap(staged, current, backup string) error {
-	if err := renameatomic.Rename(current, backup); err != nil {
+	return swapWith(staged, current, backup, renameatomic.Rename)
+}
+
+// swapWith is swap with its rename seam exposed, so the rollback branches —
+// the ones that decide whether a failed install leaves a working client — can
+// be exercised without provoking a real filesystem failure.
+func swapWith(staged, current, backup string, rename func(from, to string) error) error {
+	if err := rename(current, backup); err != nil {
 		return fmt.Errorf("cannot back up the current TokenBoard binary: %w", err)
 	}
-	if err := renameatomic.Rename(staged, current); err != nil {
+	if err := rename(staged, current); err != nil {
 		// Put the original back before reporting: a failed swap must not
 		// leave the machine without a collector.
-		if restoreErr := renameatomic.Rename(backup, current); restoreErr != nil {
+		if restoreErr := rename(backup, current); restoreErr != nil {
 			return fmt.Errorf("cannot install the new TokenBoard binary: %v; "+
 				"and the original could not be restored from %s: %w", err, backup, restoreErr)
 		}

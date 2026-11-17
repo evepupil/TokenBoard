@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -929,5 +930,102 @@ func TestSamePathMatchesThePlatformFilesystem(t *testing.T) {
 		}
 	} else if folded {
 		t.Fatal("a case-only difference was treated as the same file on a case-sensitive filesystem")
+	}
+}
+
+// The swap's rollback branches decide whether a machine that has a working
+// client still has one after a failed install. They only run when a rename
+// fails, which a test cannot provoke on a healthy filesystem, so the seam
+// supplies the failure.
+func TestSwapRestoresTheOriginalWhenTheInstallRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "tokenboard.new")
+	current := filepath.Join(dir, "tokenboard")
+	backup := filepath.Join(dir, "tokenboard.backup-20260101T000000Z-000001")
+	for path, body := range map[string]string{staged: "new", current: "old"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rename := func(from, to string) error {
+		if from == staged {
+			return errors.New("staged file is locked")
+		}
+		return os.Rename(from, to)
+	}
+
+	err := swapWith(staged, current, backup, rename)
+	if err == nil || !strings.Contains(err.Error(), "staged file is locked") {
+		t.Fatalf("err = %v, want the install failure", err)
+	}
+	restored, readErr := os.ReadFile(current)
+	if readErr != nil {
+		t.Fatalf("the client is gone after a failed install: %v", readErr)
+	}
+	if string(restored) != "old" {
+		t.Fatalf("current = %q, want the original restored", restored)
+	}
+	if _, statErr := os.Stat(backup); !os.IsNotExist(statErr) {
+		t.Errorf("the backup was not moved back: %v", statErr)
+	}
+}
+
+// When the restore fails too there is nothing left to do, but the error has to
+// name both failures and the backup's path: that file is the only working
+// client left, and the operator needs its name to put it back by hand.
+func TestSwapReportsBothFailuresAndTheBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "tokenboard.new")
+	current := filepath.Join(dir, "tokenboard")
+	backup := filepath.Join(dir, "tokenboard.backup-20260101T000000Z-000001")
+	for path, body := range map[string]string{staged: "new", current: "old"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rename := func(from, to string) error {
+		if from == current {
+			return os.Rename(from, to)
+		}
+		return errors.New("locked")
+	}
+
+	err := swapWith(staged, current, backup, rename)
+	if err == nil {
+		t.Fatal("a swap that cannot install or restore must fail")
+	}
+	for _, want := range []string{"cannot install", "could not be restored", backup} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
+// A backup that is a symlink is removed as a link, never through it: pruning
+// must not delete whatever the link points at. The target here is another
+// binary's backup, which a follow-the-link remove would silently destroy.
+func TestPruneBackupsRemovesTheLinkNotItsTarget(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "tokenboard")
+	keep := current + ".backup-20260103T000000Z-000002"
+	target := filepath.Join(dir, "elsewhere")
+	if err := os.WriteFile(target, []byte("do not delete"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := current + ".backup-20260101T000000Z-000001"
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable here: %v", err)
+	}
+	if err := os.WriteFile(keep, []byte("keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneBackups(current, keep)
+
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Errorf("the stale link survived: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "do not delete" {
+		t.Errorf("pruning reached through the link: %q, %v", data, err)
 	}
 }

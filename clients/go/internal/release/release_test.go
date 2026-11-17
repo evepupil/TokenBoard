@@ -49,6 +49,59 @@ func TestResolveFollowsTheReleasesLatestRedirect(t *testing.T) {
 	}
 }
 
+// Only the statuses net/http follows are redirects. A 304 carrying a Location
+// is a cache answer, and walking it would take the lookup somewhere the server
+// never meant; the TS client refuses the same statuses.
+func TestLatestTagRefusesANonRedirect3xx(t *testing.T) {
+	for _, status := range []int{http.StatusMultipleChoices, http.StatusNotModified, http.StatusUseProxy} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "/evepupil/TokenBoard/releases/tag/v9.9.9")
+			w.WriteHeader(status)
+		}))
+		_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+		server.Close()
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("HTTP %d", status)) {
+			t.Errorf("status %d: err = %v, want it reported as an HTTP %d answer", status, err, status)
+		}
+	}
+}
+
+// The lookup follows the release host and the asset CDN, never anywhere else:
+// a tag page served from an unnamed host would supply the download URLs the
+// rest of the install trusts. The TS client pins the same hosts.
+func TestLatestTagRefusesARedirectToAnotherHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example/evepupil/TokenBoard/releases/tag/v9.9.9", http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	if err == nil || !strings.Contains(err.Error(), "is not the release host") {
+		t.Fatalf("err = %v, want a cross-host refusal", err)
+	}
+}
+
+// A relative Location keeps its meaning: it resolves against the hop that
+// answered, so a same-host chain still resolves normally.
+func TestLatestTagFollowsARelativeRedirectWithinTheHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/evepupil/TokenBoard/releases/latest" {
+			http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("tag page"))
+	}))
+	defer server.Close()
+
+	tag, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	if err != nil {
+		t.Fatalf("latestTag: %v", err)
+	}
+	if tag != "v1.2.3" {
+		t.Errorf("tag = %q, want v1.2.3", tag)
+	}
+}
+
 // A chain longer than one hop is a loop, not a release: it is refused instead
 // of followed.
 func TestResolveRefusesARedirectLoop(t *testing.T) {

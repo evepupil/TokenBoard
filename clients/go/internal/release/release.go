@@ -256,6 +256,10 @@ func latestTag(options Options, repo string) (string, error) {
 		return http.ErrUseLastResponse
 	}
 	current := fmt.Sprintf("%s/%s/releases/latest", options.baseURL(), repo)
+	origin, err := url.Parse(current)
+	if err != nil {
+		return "", fmt.Errorf("TokenBoard release lookup URL is invalid: %w", err)
+	}
 	// One budget for the whole chain: http.Client.Timeout restarts on every
 	// client.Do, so a chain of slow redirects would otherwise multiply it.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(lookupTimeout))
@@ -273,7 +277,7 @@ func latestTag(options Options, repo string) (string, error) {
 		switch {
 		case response.StatusCode == http.StatusNotFound:
 			return "", fmt.Errorf("TokenBoard release lookup returned HTTP 404 for %s", repo)
-		case response.StatusCode >= 300 && response.StatusCode < 400:
+		case isFollowedRedirect(response.StatusCode):
 			location := response.Header.Get("Location")
 			if location == "" {
 				return "", fmt.Errorf("TokenBoard release lookup returned HTTP %d without a Location", response.StatusCode)
@@ -286,7 +290,16 @@ func latestTag(options Options, repo string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			current = currentURL.ResolveReference(resolved).String()
+			next := currentURL.ResolveReference(resolved)
+			// The lookup is the earlier request, but it carries no credential
+			// and the answer it wants is a tag page on the release host. A hop
+			// to anywhere else would put the download URLs' provenance in the
+			// hands of a server the release page never named — the asset hop
+			// already refuses this (Download's CheckRedirect).
+			if !sameRedirectHost(origin, next) {
+				return "", fmt.Errorf("TokenBoard release lookup redirected to %s, which is not the release host", next.Host)
+			}
+			current = next.String()
 			continue
 		case response.StatusCode == http.StatusOK:
 			return tagFromURL(current)
@@ -295,6 +308,18 @@ func latestTag(options Options, repo string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("TokenBoard release lookup redirected more than %d times", maxRedirects)
+}
+
+// isFollowedRedirect lists exactly the statuses net/http follows. Treating any
+// 3xx with a Location as a redirect would walk a 304 (a cache answer) to a
+// place the server never meant, and the TS client refuses the same ones.
+func isFollowedRedirect(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
 }
 
 // tagFromURL pulls the tag out of a `/releases/tag/<tag>` page URL.
