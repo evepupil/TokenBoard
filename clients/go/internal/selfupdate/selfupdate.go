@@ -29,6 +29,7 @@ import (
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 // maxBinaryBytes bounds the executable inside the tarball. The tarball itself
@@ -406,14 +407,19 @@ func nextBackupSequence() uint64 { return backupSequence.Add(1) }
 // binary path therefore restores from the backup before spawning (see
 // `recoverOrphanedBinary` in client-binary.mjs); a manual run can always
 // rename the backup back by hand.
+//
+// The renames go through renameatomic: on Windows a scanner or backup tool can
+// hold the freshly written staged file long enough for MoveFileEx to answer
+// EBUSY, and a short retry clears it where a plain os.Rename would fail an
+// update that was about to succeed.
 func swap(staged, current, backup string) error {
-	if err := os.Rename(current, backup); err != nil {
+	if err := renameatomic.Rename(current, backup); err != nil {
 		return fmt.Errorf("cannot back up the current TokenBoard binary: %w", err)
 	}
-	if err := os.Rename(staged, current); err != nil {
+	if err := renameatomic.Rename(staged, current); err != nil {
 		// Put the original back before reporting: a failed swap must not
 		// leave the machine without a collector.
-		if restoreErr := os.Rename(backup, current); restoreErr != nil {
+		if restoreErr := renameatomic.Rename(backup, current); restoreErr != nil {
 			return fmt.Errorf("cannot install the new TokenBoard binary: %v; "+
 				"and the original could not be restored from %s: %w", err, backup, restoreErr)
 		}

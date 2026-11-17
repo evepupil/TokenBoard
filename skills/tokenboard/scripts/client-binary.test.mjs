@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -974,4 +974,72 @@ test('the installer refuses an empty executable entry', async () => {
     () => extractBinary({ archivePath: archive, extractDir: join(dir, 'x'), name: 'tokenboard', log: () => {} }),
     /is empty/
   )
+})
+
+// A 3xx without a Location, and a redirect that lands on a page that is not a
+// release tag, must both be refused: following either leaves the installer with
+// no tag to download from. Go's latestTag draws the same lines.
+test('latestTag refuses a redirect without a Location', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = () => Promise.resolve({ status: 302, headers: new Map() })
+  await assert.rejects(() => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }), /without a Location/)
+})
+
+test('latestTag refuses a page that is not a release tag', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = () => Promise.resolve({ status: 200, headers: new Map() })
+  await assert.rejects(
+    () => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }),
+    /did not land on a tag page/
+  )
+})
+
+// On Windows a scanner holds a freshly written file long enough for rename to
+// answer EPERM. Recovery must retry that, the same way the state writes do
+// through rename-atomic.ts, or an update that was about to succeed fails.
+test('recovery retries a transiently busy rename', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-busy-rename-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', {
+    mode: 0o755
+  })
+  let attempts = 0
+  const rename = (from, to) => {
+    attempts += 1
+    if (attempts === 1) {
+      const error = new Error('EBUSY: resource busy or locked')
+      error.code = 'EBUSY'
+      throw error
+    }
+    renameSync(from, to)
+  }
+
+  recoverOrphanedBinary({ binaryPath, spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n' }), rename })
+
+  assert.equal(attempts, 2, 'the busy rename is retried once')
+  assert.equal(existsSync(binaryPath), true, 'the binary is back in place')
+})
+
+// A permanent rename error (a read-only directory) is not retried: retrying
+// cannot clear it, and each attempt costs the caller a delay.
+test('recovery does not retry a permanent rename failure', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-eacces-rename-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', {
+    mode: 0o755
+  })
+  let attempts = 0
+  const rename = () => {
+    attempts += 1
+    const error = new Error('EACCES: permission denied')
+    error.code = 'EACCES'
+    throw error
+  }
+
+  assert.throws(
+    () =>
+      recoverOrphanedBinary({ binaryPath, spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n' }), rename }),
+    /EACCES/
+  )
+  assert.equal(attempts, 1, 'a permanent failure is not retried')
 })

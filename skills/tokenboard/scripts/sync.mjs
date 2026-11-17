@@ -390,7 +390,8 @@ function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log,
 // recordClientVersionForInvocation notes the version this run is about to
 // execute, so status.mjs can report "this version, since then" next to the
 // sync results. A git client has no single binary version; it records nothing.
-// Failures to record are swallowed: a diagnostic must never fail the sync.
+// Failures to record never fail the sync, but they do warn: a record that
+// silently stopped working looked identical to a healthy run with no change.
 export function recordClientVersionForInvocation({
   invocation,
   spawn,

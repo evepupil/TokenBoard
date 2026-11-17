@@ -277,8 +277,7 @@ async function downloadBytesOnce({ url, name, fetcher, timeoutMs }) {
       // limited) and 5xx except 501/505, which mean it will never answer this
       // request. Everything else — a 4xx — is the release not existing.
       const retryable =
-        response.status === 429 ||
-        (response.status >= 500 && response.status !== 501 && response.status !== 505)
+        response.status === 429 || (response.status >= 500 && response.status !== 501 && response.status !== 505)
       const message = `download ${name} returned HTTP ${response.status}`
       throw retryable ? new Error(message) : permanentDownloadError(message)
     }
@@ -675,6 +674,43 @@ function configDirFromEnvironment(env = process.env) {
   return join(homedir(), '.tokenboard')
 }
 
+// renameWithRetry renames a file, retrying the transient Windows busy errors.
+//
+// A scanner or backup tool can hold a freshly written file long enough for
+// rename to answer EPERM or EBUSY, and a short backoff clears it. This is the
+// synchronous twin of packages/collector's rename-atomic.ts, which the state
+// writes use; recovery here runs synchronously inside runWithSyncLock.
+const renameRetryDelaysMs = [50, 150, 400]
+
+function isBusyRenameError(error) {
+  return error?.code === 'EPERM' || error?.code === 'EBUSY'
+}
+
+function renameWithRetry(from, to, renameFn = renameSync) {
+  try {
+    renameFn(from, to)
+    return
+  } catch (error) {
+    if (!isBusyRenameError(error)) throw error
+    let lastError = error
+    for (const delayMs of renameRetryDelaysMs) {
+      sleepSync(delayMs)
+      try {
+        renameFn(from, to)
+        return
+      } catch (retryError) {
+        if (!isBusyRenameError(retryError)) throw retryError
+        lastError = retryError
+      }
+    }
+    throw lastError
+  }
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms))
+}
+
 // recoverOrphanedBinary restores a binary whose swap was interrupted.
 //
 // `self-update` renames the running binary aside, then renames the staged one
@@ -715,7 +751,7 @@ export function recoverOrphanedBinary({
   const newestBackup = backups.at(-1)
   if (existsSync(staged) && runsVersion(staged, spawn)) {
     if (!newestBackup || !isStagedOlderThanBackup(staged, join(directory, newestBackup), spawn)) {
-      rename(staged, binaryPath)
+      renameWithRetry(staged, binaryPath, rename)
       log(`TokenBoard client was missing; restored ${binaryPath} from the staged download`)
       return staged
     }
@@ -726,7 +762,7 @@ export function recoverOrphanedBinary({
   if (!newestBackup) {
     return null
   }
-  rename(join(directory, newestBackup), binaryPath)
+  renameWithRetry(join(directory, newestBackup), binaryPath, rename)
   log(`TokenBoard client was missing; restored ${binaryPath} from ${newestBackup}`)
   return join(directory, newestBackup)
 }
