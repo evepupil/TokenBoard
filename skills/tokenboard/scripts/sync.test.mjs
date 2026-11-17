@@ -2070,3 +2070,55 @@ test('an unchanged version writes no line', async () => {
 
   assert.deepEqual(written, [])
 })
+
+// A manual sync sets neither TOKENBOARD_STATE_DIR nor TOKENBOARD_CONFIG_DIR, so
+// without the ~/.tokenboard fallback it recorded nothing at all.
+test('a manual sync with no state env still records under the home directory', async () => {
+  const { homedir } = await import('node:os')
+  const seen = []
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' }),
+    record: ({ stateDir }) => {
+      seen.push(stateDir)
+      return { changed: false }
+    }
+  })
+
+  assert.deepEqual(seen, [join(homedir(), '.tokenboard')])
+})
+
+// A probe that cannot name a version must leave a warning, not look like a
+// healthy run that had nothing to record. This is how the missing-import bug
+// (`spawnSync is not defined`) stayed invisible until a real hook failed.
+test('a failed version probe warns instead of failing silently', () => {
+  const warnings = []
+  const result = recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: { TOKENBOARD_STATE_DIR: '/tmp/x' } },
+    spawn: () => {
+      throw new ReferenceError('spawnSync is not defined')
+    },
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(result, null)
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /not recorded/)
+})
+
+// The same warning fires when the version record itself throws.
+test('a failing version write warns instead of failing silently', () => {
+  const warnings = []
+  const result = recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: { TOKENBOARD_STATE_DIR: '/tmp/x' } },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' }),
+    record: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(result, null)
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /not recorded/)
+})

@@ -482,9 +482,9 @@ func TestRunPrunesOldBackupsKeepingTheNewest(t *testing.T) {
 	}
 }
 
-// The glob pattern is escaped, so a binary living in a directory whose name
-// carries glob metacharacters prunes its own backups, not another binary's.
-func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
+// A binary living in a directory whose name carries glob metacharacters
+// prunes its own backups, not another binary's.
+func TestPruneBackupsStaysWithinItsOwnDirectory(t *testing.T) {
 	dir := t.TempDir()
 	// Two binaries in sibling directories whose names differ only by a glob
 	// character in one of them: pruning one must not match the other's files.
@@ -506,13 +506,12 @@ func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
 	}
 }
 
-// The directory is part of the glob pattern too. `filepath.Glob` reads `[`, `*`
-// and `?` as syntax anywhere in the pattern, so an unescaped config directory
-// whose name carries one (`~/.tokenboard[work]`, a Windows user folder, a
-// caller-set TOKENBOARD_CONFIG_DIR) both fails to match its own backups — they
-// accumulate forever — and matches a sibling directory's instead: the character
-// class `[cfg]` in a directory named `[cfg]` matches a sibling named `c`.
-func TestPruneBackupsEscapesGlobMetaInTheDirectory(t *testing.T) {
+// A config directory whose name carries a glob metacharacter
+// (`~/.tokenboard[work]`, a Windows user folder, a caller-set
+// TOKENBOARD_CONFIG_DIR) must still have its own backups pruned, and must not
+// reach a sibling's: with a glob, the character class `[cfg]` in a directory
+// named `[cfg]` matched a sibling named `c`.
+func TestPruneBackupsHandlesAMetacharacterDirectory(t *testing.T) {
 	dir := t.TempDir()
 	metaDir := filepath.Join(dir, "[cfg]")
 	siblingDir := filepath.Join(dir, "c")
@@ -858,4 +857,58 @@ func buildTarballWithType(t *testing.T, name string, typeflag byte, body []byte)
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+// Pruning lists the directory instead of globbing it, so it must not depend on
+// escaping at all: on Windows filepath.Glob disables escaping and treats `\`
+// as a path separator, which made an escaped `[cfg]` directory an invalid path
+// there. A directory whose name carries every glob metacharacter still has its
+// own backups pruned, and a sibling whose name resembles the pattern is left
+// alone.
+func TestPruneBackupsHandlesMetacharacterDirectoriesWithoutGlobbing(t *testing.T) {
+	root := t.TempDir()
+	oddDir := filepath.Join(root, "bin[1]*?")
+	sibling := filepath.Join(root, "bin1")
+	for _, dir := range []string{oddDir, sibling} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := filepath.Join(oddDir, "tokenboard")
+	keep := current + ".backup-20260103T000000Z-000002"
+	stale := []string{
+		current + ".backup-20260101T000000Z-000001",
+		current + ".backup-20260102T000000Z-000001",
+	}
+	for _, path := range append(stale, keep) {
+		if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	siblingBackup := filepath.Join(sibling, "tokenboard.backup-20260101T000000Z-000001")
+	if err := os.WriteFile(siblingBackup, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A directory named like a backup must never be removed as one.
+	fakeDir, _ := os.MkdirTemp(oddDir, "tokenboard.backup-")
+	if err := os.MkdirAll(fakeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneBackups(current, keep)
+
+	for _, path := range stale {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("stale backup survived: %s", path)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("the kept backup was removed: %v", err)
+	}
+	if _, err := os.Stat(siblingBackup); err != nil {
+		t.Errorf("a sibling directory's backup was removed: %v", err)
+	}
+	if info, err := os.Stat(fakeDir); err != nil || !info.IsDir() {
+		t.Errorf("a directory matching the backup prefix was removed: %v", err)
+	}
 }

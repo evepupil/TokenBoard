@@ -395,18 +395,32 @@ export function recordClientVersionForInvocation({
   invocation,
   spawn,
   now = Date.now,
-  record = recordClientVersion
+  record = recordClientVersion,
+  warn = () => {}
 } = {}) {
   if (invocation?.clientType !== 'binary') return null
   try {
     // readVersion defaults to the real spawnSync; passing undefined here keeps
     // a git-only process from ever needing child_process to be reachable.
     const version = readVersion(invocation.command, spawn ?? spawnSync, ['version'])
-    if (!version) return null
-    const stateDir = invocation.env?.TOKENBOARD_STATE_DIR || invocation.env?.TOKENBOARD_CONFIG_DIR
-    if (!stateDir) return null
+    if (!version) {
+      // readVersion answers null for a binary that cannot run or prints
+      // nothing. Nothing to record, but a broken probe looked exactly like a
+      // healthy one that had no version, so say so once.
+      if (typeof warn === 'function')
+        warn(`TokenBoard client version not recorded: ${invocation.command} did not answer version`)
+      return null
+    }
+    // Same resolution as the sync lock and the Go side: an explicit state dir,
+    // then the config dir, then ~/.tokenboard. Without the last step a manual
+    // sync (which sets neither variable) recorded nothing at all.
+    const stateDir =
+      invocation.env?.TOKENBOARD_STATE_DIR || invocation.env?.TOKENBOARD_CONFIG_DIR || join(homedir(), '.tokenboard')
     return record({ stateDir, version, now })
-  } catch {
+  } catch (error) {
+    // A diagnostic must never fail the sync, but it must not vanish either: a
+    // broken probe looked exactly like "no version to record".
+    if (typeof warn === 'function') warn(`TokenBoard client version not recorded: ${errorMessage(error)}`)
     return null
   }
 }
@@ -423,10 +437,10 @@ export function upgradeThenRecordVersion({
   upgrade = runPreCollectUpgrade,
   record = recordClientVersionForInvocation,
   write = writeSync,
-  warn = () => {}
+  warn = (message) => console.error(message)
 } = {}) {
   upgrade({ flags, invocation, logs })
-  const changed = record({ invocation })
+  const changed = record({ invocation, warn })
   if (!changed?.changed) return changed
   const from = changed.previous ? ` (was ${changed.previous})` : ''
   try {

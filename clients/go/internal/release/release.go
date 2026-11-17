@@ -367,6 +367,16 @@ func retryDelay(attempt int) time.Duration {
 	return time.Duration(attempt) * 2 * time.Second
 }
 
+// isRetryableStatus reports whether a non-200 status is worth another attempt.
+// 501 (not implemented) and 505 (HTTP version not supported) are permanent:
+// the server will answer the same way however many times it is asked.
+func isRetryableStatus(code int) bool {
+	if code == http.StatusTooManyRequests {
+		return true
+	}
+	return code >= 500 && code != http.StatusNotImplemented && code != http.StatusHTTPVersionNotSupported
+}
+
 // isTransient reports whether retrying the same request could plausibly
 // succeed. A dropped connection or a truncated body is a link problem; a 4xx
 // is the release not existing, and 501/505 mean the server will not answer
@@ -418,9 +428,10 @@ func downloadOnce(client *http.Client, asset Asset) ([]byte, error) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		err := fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
-		// 5xx (except "not implemented") and 429 are the server saying "not now";
-		// everything else is the request itself being wrong.
-		if response.StatusCode >= 500 && response.StatusCode != http.StatusNotImplemented || response.StatusCode == http.StatusTooManyRequests {
+		// A retry only helps when the server is saying "not now": 429 (rate
+		// limited) and 5xx except 501 and 505, which mean it will never answer
+		// this request. Everything else is the request itself being wrong.
+		if isRetryableStatus(response.StatusCode) {
 			return nil, err
 		}
 		return nil, &permanentDownloadError{err: err}

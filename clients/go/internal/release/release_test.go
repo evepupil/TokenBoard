@@ -324,3 +324,37 @@ func TestDownloadStopsAfterTheRetryBudget(t *testing.T) {
 		t.Errorf("attempts = %d, want the budget of %d", attempts, maxDownloadAttempts)
 	}
 }
+
+// The retry policy is "not now" versus "never". A 429 and a 5xx are worth
+// another attempt; 501 and 505 are not — the server will answer the same way.
+func TestDownloadRetryPolicyByStatus(t *testing.T) {
+	cases := []struct {
+		status    int
+		attempts  int
+		retryable bool
+	}{
+		{http.StatusTooManyRequests, maxDownloadAttempts, true},
+		{http.StatusInternalServerError, maxDownloadAttempts, true},
+		{http.StatusServiceUnavailable, maxDownloadAttempts, true},
+		{http.StatusNotImplemented, 1, false},
+		{http.StatusHTTPVersionNotSupported, 1, false},
+		{http.StatusForbidden, 1, false},
+	}
+	for _, testCase := range cases {
+		t.Run(http.StatusText(testCase.status), func(t *testing.T) {
+			var attempts int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attempts++
+				http.Error(w, "x", testCase.status)
+			}))
+			defer server.Close()
+
+			if _, err := Download(server.Client(), Asset{Name: "a.tar.gz", URL: server.URL + "/a.tar.gz"}); err == nil {
+				t.Fatal("a non-200 must fail")
+			}
+			if attempts != testCase.attempts {
+				t.Errorf("attempts = %d, want %d", attempts, testCase.attempts)
+			}
+		})
+	}
+}

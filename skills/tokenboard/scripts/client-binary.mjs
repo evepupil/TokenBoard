@@ -273,10 +273,14 @@ async function downloadBytesOnce({ url, name, fetcher, timeoutMs }) {
       }
     }
     if (!response.ok) {
-      // 4xx means the release is not there; 5xx and 429 are worth one more try.
-      if (response.status < 500 || response.status === 501)
-        throw permanentDownloadError(`download ${name} returned HTTP ${response.status}`)
-      throw new Error(`download ${name} returned HTTP ${response.status}`)
+      // A retry only helps when the server is saying "not now": 429 (rate
+      // limited) and 5xx except 501/505, which mean it will never answer this
+      // request. Everything else — a 4xx — is the release not existing.
+      const retryable =
+        response.status === 429 ||
+        (response.status >= 500 && response.status !== 501 && response.status !== 505)
+      const message = `download ${name} returned HTTP ${response.status}`
+      throw retryable ? new Error(message) : permanentDownloadError(message)
     }
     const declared = Number(response.headers?.get?.('content-length') ?? 0)
     if (Number.isFinite(declared) && declared > maxDownloadBytes) {

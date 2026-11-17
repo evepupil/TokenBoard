@@ -228,44 +228,47 @@ func Run(input Input) (Result, error) {
 // one this update just made. Cleanup never fails the update: the new binary is
 // already in place and verified, and a leftover file is not worth reporting an
 // upgrade as failed for.
+// pruneBackups removes the stale backups beside current, keeping the one this
+// update just made.
+//
+// The directory is listed and compared by name rather than globbed. A glob
+// pattern has to encode the directory too, and no spelling works on every
+// platform: filepath.Glob reads `[`, `*` and `?` as syntax, while on Windows it
+// disables escaping altogether and treats `\` as a path separator, so escaping
+// a metacharacter there rewrites the path instead of neutralising it. Listing
+// sidesteps both: a directory named `[cfg]` is just a directory.
 func pruneBackups(current, keep string) {
-	matches, err := filepath.Glob(backupPathPattern(current))
+	dir := filepath.Dir(current)
+	prefix := filepath.Base(current) + ".backup-"
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	for _, match := range matches {
-		if match == keep {
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		_ = os.Remove(match)
-	}
-}
-
-// backupPathPattern is the glob for one binary's backups. Both the directory
-// and the file name are escaped: filepath.Glob reads `[`, `*` and `?` as
-// pattern syntax anywhere in the string, so an unescaped directory whose name
-// carries one (`~/.tokenboard[work]`, a Windows user folder) would neither
-// match its own backups — leaving them to accumulate forever — nor stop at
-// its own directory: `[cfg]` as a character class matches a sibling `c`.
-func backupPathPattern(current string) string {
-	dir := filepath.Dir(current)
-	// filepath.Dir(".") is ".": joining would produce "./<name>", which still
-	// globs against the working directory, so the escape is harmless there too.
-	return filepath.Join(escapeGlobMeta(dir), escapeGlobMeta(filepath.Base(current))+".backup-*")
-}
-
-// escapeGlobMeta backslashes every pattern metacharacter in value. Go's
-// filepath.Match separates the pattern on the platform separator before
-// matching, so escaping a separator is outside what it parses.
-func escapeGlobMeta(value string) string {
-	var builder strings.Builder
-	for _, char := range value {
-		if strings.ContainsRune(`*?[]\`, char) {
-			builder.WriteRune('\\')
+		if entry.IsDir() {
+			continue
 		}
-		builder.WriteRune(char)
+		path := filepath.Join(dir, name)
+		if samePath(path, keep) {
+			continue
+		}
+		_ = os.Remove(path)
 	}
-	return builder.String()
+}
+
+// samePath reports whether two paths name the same file. Windows paths compare
+// case-insensitively, as the filesystem does.
+func samePath(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 // fileExists reports whether path is an existing regular file.
