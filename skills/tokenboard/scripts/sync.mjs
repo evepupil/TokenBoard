@@ -411,20 +411,35 @@ export function recordClientVersionForInvocation({
   }
 }
 
-async function runSync({ flags, invocation, logs }) {
-  // Recorded before the upgrade step: the version noted here is the one this
-  // run actually executes. A version that changed is worth one log line, which
-  // is where an operator looking at "why did collection change" starts.
-  const versionChange = recordClientVersionForInvocation({ invocation })
-  if (versionChange?.changed && logs) {
-    const from = versionChange.previous ? ` (was ${versionChange.previous})` : ''
-    try {
-      writeSync(logs.stdoutFd, `TokenBoard client version ${versionChange.version}${from}\n`)
-    } catch {
-      // A diagnostic line must never fail the sync.
-    }
+// upgradeThenRecordVersion runs the upgrade step and only then notes the
+// version this run will execute. self-update replaces the binary at the same
+// path in place, so the version present after the upgrade is exactly the one
+// the collector is about to spawn; recording first would report the change a
+// run late and stamp `since` at the old version's start.
+export function upgradeThenRecordVersion({
+  flags,
+  invocation,
+  logs,
+  upgrade = runPreCollectUpgrade,
+  record = recordClientVersionForInvocation,
+  write = writeSync,
+  warn = () => {}
+} = {}) {
+  upgrade({ flags, invocation, logs })
+  const changed = record({ invocation })
+  if (!changed?.changed) return changed
+  const from = changed.previous ? ` (was ${changed.previous})` : ''
+  try {
+    if (logs) write(logs.stdoutFd, `TokenBoard client version ${changed.version}${from}\n`)
+    else warn(`TokenBoard client version ${changed.version}${from}`)
+  } catch {
+    // A diagnostic line must never fail the sync.
   }
-  runPreCollectUpgrade({ flags, invocation, logs })
+  return changed
+}
+
+async function runSync({ flags, invocation, logs }) {
+  upgradeThenRecordVersion({ flags, invocation, logs })
 
   const effectiveInvocation = refreshBundledCcusageConfig(invocation)
 

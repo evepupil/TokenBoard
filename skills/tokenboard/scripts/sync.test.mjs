@@ -15,6 +15,7 @@ import {
   refreshBundledCcusageConfig,
   runCollectorProcess,
   recordClientVersionForInvocation,
+  upgradeThenRecordVersion,
   runPreCollectUpgrade,
   recordScheduledFailure,
   runSyncInvocation,
@@ -2010,4 +2011,62 @@ test('a git client records no version', async () => {
   })
 
   assert.equal(readClientVersionState(dir), null)
+})
+
+// self-update rewrites the binary at the same path in place, so the version
+// that matters is the one present after the upgrade step — that is what the
+// collector spawns. Recording before the upgrade would report the change one
+// run late and stamp `since` at the old version's start.
+test('the version is recorded after the upgrade step, not before', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const order = []
+  const logs = []
+  const result = upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: { stdoutFd: 7 },
+    upgrade: () => order.push('upgrade'),
+    record: ({ invocation }) => {
+      order.push('record')
+      assert.equal(invocation.command, '/x/tokenboard', 'the same invocation must reach the record step')
+      return { changed: true, version: '0.2.1', previous: '0.2.0' }
+    },
+    write: (fd, line) => logs.push({ fd, line })
+  })
+
+  assert.deepEqual(order, ['upgrade', 'record'])
+  assert.deepEqual(logs, [{ fd: 7, line: 'TokenBoard client version 0.2.1 (was 0.2.0)\n' }])
+  assert.equal(result.version, '0.2.1')
+})
+
+// With no log file (an interactive run) the change still surfaces, on stderr.
+test('a version change without a log file goes to the warning sink', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const warnings = []
+  upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: null,
+    upgrade: () => {},
+    record: () => ({ changed: true, version: '0.2.1', previous: undefined }),
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.deepEqual(warnings, ['TokenBoard client version 0.2.1'])
+})
+
+// An unchanged version writes nothing: the scheduled log is long-lived.
+test('an unchanged version writes no line', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const written = []
+  upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: { stdoutFd: 7 },
+    upgrade: () => {},
+    record: () => ({ changed: false, version: '0.2.0' }),
+    write: (fd, line) => written.push(line)
+  })
+
+  assert.deepEqual(written, [])
 })
