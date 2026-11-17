@@ -1904,3 +1904,27 @@ test('recovery releases the self-update lock when it fails', () => {
     })
   })
 })
+
+// A first run on a fresh machine has no state directory, so the lock cannot be
+// created. That must not leave a missing binary unrecovered: with no lock
+// directory, no self-update can be mid-swap.
+test('recovery runs when the lock directory does not exist yet', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-no-state-'))
+  const stateDir = join(base, 'missing', 'state')
+  const recoveries = []
+  const warnings = []
+
+  runPreCollectUpgrade({
+    flags: { 'skip-upgrade': true },
+    env: { TOKENBOARD_STATE_DIR: stateDir },
+    invocation: { clientType: 'binary', command: join(base, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.deepEqual(recoveries, [join(base, 'bin', 'tokenboard')])
+  assert.deepEqual(warnings, [])
+})

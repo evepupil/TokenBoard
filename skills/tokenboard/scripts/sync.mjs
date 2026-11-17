@@ -367,13 +367,19 @@ export function runPreCollectUpgrade({
   }
 }
 
-// recoverUnderUpdateLock runs the orphan recovery only while it can take the
-// lock the updater uses. The recovery renames `<binary>.backup-*` (or a valid
-// `.new`) back into place, and a self-update is between its own two renames —
-// the only moment the target is legitimately absent — while it holds that
-// lock. Running recovery without it would move the updater's backup away
-// mid-swap. If the lock is held, the absence is explained and this run leaves
-// it alone: the next sync recovers once the update finishes or fails.
+// recoverUnderUpdateLock runs the orphan recovery while holding the lock the
+// updater uses. The recovery renames `<binary>.backup-*` (or a valid `.new`)
+// back into place, and a self-update is between its own two renames — the only
+// moment the target is legitimately absent — while it holds that lock, so
+// recovery without it could move the updater's backup away mid-swap.
+//
+// Two cases fall back to recovering without the lock, because each means no
+// update can be running: the lock directory does not exist yet (a first run on
+// a fresh machine, where no self-update has ever written state), or the lock
+// file cannot be created for a reason other than an existing holder. Both would
+// otherwise leave a missing binary unrecovered — the very failure this exists
+// to repair. A readable lock that *is* held is respected and recovery waits for
+// the next run.
 function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log, warn, redact }) {
   const lockDir = stateDir || configDir || join(homedir(), '.tokenboard')
   const lockPath = join(lockDir, selfUpdateLockFileName)
@@ -382,6 +388,11 @@ function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log,
   try {
     lock = acquireLock(lockPath, runtime)
   } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+      // No usable lock directory: nothing can be mid-swap here.
+      recoverOrWarn({ recover, binaryPath, log, warn, redact })
+      return
+    }
     warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
     return
   }
@@ -390,11 +401,20 @@ function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log,
     return
   }
   try {
+    recoverOrWarn({ recover, binaryPath, log, warn, redact })
+  } finally {
+    releaseLock(lockPath, runtime, lock)
+  }
+}
+
+// recoverOrWarn runs the recovery and folds any failure into the warning sink:
+// a recovery that cannot run (permissions, a corrupt directory) must not fail
+// the sync, because the collector may still work on the binary it has.
+function recoverOrWarn({ recover, binaryPath, log, warn, redact }) {
+  try {
     recover({ binaryPath, log })
   } catch (error) {
     warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
-  } finally {
-    releaseLock(lockPath, runtime, lock)
   }
 }
 
