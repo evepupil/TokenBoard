@@ -1,4 +1,14 @@
-import { chmodSync, linkSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { currentProcessStartIdentity } from './process-liveness.mjs'
 
 // stateLockRuntime builds the environment coordinator-lock.mjs operates on.
@@ -16,6 +26,7 @@ export function stateLockRuntime({ lockTimeoutMs }) {
     lockTimeoutMs,
     chmod: (path, mode) => chmodSync(path, mode),
     lstat: (path) => lstatSync(path),
+    stat: (path) => statSync(path),
     mkdir: (path, options) => mkdirSync(path, options),
     now: Date.now,
     process,

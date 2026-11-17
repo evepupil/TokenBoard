@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { win32 as windowsPath } from 'node:path'
+import { existsSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { stateLockRuntime } from './state-lock-runtime.mjs'
 import { acquireLock, lockHasToken, releaseLock } from './coordinator-lock.mjs'
 import { coordinatedSync } from './coordinator.mjs'
 import {
@@ -910,4 +914,36 @@ test('coordinator recovers a stale lock through tasklist on legacy Windows Node'
   assert.equal(result.error, undefined)
   assert.equal(tasklistCalls, 1)
   assert.equal(fs.files.has('/state/sync.lock'), false)
+})
+
+// A holder creates its lock file with O_EXCL and writes the record next. A
+// contender that reads between those two steps sees an empty file; treating it
+// as dead lets both believe they hold the lock. The creation window fences it,
+// the same way Go's lockStaleWindow does.
+test('a fresh unparseable lock is not swept inside the creation window', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-window-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+
+  const owner = acquireLock(lockPath, runtime)
+
+  // acquireLock reports a held lock as a falsy value: `false` when the
+  // existing record was judged live, `null` when the retry budget ran out.
+  assert.ok(!owner, 'a lock written moments ago must be honoured, not swept')
+  assert.equal(existsSync(lockPath), true, 'the fresh lock file must survive')
+})
+
+// Past the window an empty record with no live process is genuinely stale.
+test('an aged unparseable lock is swept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-aged-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const old = new Date(Date.now() - 31_000)
+  utimesSync(lockPath, old, old)
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+
+  const owner = acquireLock(lockPath, runtime)
+
+  assert.ok(owner, 'an aged empty lock must be swept and re-acquired')
 })

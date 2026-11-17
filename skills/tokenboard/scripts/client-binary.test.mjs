@@ -45,15 +45,22 @@ function fixtureSpawn({ tokenboard = '1.2.3', ccusage = '20.0.20' } = {}) {
   if (process.platform !== 'win32') return undefined
   return (command, args, options) => {
     if (command === 'tar') return spawnSync(command, args, options)
-    if (!existsSync(String(command))) {
+    const path = String(command)
+    if (!existsSync(path)) {
       const error = new Error(`spawnSync ${command} ENOENT`)
       error.code = 'ENOENT'
       return { error, status: null, stdout: '', stderr: '' }
     }
-    const line = basename(String(command)).startsWith('ccusage')
-      ? `ccusage ${ccusage}`
-      : `tokenboard (go) ${tokenboard}`
-    return { status: 0, stdout: `${line}\n`, stderr: '' }
+    if (basename(path).startsWith('ccusage')) {
+      return { status: 0, stdout: `ccusage ${ccusage}\n`, stderr: '' }
+    }
+    // A script fixture cannot run on Windows, so the version the probe reads
+    // comes from the file itself: read the stub's `echo "tokenboard (go) X"`
+    // line. One fixed value for every path would make any recovery test that
+    // compares two candidates see them as equal.
+    const printed = readFileSync(path, 'utf8').match(/tokenboard \(go\) ([0-9][0-9.]*)/)
+    const version = printed ? printed[1] : tokenboard
+    return { status: 0, stdout: `tokenboard (go) ${version}\n`, stderr: '' }
   }
 }
 
@@ -802,4 +809,90 @@ test('recovery still prefers a staged binary newer than the backup', () => {
 
   assert.match(readFileSync(binaryPath, 'utf8'), /0\.3\.0/, 'the staged copy must be restored')
   assert.equal(existsSync(`${binaryPath}.backup-20260101T000000Z-000001`), true, 'the backup is left alone')
+})
+
+// The installer holds self-update.lock while it resolves the tag, so a
+// lookup that never answers must fail on its own budget rather than block
+// every scheduled self-update behind it.
+test('latestTag fails on its own budget when the lookup hangs', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = (url, options) =>
+    new Promise((resolve, reject) => {
+      options?.signal?.addEventListener(
+        'abort',
+        () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+        {
+          once: true
+        }
+      )
+      void resolve
+    })
+  await assert.rejects(
+    () => latestTag({ repo: 'owner/repo', baseUrl: 'https://github.com', fetcher, lookupTimeoutMs: 30 }),
+    /lookup timed out/
+  )
+})
+
+// A lookup that answers normally is unaffected by the budget.
+test('latestTag follows the redirect when the lookup answers', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const responses = [
+    { status: 302, headers: new Map([['location', 'https://github.com/owner/repo/releases/tag/v1.2.3']]) },
+    { status: 200, headers: new Map() }
+  ]
+  let calls = 0
+  const tag = await latestTag({
+    repo: 'owner/repo',
+    baseUrl: 'https://github.com',
+    fetcher: () => Promise.resolve(responses[calls++]),
+    lookupTimeoutMs: 1000
+  })
+  assert.equal(tag, 'v1.2.3')
+})
+
+// runSelfUpdate is a second recovery entry, reached from the upgrade path of a
+// process whose hook run does not hold sync.lock. It must not recover while a
+// Go swap holds self-update.lock, or it could move that swap's backup away.
+test('runSelfUpdate does not recover while a self-update holds the lock', async () => {
+  const { runSelfUpdate } = await import('./client-binary.mjs')
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { selfUpdateLockFileName, stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-runselfupdate-lock-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'previous', { mode: 0o755 })
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  const owner = acquireLock(join(dir, selfUpdateLockFileName), runtime)
+  const lines = []
+
+  assert.throws(
+    () =>
+      runSelfUpdate({
+        binaryPath,
+        env: { TOKENBOARD_STATE_DIR: dir },
+        log: (l) => lines.push(l),
+        spawn: () => ({ status: 0 })
+      }),
+    /not installed/
+  )
+  releaseLock(join(dir, selfUpdateLockFileName), runtime, owner)
+
+  assert.equal(existsSync(binaryPath), false, 'recovery must not have run while the lock was held')
+  assert.match(lines.join('\n'), /self-update holds/)
+})
+
+// With the lock free, runSelfUpdate still recovers a missing binary.
+test('runSelfUpdate recovers a missing binary when no update holds the lock', async () => {
+  const { runSelfUpdate } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-runselfupdate-free-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+
+  runSelfUpdate({
+    binaryPath,
+    env: { TOKENBOARD_STATE_DIR: dir },
+    log: () => {},
+    spawn: () => ({ status: 0, stdout: '', stderr: '' })
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the backup must have been restored')
 })

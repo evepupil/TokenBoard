@@ -365,7 +365,14 @@ function isLockRecordStale(lockPath, record, runtime) {
 
 function isLockOwnerActive(lockPath, record, runtime, activeOwners) {
   const pid = record?.pid ?? null
-  if (pid === null) return false
+  if (pid === null) {
+    // An unparseable record is not proof of a dead owner: the holder may have
+    // just created the file and not yet written its payload (Go's tryAcquire
+    // opens with O_EXCL, then writes). Sweeping inside that window lets two
+    // contenders both believe they own the lock. Go fences it with a 30s
+    // mtime window (lockStaleWindow); the same window applies here.
+    return isWithinCreationWindow(lockPath, runtime)
+  }
   if (pid === runtime.process.pid && record.token && activeOwners.has(lockOwnerKey(lockPath, record.token, runtime))) {
     return true
   }
@@ -474,4 +481,26 @@ function lockQuarantinePath(lockPath, runtime) {
 
 function lockCleanupPath(lockPath) {
   return `${lockPath}.cleanup`
+}
+
+// lockCreationWindowMs fences the window between a holder creating its lock
+// file and writing the record. Mirrors Go's lockStaleWindow so a lock taken by
+// either implementation is honoured by the other.
+const lockCreationWindowMs = 30_000
+
+function isWithinCreationWindow(lockPath, runtime) {
+  if (typeof runtime.stat !== 'function') {
+    // No mtime to inspect (a test double, or a runtime that cannot stat):
+    // there is no window to fence, so keep the previous behaviour rather than
+    // inventing freshness that would make a permanently dead lock unclearable.
+    return false
+  }
+  try {
+    const info = runtime.stat(lockPath)
+    const modified = typeof info?.mtimeMs === 'number' ? info.mtimeMs : null
+    if (modified === null) return false
+    return runtime.now() - modified < lockCreationWindowMs
+  } catch {
+    return false
+  }
 }

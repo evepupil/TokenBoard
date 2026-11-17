@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { isMainModule } from './is-main.mjs'
 import { readConfig, parseArgs, collectorDir, readPackageManager, resolveClientForSource } from './config.mjs'
-import { clientBinaryPath, recoverOrphanedBinary, runSelfUpdate } from './client-binary.mjs'
+import { clientBinaryPath, recoverOrphanedBinary, recoverUnderInstallLock, runSelfUpdate } from './client-binary.mjs'
 import { printHelpIfRequested, hasHelpFlag } from './cli-help.mjs'
 import { normalizePathEnv } from './schedule.mjs'
 import { readSince } from './sync-options.mjs'
@@ -367,52 +367,14 @@ export function runPreCollectUpgrade({
   }
 }
 
-// recoverUnderUpdateLock runs the orphan recovery while holding the lock the
-// updater uses. The recovery renames `<binary>.backup-*` (or a valid `.new`)
-// back into place, and a self-update is between its own two renames — the only
-// moment the target is legitimately absent — while it holds that lock, so
-// recovery without it could move the updater's backup away mid-swap.
-//
-// Two cases fall back to recovering without the lock, because each means no
-// update can be running: the lock directory does not exist yet (a first run on
-// a fresh machine, where no self-update has ever written state), or the lock
-// file cannot be created for a reason other than an existing holder. Both would
-// otherwise leave a missing binary unrecovered — the very failure this exists
-// to repair. A readable lock that *is* held is respected and recovery waits for
-// the next run.
+// recoverUnderUpdateLock is the sync path's entry to the shared recovery: it
+// takes the same self-update.lock the Go swap holds, so a hook run (which can
+// reach here without sync.lock) cannot move an in-flight update's backup away.
+// The lock logic lives with the recovery it guards, in client-binary.mjs.
 function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log, warn, redact }) {
-  const lockDir = stateDir || configDir || join(homedir(), '.tokenboard')
-  const lockPath = join(lockDir, selfUpdateLockFileName)
-  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
-  let lock
+  const env = { TOKENBOARD_STATE_DIR: stateDir ?? '', TOKENBOARD_CONFIG_DIR: configDir ?? '' }
   try {
-    lock = acquireLock(lockPath, runtime)
-  } catch (error) {
-    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
-      // No usable lock directory: nothing can be mid-swap here.
-      recoverOrWarn({ recover, binaryPath, log, warn, redact })
-      return
-    }
-    warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
-    return
-  }
-  if (!lock) {
-    log(`TokenBoard binary is missing while a self-update holds ${lockPath}; leaving recovery to it`)
-    return
-  }
-  try {
-    recoverOrWarn({ recover, binaryPath, log, warn, redact })
-  } finally {
-    releaseLock(lockPath, runtime, lock)
-  }
-}
-
-// recoverOrWarn runs the recovery and folds any failure into the warning sink:
-// a recovery that cannot run (permissions, a corrupt directory) must not fail
-// the sync, because the collector may still work on the binary it has.
-function recoverOrWarn({ recover, binaryPath, log, warn, redact }) {
-  try {
-    recover({ binaryPath, log })
+    recoverUnderInstallLock({ binaryPath, env, log, recover })
   } catch (error) {
     warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
   }

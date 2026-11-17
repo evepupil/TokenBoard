@@ -24,6 +24,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
@@ -37,6 +38,7 @@ export const defaultReleaseBaseUrl = 'https://github.com'
 // redirect to something else cannot fill the disk.
 const maxDownloadBytes = 128 * 1024 * 1024
 const downloadTimeoutMs = 120_000
+const releaseLookupTimeoutMs = 15_000
 const maxDownloadAttempts = 3
 const downloadRetryDelayMs = 500
 const maxRedirects = 5
@@ -126,10 +128,34 @@ export async function resolveRelease({
 // latestTag follows the releases-latest redirect to the tag page. Redirects
 // are followed by hand so a loop is reported instead of walked, and so the
 // request never depends on the anonymous REST quota.
-export async function latestTag({ repo, baseUrl, fetcher = fetch }) {
+// lookupTimeoutMs bounds the whole redirect chain. The installer now holds
+// self-update.lock while it resolves the tag, and a fetch without a budget
+// would block every scheduled self-update for as long as the connection
+// hangs; Go's release package draws the same line at 15s.
+export async function latestTag({ repo, baseUrl, fetcher = fetch, lookupTimeoutMs = releaseLookupTimeoutMs }) {
   let current = `${baseUrl}/${repo}/releases/latest`
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, lookupTimeoutMs)
+  try {
+    return await latestTagHops({ repo, current, fetcher, controller })
+  } catch (error) {
+    if (timedOut) throw permanentDownloadError('TokenBoard release lookup timed out')
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function latestTagHops({ repo, current, fetcher, controller }) {
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
-    const response = await fetcher(current, { redirect: 'manual' })
+    const response = await raceAbort(
+      fetcher(current, { redirect: 'manual', signal: controller.signal }),
+      controller.signal
+    )
     if (response.status === 404) {
       throw new Error(`TokenBoard release lookup returned HTTP 404 for ${repo}`)
     }
@@ -591,6 +617,47 @@ async function installClientBinaryLocked({
   }
 }
 
+// recoverUnderInstallLock runs recovery while holding the self-update lock, so
+// it cannot race a Go swap that is between its two renames. With no lock
+// directory yet, no update can be running, so recovery proceeds directly; a
+// lock that is held is respected and the caller decides what to do next.
+export function recoverUnderInstallLock({ binaryPath, env, readDir, rename, log, recover = recoverOrphanedBinary }) {
+  const lockDir = configDirFromEnvironment(env)
+  const lockPath = join(lockDir, selfUpdateLockFileName)
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  let lock
+  try {
+    lock = acquireLock(lockPath, runtime)
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+      // No usable lock directory: nothing can be mid-swap here.
+      recover({ binaryPath, readDir, rename, log })
+      return
+    }
+    throw error
+  }
+  if (!lock) {
+    log(`TokenBoard client is missing while a self-update holds ${lockPath}; leaving recovery to it`)
+    return
+  }
+  try {
+    recover({ binaryPath, readDir, rename, log })
+  } finally {
+    releaseLock(lockPath, runtime, lock)
+  }
+}
+
+// configDirFromEnvironment resolves the state directory exactly as Go's
+// state.ResolveDir does: TOKENBOARD_STATE_DIR, then TOKENBOARD_CONFIG_DIR, then
+// ~/.tokenboard. The lock only excludes the Go side when both agree.
+function configDirFromEnvironment(env = process.env) {
+  const stateDir = String(env.TOKENBOARD_STATE_DIR ?? '').trim()
+  if (stateDir) return stateDir
+  const configDir = String(env.TOKENBOARD_CONFIG_DIR ?? '').trim()
+  if (configDir) return configDir
+  return join(homedir(), '.tokenboard')
+}
+
 // recoverOrphanedBinary restores a binary whose swap was interrupted.
 //
 // `self-update` renames the running binary aside, then renames the staged one
@@ -757,8 +824,12 @@ export function runSelfUpdate({
 }) {
   if (!existsSync(binaryPath)) {
     // A missing target may be the remains of an interrupted swap rather than a
-    // client that was never installed; restore before deciding.
-    recoverOrphanedBinary({ binaryPath, readDir, rename, log })
+    // client that was never installed. Recovery must hold the same
+    // self-update.lock the Go swap takes: this call runs from the upgrade
+    // path of a second process too, and an unlocked recovery there could move
+    // that process's backup away mid-swap. When the lock is held the absence is
+    // explained and the caller reports "not installed" for this run.
+    recoverUnderInstallLock({ binaryPath, env, readDir, rename, log })
   }
   if (!existsSync(binaryPath)) {
     throw new Error(`TokenBoard client is not installed: ${binaryPath}`)
