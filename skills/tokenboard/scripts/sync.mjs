@@ -27,7 +27,7 @@ import { errorMessage } from './error-message.mjs'
 import { assertSupportedNodeVersion } from './node-version.mjs'
 import { acquireLock, lockHasToken, releaseLock, waitForLock } from './coordinator-lock.mjs'
 import { runScheduledRetry, transientSyncExitCode } from './scheduled-retry.mjs'
-import { stateLockRuntime } from './state-lock-runtime.mjs'
+import { selfUpdateLockFileName, stateLockRuntime } from './state-lock-runtime.mjs'
 import { writeScheduledSyncState } from './scheduled-sync-state.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
@@ -316,12 +316,23 @@ export function runPreCollectUpgrade({
     // place, so it must never run over a working install. `runSelfUpdate` keeps
     // its own call as a second line of defence — it becomes the only caller when
     // this one is skipped, and it re-checks existence before deciding.
+    //
+    // A hook run can reach here without sync.lock (the coordinator-lock
+    // shortcut above), and a self-update elsewhere sits in the window between
+    // its two renames, where the target is absent by design. Recovery takes the
+    // same self-update.lock the swap holds, so it cannot pull a backup out from
+    // under a live update; if the lock is held, the target is missing for a
+    // reason another process is handling, and the next run recovers instead.
     if (!binaryPresent(invocation.command)) {
-      try {
-        recover({ binaryPath: invocation.command, log })
-      } catch (error) {
-        warn(`TokenBoard binary recovery skipped: ${redactUrlCredentials(errorMessage(error))}`)
-      }
+      recoverUnderUpdateLock({
+        binaryPath: invocation.command,
+        stateDir: env.TOKENBOARD_STATE_DIR,
+        configDir: env.TOKENBOARD_CONFIG_DIR,
+        recover,
+        log,
+        warn,
+        redact: redactUrlCredentials
+      })
     }
     // The switches that hold the git client on its current version must hold
     // the binary too: an automatic self-update rewrites the executable itself,
@@ -353,6 +364,37 @@ export function runPreCollectUpgrade({
     upgrade({ flags, automatic: true, log })
   } catch (error) {
     warn(`TokenBoard upgrade skipped: ${redactUrlCredentials(errorMessage(error))}`)
+  }
+}
+
+// recoverUnderUpdateLock runs the orphan recovery only while it can take the
+// lock the updater uses. The recovery renames `<binary>.backup-*` (or a valid
+// `.new`) back into place, and a self-update is between its own two renames —
+// the only moment the target is legitimately absent — while it holds that
+// lock. Running recovery without it would move the updater's backup away
+// mid-swap. If the lock is held, the absence is explained and this run leaves
+// it alone: the next sync recovers once the update finishes or fails.
+function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log, warn, redact }) {
+  const lockDir = stateDir || configDir || join(homedir(), '.tokenboard')
+  const lockPath = join(lockDir, selfUpdateLockFileName)
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  let lock
+  try {
+    lock = acquireLock(lockPath, runtime)
+  } catch (error) {
+    warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
+    return
+  }
+  if (!lock) {
+    log(`TokenBoard binary is missing while a self-update holds ${lockPath}; leaving recovery to it`)
+    return
+  }
+  try {
+    recover({ binaryPath, log })
+  } catch (error) {
+    warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
+  } finally {
+    releaseLock(lockPath, runtime, lock)
   }
 }
 

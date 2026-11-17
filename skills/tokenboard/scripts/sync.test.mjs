@@ -1841,3 +1841,66 @@ test('the Node version guard calls the scheduled-failure recorder', () => {
   assert.match(guard, /recordScheduledFailure\(message, process\.env\)/)
   assert.match(guard, /process\.exit\(1\)/)
 })
+
+// A hook sync can reach recovery without sync.lock, while a self-update
+// elsewhere is between its two renames — the only moment the target is
+// legitimately absent. Recovery must not move that update's backup.
+test('recovery waits for the self-update lock and yields when it is held', async () => {
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { selfUpdateLockFileName, stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recover-lock-'))
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  const owner = acquireLock(join(dir, selfUpdateLockFileName), runtime)
+  const logs = []
+  const recoveries = []
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: (value) => recoveries.push(value),
+    selfUpdate: () => {},
+    log: (line) => logs.push(line),
+    warn: () => {}
+  })
+  releaseLock(join(dir, selfUpdateLockFileName), runtime, owner)
+
+  assert.deepEqual(recoveries, [], 'recovery must not run while an update holds the lock')
+  assert.match(logs.join('\n'), /self-update holds/)
+})
+
+// Once the lock is free, recovery runs and releases it so the next update
+// is not blocked by a recovery that failed.
+test('recovery releases the self-update lock when it fails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recover-fail-'))
+  const warnings = []
+  runPreCollectUpgrade({
+    flags: {},
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /recovery/i)
+  // The lock is free: a second run can take it.
+  assert.doesNotThrow(() => {
+    runPreCollectUpgrade({
+      flags: {},
+      env: { TOKENBOARD_STATE_DIR: dir },
+      invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+      binaryPresent: () => false,
+      recover: () => {},
+      selfUpdate: () => {},
+      log: () => {},
+      warn: () => {}
+    })
+  })
+})
