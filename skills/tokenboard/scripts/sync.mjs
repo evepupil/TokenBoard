@@ -17,18 +17,17 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { isMainModule } from './is-main.mjs'
 import { readConfig, parseArgs, collectorDir, readPackageManager, resolveClientForSource } from './config.mjs'
-import { clientBinaryPath } from './client-binary.mjs'
+import { clientBinaryPath, recoverOrphanedBinary, runSelfUpdate } from './client-binary.mjs'
 import { printHelpIfRequested, hasHelpFlag } from './cli-help.mjs'
 import { normalizePathEnv } from './schedule.mjs'
 import { readSince } from './sync-options.mjs'
 import { closeScheduledLogRuntime, createScheduledLogRuntime } from './logs.mjs'
 import { runUpgrade } from './upgrade.mjs'
-import { runSelfUpdate } from './client-binary.mjs'
 import { errorMessage } from './error-message.mjs'
 import { assertSupportedNodeVersion } from './node-version.mjs'
 import { acquireLock, lockHasToken, releaseLock, waitForLock } from './coordinator-lock.mjs'
 import { runScheduledRetry, transientSyncExitCode } from './scheduled-retry.mjs'
-import { currentProcessStartIdentity } from './process-liveness.mjs'
+import { stateLockRuntime } from './state-lock-runtime.mjs'
 import { writeScheduledSyncState } from './scheduled-sync-state.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
@@ -288,6 +287,15 @@ export async function runSyncInvocation({
 // upgrade at all: they only enqueue and reconcile usage, and a hook must not
 // make a network request it cannot afford.
 //
+// Recovery runs before the upgrade gate. Restoring a binary left missing by a
+// swap interrupted between its two renames is a local `rename`, not an upgrade
+// and not a network call — so every switch that holds a client on its current
+// version (`--skip-upgrade`, `TOKENBOARD_AUTO_UPGRADE=0`, the scheduled retry's
+// own `skip-upgrade`) and the hook mode still get it. Running it only inside
+// `runSelfUpdate` put the repair behind those switches, and a machine that
+// interrupted a swap while they were set reported "client is not installed" on
+// every later run with no automatic way back.
+//
 // A failure on either path is a warning, never a sync failure: an offline
 // machine is a normal state, and the collector keeps working on the version it
 // has.
@@ -298,22 +306,27 @@ export function runPreCollectUpgrade({
   env = process.env,
   upgrade = runUpgrade,
   selfUpdate = runSelfUpdate,
+  recover = recoverOrphanedBinary,
+  binaryPresent = existsSync,
   log = createUpgradeLogger(logs),
   warn = (message) => console.error(message)
 } = {}) {
   if (invocation?.clientType === 'binary') {
+    // Only when the target is genuinely missing: recovery renames a backup into
+    // place, so it must never run over a working install. `runSelfUpdate` keeps
+    // its own call as a second line of defence — it becomes the only caller when
+    // this one is skipped, and it re-checks existence before deciding.
+    if (!binaryPresent(invocation.command)) {
+      try {
+        recover({ binaryPath: invocation.command, log })
+      } catch (error) {
+        warn(`TokenBoard binary recovery skipped: ${redactUrlCredentials(errorMessage(error))}`)
+      }
+    }
     // The switches that hold the git client on its current version must hold
     // the binary too: an automatic self-update rewrites the executable itself,
     // which is harder to undo than a checkout `git checkout` can revert.
     // `shouldRunUpgrade` also covers `--hook`, so a hook still never upgrades.
-    //
-    // A missing binary must still reach `selfUpdate`: that is where
-    // `recoverOrphanedBinary` restores a swap interrupted between its two
-    // renames. Skipping the call because the target is missing is exactly the
-    // case the recovery exists for — without it the machine reports "client is
-    // not installed" on every run with no automatic way back. When there is
-    // nothing to recover, `runSelfUpdate` throws and the failure stays a
-    // warning, as with any other failed update.
     if (!shouldRunUpgrade({ flags, env })) {
       return
     }
@@ -860,30 +873,7 @@ function configDirFromInvocation(invocation, homeDir) {
 }
 
 function syncLockRuntime() {
-  let processStartIdentity
-  return {
-    lockTimeoutMs: defaultSyncLockTimeoutMs,
-    chmod: (path, mode) => chmodSync(path, mode),
-    lstat: (path) => lstatSync(path),
-    mkdir: (path, options) => mkdirSync(path, options),
-    now: Date.now,
-    process,
-    getProcessStartIdentity: () => {
-      if (processStartIdentity) return processStartIdentity
-      processStartIdentity = currentProcessStartIdentity()
-      return processStartIdentity
-    },
-    readFile: (path) => readFileSync(path, 'utf8'),
-    rename: renameSync,
-    link: linkSync,
-    sleep: sleepSync,
-    unlink: unlinkSync,
-    writeFile: writeFileSync
-  }
-}
-
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms))
+  return stateLockRuntime({ lockTimeoutMs: defaultSyncLockTimeoutMs })
 }
 
 function isMain() {

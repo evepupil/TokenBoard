@@ -691,23 +691,104 @@ test('scheduled upgrade diagnostics redact credentials embedded in URLs', () => 
   assert.doesNotMatch(lines[1], /ci-token/)
 })
 
-test('a binary client honors the skip-upgrade switch', () => {
+// Every switch that holds a client on its current version must still run the
+// local recovery: restoring a binary left missing by an interrupted swap is a
+// rename on this machine, not an upgrade and not a network request.
+test('a binary client honors the skip-upgrade switch but still recovers a missing binary', () => {
   for (const options of [
     { flags: { 'skip-upgrade': true }, env: {} },
     { flags: {}, env: { TOKENBOARD_SKIP_UPGRADE: '1' } },
     { flags: {}, env: { TOKENBOARD_AUTO_UPGRADE: '0' } }
   ]) {
     const selfUpdates = []
+    const recoveries = []
     runPreCollectUpgrade({
       ...options,
       invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+      recover: (value) => recoveries.push(value.binaryPath),
       selfUpdate: (value) => selfUpdates.push(value),
       log: () => {},
       warn: () => {}
     })
 
     assert.deepEqual(selfUpdates, [], JSON.stringify(options))
+    assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'], JSON.stringify(options))
   }
+})
+
+// A hook sync must not reach the network, but the recovery it runs is local:
+// a hook is often the only thing executing on a machine for hours, so it is
+// exactly where an interrupted swap should be repaired.
+test('a binary hook sync never upgrades but still recovers a missing binary', () => {
+  const selfUpdates = []
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: (options) => selfUpdates.push(options),
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(selfUpdates, [])
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
+})
+
+// The scheduled retry path adds --skip-upgrade, so without recovery before the
+// gate a swap interrupted on that path is never repaired.
+test('a scheduled retry that skips the upgrade still recovers a missing binary', () => {
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: { scheduled: true, 'skip-upgrade': true },
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {
+      throw new Error('the retry path must not self-update')
+    },
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
+})
+
+// A binary already in place is not the recovery case: the recovery must not
+// run (and must not touch the file) when there is nothing missing.
+test('a present binary is not recovered', () => {
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    binaryPresent: () => true,
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {},
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(recoveries, [])
+})
+
+// A recovery that cannot run (permissions, a corrupt directory) must stay a
+// warning: the collector may still work on the binary it has.
+test('a failed recovery warns instead of failing the sync', () => {
+  const warnings = []
+  assert.doesNotThrow(() =>
+    runPreCollectUpgrade({
+      flags: { 'skip-upgrade': true },
+      invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+      recover: () => {
+        throw new Error('EACCES: permission denied')
+      },
+      selfUpdate: () => {},
+      log: () => {},
+      warn: (message) => warnings.push(message)
+    })
+  )
+
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /recovery/i)
 })
 
 // The feed an install came from lives in the config, so an automatic update
@@ -774,20 +855,23 @@ test('a binary hook sync never upgrades at all', () => {
   assert.deepEqual(selfUpdates, [])
 })
 
-// A missing target is the recovery case, not a skip case: `runSelfUpdate` is what calls
-// `recoverOrphanedBinary`, which restores a binary whose swap was interrupted between its two
-// renames. Returning early here made that recovery unreachable from the automatic path, so an
-// interrupted self-update left every later sync reporting "client is not installed".
+// A missing target is the recovery case, not a skip case. Recovery now runs
+// before the upgrade gate (it is local, and every switch that holds a version
+// still needs it), so the gate-passing path reaches self-update with the binary
+// already restored.
 test('a binary client whose binary is missing still reaches self-update so the swap can be recovered', () => {
   const selfUpdates = []
+  const recoveries = []
   runPreCollectUpgrade({
     flags: {},
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
     selfUpdate: (options) => selfUpdates.push(options),
     log: () => {},
     warn: () => {}
   })
 
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
   assert.equal(selfUpdates.length, 1)
   assert.equal(selfUpdates[0].binaryPath, '/home/user/.tokenboard/bin/tokenboard')
 })
