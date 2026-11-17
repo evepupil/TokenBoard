@@ -778,3 +778,84 @@ func TestRunStillInstallsAPinnedDowngrade(t *testing.T) {
 		t.Errorf("result = %+v, want a pinned downgrade to 1.9.0", result)
 	}
 }
+
+// A tarball that does not carry the executable, or carries something that is
+// not a plain non-empty file under 128MiB, must be refused before anything is
+// staged: unpacking it "successfully" would install a directory entry or a
+// truncated binary over the client.
+func TestExtractBinaryRefusesMalformedTarballs(t *testing.T) {
+	cases := []struct {
+		name    string
+		build   func(t *testing.T) []byte
+		wantMsg string
+	}{
+		{
+			name: "missing the executable",
+			build: func(t *testing.T) []byte {
+				return buildTarball(t, "README.md", []byte("docs"))
+			},
+			wantMsg: "does not contain tokenboard",
+		},
+		{
+			name: "entry is a directory",
+			build: func(t *testing.T) []byte {
+				return buildTarballWithType(t, "tokenboard", tar.TypeDir, nil)
+			},
+			wantMsg: "is not a file",
+		},
+		{
+			name: "entry is empty",
+			build: func(t *testing.T) []byte {
+				return buildTarball(t, "tokenboard", nil)
+			},
+			wantMsg: "is empty",
+		},
+		{
+			name: "not a gzip stream",
+			build: func(t *testing.T) []byte {
+				return []byte("not a tarball at all")
+			},
+			wantMsg: "invalid TokenBoard release tarball",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := extractBinary(testCase.build(t), "tokenboard")
+			if err == nil {
+				t.Fatal("a malformed tarball must be refused")
+			}
+			if !strings.Contains(err.Error(), testCase.wantMsg) {
+				t.Errorf("err = %q, want it to mention %q", err, testCase.wantMsg)
+			}
+		})
+	}
+}
+
+// buildTarballWithType assembles a tarball whose single entry has the given
+// type flag, so a directory entry can be presented where a file is expected.
+func buildTarballWithType(t *testing.T, name string, typeflag byte, body []byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	archive := tar.NewWriter(writer)
+	if err := archive.WriteHeader(&tar.Header{
+		Name:     name,
+		Mode:     0o755,
+		Size:     int64(len(body)),
+		Typeflag: typeflag,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > 0 {
+		if _, err := archive.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
