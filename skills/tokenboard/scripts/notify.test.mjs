@@ -1683,3 +1683,51 @@ test('trailing wait returns immediately for a non-positive delay', async () => {
   await waitTrailingDelay(Number.NaN, { sleep })
   assert.deepEqual(sleeps, [])
 })
+
+// The cap is a byte budget (`Buffer.byteLength` decides when to trim), but the trim itself
+// sliced the JS string — `slice(-64 * 1024)` counts UTF-16 code units, not bytes. With
+// multi-byte text every retained character costs 2–3 bytes, so a Chinese-language error log
+// landed at 167 KB against a 64 KiB cap and kept growing from there. The trim has to land on a
+// byte offset that is also a character boundary.
+test('the worker error log trim is bounded in bytes for multi-byte text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-multibyte-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    const line = `${JSON.stringify({ message: `采集失败：${'错误'.repeat(80)}`, at: '2026-11-16T00:00:00.000Z' })}\n`
+    await writeFile(logPath, line.repeat(400))
+    assert.ok(Buffer.byteLength(readFileSync(logPath, 'utf8')) > 64 * 1024)
+
+    recordNotifyWorkerError(logPath, '最终错误')
+
+    const after = readFileSync(logPath)
+    assert.ok(
+      after.length <= 64 * 1024,
+      `log is ${after.length} bytes, over the 64 KiB cap (multi-byte text must not multiply it)`
+    )
+    const text = after.toString('utf8')
+    assert.doesNotMatch(text, /�/, 'the trim must not split a multi-byte character')
+    assert.match(text, /最终错误/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the worker error log keeps whole lines after a multi-byte trim', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-lines-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    const line = `${JSON.stringify({ message: `失败：${'原因'.repeat(40)}`, at: '2026-11-16T00:00:00.000Z' })}\n`
+    await writeFile(logPath, line.repeat(600))
+
+    recordNotifyWorkerError(logPath, '最后一条')
+
+    const entries = readNotifyWorkerErrors(root)
+    assert.ok(entries.length > 0, 'the trimmed log must still parse')
+    assert.ok(
+      entries.some((entry) => String(entry.message).includes('最后一条')),
+      'the newest error must survive the trim'
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

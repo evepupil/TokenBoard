@@ -2,6 +2,7 @@ import { dirname } from 'node:path'
 import {
   codexSource,
   inspectTomlStringArray,
+  normalizePathForComparison,
   readOptional,
   removeTomlKey,
   setTomlStringArray,
@@ -82,9 +83,10 @@ function readCodexNotifyForWrite(text) {
   return result.value
 }
 
-function isCodexNotifyCommand(value, notifyPath) {
+export function isCodexNotifyCommand(value, notifyPath) {
   if (!Array.isArray(value)) return false
-  const notifyIndex = value.findIndex((part) => part === notifyPath)
+  const wanted = normalizePathForComparison(notifyPath)
+  const notifyIndex = value.findIndex((part) => normalizePathForComparison(part) === wanted)
   return isNodeExecutingNotify(value, notifyIndex) && hasSourceArg(value, notifyIndex + 1, codexSource)
 }
 

@@ -279,3 +279,14 @@ function parseTomlBasicString(text, startIndex) {
   }
   return null
 }
+
+// The same file reaches the hook checks spelled two ways: `path.join` produces backslashes on
+// Windows, while a config written on macOS (a shared settings file), by hand, or by an older
+// install spells it with forward slashes. Comparing those as plain strings reports "not
+// installed", so install appends a duplicate hook — the sync then runs twice per session — and
+// uninstall cannot find the stale copy at all. Windows paths are also case-insensitive, so the
+// filename case must not decide identity either. Both the Claude and the Codex hook checks go
+// through this one function; fixing only one of them is the bug that left the Codex half broken.
+export function normalizePathForComparison(value) {
+  return String(value).replace(/\\/g, '/').toLowerCase()
+}

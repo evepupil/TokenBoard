@@ -3,6 +3,7 @@ import {
   loadJsonObject,
   normalizeArray,
   normalizeObject,
+  normalizePathForComparison,
   quoteShellArg,
   writeJsonWithBackup
 } from './hooks-utils.mjs'
@@ -105,16 +106,6 @@ export function isClaudeNotifyHook(hook, notifyPath) {
   const wanted = normalizePathForComparison(notifyPath)
   const notifyIndex = argv.findIndex((arg) => normalizePathForComparison(arg) === wanted)
   return isNodeExecutingNotify(argv, notifyIndex) && hasSourceArg(argv, notifyIndex + 1, claudeSource)
-}
-
-// The same file reaches us spelled two ways: `path.join` produces backslashes on Windows,
-// while a hook written on macOS (a shared settings file), by hand, or by an older install
-// spells it with forward slashes. Comparing those as plain strings reported "not installed",
-// so install appended a duplicate — the sync then ran twice per session — and uninstall could
-// not remove the stale copy at all. Windows paths are also case-insensitive, so the filename
-// case must not decide identity either.
-function normalizePathForComparison(value) {
-  return String(value).replace(/\\/g, '/').toLowerCase()
 }
 
 function hasSourceArg(argv, startIndex, source) {

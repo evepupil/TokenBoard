@@ -367,6 +367,20 @@ export async function runNotifyCli(options = {}) {
 export const notifyWorkerErrorLogName = 'notify-worker-errors.log'
 const notifyWorkerErrorLogMaxBytes = 64 * 1024
 
+// The bound is a byte budget, but `String.prototype.slice` counts UTF-16 code units: with
+// multi-byte text a `slice(-65536)` keeps up to three times the cap in bytes, and the file
+// then grows from there instead of converging. Cut on a byte offset and step back to a
+// character boundary so the retained text is still valid UTF-8 and still parses line by line.
+function trimLogToByteBudget(text, maxBytes) {
+  const buf = Buffer.from(text, 'utf8')
+  if (buf.length <= maxBytes) return text
+  let start = buf.length - maxBytes
+  // UTF-8 continuation bytes are 0b10xxxxxx; skipping them lands on the first byte of a
+  // character, so nothing is split. Bounded by at most three steps per trim.
+  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start += 1
+  return buf.subarray(start).toString('utf8')
+}
+
 // recordNotifyWorkerError appends one already-redacted fatal message, bounded
 // so a repeating failure cannot grow the file without limit. Diagnostics must
 // never fail the run: the exit code already reports the failure, and a
@@ -418,7 +432,7 @@ export function recordNotifyWorkerError(
         if (error?.code !== 'ENOENT') throw error
       }
       const combined = `${existing}${entry}`
-      writeFile(logPath, combined.slice(-notifyWorkerErrorLogMaxBytes), { encoding: 'utf8', mode: 0o600 })
+      writeFile(logPath, trimLogToByteBudget(combined, notifyWorkerErrorLogMaxBytes), { encoding: 'utf8', mode: 0o600 })
       return
     }
     appendFile(logPath, entry, { encoding: 'utf8', mode: 0o600 })
