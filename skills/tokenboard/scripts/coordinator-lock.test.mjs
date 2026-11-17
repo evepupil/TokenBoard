@@ -967,3 +967,36 @@ test('an aged unparseable lock is swept', () => {
 
   assert.ok(owner, 'an aged empty lock must be swept and re-acquired')
 })
+
+// The creation window only exists when the runtime can stat the lock. A
+// production runtime without it silently falls back to sweeping a fresh empty
+// record, which is the exact race the window fences, so both real runtimes
+// must carry a stat — calling the real coordinatedSync against a real
+// directory is what proves the wiring, not a unit test of the helper.
+test('coordinatedSync gives its lock runtime a usable stat', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-coordinator-stat-'))
+  const lockPath = join(dir, 'sync.lock')
+  // Empty and brand new: only the creation window can tell a contender this
+  // record is a holder mid-write rather than a dead lock.
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  let ran = false
+
+  const result = coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      stateDir: dir,
+      cooldownMs: 0,
+      lockTimeoutMs: 0,
+      process: fakeProcess(process.pid),
+      homeDir: dir,
+      executeSync: () => {
+        ran = true
+        return { ok: true }
+      }
+    }
+  )
+
+  assert.equal(ran, false, 'a fresh empty lock must block the sync')
+  assert.equal(result.skippedReason, 'lock-timeout')
+  assert.equal(existsSync(lockPath), true, 'the fresh lock must survive')
+})

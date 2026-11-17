@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -1074,3 +1074,31 @@ function codeError(code, path) {
   error.code = code
   return error
 }
+
+// Same wiring requirement as the coordinator: a runtime without a stat cannot
+// tell a freshly created record from a dead one, so a retry would run while
+// another process is still writing its lock.
+test('scheduled retry gives its lock runtime a usable stat', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-retry-stat-'))
+  try {
+    writeFileSync(scheduledRetryTransitionLockPath(dir), '', { mode: 0o600, flag: 'wx' })
+    let calls = 0
+
+    const result = await runScheduledRetry({
+      stateDir: dir,
+      source: 'all',
+      maxAttempts: 1,
+      delayMs: 0,
+      runAttempt: () => {
+        calls += 1
+        return 0
+      }
+    })
+
+    assert.equal(calls, 0, 'a fresh empty transition lock must block the retry')
+    assert.equal(result.skipped, true)
+    assert.equal(result.skippedReason, 'active-retry')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

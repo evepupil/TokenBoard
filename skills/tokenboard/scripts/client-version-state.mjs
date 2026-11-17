@@ -20,13 +20,20 @@ export function clientVersionStatePath(stateDir) {
 }
 
 // readClientVersionState returns the recorded state, or null when it is absent
-// or unreadable. A half-written or corrupt file must not fail status.
+// or its contents are unusable. A half-written or corrupt file must not fail
+// status.
+//
+// A file that exists but cannot be read is reported instead: answering null
+// there makes the next record look like a first run, which silently resets
+// `since` and drops `previous` — exactly the history an upgrade failure is
+// traced with.
 export function readClientVersionState(stateDir) {
   let raw
   try {
     raw = readFileSync(clientVersionStatePath(stateDir), 'utf8')
-  } catch {
-    return null
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
   }
   try {
     const value = JSON.parse(raw)

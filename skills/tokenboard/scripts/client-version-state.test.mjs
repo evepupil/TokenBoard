@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readClientVersionState, recordClientVersion, clientVersionStateFileName } from './client-version-state.mjs'
+import {
+  clientVersionStateFileName,
+  clientVersionStatePath,
+  readClientVersionState,
+  recordClientVersion
+} from './client-version-state.mjs'
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-clientver-'))
@@ -62,4 +67,19 @@ test('a missing or corrupt state file reads as null rather than throwing', (t) =
 
   writeFileSync(join(dir, clientVersionStateFileName), '{not json')
   assert.equal(readClientVersionState(dir), null)
+})
+
+// A record that exists but cannot be read is not a first run. Answering null
+// here reset `since` and dropped `previous`, so an upgrade that broke the
+// machine lost exactly the history that answers "did this happen when the
+// version changed?".
+test('an unreadable record is reported instead of treated as a first run', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-unreadable-'))
+  writeFileSync(clientVersionStatePath(dir), '{"schemaVersion":"tokenboard-client-version/v1"}', { mode: 0o000 })
+  try {
+    assert.throws(() => readClientVersionState(dir), /EACCES/)
+  } finally {
+    chmodSync(clientVersionStatePath(dir), 0o600)
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

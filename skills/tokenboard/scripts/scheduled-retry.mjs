@@ -6,6 +6,7 @@ import {
   readdirSync,
   renameSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -539,6 +540,7 @@ function retryRuntime(options) {
     runTasklist: options.runTasklist || provided.runTasklist,
     mkdir: options.mkdir || provided.mkdir || mkdirSync,
     readFile: options.readFile || provided.readFile || ((path) => readFileSync(path, 'utf8')),
+    stat: options.stat || provided.stat || statSync,
     readdir: options.readdir || provided.readdir || readdirSync,
     writeFile: options.writeFile || provided.writeFile || writeFileSync,
     rename: options.rename || provided.rename || renameSync,

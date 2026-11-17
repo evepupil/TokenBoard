@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -444,6 +445,7 @@ function buildRuntime(options = {}) {
     mkdir: options.mkdir || mkdirSync,
     chmod: options.chmod || (hasCustomFileOps ? undefined : chmodSync),
     lstat: options.lstat || (hasCustomFileOps ? undefined : lstatSync),
+    stat: options.stat || (hasCustomFileOps ? undefined : statSync),
     readFile: options.readFile || ((path) => readFileSync(path, 'utf8')),
     writeFile: options.writeFile || writeFileSync,
     readdir: options.readdir || (hasCustomFileOps ? undefined : readdirSync),

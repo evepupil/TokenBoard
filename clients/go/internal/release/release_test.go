@@ -1,13 +1,17 @@
 package release
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The latest release is found by following one redirect, not by calling the
@@ -356,5 +360,44 @@ func TestDownloadRetryPolicyByStatus(t *testing.T) {
 				t.Errorf("attempts = %d, want %d", attempts, testCase.attempts)
 			}
 		})
+	}
+}
+
+// http.Client.Timeout restarts for every client.Do, so a chain of slow
+// redirects used to multiply the lookup budget by the hop count while holding
+// the sync lock. The budget is now carried across hops; this test compresses
+// it so the difference is measurable instead of waiting fifteen real seconds.
+func TestLatestTagSpendsOneBudgetAcrossItsHops(t *testing.T) {
+	const budget = 700 * time.Millisecond
+	const hopDelay = 300 * time.Millisecond
+	original := lookupTimeout
+	lookupTimeout = budget
+	t.Cleanup(func() { lookupTimeout = original })
+
+	// The server sleeps before answering, so a hop that starts with less than
+	// hopDelay left on the chain budget cannot be answered in time. Under a
+	// per-request budget every hop would get the full amount.
+	var responded atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(hopDelay)
+		responded.Add(1)
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/latest?next=1", http.StatusFound)
+	}))
+	defer server.Close()
+
+	started := time.Now()
+	_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("a chain that never ends must fail")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the chain deadline to end it", err)
+	}
+	// A per-request budget answers all six hops; one shared budget allows two
+	// and cuts the third off mid-wait.
+	if got := responded.Load(); got > 2 {
+		t.Fatalf("%d hops were answered in %s under a %s budget", got, elapsed, budget)
 	}
 }

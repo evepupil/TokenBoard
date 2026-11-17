@@ -199,6 +199,17 @@ function publicHookStatus(hooks) {
   }
 }
 
+// A version record that exists but cannot be read is reported rather than
+// dropped: status is the one command an operator runs when something looks
+// wrong, and a silently missing field reads as "no version recorded".
+function readClientVersionNotice(stateDir) {
+  try {
+    return readClientVersionState(stateDir)
+  } catch (error) {
+    return { error: errorMessage(error) }
+  }
+}
+
 function hookState(value) {
   return value === 'installed' || value === 'installed-local-history' || value === 'not-installed' || value === 'error'
     ? value
@@ -234,7 +245,7 @@ function runCli() {
           config.clientType === 'binary'
             ? readClientStatus({ configDir: process.env.TOKENBOARD_CONFIG_DIR?.trim() || dirname(file) })
             : undefined,
-        clientVersion: readClientVersionState(stateDir),
+        clientVersion: readClientVersionNotice(stateDir),
         shadowDualRun: collectShadowDualRunSummary(dualRunLogPath())
       }),
       null,

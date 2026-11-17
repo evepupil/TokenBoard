@@ -186,8 +186,6 @@ func (o Options) platform() (string, error) {
 // room for a slow link. Sharing one value meant either a lookup that hangs for
 // the download budget or a download that fails on a link the lookup survived.
 const (
-	// lookupTimeout bounds one `/releases/latest` hop chain.
-	lookupTimeout = 15 * time.Second
 	// downloadTimeout bounds one asset transfer.
 	downloadTimeout = 2 * time.Minute
 	// retryBudget bounds the retries a caller may make for one asset. The
@@ -196,6 +194,13 @@ const (
 	// of its sync on this.
 	maxDownloadAttempts = 3
 )
+
+// lookupTimeout bounds one `/releases/latest` hop chain. Go's
+// http.Client.Timeout restarts for each client.Do, so latestTag carries a
+// deadline across its hops by hand; otherwise a chain of slow redirects
+// multiplies this budget. A var rather than a const so a test can compress it
+// and observe the shared deadline without waiting fifteen real seconds.
+var lookupTimeout = 15 * time.Second
 
 func (o Options) client() *http.Client {
 	if o.HTTPClient != nil {
@@ -251,8 +256,12 @@ func latestTag(options Options, repo string) (string, error) {
 		return http.ErrUseLastResponse
 	}
 	current := fmt.Sprintf("%s/%s/releases/latest", options.baseURL(), repo)
+	// One budget for the whole chain: http.Client.Timeout restarts on every
+	// client.Do, so a chain of slow redirects would otherwise multiply it.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(lookupTimeout))
+	defer cancel()
 	for hop := 0; hop <= maxRedirects; hop++ {
-		request, err := http.NewRequest(http.MethodGet, current, nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, current, nil)
 		if err != nil {
 			return "", err
 		}
