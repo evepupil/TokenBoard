@@ -916,3 +916,36 @@ test('recovery keeps the backup when the staged version cannot be read', () => {
 
   assert.match(readFileSync(binaryPath, 'utf8'), /0\.2\.0/, 'the known backup must be restored')
 })
+
+// A recovery that cannot rename (a read-only directory) must not throw past
+// runSelfUpdate: the caller needs "not installed", the actionable fact, and the
+// next run retries. The failure is reported, not swallowed.
+test('runSelfUpdate reports a failed recovery instead of throwing it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recovery-eacces-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'prev', { mode: 0o755 })
+  const lines = []
+
+  assert.throws(
+    () =>
+      runSelfUpdate({
+        binaryPath,
+        env: { TOKENBOARD_STATE_DIR: dir },
+        log: (l) => lines.push(l),
+        // A rename that fails the way a read-only directory does.
+        rename: () => {
+          const error = new Error('EACCES: permission denied')
+          error.code = 'EACCES'
+          throw error
+        },
+        spawn: () => ({ status: 0, stdout: '', stderr: '' })
+      }),
+    /not installed/,
+    'the run must report the missing binary, not the recovery error'
+  )
+  assert.equal(
+    lines.some((l) => /recovery failed/.test(l)),
+    true,
+    'the recovery failure must be logged'
+  )
+})

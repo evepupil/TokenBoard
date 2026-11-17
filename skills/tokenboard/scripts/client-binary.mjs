@@ -835,7 +835,14 @@ export function runSelfUpdate({
     // path of a second process too, and an unlocked recovery there could move
     // that process's backup away mid-swap. When the lock is held the absence is
     // explained and the caller reports "not installed" for this run.
-    recoverUnderInstallLock({ binaryPath, env, readDir, rename, log })
+    try {
+      recoverUnderInstallLock({ binaryPath, env, readDir, rename, log })
+    } catch (error) {
+      // A recovery that cannot run (permissions, a read-only directory) must
+      // not mask the real outcome: the check below reports "not installed",
+      // which is the actionable fact, and the next run retries the recovery.
+      log(`TokenBoard binary recovery failed: ${errorMessage(error)}`)
+    }
   }
   if (!existsSync(binaryPath)) {
     throw new Error(`TokenBoard client is not installed: ${binaryPath}`)
