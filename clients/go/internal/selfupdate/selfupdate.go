@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
@@ -126,6 +127,11 @@ func Run(input Input) (Result, error) {
 		return Result{}, err
 	}
 
+	// The lookup and the download get their own budgets: a release lookup is a
+	// few hundred bytes and should fail fast, while a multi-megabyte tarball
+	// needs room for a slow link. A nil client lets each layer apply its own
+	// default; a caller-supplied one (tests, an operator's proxy client) is
+	// used as-is for both.
 	client := input.HTTPClient
 	assets, err := release.Resolve(release.Options{
 		Repo:       repo,
@@ -160,9 +166,6 @@ func Run(input Input) (Result, error) {
 		return Result{Version: currentVersion}, nil
 	}
 
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
 	archiveData, err := release.Download(client, assets.Archive)
 	if err != nil {
 		return Result{}, err
@@ -231,12 +234,22 @@ func pruneBackups(current, keep string) {
 	}
 }
 
-// backupPathPattern is the glob for one binary's backups. The literal prefix is
-// escaped so a directory containing glob metacharacters cannot widen the match.
+// backupPathPattern is the glob for one binary's backups. Both the directory
+// and the file name are escaped: filepath.Glob reads `[`, `*` and `?` as
+// pattern syntax anywhere in the string, so an unescaped directory whose name
+// carries one (`~/.tokenboard[work]`, a Windows user folder) would neither
+// match its own backups — leaving them to accumulate forever — nor stop at
+// its own directory: `[cfg]` as a character class matches a sibling `c`.
 func backupPathPattern(current string) string {
-	return filepath.Join(filepath.Dir(current), escapeGlobMeta(filepath.Base(current))+".backup-*")
+	dir := filepath.Dir(current)
+	// filepath.Dir(".") is ".": joining would produce "./<name>", which still
+	// globs against the working directory, so the escape is harmless there too.
+	return filepath.Join(escapeGlobMeta(dir), escapeGlobMeta(filepath.Base(current))+".backup-*")
 }
 
+// escapeGlobMeta backslashes every pattern metacharacter in value. Go's
+// filepath.Match separates the pattern on the platform separator before
+// matching, so escaping a separator is outside what it parses.
 func escapeGlobMeta(value string) string {
 	var builder strings.Builder
 	for _, char := range value {
@@ -349,13 +362,30 @@ func targetPath(explicit string) (string, error) {
 	return path, nil
 }
 
+// backupPath names the previous binary, which is the rollback until the next
+// successful update replaces it.
+//
+// The stamp is second-precision, and the name is the target of a rename that
+// replaces what it lands on: two swaps inside one second (two `self-update`
+// processes racing; nothing serializes them) would otherwise destroy the only
+// rollback copy. A per-process sequence number keeps them apart. It is
+// zero-padded and follows the stamp, so the newest backup still sorts last —
+// `recoverOrphanedBinary` in the skill picks the newest by sorting names.
 func backupPath(current string, now func() time.Time) string {
 	stamp := time.Now().UTC()
 	if now != nil {
 		stamp = now().UTC()
 	}
-	return fmt.Sprintf("%s.backup-%s", current, stamp.Format("20060102T150405Z"))
+	return fmt.Sprintf("%s.backup-%s-%06d", current, stamp.Format("20060102T150405Z"), nextBackupSequence())
 }
+
+// backupSequence orders backups made by this process. Its first value is 1 so
+// a name from this change always sorts after a plain `<stamp>` name written by
+// an earlier release with the same second, and it never resets: a long-running
+// process that updates twice in the same second must still get two names.
+var backupSequence atomic.Uint64
+
+func nextBackupSequence() uint64 { return backupSequence.Add(1) }
 
 // swap replaces current with staged, keeping the old file as backup.
 //

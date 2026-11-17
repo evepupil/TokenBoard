@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
@@ -501,6 +503,80 @@ func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
 	pruneBackups(filepath.Join(metaDir, "tokenboard"), filepath.Join(metaDir, "tokenboard.backup-new"))
 	if _, err := os.Stat(plainBackup); err != nil {
 		t.Errorf("the sibling directory's backup was removed by an escaped-name pattern: %v", err)
+	}
+}
+
+// The directory is part of the glob pattern too. `filepath.Glob` reads `[`, `*`
+// and `?` as syntax anywhere in the pattern, so an unescaped config directory
+// whose name carries one (`~/.tokenboard[work]`, a Windows user folder, a
+// caller-set TOKENBOARD_CONFIG_DIR) both fails to match its own backups — they
+// accumulate forever — and matches a sibling directory's instead: the character
+// class `[cfg]` in a directory named `[cfg]` matches a sibling named `c`.
+func TestPruneBackupsEscapesGlobMetaInTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	metaDir := filepath.Join(dir, "[cfg]")
+	siblingDir := filepath.Join(dir, "c")
+	otherSubdir := filepath.Join(dir, "g")
+	for _, target := range []string{metaDir, siblingDir, otherSubdir} {
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ownOld := filepath.Join(metaDir, "tokenboard.backup-20260101T000000Z")
+	if err := os.WriteFile(ownOld, []byte("own old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A sibling directory's backup: `[cfg]` as a character class matches `c` and
+	// `g`, so an unescaped pattern reaches it.
+	for _, sibling := range []string{siblingDir, otherSubdir} {
+		if err := os.WriteFile(filepath.Join(sibling, "tokenboard.backup-20260101T000000Z"), []byte("sibling"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keep := filepath.Join(metaDir, "tokenboard.backup-20260102T000000Z")
+	pruneBackups(filepath.Join(metaDir, "tokenboard"), keep)
+
+	// The directory's own old backup must be pruned.
+	if _, err := os.Stat(ownOld); !os.IsNotExist(err) {
+		t.Errorf("the directory's own old backup survived (glob did not reach it): %v", err)
+	}
+	// The sibling's must not be touched.
+	for _, sibling := range []string{siblingDir, otherSubdir} {
+		path := filepath.Join(sibling, "tokenboard.backup-20260101T000000Z")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("a sibling directory's backup was removed: %s: %v", path, err)
+		}
+	}
+}
+
+// Backup names must be unique even within one UTC second. The stamp alone is
+// second-precision, and `backupPath` is also the argument to a rename that
+// replaces its target: two swaps inside one second (two self-updates racing,
+// which nothing serializes) would otherwise overwrite each other's backup and
+// destroy the only rollback copy.
+func TestBackupPathIsUniqueWithinOneSecond(t *testing.T) {
+	fixed := func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	first := backupPath("/home/user/.tokenboard/bin/tokenboard", fixed)
+	second := backupPath("/home/user/.tokenboard/bin/tokenboard", fixed)
+
+	if first == second {
+		t.Fatalf("two backups in the same second share a name: %s", first)
+	}
+	// The timestamp must stay in the name: recoverOrphanedBinary picks the
+	// newest backup by sorting the names.
+	for _, path := range []string{first, second} {
+		if !strings.Contains(filepath.Base(path), "20260102T030405Z") {
+			t.Errorf("backup %s does not carry the UTC stamp", path)
+		}
+	}
+	// A later second still orders after an earlier one by name.
+	later := backupPath("/home/user/.tokenboard/bin/tokenboard",
+		func() time.Time { return time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC) })
+	names := []string{first, second, later}
+	sort.Strings(names)
+	if names[len(names)-1] != later {
+		t.Errorf("the newest backup does not sort last: %v", names)
 	}
 }
 
