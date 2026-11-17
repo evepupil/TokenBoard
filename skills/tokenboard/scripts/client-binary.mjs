@@ -27,6 +27,8 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
+import { acquireLock, releaseLock } from './coordinator-lock.mjs'
+import { selfUpdateLockFileName, selfUpdateLockWaitMs, stateLockRuntime } from './state-lock-runtime.mjs'
 
 export const defaultReleaseRepo = 'evepupil/TokenBoard'
 export const defaultReleaseBaseUrl = 'https://github.com'
@@ -34,6 +36,9 @@ export const defaultReleaseBaseUrl = 'https://github.com'
 // Bounds mirror internal/release: a few megabytes of binary, capped so a
 // redirect to something else cannot fill the disk.
 const maxDownloadBytes = 128 * 1024 * 1024
+const downloadTimeoutMs = 120_000
+const maxDownloadAttempts = 3
+const downloadRetryDelayMs = 500
 const maxRedirects = 5
 const childOutputMaxBuffer = 64 * 1024 * 1024
 // A binary that cannot answer `version` must not hang the caller: the staged-file probe runs
@@ -171,52 +176,134 @@ function sameRedirectHost(origin, target) {
 // let fetch follow them would accept a chain to an arbitrary host — the tarball
 // and its checksums cannot vouch for each other when both arrive from a host
 // the release page never named.
-export async function downloadBytes({ url, name, fetcher = fetch }) {
+export async function downloadBytes({
+  url,
+  name,
+  fetcher = fetch,
+  timeoutMs = downloadTimeoutMs,
+  maxAttempts = maxDownloadAttempts,
+  retryDelayMs = downloadRetryDelayMs
+}) {
+  let lastError
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await downloadBytesOnce({ url, name, fetcher, timeoutMs })
+    } catch (error) {
+      lastError = error
+      if (error?.permanent) throw error
+      if (attempt < maxAttempts) await delay(retryDelayMs * attempt)
+    }
+  }
+  throw lastError
+}
+
+function permanentDownloadError(message) {
+  const error = new Error(message)
+  error.permanent = true
+  return error
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function abortError() {
+  const error = new Error('TokenBoard release download timed out')
+  error.name = 'AbortError'
+  return error
+}
+
+async function downloadBytesOnce({ url, name, fetcher, timeoutMs }) {
   const origin = new URL(url)
-  let current = origin
-  let response
-  for (let hop = 0; hop <= maxRedirects; hop += 1) {
-    response = await fetcher(current.toString(), { redirect: 'manual' })
-    if (response.status < 300 || response.status >= 400) break
-    const location = response.headers?.get?.('location')
-    if (!location) {
-      throw new Error(`download ${name} returned HTTP ${response.status} without a Location`)
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    let current = url
+    let response
+    for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      response = await raceAbort(
+        fetcher(current.toString(), { redirect: 'manual', signal: controller.signal }),
+        controller.signal
+      )
+      if (response.status < 300 || response.status >= 400) break
+      const location = response.headers?.get?.('location')
+      if (!location) {
+        throw permanentDownloadError(`download ${name} returned HTTP ${response.status} without a Location`)
+      }
+      const next = new URL(location, new URL(current))
+      if (!sameRedirectHost(origin, next)) {
+        throw permanentDownloadError(`download ${name} redirected to ${next.host}, which is not the release host`)
+      }
+      current = next
+      if (hop === maxRedirects) {
+        throw permanentDownloadError(`download ${name} redirected more than ${maxRedirects} times`)
+      }
     }
-    const next = new URL(location, current)
-    if (!sameRedirectHost(origin, next)) {
-      throw new Error(`download ${name} redirected to ${next.host}, which is not the release host`)
+    if (!response.ok) {
+      // 4xx means the release is not there; 5xx and 429 are worth one more try.
+      if (response.status < 500 || response.status === 501)
+        throw permanentDownloadError(`download ${name} returned HTTP ${response.status}`)
+      throw new Error(`download ${name} returned HTTP ${response.status}`)
     }
-    current = next
-    if (hop === maxRedirects) {
-      throw new Error(`download ${name} redirected more than ${maxRedirects} times`)
+    const declared = Number(response.headers?.get?.('content-length') ?? 0)
+    if (Number.isFinite(declared) && declared > maxDownloadBytes) {
+      throw permanentDownloadError(`download ${name} exceeds ${maxDownloadBytes} bytes`)
     }
-  }
-  if (!response.ok) {
-    throw new Error(`download ${name} returned HTTP ${response.status}`)
-  }
-  const declared = Number(response.headers?.get?.('content-length') ?? 0)
-  if (Number.isFinite(declared) && declared > maxDownloadBytes) {
-    throw new Error(`download ${name} exceeds ${maxDownloadBytes} bytes`)
-  }
-  if (!response.body || typeof response.body[Symbol.asyncIterator] !== 'function') {
-    // A fetcher without a streaming body (a test double, or an older runtime)
-    // still gets the post-read check.
-    const data = Buffer.from(await response.arrayBuffer())
-    if (data.length > maxDownloadBytes) {
-      throw new Error(`download ${name} exceeds ${maxDownloadBytes} bytes`)
+    if (!response.body || typeof response.body[Symbol.asyncIterator] !== 'function') {
+      const data = Buffer.from(await raceAbort(response.arrayBuffer(), controller.signal))
+      if (data.length > maxDownloadBytes) {
+        throw permanentDownloadError(`download ${name} exceeds ${maxDownloadBytes} bytes`)
+      }
+      return data
     }
-    return data
-  }
-  const chunks = []
-  let total = 0
-  for await (const chunk of response.body) {
-    total += chunk.length
-    if (total > maxDownloadBytes) {
-      throw new Error(`download ${name} exceeds ${maxDownloadBytes} bytes`)
+    const chunks = []
+    let total = 0
+    for await (const chunk of raceAbortStream(response.body, controller.signal)) {
+      total += chunk.length
+      if (total > maxDownloadBytes) {
+        throw permanentDownloadError(`download ${name} exceeds ${maxDownloadBytes} bytes`)
+      }
+      chunks.push(Buffer.from(chunk))
     }
-    chunks.push(Buffer.from(chunk))
+    return Buffer.concat(chunks)
+  } catch (error) {
+    if (timedOut) throw abortError()
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-  return Buffer.concat(chunks)
+}
+
+function raceAbort(promise, signal) {
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortError())
+    const done = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    Promise.resolve(promise).then(
+      (value) => {
+        done()
+        resolve(value)
+      },
+      (error) => {
+        done()
+        reject(error)
+      }
+    )
+  })
+}
+
+async function* raceAbortStream(stream, signal) {
+  const iterator = stream[Symbol.asyncIterator]()
+  for (;;) {
+    const result = await raceAbort(iterator.next(), signal)
+    if (result.done) return
+    yield result.value
+  }
 }
 
 // readChecksums parses a GoReleaser checksums.txt. A line that cannot be read
@@ -374,6 +461,13 @@ export function namesVersion(output, version) {
 // installClientBinary bootstraps a binary install on a machine that has none.
 // It is the only place the skill downloads a release; every later upgrade is
 // the binary's own `self-update`.
+//
+// It stages the same `<binary>.new` the binary's `self-update` does, so it
+// takes the same `self-update.lock` in the state directory: two runs swapping
+// into one path delete each other's staged file mid-verification, overwrite
+// each other's backup, and both widen the window where the target is absent.
+// The lock protocol is shared with Go (`internal/state.Acquire` writes the
+// same JSON record), which is why the file name has to stay in sync.
 export async function installClientBinary({
   repo = defaultReleaseRepo,
   tag,
@@ -384,10 +478,57 @@ export async function installClientBinary({
   fetcher = fetch,
   spawn = spawnSync,
   workDir,
+  lockWaitMs = selfUpdateLockWaitMs,
   log = () => {}
 }) {
   const target = clientBinaryPath({ configDir, platform })
   const work = workDir || join(configDir, 'client-install')
+  // Go's `self-update` takes this lock in state.ResolveDir, which prefers
+  // TOKENBOARD_STATE_DIR over TOKENBOARD_CONFIG_DIR. Use the same resolution
+  // here or the two paths lock different files when an operator overrides the
+  // state directory, reintroducing the staged-file race.
+  const lockDir = process.env.TOKENBOARD_STATE_DIR || configDir
+  const lockPath = join(lockDir, selfUpdateLockFileName)
+  const lockRuntime = stateLockRuntime({ lockTimeoutMs: lockWaitMs })
+  mkdirSync(lockDir, { recursive: true, mode: 0o700 })
+  const lock = acquireLock(lockPath, lockRuntime)
+  if (!lock) {
+    throw new Error(
+      `a TokenBoard self-update is already in progress (${lockPath}); run the install again once it finishes`
+    )
+  }
+  try {
+    return await installClientBinaryLocked({
+      repo,
+      tag,
+      baseUrl,
+      configDir,
+      platform,
+      arch,
+      fetcher,
+      spawn,
+      workDir: work,
+      target,
+      log
+    })
+  } finally {
+    releaseLock(lockPath, lockRuntime, lock)
+  }
+}
+
+async function installClientBinaryLocked({
+  repo,
+  tag,
+  baseUrl,
+  configDir,
+  platform,
+  arch,
+  fetcher,
+  spawn,
+  workDir: work,
+  target,
+  log
+}) {
   const release = await resolveRelease({ repo, tag, baseUrl, platform, arch, fetcher })
   const archivePath = join(work, release.archive.name)
   const extractDir = join(work, 'extract')

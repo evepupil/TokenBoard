@@ -538,6 +538,28 @@ test('recovery ignores a staged binary that does not run', () => {
   assert.equal(readFileSync(binaryPath, 'utf8'), 'previous')
 })
 
+// Backups written by the current release carry a sequence suffix
+// (`<stamp>-000001`) so two swaps in the same second cannot collide. The newer
+// stamp is still the one restored: the suffix only breaks ties inside a second.
+test('recovery picks the newest backup across both name shapes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-shapes-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20251231T235959Z`, 'legacy old', { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'newer first', { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000002`, 'newer second', { mode: 0o755 })
+
+  recoverOrphanedBinary({ binaryPath })
+
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer second')
+})
+
+// An earlier binary written by a release that knew no sequence still sorts
+// before this release's name for the same second.
+test('the sequence suffix sorts after a plain backup of the same second', () => {
+  const sorted = ['tokenboard.backup-20260101T000000Z', 'tokenboard.backup-20260101T000000Z-000001'].sort()
+  assert.equal(sorted.at(-1), 'tokenboard.backup-20260101T000000Z-000001')
+})
+
 // A release archive that happens to carry a ccusage member no longer has it
 // installed: the client collects in process since S5 and would never read it.
 test('installClientBinary ignores a ccusage member in the archive', async (t) => {
@@ -582,4 +604,125 @@ test('installClientBinary reports the ccusage an earlier release left behind', a
   assert.ok(stale.includes(stalePath), `the report must name ${stalePath}, got ${stale}`)
   // Left in place means untouched, and never executed by the install.
   assert.match(readFileSync(stalePath, 'utf8'), /ccusage 20\.0\.20/)
+})
+
+// The bootstrap installer stages the same `<binary>.new` Go's `self-update`
+// does, so it takes the same lock file in the state directory. A self-update
+// holding it means an install would race the swap: the install yields with a
+// clear error instead of deleting the other run's staged file.
+test('installClientBinary yields while a self-update holds its lock', async (t) => {
+  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
+  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-locked-'))
+  t.after(() => rmSync(configDir, { recursive: true, force: true }))
+  // A lock owned by this process looks live; it is released in the cleanup.
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const runtime = stateLockRuntime({ lockTimeoutMs: 50 })
+  const owner = acquireLock(join(configDir, 'self-update.lock'), runtime)
+  t.after(() => releaseLock(join(configDir, 'self-update.lock'), runtime, owner))
+
+  await assert.rejects(
+    () =>
+      installClientBinary({
+        baseUrl,
+        configDir,
+        platform: 'darwin',
+        arch: 'x64',
+        spawn: fixtureSpawn(),
+        log: () => {}
+      }),
+    /self-update/
+  )
+  assert.equal(
+    existsSync(join(configDir, 'bin', 'tokenboard')),
+    false,
+    'nothing may be installed while the lock is held'
+  )
+})
+
+// A stalled transfer must fail, not hang the install forever. The installer
+// now holds self-update.lock while it downloads, so an unbounded fetch would
+// also block every scheduled self-update behind it.
+test('downloadBytes aborts a transfer that stalls past its budget', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let activeSignal
+  // A body that never produces a chunk unless the signal fires: an unbounded
+  // read would hang the test forever, which is precisely the bug.
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return new Promise((resolve, reject) => {
+            activeSignal.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+              {
+                once: true
+              }
+            )
+          })
+        }
+      }
+    }
+  }
+  const fetcher = (url, options) => {
+    activeSignal = options?.signal
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        timeoutMs: 50,
+        maxAttempts: 1
+      }),
+    /timed out|abort/i
+  )
+  assert.ok(activeSignal, 'the request must carry an abort signal')
+})
+
+// A transient failure (dropped connection) is retried; the install is a
+// one-off, and a single blip should not send the operator back to square one.
+test('downloadBytes retries a transient failure', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  const fetcher = () => {
+    calls += 1
+    if (calls === 1) return Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))
+    const body = (async function* generate() {
+      yield Buffer.from('complete')
+    })()
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  const data = await downloadBytes({
+    url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher,
+    retryDelayMs: 1
+  })
+  assert.equal(data.toString(), 'complete')
+  assert.equal(calls, 2)
+})
+
+// A 404 is the release not existing; retrying it only delays the failure.
+test('downloadBytes does not retry a permanent failure', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  const fetcher = () => {
+    calls += 1
+    return Promise.resolve({ ok: false, status: 404, headers: { get: () => null }, body: null })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        retryDelayMs: 1
+      }),
+    /HTTP 404/
+  )
+  assert.equal(calls, 1)
 })

@@ -976,6 +976,11 @@ func assertValidTimezone(value string) error {
 // keeps working on the version it has. A genuine update failure is reported
 // on stderr and still exits 0 for the scheduled path, so the scheduler does
 // not retry an upgrade it cannot influence.
+// selfUpdateLockWait bounds how long a second self-update tries for the lock.
+// The lock is acquired with a near-zero wait in practice: a contender yields
+// immediately rather than queueing behind a download it cannot shorten.
+const selfUpdateLockWait = 100 * time.Millisecond
+
 func runSelfUpdate(args []string, env Env, stdout, stderr io.Writer) int {
 	// --scheduled is a boolean: the scheduler writes it bare
 	// (`tokenboard self-update --scheduled`), which the value-requiring flag
@@ -999,6 +1004,38 @@ func runSelfUpdate(args []string, env Env, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitUsage
 	}
+
+	// Two updates at once rewrite the same executable: each stages to
+	// `<binary>.new` and swaps it in, so they can delete each other's staged
+	// file mid-verification, overwrite each other's backup, and lengthen the
+	// window in which the target path does not exist. Nothing else serializes
+	// them — this subcommand returns before `dispatch` takes
+	// collector-run.lock, and the skill's sync.lock only covers runs started
+	// through sync.mjs. A contender yields rather than waits: an update is not
+	// urgent, and the next scheduled run picks it up.
+	// os.UserHomeDir, not $HOME: Windows has no HOME by default, and resolving
+	// to a relative ".tokenboard" under the working directory would put this
+	// lock somewhere no other TokenBoard component looks.
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ".tokenboard"
+	}
+	lock, lockErr := state.Acquire(filepath.Join(state.ResolveDir(env, home), "self-update.lock"), selfUpdateLockWait)
+	if lockErr != nil {
+		fmt.Fprintln(stderr, lockErr.Error())
+		if scheduled {
+			return ExitOK
+		}
+		return ExitFailure
+	}
+	if lock == nil {
+		fmt.Fprintln(stderr, "TokenBoard self-update already in progress; leaving this one to it")
+		payload, _ := json.MarshalIndent(map[string]any{"version": strings.TrimPrefix(Version, "v"), "updated": false}, "", "  ")
+		fmt.Fprintln(stdout, string(payload))
+		return ExitOK
+	}
+	defer func() { _ = lock.Release() }()
+
 	// The flag is the operator's intent for this run and wins over the
 	// environment, which is the scheduler's channel; the skill spells both the
 	// same way (`flags['release-repo'] || env.TOKENBOARD_RELEASE_REPO`). A
