@@ -11,8 +11,10 @@
 package release
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -177,11 +179,29 @@ func (o Options) platform() (string, error) {
 	return platform, nil
 }
 
+// Timeouts are split by what the call has to move. `http.Client.Timeout`
+// covers the whole request — connect, redirects and body — so one value cannot
+// serve both ends of this package: a release lookup is a few hundred bytes of
+// headers and should fail fast, while a tarball is several megabytes and needs
+// room for a slow link. Sharing one value meant either a lookup that hangs for
+// the download budget or a download that fails on a link the lookup survived.
+const (
+	// lookupTimeout bounds one `/releases/latest` hop chain.
+	lookupTimeout = 15 * time.Second
+	// downloadTimeout bounds one asset transfer.
+	downloadTimeout = 2 * time.Minute
+	// retryBudget bounds the retries a caller may make for one asset. The
+	// attempt count is small on purpose: the caller is a scheduled job that runs
+	// again later, and a machine behind a dead proxy should not spend minutes
+	// of its sync on this.
+	maxDownloadAttempts = 3
+)
+
 func (o Options) client() *http.Client {
 	if o.HTTPClient != nil {
 		return o.HTTPClient
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: lookupTimeout}
 }
 
 // Resolve returns the release tag and the download URLs of its platform
@@ -321,8 +341,55 @@ func sameRedirectHost(origin, target *url.URL) bool {
 // else.
 func Download(client *http.Client, asset Asset) ([]byte, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: downloadTimeout}
 	}
+	var lastErr error
+	for attempt := 1; attempt <= maxDownloadAttempts; attempt++ {
+		data, err := downloadOnce(client, asset)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if !isTransient(err) {
+			return nil, err
+		}
+		if attempt < maxDownloadAttempts {
+			time.Sleep(retryDelay(attempt))
+		}
+	}
+	return nil, fmt.Errorf("%w (after %d attempts)", lastErr, maxDownloadAttempts)
+}
+
+// retryDelay backs off between attempts. It stays short: the caller is a
+// scheduled job that will run again, so waiting longer spends the sync window
+// without improving the odds.
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * 2 * time.Second
+}
+
+// isTransient reports whether retrying the same request could plausibly
+// succeed. A dropped connection or a truncated body is a link problem; a 4xx
+// is the release not existing, and 501/505 mean the server will not answer
+// this request however many times it is asked.
+func isTransient(err error) bool {
+	var permanentErr *permanentDownloadError
+	if errors.As(err, &permanentErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		// The download budget ran out: another attempt has the same budget.
+		return false
+	}
+	return true
+}
+
+// permanentDownloadError marks a failure a retry cannot fix.
+type permanentDownloadError struct{ err error }
+
+func (e *permanentDownloadError) Error() string { return e.err.Error() }
+func (e *permanentDownloadError) Unwrap() error { return e.err }
+
+func downloadOnce(client *http.Client, asset Asset) ([]byte, error) {
 	origin, err := url.Parse(asset.URL)
 	if err != nil {
 		return nil, err
@@ -334,10 +401,10 @@ func Download(client *http.Client, asset Asset) ([]byte, error) {
 		// number this call is deciding: refusing at `> maxRedirects` follows
 		// exactly maxRedirects hops, matching latestTag's loop.
 		if len(via) > maxRedirects {
-			return fmt.Errorf("download %s redirected more than %d times", asset.Name, maxRedirects)
+			return &permanentDownloadError{err: fmt.Errorf("download %s redirected more than %d times", asset.Name, maxRedirects)}
 		}
 		if !sameRedirectHost(origin, request.URL) {
-			return fmt.Errorf("download %s redirected to %s, which is not the release host", asset.Name, request.URL.Host)
+			return &permanentDownloadError{err: fmt.Errorf("download %s redirected to %s, which is not the release host", asset.Name, request.URL.Host)}
 		}
 		if previous != nil {
 			return previous(request, via)
@@ -350,14 +417,22 @@ func Download(client *http.Client, asset Asset) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
+		err := fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
+		// 5xx (except "not implemented") and 429 are the server saying "not now";
+		// everything else is the request itself being wrong.
+		if response.StatusCode >= 500 && response.StatusCode != http.StatusNotImplemented || response.StatusCode == http.StatusTooManyRequests {
+			return nil, err
+		}
+		return nil, &permanentDownloadError{err: err}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxDownloadBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > maxDownloadBytes {
-		return nil, fmt.Errorf("download %s exceeds %d bytes", asset.Name, maxDownloadBytes)
+		// The bound is the same on every attempt; a server sending more is not
+		// a link problem.
+		return nil, &permanentDownloadError{err: fmt.Errorf("download %s exceeds %d bytes", asset.Name, maxDownloadBytes)}
 	}
 	return data, nil
 }

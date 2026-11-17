@@ -253,3 +253,74 @@ func TestDownloadFollowsASameHostRedirect(t *testing.T) {
 		t.Fatalf("data = %q", data)
 	}
 }
+
+// A link that drops the transfer once is not a reason to leave the machine a
+// release behind until the next scheduled run: the retry is bounded, and it
+// re-downloads the whole asset rather than resuming, because a partially read
+// body cannot be trusted for a checksum.
+func TestDownloadRetriesATransientFailure(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Content-Length", "1000")
+			_, _ = w.Write([]byte("short"))
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte("complete"))
+	}))
+	defer server.Close()
+
+	data, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if string(data) != "complete" {
+		t.Errorf("data = %q, want the complete body from the retry", data)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2 (one failure, one retry)", attempts)
+	}
+}
+
+// A 404 is not transient: retrying it would only delay the failure the
+// operator needs to see.
+func TestDownloadDoesNotRetryAPermanentFailure(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	if _, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"}); err == nil {
+		t.Fatal("a 404 must fail")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1: a 404 must not be retried", attempts)
+	}
+}
+
+// Retries stop: a dead proxy must not hold the caller forever. The bound is
+// what the scheduled sync relies on to finish its own run.
+func TestDownloadStopsAfterTheRetryBudget(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "boom", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	if _, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"}); err == nil {
+		t.Fatal("a persistently failing server must fail")
+	}
+	if attempts != maxDownloadAttempts {
+		t.Errorf("attempts = %d, want the budget of %d", attempts, maxDownloadAttempts)
+	}
+}

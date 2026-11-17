@@ -91,6 +91,25 @@ release:
     To roll a machine back, set `clientType` to `"git"` — a `perSource` map
     cannot mix clients under `--source all`, which fails closed by design.
 
+    **Roll a binary install back to a previous release** (no support required
+    beyond the release assets):
+
+    ```bash
+    ~/.tokenboard/bin/tokenboard self-update --tag v0.2.0
+    ```
+
+    A pinned `--tag` installs exactly that release even though it is older:
+    the downgrade guard only stops an *unpinned* update from following a feed
+    that points backwards. The replaced binary is kept beside it as
+    `tokenboard.backup-<UTC stamp>-<seq>`, and renaming that file back over
+    `tokenboard` is the manual equivalent when the network is unavailable.
+    `self-update` verifies every download against the release's `checksums.txt`
+    and runs the staged binary's `version` before swapping, so an interrupted
+    or corrupted download leaves the installed client untouched. It does not
+    check whether the *new* version collects correctly; if a release breaks a
+    source, watch `node skills/tokenboard/scripts/status.mjs` after upgrading
+    and roll back with `--tag`.
+
 changelog:
   use: github
   sort: asc
