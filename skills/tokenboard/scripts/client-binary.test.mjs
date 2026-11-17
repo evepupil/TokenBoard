@@ -726,3 +726,80 @@ test('downloadBytes does not retry a permanent failure', async () => {
   )
   assert.equal(calls, 1)
 })
+
+// A timeout is not retried. The installer holds self-update.lock while it
+// downloads, so retrying a stalled transfer multiplies the time it blocks
+// every scheduled self-update: three 120s budgets beat a fast, honest failure.
+test('downloadBytes does not retry a timeout', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  let activeSignal
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return new Promise((resolve, reject) => {
+            activeSignal.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+              {
+                once: true
+              }
+            )
+          })
+        }
+      }
+    }
+  }
+  const fetcher = (url, options) => {
+    calls += 1
+    activeSignal = options?.signal
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        timeoutMs: 30,
+        retryDelayMs: 1
+      }),
+    /timed out/i
+  )
+  assert.equal(calls, 1, 'a timeout must fail on the first attempt')
+})
+
+// A `.new` left by a failed *older* download runs fine, so "answers version"
+// alone would restore it over a newer backup and roll the client back. The
+// staged copy is taken only when it is at least as new as the backup.
+test('recovery prefers a newer backup over a runnable but older staged binary', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-stale-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.1.9'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+  const lines = []
+
+  recoverOrphanedBinary({
+    binaryPath,
+    spawn: fixtureSpawn({ tokenboard: '0.2.0' }),
+    log: (line) => lines.push(line)
+  })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.2\.0/, 'the newer backup must be restored')
+  assert.equal(existsSync(`${binaryPath}.new`), false, 'the stale staged copy must be dropped')
+})
+
+// The staged copy an interrupted update was installing is newer than the
+// backup beside it, and it still wins.
+test('recovery still prefers a staged binary newer than the backup', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-newer-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.3.0'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+
+  recoverOrphanedBinary({ binaryPath, spawn: fixtureSpawn({ tokenboard: '0.3.0' }) })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.3\.0/, 'the staged copy must be restored')
+  assert.equal(existsSync(`${binaryPath}.backup-20260101T000000Z-000001`), true, 'the backup is left alone')
+})

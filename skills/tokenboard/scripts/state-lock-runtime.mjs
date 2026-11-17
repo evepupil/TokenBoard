@@ -41,8 +41,3 @@ function sleepSync(ms) {
 // directory before it touches the executable. An installer that stages the
 // same `<binary>.new` must take it too.
 export const selfUpdateLockFileName = 'self-update.lock'
-
-// How long the bootstrap installer waits for a `self-update` already running.
-// Yielding is what the Go side does; the install is a one-off and re-running
-// it costs the operator nothing.
-export const selfUpdateLockWaitMs = 2_000

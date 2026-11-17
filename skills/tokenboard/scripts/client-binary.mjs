@@ -28,7 +28,7 @@ import { basename, dirname, join } from 'node:path'
 import { errorMessage } from './error-message.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 import { acquireLock, releaseLock } from './coordinator-lock.mjs'
-import { selfUpdateLockFileName, selfUpdateLockWaitMs, stateLockRuntime } from './state-lock-runtime.mjs'
+import { selfUpdateLockFileName, stateLockRuntime } from './state-lock-runtime.mjs'
 
 export const defaultReleaseRepo = 'evepupil/TokenBoard'
 export const defaultReleaseBaseUrl = 'https://github.com'
@@ -210,6 +210,9 @@ function delay(ms) {
 function abortError() {
   const error = new Error('TokenBoard release download timed out')
   error.name = 'AbortError'
+  // A timeout is the budget, not the link: another attempt has the same
+  // budget, and the caller holds self-update.lock while it waits.
+  error.permanent = true
   return error
 }
 
@@ -478,18 +481,21 @@ export async function installClientBinary({
   fetcher = fetch,
   spawn = spawnSync,
   workDir,
-  lockWaitMs = selfUpdateLockWaitMs,
   log = () => {}
 }) {
   const target = clientBinaryPath({ configDir, platform })
   const work = workDir || join(configDir, 'client-install')
+  // acquireLock tries a handful of times without sleeping: a held lock is
+  // reported at once, not waited out. That matches Go, which yields to a
+  // running update rather than queueing behind a download it cannot shorten.
+  //
   // Go's `self-update` takes this lock in state.ResolveDir, which prefers
   // TOKENBOARD_STATE_DIR over TOKENBOARD_CONFIG_DIR. Use the same resolution
   // here or the two paths lock different files when an operator overrides the
   // state directory, reintroducing the staged-file race.
   const lockDir = process.env.TOKENBOARD_STATE_DIR || configDir
   const lockPath = join(lockDir, selfUpdateLockFileName)
-  const lockRuntime = stateLockRuntime({ lockTimeoutMs: lockWaitMs })
+  const lockRuntime = stateLockRuntime({ lockTimeoutMs: 0 })
   mkdirSync(lockDir, { recursive: true, mode: 0o700 })
   const lock = acquireLock(lockPath, lockRuntime)
   if (!lock) {
@@ -605,42 +611,90 @@ export function recoverOrphanedBinary({
     return null
   }
   const directory = dirname(binaryPath)
-  // Go's backupPath is `current + ".backup-" + stamp`, so the prefix follows the
-  // path actually configured rather than the platform's default file name.
+  // Go's backupPath is `current + ".backup-" + <UTC stamp>[-<sequence>]`, so the
+  // prefix follows the path actually configured rather than the platform's
+  // default file name. The optional sequence suffix still starts with the
+  // prefix, so names written before it existed keep matching.
   const prefix = `${basename(binaryPath)}.backup-`
 
   // The staged copy is the newer binary, but a kill during its write leaves a
   // truncated file. It is restored only if it still answers `version`; the
   // known-good backup is the fallback, and a dead staged file is removed so it
   // cannot shadow a later install.
+  //
+  // "Answers version" is not enough to prefer it: a `.new` left by a failed
+  // *older* download runs fine and would roll the client back below the backup
+  // beside it. The staged copy is taken only when it is at least as new as the
+  // newest backup; otherwise the backup wins and the stale `.new` is dropped.
   const staged = `${binaryPath}.new`
+  const backups = listBackups(directory, prefix, readDir)
+  const newestBackup = backups.at(-1)
   if (existsSync(staged) && runsVersion(staged, spawn)) {
-    rename(staged, binaryPath)
-    log(`TokenBoard client was missing; restored ${binaryPath} from the staged download`)
-    return staged
+    if (!newestBackup || !isStagedOlderThanBackup(staged, join(directory, newestBackup), spawn)) {
+      rename(staged, binaryPath)
+      log(`TokenBoard client was missing; restored ${binaryPath} from the staged download`)
+      return staged
+    }
+    log(`TokenBoard client was missing; the staged download is older than ${newestBackup}, keeping the backup`)
   }
   remove(staged, { force: true })
 
+  if (!newestBackup) {
+    return null
+  }
+  rename(join(directory, newestBackup), binaryPath)
+  log(`TokenBoard client was missing; restored ${binaryPath} from ${newestBackup}`)
+  return join(directory, newestBackup)
+}
+
+// listBackups returns this binary's backup file names, oldest first. The
+// timestamp leads every name, so a plain byte sort orders them by age.
+function listBackups(directory, prefix, readDir) {
   let names
   try {
     names = readDir(directory)
   } catch {
-    return null
+    return []
   }
-  const backups = names.filter((name) => name.startsWith(prefix)).sort()
-  const latest = backups.at(-1)
-  if (!latest) {
-    return null
+  return names.filter((name) => name.startsWith(prefix)).sort()
+}
+
+// isStagedOlderThanBackup compares the versions two runnable binaries print.
+// An unparseable version on either side is not proof the staged copy is stale,
+// so it is treated as "not older" — the staged copy is the one an interrupted
+// update was installing.
+function isStagedOlderThanBackup(staged, backup, spawn) {
+  const stagedVersion = versionParts(runsVersion(staged, spawn, true))
+  const backupVersion = versionParts(runsVersion(backup, spawn, true))
+  if (!stagedVersion || !backupVersion) return false
+  for (let index = 0; index < Math.max(stagedVersion.length, backupVersion.length); index += 1) {
+    const left = stagedVersion[index] ?? 0
+    const right = backupVersion[index] ?? 0
+    if (left !== right) return left < right
   }
-  rename(join(directory, latest), binaryPath)
-  log(`TokenBoard client was missing; restored ${binaryPath} from ${latest}`)
-  return join(directory, latest)
+  return false
+}
+
+function versionParts(output) {
+  if (typeof output !== 'string') return null
+  // "tokenboard (go) 1.2.3" — the last whitespace-separated field is the version.
+  const token = output.trim().split(/\s+/).filter(Boolean).at(-1)
+  if (!token) return null
+  const parts = []
+  for (const field of token.replace(/^v/, '').split('.')) {
+    const value = Number.parseInt(field, 10)
+    if (!Number.isFinite(value) || value < 0) break
+    parts.push(value)
+  }
+  return parts.length > 0 ? parts : null
 }
 
 // runsVersion reports whether an executable answers `version` at all. The
 // output is not compared to a release: the point is only to reject a file that
-// a truncated write left unrunnable.
-function runsVersion(path, spawn) {
+// a truncated write left unrunnable. With `withOutput` it returns the printed
+// line instead of a boolean (null when it cannot run), which is what lets
+// recovery compare two runnable candidates.
+function runsVersion(path, spawn, withOutput = false) {
   try {
     const result = spawn(path, ['version'], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -651,9 +705,11 @@ function runsVersion(path, spawn) {
       // so it must not see the upload token either.
       env: scrubbedChildEnv()
     })
-    return !result.error && result.status === 0
+    const ok = !result.error && result.status === 0
+    if (withOutput) return ok ? String(result.stdout ?? '') : null
+    return ok
   } catch {
-    return false
+    return withOutput ? null : false
   }
 }
 
