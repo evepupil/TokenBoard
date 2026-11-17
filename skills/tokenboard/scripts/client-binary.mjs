@@ -424,8 +424,21 @@ function toTarPath(value) {
 // and Windows 10+), the way the archive fallback already shells out to unzip.
 export function extractBinary({ archivePath, extractDir, name, platform = process.platform, spawn = spawnSync, log }) {
   mkdirSync(extractDir, { recursive: true })
-  runTarExtract({ archivePath, extractDir, name, platform, spawn, log })
-  return readExtractedFile(extractDir, name, `TokenBoard release tarball does not contain ${name}`)
+  const missingMessage = `TokenBoard release tarball does not contain ${name}`
+  try {
+    runTarExtract({ archivePath, extractDir, name, platform, spawn, log })
+  } catch (error) {
+    // `tar xzf <archive> <member>` exits non-zero when the member is absent,
+    // and "tar failed with exit code 1" tells an operator nothing. When the
+    // member is simply not there, report what is missing — the same wording
+    // Go's extractBinary uses. An archive that is not a tarball at all gets the
+    // same treatment: the directory is empty either way.
+    if (!existsSync(join(extractDir, name))) {
+      throw new Error(missingMessage)
+    }
+    throw error
+  }
+  return readExtractedFile(extractDir, name, missingMessage)
 }
 
 function readExtractedFile(extractDir, name, missingMessage) {

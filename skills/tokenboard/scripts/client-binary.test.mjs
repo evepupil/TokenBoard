@@ -949,3 +949,29 @@ test('runSelfUpdate reports a failed recovery instead of throwing it', () => {
     'the recovery failure must be logged'
   )
 })
+
+// The installer extracts with the platform's tar, so the refusals Go's
+// extractBinary makes by hand have to be made here too: an archive that does
+// not carry the executable, or whose entry is not a non-empty file, must not
+// produce a staged binary.
+test('the installer refuses an archive without the executable', async () => {
+  const { extractBinary } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-nobin-'))
+  const archive = join(dir, 'release.tar.gz')
+  writeFileSync(archive, buildTarball(dir, 'README.md', 'docs'))
+  assert.throws(
+    () => extractBinary({ archivePath: archive, extractDir: join(dir, 'x'), name: 'tokenboard', log: () => {} }),
+    /does not contain tokenboard/
+  )
+})
+
+test('the installer refuses an empty executable entry', async () => {
+  const { extractBinary } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-emptybin-'))
+  const archive = join(dir, 'release.tar.gz')
+  writeFileSync(archive, buildTarball(dir, 'tokenboard', ''))
+  assert.throws(
+    () => extractBinary({ archivePath: archive, extractDir: join(dir, 'x'), name: 'tokenboard', log: () => {} }),
+    /is empty/
+  )
+})
