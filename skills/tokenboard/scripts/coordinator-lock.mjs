@@ -500,7 +500,13 @@ function isWithinCreationWindow(lockPath, runtime) {
     const modified = typeof info?.mtimeMs === 'number' ? info.mtimeMs : null
     if (modified === null) return false
     return runtime.now() - modified < lockCreationWindowMs
-  } catch {
-    return false
+  } catch (error) {
+    // The record was read a moment ago, so the file exists; a stat that now
+    // fails for any reason other than it vanishing means the age cannot be
+    // known. Go's removeStale returns the same error instead of sweeping, and
+    // sweeping on an unknown age is how a contender steals a lock whose holder
+    // is still writing it.
+    if (error?.code === 'ENOENT') return false
+    throw error
   }
 }

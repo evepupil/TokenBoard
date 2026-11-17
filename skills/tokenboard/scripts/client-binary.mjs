@@ -134,7 +134,8 @@ export async function resolveRelease({
 // would block every scheduled self-update for as long as the connection
 // hangs; Go's release package draws the same line at 15s.
 export async function latestTag({ repo, baseUrl, fetcher = fetch, lookupTimeoutMs = releaseLookupTimeoutMs }) {
-  let current = `${baseUrl}/${repo}/releases/latest`
+  const origin = new URL(`${baseUrl}/${repo}/releases/latest`)
+  let current = origin.toString()
   const controller = new AbortController()
   let timedOut = false
   const timer = setTimeout(() => {
@@ -142,7 +143,7 @@ export async function latestTag({ repo, baseUrl, fetcher = fetch, lookupTimeoutM
     controller.abort()
   }, lookupTimeoutMs)
   try {
-    return await latestTagHops({ repo, current, fetcher, controller })
+    return await latestTagHops({ repo, origin, current, fetcher, controller })
   } catch (error) {
     if (timedOut) throw permanentDownloadError('TokenBoard release lookup timed out')
     throw error
@@ -151,7 +152,7 @@ export async function latestTag({ repo, baseUrl, fetcher = fetch, lookupTimeoutM
   }
 }
 
-async function latestTagHops({ repo, current, fetcher, controller }) {
+async function latestTagHops({ repo, origin, current, fetcher, controller }) {
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const response = await raceAbort(
       fetcher(current, { redirect: 'manual', signal: controller.signal }),
@@ -167,7 +168,14 @@ async function latestTagHops({ repo, current, fetcher, controller }) {
       if (!location) {
         throw new Error(`TokenBoard release lookup returned HTTP ${response.status} without a Location`)
       }
-      current = new URL(location, current).toString()
+      // The asset download already refuses a hop to a host the release page
+      // never named; the lookup is the earlier request and follows the same
+      // rule, or an answer on the release host could send it anywhere.
+      const next = new URL(location, current)
+      if (!sameRedirectHost(origin, next)) {
+        throw new Error(`TokenBoard release lookup redirected to ${next.host}, which is not the release host`)
+      }
+      current = next.toString()
       continue
     }
     if (response.status !== 200) {

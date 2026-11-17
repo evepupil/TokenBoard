@@ -934,6 +934,26 @@ test('a fresh unparseable lock is not swept inside the creation window', () => {
   assert.equal(existsSync(lockPath), true, 'the fresh lock file must survive')
 })
 
+// The age of a lock that cannot be stat'ed is unknown, not zero. Go's
+// removeStale propagates the same error rather than sweeping; treating it as
+// "too old" would let a contender steal the lock a holder is still writing.
+test('an unparseable lock whose age cannot be read is not swept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-stat-fail-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const runtime = {
+    ...stateLockRuntime({ lockTimeoutMs: 0 }),
+    stat: () => {
+      const error = new Error('EACCES: permission denied')
+      error.code = 'EACCES'
+      throw error
+    }
+  }
+
+  assert.throws(() => acquireLock(lockPath, runtime), /EACCES/)
+  assert.equal(existsSync(lockPath), true, 'the lock must survive an unreadable stat')
+})
+
 // Past the window an empty record with no live process is genuinely stale.
 test('an aged unparseable lock is swept', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-aged-'))

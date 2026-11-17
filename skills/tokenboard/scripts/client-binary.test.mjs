@@ -899,6 +899,28 @@ test('latestTag fails on its own budget when the lookup hangs', async () => {
 })
 
 // A lookup that answers normally is unaffected by the budget.
+// The lookup hop already refuses an absolute redirect away from the release
+// host in the Go client (release.latestTag walks any absolute Location), and
+// here a cross-host hop would send the anonymous lookup to a server the
+// release page never named. A relative Location keeps resolving as before.
+test('latestTag refuses an absolute redirect that leaves the release host', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return Promise.resolve({
+      status: 302,
+      headers: new Map([['location', 'https://evil.example/owner/repo/releases/tag/v9']])
+    })
+  }
+
+  await assert.rejects(
+    () => latestTag({ repo: 'owner/repo', baseUrl: 'https://github.com', fetcher, lookupTimeoutMs: 1000 }),
+    /not the release host/
+  )
+  assert.equal(seen.length, 1, 'the lookup must not follow the hop')
+})
+
 test('latestTag follows the redirect when the lookup answers', async () => {
   const { latestTag } = await import('./client-binary.mjs')
   const responses = [
