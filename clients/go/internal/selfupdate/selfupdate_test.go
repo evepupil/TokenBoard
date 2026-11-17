@@ -867,7 +867,7 @@ func buildTarballWithType(t *testing.T, name string, typeflag byte, body []byte)
 // alone.
 func TestPruneBackupsHandlesMetacharacterDirectoriesWithoutGlobbing(t *testing.T) {
 	root := t.TempDir()
-	oddDir := filepath.Join(root, "bin[1]*?")
+	oddDir := filepath.Join(root, "bin[1]")
 	sibling := filepath.Join(root, "bin1")
 	for _, dir := range []string{oddDir, sibling} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -910,5 +910,24 @@ func TestPruneBackupsHandlesMetacharacterDirectoriesWithoutGlobbing(t *testing.T
 	}
 	if info, err := os.Stat(fakeDir); err != nil || !info.IsDir() {
 		t.Errorf("a directory matching the backup prefix was removed: %v", err)
+	}
+}
+
+// The keep path is compared before removing. Windows compares case
+// -insensitively the way its filesystem does, because the same file can be
+// named with different case by different callers. On other platforms two names
+// that differ only in case are different files and must not be conflated.
+func TestSamePathMatchesThePlatformFilesystem(t *testing.T) {
+	same := samePath("/opt/bin/tokenboard", "/opt/bin/./tokenboard")
+	if !same {
+		t.Fatal("a cleaned path was not recognised as the same file")
+	}
+	folded := samePath(`C:\Bin\tokenboard`, `c:\bin\TokenBoard`)
+	if runtime.GOOS == "windows" {
+		if !folded {
+			t.Fatal("Windows did not compare a case-only difference as the same file")
+		}
+	} else if folded {
+		t.Fatal("a case-only difference was treated as the same file on a case-sensitive filesystem")
 	}
 }

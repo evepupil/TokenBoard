@@ -516,6 +516,71 @@ test('downloadBytes follows a redirect to the GitHub asset CDN', async () => {
   assert.equal(calls, 2)
 })
 
+// Retry classification is a cross-language contract: Go's
+// release.isRetryableStatus retries 429 and every 5xx except 501 and 505, and
+// treats the rest as the release not existing. One side retrying what the
+// other gives up on would show up as installs that work on one client and not
+// the other against the same server.
+for (const [status, attempts] of [
+  [429, 3],
+  [500, 3],
+  [503, 3],
+  [501, 1],
+  [505, 1],
+  [404, 1],
+  [403, 1]
+]) {
+  test(`downloadBytes retries based on HTTP ${status} exactly like the Go client`, async () => {
+    const { downloadBytes } = await import('./client-binary.mjs')
+    let calls = 0
+    const fetcher = () => {
+      calls += 1
+      return Promise.resolve({ ok: false, status, headers: { get: () => null }, body: null })
+    }
+
+    await assert.rejects(
+      () =>
+        downloadBytes({
+          url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+          name: 'tokenboard.tar.gz',
+          fetcher,
+          retryDelayMs: 1
+        }),
+      new RegExp(`returned HTTP ${status}`)
+    )
+    assert.equal(calls, attempts)
+  })
+}
+
+// A 304 is a cache answer, not a redirection, even when it carries a Location.
+// Go's net/http only follows 301/302/303/307/308; following this one here would
+// let the two clients disagree about what the same server answer means.
+test('downloadBytes does not treat a non-redirect 3xx as a redirect', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return {
+      ok: false,
+      status: 304,
+      headers: { get: () => 'https://github.com/MisonL/TokenBoard/releases/tag/v1' },
+      body: null
+    }
+  }
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        maxAttempts: 1
+      }),
+    /returned HTTP 304/
+  )
+  assert.equal(seen.length, 1)
+})
+
 // A swap killed between the two renames can leave the *staged* binary behind
 // as well as the backup. The staged one is newer, but a kill during its write
 // leaves a truncated file, so it is restored only after it answers `version`;
@@ -976,6 +1041,21 @@ test('the installer refuses an empty executable entry', async () => {
   )
 })
 
+test('latestTag does not treat a non-redirect 3xx as a redirect', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return Promise.resolve({
+      status: 304,
+      headers: new Map([['location', 'https://github.com/o/r/releases/tag/v1']])
+    })
+  }
+
+  await assert.rejects(() => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }), /returned HTTP 304/)
+  assert.equal(seen.length, 1)
+})
+
 // A 3xx without a Location, and a redirect that lands on a page that is not a
 // release tag, must both be refused: following either leaves the installer with
 // no tag to download from. Go's latestTag draws the same lines.
@@ -1042,4 +1122,28 @@ test('recovery does not retry a permanent rename failure', () => {
     /EACCES/
   )
   assert.equal(attempts, 1, 'a permanent failure is not retried')
+})
+
+// A directory that cannot be listed is not a directory with no backups. If
+// recovery answered "none" here, a runnable but older `.new` would win over a
+// newer backup it could not see — the rollback this comparison exists to stop.
+test('recovery does not treat an unlistable directory as having no backups', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-unlistable-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.1.9'), { mode: 0o755 })
+  const error = new Error('EACCES: permission denied')
+  error.code = 'EACCES'
+
+  assert.throws(
+    () =>
+      recoverOrphanedBinary({
+        binaryPath,
+        spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.1.9\n' }),
+        readDir: () => {
+          throw error
+        }
+      }),
+    /EACCES/
+  )
+  assert.equal(existsSync(binaryPath), false, 'nothing may be restored from an unknown directory')
 })

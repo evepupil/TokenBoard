@@ -42,6 +42,7 @@ const releaseLookupTimeoutMs = 15_000
 const maxDownloadAttempts = 3
 const downloadRetryDelayMs = 500
 const maxRedirects = 5
+const followedRedirectStatuses = new Set([301, 302, 303, 307, 308])
 const childOutputMaxBuffer = 64 * 1024 * 1024
 // A binary that cannot answer `version` must not hang the caller: the staged-file probe runs
 // inside the sync lock, so an unbounded wait there holds sync.lock until the process dies.
@@ -159,7 +160,9 @@ async function latestTagHops({ repo, current, fetcher, controller }) {
     if (response.status === 404) {
       throw new Error(`TokenBoard release lookup returned HTTP 404 for ${repo}`)
     }
-    if (response.status >= 300 && response.status < 400) {
+    // Same rule as downloadBytes: only the statuses net/http follows are
+    // redirects, so a 304 with a Location falls through to the error below.
+    if (followedRedirectStatuses.has(response.status)) {
       const location = response.headers.get('location')
       if (!location) {
         throw new Error(`TokenBoard release lookup returned HTTP ${response.status} without a Location`)
@@ -258,7 +261,12 @@ async function downloadBytesOnce({ url, name, fetcher, timeoutMs }) {
         fetcher(current.toString(), { redirect: 'manual', signal: controller.signal }),
         controller.signal
       )
-      if (response.status < 300 || response.status >= 400) break
+      // Only the statuses a browser follows are redirects. Treating any 3xx
+      // with a Location as one would walk a 304 (a cache answer, not a
+      // redirect) somewhere it was never meant to go; Go's net/http follows
+      // exactly 301/302/303 plus 307/308, so anything else has to land in the
+      // same terminal branch on both sides.
+      if (!followedRedirectStatuses.has(response.status)) break
       const location = response.headers?.get?.('location')
       if (!location) {
         throw permanentDownloadError(`download ${name} returned HTTP ${response.status} without a Location`)
@@ -773,8 +781,13 @@ function listBackups(directory, prefix, readDir) {
   let names
   try {
     names = readDir(directory)
-  } catch {
-    return []
+  } catch (error) {
+    // A directory that does not exist has no backups. Any other failure — a
+    // directory that is executable but not listable, say — means the backups
+    // are unknown, not absent: answering "none" would let recovery prefer a
+    // runnable but older `.new` over a newer backup it simply could not see.
+    if (error?.code === 'ENOENT') return []
+    throw error
   }
   return names.filter((name) => name.startsWith(prefix)).sort()
 }
