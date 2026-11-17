@@ -896,3 +896,23 @@ test('runSelfUpdate recovers a missing binary when no update holds the lock', as
 
   assert.equal(existsSync(binaryPath), true, 'the backup must have been restored')
 })
+
+// A staged copy whose version cannot be read is not proof it is current. The
+// known backup wins: restoring an unidentifiable file could roll the client
+// back with no way to tell.
+test('recovery keeps the backup when the staged version cannot be read', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-unreadable-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('9.9.9'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+  // The staged probe answers success but prints no parseable version.
+  const spawn = (command) => {
+    const text = readFileSync(String(command), 'utf8')
+    if (String(command).endsWith('.new')) return { status: 0, stdout: 'no version here\n', stderr: '' }
+    return { status: 0, stdout: text.includes('0.2.0') ? 'tokenboard (go) 0.2.0\n' : 'no version here\n', stderr: '' }
+  }
+
+  recoverOrphanedBinary({ binaryPath, spawn, log: () => {} })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.2\.0/, 'the known backup must be restored')
+})

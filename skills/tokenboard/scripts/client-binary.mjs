@@ -733,7 +733,13 @@ function listBackups(directory, prefix, readDir) {
 function isStagedOlderThanBackup(staged, backup, spawn) {
   const stagedVersion = versionParts(runsVersion(staged, spawn, true))
   const backupVersion = versionParts(runsVersion(backup, spawn, true))
-  if (!stagedVersion || !backupVersion) return false
+  // A version that cannot be read is not evidence the staged copy is current.
+  // Choosing it anyway would restore whatever an interrupted older download
+  // left behind over a backup whose version is known — the rollback risk this
+  // comparison exists to prevent. The known-good backup wins the tie; the
+  // staged copy is only preferred when it proves it is at least as new.
+  if (!stagedVersion) return true
+  if (!backupVersion) return false
   for (let index = 0; index < Math.max(stagedVersion.length, backupVersion.length); index += 1) {
     const left = stagedVersion[index] ?? 0
     const right = backupVersion[index] ?? 0
