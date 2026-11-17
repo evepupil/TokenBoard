@@ -720,3 +720,61 @@ func TestVerifyExecutableDoesNotHandCredentialsToTheStagedBinary(t *testing.T) {
 		t.Errorf("staged binary saw credentials: %q, want all stripped", string(captured))
 	}
 }
+
+// A pinned tag that already matches the installed version is a no-op. The
+// equality short-circuit used to skip pinned runs so a downgrade stayed
+// possible, but the downgrade guard has its own branch: leaving `--tag` (or a
+// TOKENBOARD_RELEASE_TAG carried in the scheduler's environment) outside the
+// check meant every scheduled run re-downloaded and re-swapped the same 6MB.
+func TestRunIsANoopWhenAPinnedTagMatchesTheInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	installed := stubBinary("1.2.3")
+	if err := os.WriteFile(target, installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("1.2.3")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	var downloads int
+	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.2.3"))}
+	server := fake.server(t)
+	server.Config.Handler = countingDownloads(server.Config.Handler, &downloads)
+
+	result, err := runAgainst(t, server, target, "v1.2.3")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Updated {
+		t.Error("a pinned tag matching the installed version must not reinstall it")
+	}
+	if downloads != 0 {
+		t.Errorf("downloads = %d, want none: the archive must not be fetched", downloads)
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, installed) {
+		t.Error("the installed binary was replaced")
+	}
+}
+
+// A pinned downgrade is still allowed: the equality check is not what decides
+// it, the version comparison is.
+func TestRunStillInstallsAPinnedDowngrade(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	if err := os.WriteFile(target, stubBinary("2.0.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("2.0.0")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	fake := fakeRelease{tag: "v1.9.0", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.9.0"))}
+	server := fake.server(t)
+
+	result, err := runAgainst(t, server, target, "v1.9.0")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Updated || result.Version != "1.9.0" {
+		t.Errorf("result = %+v, want a pinned downgrade to 1.9.0", result)
+	}
+}

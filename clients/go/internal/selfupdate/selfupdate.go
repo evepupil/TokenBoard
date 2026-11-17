@@ -149,7 +149,14 @@ func Run(input Input) (Result, error) {
 		return Result{}, fmt.Errorf("TokenBoard release %s has no usable version", assets.Tag)
 	}
 	currentVersion := release.Version(CurrentVersion())
-	if !pinned(input.Tag) && currentVersion == version {
+	// Already this version is a no-op, pinned or not. The equality check and
+	// the downgrade guard are different questions: a pinned tag that *equals*
+	// the installed version has nothing to install, while a pinned tag below
+	// it is the operator's explicit downgrade and falls through to the
+	// comparison branch below. Skipping the equality check for pinned runs
+	// meant a TOKENBOARD_RELEASE_TAG left in the scheduler's environment
+	// re-downloaded and re-swapped the same 6MB on every scheduled run.
+	if currentVersion == version {
 		// A scheduled run must stay quiet when there is nothing to do: the
 		// log is long-lived and an "already current" line every hour is noise.
 		return Result{Version: version}, nil
