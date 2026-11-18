@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { buildStatus, collectRecentRunSummary, readClientStatus } from './status.mjs'
+import { buildStatus, collectRecentRunSummary, readClientStatus, readClientVersionNotice } from './status.mjs'
+import { clientVersionStatePath } from './client-version-state.mjs'
 import { scheduledRetryLegacyStatePath, scheduledRetryStatePath } from './scheduled-retry.mjs'
 import { scheduledSyncStatePath } from './scheduled-sync-state.mjs'
 
@@ -1027,4 +1028,24 @@ test('buildStatus omits the clientVersion field when nothing is recorded', () =>
   })
 
   assert.equal('clientVersion' in status, false)
+})
+
+// A file system error names the absolute path it failed on, and status output
+// is pasted into issues. The reason has to survive; the account name in the
+// path does not.
+test('an unreadable version record reports the reason without the path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-status-path-'))
+  const file = clientVersionStatePath(dir)
+  writeFileSync(file, '{"schemaVersion":"tokenboard-client-version/v1"}', { mode: 0o000 })
+  try {
+    if (process.platform !== 'win32') {
+      const notice = readClientVersionNotice(dir)
+      assert.match(notice.error, /EACCES/)
+      assert.doesNotMatch(notice.error, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      return
+    }
+  } finally {
+    chmodSync(file, 0o600)
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

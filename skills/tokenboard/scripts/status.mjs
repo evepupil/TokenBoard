@@ -7,6 +7,7 @@ import { configPath, readConfig } from './config.mjs'
 import { binaryFileName, readVersion } from './client-binary.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { errorMessage } from './error-message.mjs'
+import { redactUrlCredentials } from './redact-credentials.mjs'
 import { deviceLinkStatus } from './device-link.mjs'
 import { hookStatus } from './hooks.mjs'
 import { readNotifyWorkerErrors } from './notify.mjs'
@@ -202,12 +203,25 @@ function publicHookStatus(hooks) {
 // A version record that exists but cannot be read is reported rather than
 // dropped: status is the one command an operator runs when something looks
 // wrong, and a silently missing field reads as "no version recorded".
-function readClientVersionNotice(stateDir) {
+//
+// The message keeps the reason and drops the path: a file system error puts
+// the absolute path in its message, and status output gets pasted into issues
+// and chats, where the account name in that path is not the reader's to see.
+export function readClientVersionNotice(stateDir) {
   try {
     return readClientVersionState(stateDir)
   } catch (error) {
-    return { error: errorMessage(error) }
+    const reason = String(error?.code ?? '').trim() || redactPath(errorMessage(error))
+    return { error: `client version state could not be read (${reason})` }
   }
+}
+
+// Characters a POSIX or Windows path can contain; anything else ends it, so
+// `open '/home/a/.tokenboard/x.json': EACCES` loses the path and keeps the
+// reason. A credential fragment is redacted first so the path pattern can
+// never expose one that the URL rules would have caught.
+function redactPath(message) {
+  return redactUrlCredentials(message).replace(/[^\s'"`:,;()[\]]*[\\/][^\s'"`:,;()[\]]*/g, '<path>')
 }
 
 function hookState(value) {

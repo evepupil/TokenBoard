@@ -443,6 +443,22 @@ test('recovery matches a backup prefix case-insensitively only on Windows', () =
   assert.equal(readFileSync(binaryPath, 'utf8'), 'previous')
 })
 
+// Matching case-insensitively means two backups of the same target can carry
+// prefixes that differ in case. The newest is decided by the timestamp, not by
+// the byte order of the whole name, or the older "t..." name would sort after
+// the newer "T..." one and be restored instead.
+test('recovery picks the newest backup across differently cased prefixes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-newest-'))
+  const binaryPath = join(dir, 'tokenboard.exe')
+  writeFileSync(join(dir, 'TokenBoard.exe.backup-20260102T000000Z'), 'newer', { mode: 0o755 })
+  writeFileSync(join(dir, 'tokenboard.exe.backup-20260101T000000Z'), 'older', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'win32' })
+
+  assert.equal(restored, join(dir, 'TokenBoard.exe.backup-20260102T000000Z'))
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer')
+})
+
 test('recovery ignores a differently cased backup on other platforms', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-posix-'))
   const binaryPath = join(dir, 'tokenboard')

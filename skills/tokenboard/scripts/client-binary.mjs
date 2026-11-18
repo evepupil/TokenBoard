@@ -778,7 +778,7 @@ export function recoverOrphanedBinary({
   // beside it. The staged copy is taken only when it is at least as new as the
   // newest backup; otherwise the backup wins and the stale `.new` is dropped.
   const staged = `${binaryPath}.new`
-  const backups = listBackups(directory, matchesPrefix, readDir)
+  const backups = listBackups(directory, prefix.length, matchesPrefix, readDir)
   const newestBackup = backups.at(-1)
   if (existsSync(staged) && runsVersion(staged, spawn)) {
     if (!newestBackup || !isStagedOlderThanBackup(staged, join(directory, newestBackup), spawn)) {
@@ -798,9 +798,14 @@ export function recoverOrphanedBinary({
   return join(directory, newestBackup)
 }
 
-// listBackups returns this binary's backup file names, oldest first. The
-// timestamp leads every name, so a plain byte sort orders them by age.
-function listBackups(directory, matchesPrefix, readDir) {
+// listBackups returns this binary's backup file names, oldest first.
+//
+// Go names a backup `<current>.backup-<UTC stamp>[-<seq>]`, so the sort key is
+// the stamp inside the name, compared as a string rather than by locale. The
+// whole name is not the key: on Windows the prefix may differ in case between
+// two backups of the same target, and a byte sort would order "T…0102" after
+// "t…0101" — picking the older one as newest.
+function listBackups(directory, prefixLength, matchesPrefix, readDir) {
   let names
   try {
     names = readDir(directory)
@@ -812,7 +817,10 @@ function listBackups(directory, matchesPrefix, readDir) {
     if (error?.code === 'ENOENT') return []
     throw error
   }
-  return names.filter(matchesPrefix).sort()
+  const stampOf = (name) => name.slice(prefixLength)
+  return names
+    .filter(matchesPrefix)
+    .sort((left, right) => (stampOf(left) < stampOf(right) ? -1 : stampOf(left) > stampOf(right) ? 1 : 0))
 }
 
 // isStagedOlderThanBackup compares the versions two runnable binaries print.

@@ -27,10 +27,10 @@ export function clientVersionStatePath(stateDir) {
 // there makes the next record look like a first run, which silently resets
 // `since` and drops `previous` — exactly the history an upgrade failure is
 // traced with.
-export function readClientVersionState(stateDir) {
+export function readClientVersionState(stateDir, readFile = readFileSync) {
   let raw
   try {
-    raw = readFileSync(clientVersionStatePath(stateDir), 'utf8')
+    raw = readFile(clientVersionStatePath(stateDir), 'utf8')
   } catch (error) {
     if (error?.code === 'ENOENT') return null
     throw error

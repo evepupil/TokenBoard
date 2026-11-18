@@ -73,13 +73,35 @@ test('a missing or corrupt state file reads as null rather than throwing', (t) =
 // here reset `since` and dropped `previous`, so an upgrade that broke the
 // machine lost exactly the history that answers "did this happen when the
 // version changed?".
-test('an unreadable record is reported instead of treated as a first run', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-unreadable-'))
-  writeFileSync(clientVersionStatePath(dir), '{"schemaVersion":"tokenboard-client-version/v1"}', { mode: 0o000 })
-  try {
-    assert.throws(() => readClientVersionState(dir), /EACCES/)
-  } finally {
-    chmodSync(clientVersionStatePath(dir), 0o600)
-    rmSync(dir, { recursive: true, force: true })
+// Windows ignores the POSIX mode bits, so chmod 000 does not make the file
+// unreadable there and this cannot be exercised the same way; the injected-fs
+// test below carries that platform.
+test(
+  'an unreadable record is reported instead of treated as a first run',
+  { skip: process.platform === 'win32' },
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-unreadable-'))
+    writeFileSync(clientVersionStatePath(dir), '{"schemaVersion":"tokenboard-client-version/v1"}', { mode: 0o000 })
+    try {
+      assert.throws(() => readClientVersionState(dir), /EACCES/)
+    } finally {
+      chmodSync(clientVersionStatePath(dir), 0o600)
+      rmSync(dir, { recursive: true, force: true })
+    }
   }
+)
+
+// The same rule on every platform, without depending on how an OS exposes
+// permissions: a read that fails for any reason other than "no file" must not
+// be turned into a first run.
+test('a read failure other than a missing file is reported on every platform', () => {
+  const error = new Error('EACCES: permission denied')
+  error.code = 'EACCES'
+  assert.throws(
+    () =>
+      readClientVersionState('/state', () => {
+        throw error
+      }),
+    /EACCES/
+  )
 })
