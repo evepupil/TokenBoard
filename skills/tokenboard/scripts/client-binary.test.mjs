@@ -329,6 +329,36 @@ test('installClientBinary installs a verified binary and leaves no staged file',
   assert.equal(existsSync(join(configDir, 'client-install')), false)
 })
 
+// A running collector can hold the target on Windows for a moment, and
+// MoveFileEx then answers EPERM. Recovery and the Go swap retry that; the
+// bootstrap used to give up on the first one, so the very first install on a
+// busy machine failed where a retry moments later would have worked.
+test('installClientBinary retries a transient busy rename onto the target', async (t) => {
+  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
+  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
+  let attempts = 0
+  const result = await installClientBinary({
+    baseUrl,
+    configDir,
+    platform: 'darwin',
+    arch: 'x64',
+    spawn: fixtureSpawn(),
+    rename: (from, to) => {
+      attempts += 1
+      if (attempts === 1) {
+        const error = new Error('EPERM: operation not permitted')
+        error.code = 'EPERM'
+        throw error
+      }
+      renameSync(from, to)
+    },
+    log: () => {}
+  })
+
+  assert.equal(attempts, 2, 'the busy rename must be retried once')
+  assert.match(readFileSync(result.path, 'utf8'), /tokenboard \(go\) 1\.2\.3/)
+})
+
 test('installClientBinary refuses a checksum mismatch and installs nothing', async (t) => {
   const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', badChecksum: true })
   const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))

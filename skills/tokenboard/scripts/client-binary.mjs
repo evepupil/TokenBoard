@@ -539,6 +539,7 @@ export async function installClientBinary({
   fetcher = fetch,
   spawn = spawnSync,
   workDir,
+  rename = renameSync,
   log = () => {}
 }) {
   const target = clientBinaryPath({ configDir, platform })
@@ -573,6 +574,7 @@ export async function installClientBinary({
       spawn,
       workDir: work,
       target,
+      rename,
       log
     })
   } finally {
@@ -591,6 +593,7 @@ async function installClientBinaryLocked({
   spawn,
   workDir: work,
   target,
+  rename,
   log
 }) {
   const release = await resolveRelease({ repo, tag, baseUrl, platform, arch, fetcher })
@@ -630,7 +633,11 @@ async function installClientBinaryLocked({
     chmodSync(staged, 0o755)
     try {
       verifyExecutable(staged, release.version, { spawn })
-      renameSync(staged, target)
+      // The bootstrap replaces a file a running collector may be holding, and
+      // Windows answers that with EPERM/EBUSY for a moment. Recovery and the
+      // Go swap already retry those; a plain rename made the first install on
+      // such a machine fail where a second attempt would have worked.
+      renameWithRetry(staged, target, rename)
     } catch (error) {
       rmSync(staged, { force: true })
       throw error

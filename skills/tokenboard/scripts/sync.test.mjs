@@ -1981,6 +1981,36 @@ test('recovery warns instead of failing when the state directory is not writable
   assert.match(warn[0], /recovery skipped/)
 })
 
+// The path above stubs `recover`, so it never proves the wiring. This one uses
+// the real recoverUnderInstallLock: a regular file where the state directory
+// should be makes the lock acquisition fail with ENOTDIR on every platform,
+// which is the "no usable lock directory" branch — recovery must still run
+// directly instead of the sync losing its client.
+test('recovery runs directly when the lock directory is a file', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-file-state-'))
+  const statePath = join(base, 'state')
+  writeFileSync(statePath, 'not a directory')
+  const binaryDir = join(base, 'bin')
+  mkdirSync(binaryDir, { recursive: true })
+  const binaryPath = join(binaryDir, 'tokenboard')
+  const backup = `${binaryPath}.backup-20260101T000000Z-000001`
+  writeFileSync(backup, 'previous', { mode: 0o755 })
+  const warn = []
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: statePath },
+    invocation: { clientType: 'binary', command: binaryPath },
+    binaryPresent: () => false,
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warn.push(line)
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the backup must have been restored')
+  assert.deepEqual(warn, [], 'a missing lock directory is not a warning')
+})
+
 // After an upgrade the client cannot say whether the new version collects
 // correctly. Recording the installed version at sync time gives status.mjs the
 // one fact needed to answer that later: which version was running when the
