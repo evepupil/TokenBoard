@@ -459,6 +459,22 @@ test('recovery picks the newest backup across differently cased prefixes', () =>
   assert.equal(readFileSync(binaryPath, 'utf8'), 'newer')
 })
 
+// A Unicode prefix can lower-case to a different number of code points
+// (`İ` becomes `i` plus a combining dot), so a matched prefix is not
+// always as long as this target's own spelling. The stamp has to be found by
+// its shape, or the sort keys come out misaligned and the older backup wins.
+test('recovery orders backups whose prefix changes length when folded', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-fold-'))
+  const binaryPath = join(dir, 'İ.exe')
+  writeFileSync(join(dir, 'i̇.exe.backup-20260102T000000Z'), 'newer', { mode: 0o755 })
+  writeFileSync(join(dir, 'İ.exe.backup-20260101T000000Z'), 'older', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'win32' })
+
+  assert.equal(restored, join(dir, 'i̇.exe.backup-20260102T000000Z'))
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer')
+})
+
 test('recovery ignores a differently cased backup on other platforms', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-posix-'))
   const binaryPath = join(dir, 'tokenboard')

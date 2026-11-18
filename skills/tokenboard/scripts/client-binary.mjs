@@ -778,7 +778,7 @@ export function recoverOrphanedBinary({
   // beside it. The staged copy is taken only when it is at least as new as the
   // newest backup; otherwise the backup wins and the stale `.new` is dropped.
   const staged = `${binaryPath}.new`
-  const backups = listBackups(directory, prefix.length, matchesPrefix, readDir)
+  const backups = listBackups(directory, matchesPrefix, readDir)
   const newestBackup = backups.at(-1)
   if (existsSync(staged) && runsVersion(staged, spawn)) {
     if (!newestBackup || !isStagedOlderThanBackup(staged, join(directory, newestBackup), spawn)) {
@@ -805,7 +805,18 @@ export function recoverOrphanedBinary({
 // whole name is not the key: on Windows the prefix may differ in case between
 // two backups of the same target, and a byte sort would order "T…0102" after
 // "t…0101" — picking the older one as newest.
-function listBackups(directory, prefixLength, matchesPrefix, readDir) {
+//
+// The stamp is located by its own shape, not by the prefix's length: a Unicode
+// prefix can lower-case to a different number of code points (`İ` becomes
+// `i` plus a combining dot), so the matched prefix need not be as long as the
+// one this target would spell.
+const backupStampPattern = /(?:^|\.backup-)(\d{8}T\d{6}Z(?:-\d+)?)$/
+function backupStamp(name) {
+  const match = backupStampPattern.exec(name)
+  return match ? match[1] : ''
+}
+
+function listBackups(directory, matchesPrefix, readDir) {
   let names
   try {
     names = readDir(directory)
@@ -817,10 +828,11 @@ function listBackups(directory, prefixLength, matchesPrefix, readDir) {
     if (error?.code === 'ENOENT') return []
     throw error
   }
-  const stampOf = (name) => name.slice(prefixLength)
-  return names
-    .filter(matchesPrefix)
-    .sort((left, right) => (stampOf(left) < stampOf(right) ? -1 : stampOf(left) > stampOf(right) ? 1 : 0))
+  return names.filter(matchesPrefix).sort((left, right) => {
+    const a = backupStamp(left)
+    const b = backupStamp(right)
+    return a < b ? -1 : a > b ? 1 : 0
+  })
 }
 
 // isStagedOlderThanBackup compares the versions two runnable binaries print.
