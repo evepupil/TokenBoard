@@ -57,3 +57,37 @@ func TestRunExternalCutsOffARunawayReaderAtTheCeiling(t *testing.T) {
 		t.Fatalf("the reader ran for %s; the ceiling must stop it without waiting for the timeout", elapsed)
 	}
 }
+
+// The external sqlite3 binary is a third-party program, and exec.Cmd inherits
+// the whole process environment when Env is nil — upload token included. This
+// is the Go-side twin of the TS reader's scrub; a stand-in reports what it saw.
+func TestExternalReaderScrubsTheCredentialEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in is a POSIX shell script")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "seen.txt")
+	standIn := filepath.Join(dir, "sqlite3")
+	body := "#!/bin/sh\nif [ -n \"$TOKENBOARD_UPLOAD_TOKEN\" ]; then echo LEAKED > " + marker +
+		"; else echo CLEAN > " + marker + "; fi\necho '[]'\n"
+	if err := os.WriteFile(standIn, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_probe_secret")
+
+	if _, err := QueryJSONRows(filepath.Join(dir, "unused.db"), "select 1", QueryOptions{
+		SQLiteBin:     &standIn,
+		ForceExternal: true,
+		Label:         "OpenCode",
+	}); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+
+	seen, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the stand-in never ran: %v", err)
+	}
+	if strings.TrimSpace(string(seen)) != "CLEAN" {
+		t.Fatalf("the sqlite binary inherited the upload token: %q", seen)
+	}
+}

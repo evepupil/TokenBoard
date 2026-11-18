@@ -275,11 +275,21 @@ export async function runSyncInvocation({
   // code to report, so none is recorded.
   const skipped = result.skipped === true
   const status = skipped ? 'deferred' : result.exhausted || exitCode !== 0 ? 'failed' : 'success'
+  // 75 is an internal contract with the retry loop, not something the state file — which
+  // `status.mjs` prints verbatim — should carry: a reader has no way to know it means
+  // "the collector was busy". An exhausted budget is a recorded failure, with the cause
+  // kept in the error text so the distinction is not lost.
+  const recordedExitCode = result.exhausted ? 1 : exitCode
+  const recordedError =
+    result.error ??
+    (result.exhausted && exitCode === transientSyncExitCode
+      ? `sync exited with transient code ${transientSyncExitCode} through ${result.attempts} attempts; snapshots remain queued`
+      : undefined)
   recordState(status, {
-    ...(skipped ? {} : { exitCode }),
-    ...(result.error ? { error: result.error } : {})
+    ...(skipped ? {} : { exitCode: recordedExitCode }),
+    ...(recordedError ? { error: recordedError } : {})
   })
-  return exitCode
+  return recordedExitCode
 }
 
 // runPreCollectUpgrade is the upgrade step that runs before collection.

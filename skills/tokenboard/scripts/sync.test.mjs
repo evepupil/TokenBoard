@@ -22,6 +22,7 @@ import {
   writeRedactedOutput
 } from './sync.mjs'
 import { buildDefaultSince, readSince } from './sync-options.mjs'
+import { transientSyncExitCode } from './scheduled-retry.mjs'
 import { normalizeMemoryPath } from './coordinator-test-helpers.mjs'
 
 test('buildDefaultSince returns compact local date for the lookback window', () => {
@@ -995,6 +996,28 @@ test('a deferred run never records the internal transient exit code', async () =
   // `status.mjs` prints verbatim — should carry. The non-scheduled branch normalizes the
   // same code to 1 for the same reason.
   assert.equal(deferred.exitCode, undefined)
+})
+
+// 75 is an internal contract with the retry loop. `status.mjs` prints the
+// recorded exitCode verbatim, and a reader has no way to know 75 means "the
+// collector was busy" — so the state file records a plain failure and keeps
+// the cause in the error text.
+test('an exhausted retry records a plain failure and keeps the transient cause', async () => {
+  const states = []
+  await runSyncInvocation({
+    flags: { scheduled: true },
+    invocation: { source: 'all' },
+    stateDir: '/state',
+    now: () => Date.parse('2026-09-20T01:00:00.000Z'),
+    writeState: (state) => states.push(state),
+    runWithLock: () => transientSyncExitCode,
+    runRetry: () => ({ exitCode: transientSyncExitCode, exhausted: true, attempts: 2 })
+  })
+
+  const failed = states.at(-1)
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.exitCode, 1, 'the state file must not carry the internal 75')
+  assert.match(String(failed.error), /transient code 75/)
 })
 
 test('a skipped retry is deferred rather than failed', async () => {

@@ -860,8 +860,10 @@ test('scheduled retry reports exhaustion after the transient budget is spent', a
     runAttempt: () => transientSyncExitCode
   })
 
-  // The transient code survives to the caller: "the collector was busy and the
-  // snapshots are still queued" must stay distinguishable from a real failure.
+  // The transient code survives to the caller, which normalizes it: "the
+  // collector was busy and the snapshots are still queued" has to stay
+  // distinguishable from a real failure, but 75 is an internal contract and
+  // must never reach the state file. See the sync.mjs test that pins that half.
   assert.deepEqual(result, { exitCode: transientSyncExitCode, skipped: false, attempts: 2, exhausted: true })
   assert.deepEqual(fs.sleeps, [10])
   const state = JSON.parse(fs.files.get(scheduledRetryStatePath('/state')))

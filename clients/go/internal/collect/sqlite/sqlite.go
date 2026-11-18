@@ -33,6 +33,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/mtime"
 )
 
@@ -220,6 +221,10 @@ func runExternal(dbFile, sql string, jsonMode bool, options QueryOptions) (strin
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, sqliteBin, arguments...)
+	// A third-party binary, and exec.Cmd inherits the whole process environment
+	// when Env is nil — upload token included. Same scrubbed list as every
+	// other child the collector launches.
+	command.Env = ccusage.ScrubCredentialEnv(nil)
 	command.WaitDelay = timeout
 	limit := resolveMaxOutputBytes(options)
 	stdout := &boundedStdout{limit: limit, cancel: cancel}
