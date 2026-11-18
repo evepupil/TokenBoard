@@ -1488,6 +1488,33 @@ test('a substantive Skipping warning reaches the terminal failure line instead o
   )
 })
 
+// The client-version probe only ever warns — sync.mjs catches its failure and returns null — and it
+// runs before the collector, so its line reaches stderr first and wins the terminal slot. A real
+// failure then appears only in diagnostics: on 2026-11-18 a vanished session file was reported to
+// the operator as "client version not recorded".
+test('a version-probe warning is noise, not the terminal failure reason', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('claude-code', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({
+          status: 1,
+          error: undefined,
+          stderr: [
+            'TokenBoard client version not recorded: /Users/example/.tokenboard/bin/tokenboard did not answer version',
+            'claude: open /Users/example/.claude/projects/p/s.jsonl: open /Users/example/.claude/projects/p/s.jsonl: no such file or directory'
+          ].join('\n')
+        })
+      }),
+    (error) => {
+      assert.match(error.message, /claude: open /)
+      assert.doesNotMatch(error.message, /client version not recorded/)
+      assert.match(error.diagnostics ?? '', /client version not recorded/)
+      return true
+    }
+  )
+})
+
 test('config notifyCooldownMs applies when env is unset', () => {
   assert.equal(readNotifyCooldownMs(undefined, {}, 1_800_000), 1_800_000)
 })

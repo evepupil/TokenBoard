@@ -587,8 +587,11 @@ function trailingContinuationDelay(result, lockPath, runtime = trailingRuntime({
 // unavailability skips count as noise. The pricing prefix must cover both of the collector's
 // spellings: the fallback paths print `TokenBoard model pricing: ...` (colon) and the
 // unpriced-model summary prints `TokenBoard model pricing unavailable ...` (space).
+// The version probe only warns (sync.mjs catches its failure), and it runs first, so without
+// this line it wins the terminal slot over the collector error that actually failed the run.
 const expectedDiagnosticPrefixes = [
   /^TokenBoard model pricing[: ]/,
+  /^TokenBoard client version not recorded: /,
   /^Skipped \d+ /,
   /^Skipping (unavailable )?\S+ source: /
 ]
