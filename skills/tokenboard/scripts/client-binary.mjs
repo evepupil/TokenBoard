@@ -748,6 +748,7 @@ export function recoverOrphanedBinary({
   rename = renameSync,
   remove = rmSync,
   spawn = spawnSync,
+  platform = process.platform,
   log = () => {}
 }) {
   if (existsSync(binaryPath)) {
@@ -758,7 +759,14 @@ export function recoverOrphanedBinary({
   // prefix follows the path actually configured rather than the platform's
   // default file name. The optional sequence suffix still starts with the
   // prefix, so names written before it existed keep matching.
+  //
+  // Windows filesystems compare names case-insensitively, so the prefix must
+  // too: the Go side names its backup after the path it was handed (a
+  // resolved $PATH entry, say), and "TokenBoard.exe.backup-…" is a backup of
+  // this same target there.
   const prefix = `${basename(binaryPath)}.backup-`
+  const matchesPrefix = (name) =>
+    platform === 'win32' ? name.toLowerCase().startsWith(prefix.toLowerCase()) : name.startsWith(prefix)
 
   // The staged copy is the newer binary, but a kill during its write leaves a
   // truncated file. It is restored only if it still answers `version`; the
@@ -770,7 +778,7 @@ export function recoverOrphanedBinary({
   // beside it. The staged copy is taken only when it is at least as new as the
   // newest backup; otherwise the backup wins and the stale `.new` is dropped.
   const staged = `${binaryPath}.new`
-  const backups = listBackups(directory, prefix, readDir)
+  const backups = listBackups(directory, matchesPrefix, readDir)
   const newestBackup = backups.at(-1)
   if (existsSync(staged) && runsVersion(staged, spawn)) {
     if (!newestBackup || !isStagedOlderThanBackup(staged, join(directory, newestBackup), spawn)) {
@@ -792,7 +800,7 @@ export function recoverOrphanedBinary({
 
 // listBackups returns this binary's backup file names, oldest first. The
 // timestamp leads every name, so a plain byte sort orders them by age.
-function listBackups(directory, prefix, readDir) {
+function listBackups(directory, matchesPrefix, readDir) {
   let names
   try {
     names = readDir(directory)
@@ -804,7 +812,7 @@ function listBackups(directory, prefix, readDir) {
     if (error?.code === 'ENOENT') return []
     throw error
   }
-  return names.filter((name) => name.startsWith(prefix)).sort()
+  return names.filter(matchesPrefix).sort()
 }
 
 // isStagedOlderThanBackup compares the versions two runnable binaries print.
