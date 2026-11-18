@@ -191,7 +191,11 @@ async function executeScheduledRetry({ source, maxAttempts, delayMs, runAttempt,
           }),
           runtime
         )
-        return { exitCode: 1, skipped: false, attempts: attempt, exhausted: true }
+        // The transient code is carried out, not flattened to 1: the caller
+        // records `failed` either way, but a reader that sees 75 knows the
+        // collector was busy and the snapshots are still in the cursor, while
+        // 1 says something actually broke.
+        return { exitCode: transientSyncExitCode, skipped: false, attempts: attempt, exhausted: true }
       }
       const retryAt = runtime.now()
       writeRetryState(

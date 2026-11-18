@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import { childProcessEnv } from '../child-env'
 import { errorMessage } from '../error-message'
 
 const execFileAsync = promisify(execFile)
@@ -148,6 +149,10 @@ async function queryTextWithSqliteBinary(
   try {
     return (
       await execFileAsync(sqliteBin, ['-readonly', '-batch', dbFile, sql], {
+        // The upload token and pairing code live in the same environment this
+        // process was handed. execFile inherits all of it when `env` is
+        // omitted, so a third-party sqlite binary would have seen them.
+        env: childProcessEnv(process.env),
         maxBuffer: resolveMaxOutputBytes(options),
         timeout: options.timeoutMs ?? defaultTimeoutMs,
         killSignal: 'SIGKILL'
@@ -293,6 +298,9 @@ async function queryWithSqliteBinary(
   try {
     stdout = (
       await execFileAsync(sqliteBin, ['-readonly', '-json', '-batch', dbFile, sql], {
+        // Same scrubbing as the text query: this path launches the same
+        // third-party binary.
+        env: childProcessEnv(process.env),
         maxBuffer: resolveMaxOutputBytes(options),
         timeout: options.timeoutMs ?? defaultTimeoutMs,
         killSignal: 'SIGKILL'

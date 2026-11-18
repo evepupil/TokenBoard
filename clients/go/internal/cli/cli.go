@@ -30,8 +30,10 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/urlorigin"
 )
 
-// Exit codes. 75 is the scheduler retry contract: a transient failure the
-// launchd/systemd/schtasks wrapper may re-run.
+// Exit codes. 75 is the "retry later" contract: a transient failure the
+// launchd/systemd/schtasks wrapper may re-run, or a hook run whose upload is
+// paused (its 0 would clear the source's queued signal and strand the
+// snapshots).
 //
 // ExitUsage is deliberately 2, where the TS collector returns 1 for the same
 // usage error. The TS CLI has a single failure code, so a usage error and a
@@ -269,6 +271,13 @@ func syncLocked(
 			pausedUntil)
 		if shouldFailForSourceErrors {
 			return ExitFailure
+		}
+		// A hook run's 0 means "this source is covered", and the coordinator
+		// clears its queued signal on that. Nothing was uploaded, so the
+		// transient code is the honest answer: defer, schedule the retry, and
+		// leave the snapshots queued in the cursor.
+		if options.HookMode {
+			return ExitTransient
 		}
 		return ExitOK
 	}

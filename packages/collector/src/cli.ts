@@ -108,9 +108,10 @@ const defaultDeps: CliDeps = {
 // upload failure (DNS, TLS, reset connection, 5xx from the edge) is not a
 // collector defect: the snapshots are still pending in the cursor and the next
 // attempt can succeed, so the run reports itself as deferrable rather than
-// failed. Only the scheduled runner defers, and it never runs in hook mode, so
-// hook syncs keep reporting a plain failure. The skill scripts mirror this
-// literal; keep them in sync.
+// failed. A hook sync reports it only for a paused upload: a plain hook
+// failure is never retried, but a pause is the collector saying "not now",
+// and reporting success there would clear the source's queued signal. The
+// skill scripts mirror this literal; keep them in sync.
 export const transientSyncExitCode = 75
 
 export async function runCollectorCli(
@@ -193,7 +194,12 @@ export async function runCollectorCli(
       collectorDeps.stderr(
         `TokenBoard upload paused until ${paused.pausedUntil} after repeated non-transient failures; collected snapshots remain queued in the cursor`
       )
-      return collectionFailed ? 1 : 0
+      // A hook run's 0 means "this source is covered", and the coordinator
+      // clears its queued signal on that. Nothing was uploaded, so the
+      // transient code is the honest answer: defer and leave the snapshots
+      // queued. A scheduled run keeps 0 — its runner owns the retry schedule.
+      if (collectionFailed) return 1
+      return env.TOKENBOARD_HOOK_MODE === '1' ? transientSyncExitCode : 0
     }
 
     let uploadSucceeded = false
@@ -259,8 +265,8 @@ export async function runCollectorCli(
     return 0
   } catch (error) {
     collectorDeps.stderr(errorMessage(error))
-    // Only a non-hook sync run can be deferred: preview and warm-hooks report a
-    // plain failure, and hook syncs are never retried by the scheduler.
+    // Only a non-hook sync run can be deferred here: preview and warm-hooks
+    // report a plain failure, and this error path is not the upload pause.
     if (command === 'sync' && env.TOKENBOARD_HOOK_MODE !== '1' && isTransientNetworkError(error)) {
       return transientSyncExitCode
     }

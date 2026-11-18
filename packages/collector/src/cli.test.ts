@@ -1687,6 +1687,42 @@ describe('upload backoff integration', () => {
     }
   })
 
+  // A hook run's 0 means "this source is covered", and the coordinator clears
+  // its queued signal on that. While uploads are paused nothing was uploaded,
+  // so 0 would strand the queue; the pause is the collector saying "not now",
+  // which is what the transient code means.
+  test('a paused hook run reports the transient code instead of success', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'cli-backoff-hook-'))
+    try {
+      const { recordUploadFailure } = await import('./upload-backoff')
+      for (let index = 0; index < 5; index += 1) {
+        await recordUploadFailure(stateDir, new Error('status 400 from server'))
+      }
+      const result = await runCollectorCli(
+        ['sync', '--source', 'claude-code', '--endpoint', 'https://collector.example/api/v1/ingest'],
+        {
+          TOKENBOARD_TIMEZONE: 'Asia/Shanghai',
+          TOKENBOARD_UPLOAD_TOKEN: 'tb_test',
+          TOKENBOARD_STATE_DIR: stateDir,
+          TOKENBOARD_HOOK_MODE: '1'
+        },
+        {
+          stdout: () => undefined,
+          stderr: () => undefined,
+          collectClaudeCodeUsage: async () => [claudeSnapshot],
+          collectCodexUsage: async () => [],
+          uploadSnapshots: async () => {
+            throw new Error('upload must be skipped while paused')
+          },
+          clearPendingUploadCursors: async () => undefined
+        }
+      )
+      expect(result).toBe(transientSyncExitCode)
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
   test('a non-transient upload failure counts toward the pause; success clears', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'cli-backoff-count-'))
     const stderr: string[] = []

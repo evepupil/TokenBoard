@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { connect as connectTls, type TLSSocket } from 'node:tls'
+import { childProcessEnv } from '../child-env'
 import { errorMessage } from '../error-message'
 import {
   beginAntigravityFileScan,
@@ -238,7 +239,11 @@ export async function createAntigravityLanguageServerClient(input: {
   }
 }
 
-function spawnLanguageServer(input: {
+// Exported for its own test: the credential scrubbing on this spawn is the
+// only thing keeping a third-party binary from inheriting the upload token,
+// and driving it through createAntigravityLanguageServerClient would need a
+// stand-in that also answers the readiness probe.
+export function spawnLanguageServer(input: {
   source: AntigravityGuiSource
   languageServerPath?: string
   overrideIdeVersion?: string
@@ -270,7 +275,9 @@ function spawnLanguageServer(input: {
     '--enable_sidecars',
     '--headless'
   ]
-  return spawn(languageServerPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  // The language server is a third-party binary. It inherits this process's
+  // whole environment when `env` is omitted, upload token included.
+  return spawn(languageServerPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: childProcessEnv(process.env) })
 }
 
 export function waitForReady(

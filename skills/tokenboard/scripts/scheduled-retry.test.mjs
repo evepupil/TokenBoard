@@ -860,7 +860,9 @@ test('scheduled retry reports exhaustion after the transient budget is spent', a
     runAttempt: () => transientSyncExitCode
   })
 
-  assert.deepEqual(result, { exitCode: 1, skipped: false, attempts: 2, exhausted: true })
+  // The transient code survives to the caller: "the collector was busy and the
+  // snapshots are still queued" must stay distinguishable from a real failure.
+  assert.deepEqual(result, { exitCode: transientSyncExitCode, skipped: false, attempts: 2, exhausted: true })
   assert.deepEqual(fs.sleeps, [10])
   const state = JSON.parse(fs.files.get(scheduledRetryStatePath('/state')))
   assert.equal(state.status, 'exhausted')

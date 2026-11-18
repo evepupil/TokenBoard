@@ -10,6 +10,7 @@ import {
   formatMetadataRequestTransportError,
   listAntigravityCascades,
   requestGeneratorMetadata,
+  spawnLanguageServer,
   waitForReady,
   type AntigravityCascadeFileSystem
 } from './antigravity-gui-client'
@@ -629,3 +630,45 @@ function restoreEnv(key: string, value: string | undefined) {
 function cascadeId(index: number) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 }
+
+// The language server is a third-party binary. `spawn` inherits the whole
+// process environment when `env` is omitted, and the upload token lives there,
+// so a launch that skipped the scrub would hand the credential to it.
+describe('spawnLanguageServer', () => {
+  test('never hands the child the credential environment', async () => {
+    if (process.platform === 'win32') return // The stand-in is a shell script.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-ls-env-'))
+    try {
+      const marker = join(root, 'seen.txt')
+      const standIn = join(root, 'server.sh')
+      await writeFile(
+        standIn,
+        `#!/bin/sh\nif [ -n "$TOKENBOARD_UPLOAD_TOKEN" ]; then echo LEAKED > '${marker}'; else echo CLEAN > '${marker}'; fi\n`,
+        { mode: 0o755 }
+      )
+      const previous = process.env.TOKENBOARD_UPLOAD_TOKEN
+      process.env.TOKENBOARD_UPLOAD_TOKEN = 'tb_probe_secret'
+      try {
+        const server = spawnLanguageServer({
+          source: 'antigravity',
+          languageServerPath: standIn,
+          port: 12345,
+          csrfToken: 'csrf'
+        })
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('the stand-in did not finish')), 5000)
+          server.on('exit', () => {
+            clearTimeout(timer)
+            resolve(undefined)
+          })
+        })
+        expect((await readFile(marker, 'utf8')).trim()).toBe('CLEAN')
+      } finally {
+        if (previous === undefined) delete process.env.TOKENBOARD_UPLOAD_TOKEN
+        else process.env.TOKENBOARD_UPLOAD_TOKEN = previous
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})

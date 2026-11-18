@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
@@ -126,6 +127,10 @@ func spawnLanguageServer(options Options, languageServerPath, overrideIdeVersion
 		"--headless",
 	}
 	command := exec.Command(path, args...)
+	// The language server is a third-party binary, and exec.Cmd inherits the
+	// whole process environment when Env is nil — upload token included. Use
+	// the same scrubbed list every other third-party child gets.
+	command.Env = ccusage.ScrubCredentialEnv(nil)
 	// The server writes progress to stdout/stderr that nobody reads; discarding
 	// it keeps a chatty run from filling a pipe buffer and blocking the child.
 	command.Stdout = io.Discard

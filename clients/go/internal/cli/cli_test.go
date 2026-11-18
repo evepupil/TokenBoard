@@ -387,6 +387,30 @@ func TestSyncReportsActivePause(t *testing.T) {
 	}
 }
 
+// A hook run reports 0, and the coordinator treats 0 as "this source is
+// covered": it clears the queued signal and schedules no retry. While uploads
+// are paused nothing was uploaded, so 0 would strand the queue until some
+// later, unrelated trigger happened to cover the source again. The pause is
+// the collector saying "not now", which is what the transient code means.
+func TestHookSyncReportsAPausedUploadAsTransient(t *testing.T) {
+	stateDir := t.TempDir()
+	_ = os.Chmod(stateDir, 0o700)
+	for i := 0; i < 5; i++ {
+		viaUploadFailure(t, stateDir)
+	}
+	code, _, stderr := run(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":     "UTC",
+		"TOKENBOARD_STATE_DIR":    stateDir,
+		"TOKENBOARD_ENDPOINT":     "http://127.0.0.1:1",
+		"TOKENBOARD_UPLOAD_TOKEN": "tb_x",
+		"TOKENBOARD_GROK_HOME":    grokHomeFixture(t),
+		"TOKENBOARD_HOOK_MODE":    "1",
+	}, "sync", "--source", "grok-build")
+	if code != ExitTransient {
+		t.Errorf("a paused hook run must defer (exit %d), got %d; stderr=%q", ExitTransient, code, stderr)
+	}
+}
+
 func viaUploadFailure(t *testing.T, stateDir string) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
