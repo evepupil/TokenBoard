@@ -313,6 +313,43 @@ describe('runCollectorCli Antigravity source', () => {
     ])
   })
 
+  // The not-installed shape is raised by a stat before any spawn, so it cannot
+  // be a mangled spawn path: the app itself is gone and its conversation
+  // history stayed behind. No retry installs an app, so strict mode must not
+  // turn it into a failure (2026-11-18: every scheduled run failed this way).
+  // The tests around it keep the spawn-ENOENT shape failing on purpose.
+  test('does not fail strict all mode when the Antigravity app is not installed', async () => {
+    const stderr: string[] = []
+    const uploaded: UsageSnapshot[][] = []
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'all'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token',
+        TOKENBOARD_FAIL_ON_SOURCE_ERROR: '1'
+      },
+      deps({
+        stderr: (line) => stderr.push(line),
+        uploadSnapshots: async (_config, snapshots) => {
+          uploaded.push(snapshots)
+          return { upserted: snapshots.length, skipped: 0 }
+        },
+        collectAntigravityUsage: async () => {
+          throw new Error(
+            'Antigravity language server is not installed at /Applications/Antigravity.app/Contents/Resources/bin/language_server'
+          )
+        }
+      })
+    )
+
+    expect(result).toBe(0)
+    expect(uploaded).toEqual([[]])
+    expect(stderr).toEqual([
+      'Antigravity collection: source=antigravity status=unavailable category=language-server-unavailable'
+    ])
+  })
+
   test('fails strict all mode when an installed Antigravity language-server path contains spaces', async () => {
     const stderr: string[] = []
     const uploaded: UsageSnapshot[][] = []

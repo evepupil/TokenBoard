@@ -161,7 +161,14 @@ func IsOptionalSourceUnavailableIgnoringLanguageServer(
 		return strings.Contains(message, "No DeepSeek Harness sessions found") ||
 			strings.Contains(message, "This Node.js build lacks zstd support")
 	case contract.SourceAntigravityCLI, contract.SourceAntigravity, contract.SourceAntigravityIDE:
+		// A language server missing from the default install path means the
+		// Antigravity app itself is not installed, which no run can fix by
+		// retrying — so it stays "unavailable" even when the operator asked
+		// for a hard failure on every source error. The spawn-ENOENT shape
+		// stays inside the switch on purpose: it also matches a path the
+		// client mangled, which strict mode is there to surface.
 		return strings.Contains(message, "Antigravity SQLite reader unavailable") ||
+			antigravitymeta.IsLanguageServerNotInstalled(message) ||
 			(ignoreLanguageServerUnavailable &&
 				antigravitymeta.IsUnavailableLanguageServerError(errors.New(message))) ||
 			strings.Contains(message, "Antigravity conversations directory not found") ||

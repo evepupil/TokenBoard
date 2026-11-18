@@ -7,8 +7,10 @@ import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { connect as connectTls, type TLSSocket } from 'node:tls'
+import { existsSync } from 'node:fs'
 import { childProcessEnv } from '../child-env'
 import { errorMessage } from '../error-message'
+import { languageServerNotInstalledPrefix } from './antigravity-gui-environment'
 import {
   beginAntigravityFileScan,
   listAntigravityDirectoryFileNames,
@@ -21,7 +23,12 @@ import {
 } from './antigravity-file-scan'
 import type { AntigravityGuiSource } from './antigravity-gui'
 
-const defaultLanguageServerPath = '/Applications/Antigravity.app/Contents/Resources/bin/language_server'
+// The macOS app bundle the default language server lives in. It is checked on
+// its own so "Antigravity is not installed here" can be told apart from a spawn
+// failure, which strict mode reports because it also covers a spawn path the
+// client mangled.
+const defaultLanguageServerAppBundle = '/Applications/Antigravity.app'
+const defaultLanguageServerPath = `${defaultLanguageServerAppBundle}/Contents/Resources/bin/language_server`
 const apiServerUrl = 'https://generativelanguage.googleapis.com'
 const cloudCodeEndpoint = 'https://daily-cloudcode-pa.googleapis.com'
 const defaultReadyTimeoutMs = 30_000
@@ -249,9 +256,15 @@ export function spawnLanguageServer(input: {
   overrideIdeVersion?: string
   port: number
   csrfToken: string
+  // Seam for the install check: a machine that has Antigravity installed can
+  // only take the absent branch by faking it.
+  exists?: (path: string) => boolean
 }) {
   const languageServerPath =
     input.languageServerPath ?? process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER ?? defaultLanguageServerPath
+  if (missingDefaultLanguageServer(languageServerPath, input.exists)) {
+    throw new Error(languageServerNotInstalledPrefix + languageServerPath)
+  }
   const args = [
     '--standalone',
     '--override_ide_name',
@@ -278,6 +291,16 @@ export function spawnLanguageServer(input: {
   // The language server is a third-party binary. It inherits this process's
   // whole environment when `env` is omitted, upload token included.
   return spawn(languageServerPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: childProcessEnv(process.env) })
+}
+
+// missingDefaultLanguageServer reports a default install whose app bundle is
+// absent. A path from the environment or an explicit option is never
+// reclassified: there the operator named the path to try. Exported for its own
+// test — on a machine with Antigravity installed the absent branch is
+// unreachable through spawnLanguageServer.
+export function missingDefaultLanguageServer(path: string, exists: (path: string) => boolean = existsSync): boolean {
+  if (path !== defaultLanguageServerPath) return false
+  return !exists(defaultLanguageServerAppBundle)
 }
 
 export function waitForReady(

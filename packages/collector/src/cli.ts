@@ -12,7 +12,7 @@ import {
   collectAntigravityUsage,
   isAntigravityPartialUsageError
 } from './providers/antigravity-gui'
-import { isUnavailableLanguageServerError } from './providers/antigravity-gui-environment'
+import { isLanguageServerNotInstalled, isUnavailableLanguageServerError } from './providers/antigravity-gui-environment'
 import { collectClaudeCodeUsage } from './providers/claude-code'
 import { collectCodexUsage } from './providers/codex'
 import { collectCcusageToolUsage } from './providers/ccusage-tools'
@@ -815,6 +815,11 @@ function isOptionalSourceUnavailable(
   if (!source.startsWith('antigravity')) return false
   return (
     message.includes('Antigravity SQLite reader unavailable') ||
+    // Not gated on ignoreLanguageServerUnavailable: the app being absent is
+    // the same class as a missing OpenCode database, and the strict switch is
+    // for a source that is installed and misbehaving. The spawn-ENOENT shape
+    // below stays gated because it also matches a mangled spawn path.
+    isLanguageServerNotInstalled(message) ||
     (ignoreLanguageServerUnavailable && isUnavailableLanguageServerError(new Error(message))) ||
     message.includes('Antigravity conversations directory not found') ||
     message.includes('No Antigravity conversations found')

@@ -215,6 +215,31 @@ func TestPreviewAllSourceSkipsAnUnavailableLanguageServerByDefault(t *testing.T)
 	}
 }
 
+func TestPreviewAllSourceSkipsAnUninstalledAntigravityAppEvenUnderStrictMode(t *testing.T) {
+	// With the Antigravity app removed and its conversation history still on
+	// disk, the provider reports "not installed" rather than a spawn ENOENT —
+	// no retry installs an app, so the strict switch must not turn it into a
+	// failure. A spawn ENOENT stays a strict failure: that shape is also what a
+	// mangled spawn path produces (see the "path contains spaces" case).
+	env := emptyProviderHomes(t)
+	env["TOKENBOARD_FAIL_ON_SOURCE_ERROR"] = "1"
+	stubSource(t, contract.SourceAntigravity, stubProvider{
+		err: errors.New(
+			"Antigravity language server is not installed at /Applications/Antigravity.app/Contents/Resources/bin/language_server"),
+	})
+
+	code, _, stderr := run(t, env, "preview")
+	if code != ExitOK {
+		t.Fatalf("code = %d, want success; stderr=%q", code, stderr)
+	}
+	if strings.Contains(stderr, "One or more sources failed") {
+		t.Fatalf("stderr = %q, want no failure report", stderr)
+	}
+	if !strings.Contains(stderr, "status=unavailable category=language-server-unavailable") {
+		t.Fatalf("stderr = %q, want the unavailable diagnostic", stderr)
+	}
+}
+
 func TestSyncFatalPartialUploadsBeforeReportingFailure(t *testing.T) {
 	// A fatal partial result is not an abort: the snapshots upload, and only
 	// then does the run report the failure.
