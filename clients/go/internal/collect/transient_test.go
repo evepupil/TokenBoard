@@ -3,7 +3,9 @@ package collect
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/url"
 	"testing"
 )
 
@@ -42,6 +44,23 @@ func TestIsTransientNetworkErrorRejectsPathLookalikes(t *testing.T) {
 		if IsTransientNetworkError(err) {
 			t.Errorf("%q must NOT be transient", err)
 		}
+	}
+}
+
+// net/http wraps every failure that happened on the wire in *url.Error, and
+// its text for a connection that died mid-response is "unexpected EOF" — a
+// wording none of the TS signatures cover. The type is the Go counterpart of
+// TS's `fetch failed`, which covers every transport failure there. The same
+// wording also comes from a truncated local file, so the type check is what
+// keeps that read fault non-transient.
+func TestIsTransientNetworkErrorClassifiesTransportFailures(t *testing.T) {
+	transport := &url.Error{Op: "Post", URL: "https://tokenboard.example/api/v1/ingest", Err: io.ErrUnexpectedEOF}
+	if !IsTransientNetworkError(transport) {
+		t.Fatalf("a *url.Error transport failure should be transient: %v", transport)
+	}
+	local := fmt.Errorf("read /tmp/session.jsonl: %w", io.ErrUnexpectedEOF)
+	if IsTransientNetworkError(local) {
+		t.Fatalf("a local read fault must NOT be transient: %v", local)
 	}
 }
 

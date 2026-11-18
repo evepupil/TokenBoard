@@ -4,6 +4,8 @@
 package collect
 
 import (
+	"errors"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -62,9 +64,21 @@ var httpStatusPattern = regexp.MustCompile(`status (\d{3})\b`)
 // IsTransientNetworkError classifies an error the same way
 // transient-error.ts does, on the lowercased message: a known transport
 // signature, or a "status <code>" mention of a retryable gateway status.
+//
+// A *url.Error is transient on its type alone. net/http wraps every failure
+// that happened on the wire in one, with wordings the shared list cannot all
+// carry ("unexpected EOF", "http2: ..."), while TS's fetch reports the whole
+// class as TypeError("fetch failed") — the single signature the list already
+// has. Matching the type rather than the text is also what keeps a truncated
+// local file's io.ErrUnexpectedEOF, which reads the same, out of the retry
+// path.
 func IsTransientNetworkError(err error) bool {
 	if err == nil {
 		return false
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	for _, pattern := range transientErrorPatterns {
