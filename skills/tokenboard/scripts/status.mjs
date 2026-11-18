@@ -220,7 +220,7 @@ export function readClientVersionNotice(stateDir) {
 // `open '/home/a/.tokenboard/x.json': EACCES` loses the path and keeps the
 // reason. A credential fragment is redacted first so the path pattern can
 // never expose one that the URL rules would have caught.
-function redactPath(message) {
+export function redactPath(message) {
   return redactUrlCredentials(message).replace(/[^\s'"`:,;()[\]]*[\\/][^\s'"`:,;()[\]]*/g, '<path>')
 }
 
