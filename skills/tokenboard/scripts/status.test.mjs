@@ -1057,10 +1057,29 @@ test('an unreadable version record reports the reason without the path', { skip:
 test('the recorded read error never carries a path', () => {
   const shapes = [
     "EACCES: permission denied, open '/home/alice/.tokenboard/client-version-state.json'",
-    'open C:\\Users\\alice\\.tokenboard\\client-version-state.json: Access is denied.'
+    'open C:\\Users\\alice\\.tokenboard\\client-version-state.json: Access is denied.',
+    // Spaces and parentheses are legal in a home directory, and splitting the
+    // path on them left the account name behind.
+    'open /Users/Alice Bob Smith/.tokenboard/client-version-state.json',
+    'open /home/alice(work)/.tokenboard/client-version-state.json'
   ]
   for (const message of shapes) {
     const redacted = redactPath(message)
-    assert.doesNotMatch(redacted, /alice/, `a path survived redaction: ${redacted}`)
+    assert.doesNotMatch(redacted, /alice|Alice|Smith|Bob|work/i, `a path survived redaction: ${redacted}`)
+    assert.doesNotMatch(redacted, /[\\/]/, `a separator survived redaction: ${redacted}`)
   }
+})
+
+test('redaction leaves a reason without a path and a bare timestamp alone', () => {
+  assert.equal(
+    redactPath('EISDIR: illegal operation on a directory, read'),
+    'EISDIR: illegal operation on a directory, read'
+  )
+  assert.equal(redactPath('2026-11-18T00:00:00.000Z'), '2026-11-18T00:00:00.000Z')
+})
+
+// A URL is not a path: redacting its slashes as one left "https:<path>", which
+// is neither the reason nor a useful trace.
+test('redaction replaces a URL as a whole', () => {
+  assert.equal(redactPath('failed at https://example.com/releases/tag/v1.2.3'), 'failed at <url>')
 })

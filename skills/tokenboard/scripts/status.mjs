@@ -216,12 +216,16 @@ export function readClientVersionNotice(stateDir) {
   }
 }
 
-// Characters a POSIX or Windows path can contain; anything else ends it, so
-// `open '/home/a/.tokenboard/x.json': EACCES` loses the path and keeps the
-// reason. A credential fragment is redacted first so the path pattern can
-// never expose one that the URL rules would have caught.
+// A path is a run of path characters that contains a separator, so the run
+// spans spaces and parentheses inside the path too — `/Users/Alice Bob/x` and
+// `/home/alice(work)/x` are one path, and splitting them left "Bob" and
+// "(work)" behind. Credentials are redacted first so the path run can never
+// re-expose one the URL rules would have caught.
 export function redactPath(message) {
-  return redactUrlCredentials(message).replace(/[^\s'"`:,;()[\]]*[\\/][^\s'"`:,;()[\]]*/g, '<path>')
+  return redactUrlCredentials(message)
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/\S*)/gi, '<url>')
+    .replace(/[^\s'"`]*[\\/][^\s'"`]*/g, '<path>')
+    .replace(/(open |'|")<path>(?: [^'"`:\n]*)+/g, (_, lead) => `${lead}<path>`)
 }
 
 function hookState(value) {
