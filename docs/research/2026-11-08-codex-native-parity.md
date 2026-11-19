@@ -256,6 +256,11 @@ single/30d（§5.1，native 快 12.4×/4.5×、RSS 小 4.2×/3.9×）。这个�
 - hook 场景（`-scenario hook`）依赖本机真实 cursor，未在本次证据中跑（Task 9 范围是
   parity + 三场景；hook 窗口重算的正确性已由 Task 8 的 frozen-scope 重算测试钉住）。
 - Windows/Windows Server 上的 `.zst` 解码路径未实测（金样本 zeta 覆盖语义，真机未覆盖）。
+- `timestampFromRaw`（`adapters/codex/parser.go`）缺另一条时间戳路径上的 `repaired()` 毒化检查：
+  被「修复」过的损坏时间戳可能进到 `ParseTimestamp`，而不是在来源处失败（S3 实施时登记，未修）。
+- `parseNativeCodexArgs`（`providers/codex/native.go`）只在 `--since` 与 `--until` **同时**给出时才
+  归一化日期；单独一个 `--until` 保留原样拼写。provider 总是两个一起传，故下游未见分叉，但这条
+  不对称是一个潜在陷阱（S3 实施时登记，未修）。
 
 ## 7. 复现
 
