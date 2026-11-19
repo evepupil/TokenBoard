@@ -587,11 +587,16 @@ function trailingContinuationDelay(result, lockPath, runtime = trailingRuntime({
 // unavailability skips count as noise. The pricing prefix must cover both of the collector's
 // spellings: the fallback paths print `TokenBoard model pricing: ...` (colon) and the
 // unpriced-model summary prints `TokenBoard model pricing unavailable ...` (space).
-// The version probe only warns (sync.mjs catches its failure), and it runs first, so without
-// this line it wins the terminal slot over the collector error that actually failed the run.
+//
+// Every diagnostic sync.mjs emits before the collector is a caught warning, and all of them run
+// ahead of the output that actually failed the run. Without these entries the first warning takes
+// the terminal slot: on 2026-11-18 a vanished session file was reported to the operator as
+// "client version not recorded". Listing them by kind, not by message, keeps the rule honest —
+// a collector error that happens to start with "TokenBoard " still wins the slot.
 const expectedDiagnosticPrefixes = [
   /^TokenBoard model pricing[: ]/,
-  /^TokenBoard client version not recorded: /,
+  /^TokenBoard client version (?:not recorded: |\d)/,
+  /^TokenBoard (?:self-update|upgrade|binary recovery) skipped: /,
   /^Skipped \d+ /,
   /^Skipping (unavailable )?\S+ source: /
 ]

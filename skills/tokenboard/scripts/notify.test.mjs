@@ -1515,6 +1515,36 @@ test('a version-probe warning is noise, not the terminal failure reason', () => 
   )
 })
 
+// Every warn() in sync.mjs's pre-collect phase is a caught diagnostic, and each runs before the
+// collector: a version change notice, and the binary-recovery skip (which hook runs reach, since
+// recovery sits before the upgrade gate). They must not describe a failure they did not cause.
+test('pre-collect warnings never own the terminal failure line', () => {
+  const warnings = [
+    'TokenBoard client version 0.3.0 (was 0.2.0)',
+    'TokenBoard binary recovery skipped: EBUSY',
+    'TokenBoard self-update skipped: fetch failed',
+    'TokenBoard upgrade skipped: Refusing to upgrade a collector checkout with uncommitted changes'
+  ]
+  for (const warning of warnings) {
+    assert.throws(
+      () =>
+        executeTokenBoardSync('codex', {
+          lockToken: 'a'.repeat(32),
+          spawn: () => ({
+            status: 1,
+            error: undefined,
+            stderr: `${warning}\nTokenBoard collector lock timed out`
+          })
+        }),
+      (error) => {
+        assert.equal(error.message, 'TokenBoard hook sync failed with exit code 1: TokenBoard collector lock timed out')
+        assert.match(error.diagnostics ?? '', new RegExp(warning.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        return true
+      }
+    )
+  }
+})
+
 test('config notifyCooldownMs applies when env is unset', () => {
   assert.equal(readNotifyCooldownMs(undefined, {}, 1_800_000), 1_800_000)
 })
