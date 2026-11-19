@@ -1,6 +1,7 @@
 # S5 迁移差异台账（native vs 生产线上 ccusage）
 
-- 日期：2026-11-15 整理，依据 2026-11-10 至 2026-11-15 的真实数据双跑，不新跑基准。
+- 日期：2026-11-15 整理，依据 2026-11-10 至 2026-11-15 的真实数据双跑；§2.3 为 2026-11-19 依据
+  后续定时双跑（至 2026-11-19 03:24 北京时间）的补记，不新跑基准。
 - 目的：兑现 `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §2 G2 的**迁移闸门**——
   「落地前做一次 native vs 生产线上 ccusage 的 diff，每一处差异逐条列出并解释」，以及 D7 的
   「差异逐条进台账」，让首次全量上传造成的历史 `costUsd` 覆盖是**已知且有意**的。
@@ -15,10 +16,17 @@
 |---|---|
 | `docs/research/2026-11-10-s5-post-flip-dual-run.md` | 翻转后首轮：codex、claude-code（preview + hook）、grok-build、deepseek-harness、kimi、zcode、amp，加九个空工具源 |
 | `docs/research/2026-11-10-s5-flip-coverage.md` §2.4 | deepseek 族双向费率差的逐口径拆解，7.7% 总量差的来源 |
-| `~/.tokenboard/logs/observation-dual-run.jsonl` 的 `observation-dual-run` 定时双跑 | 2026-11-12 至 11-15 的每日七源记录（codex、claude-code、grok-build、deepseek-harness、amp、kimi、zcode） |
+| `~/.tokenboard/logs/observation-dual-run.jsonl` 的 `observation-dual-run` 定时双跑 | 2026-11-13 至 11-19 北京时间 03:2x 的 7 条七源记录（codex、claude-code、grok-build、deepseek-harness、amp、kimi、zcode；11-13 那条 codex 为 `error`），另有 2026-11-12 的两条单源补跑与 2026-11-13 09:43 的 codex 单源补跑 |
 
-定时双跑的最新三条有效记录（2026-11-13 / 11-14 / 11-15 03:2x 北京时间）结论一致：
-claude-code、amp、zcode 为 `cost-only`，其余四源 `match`，没有出现费率口径以外的差异。
+定时双跑（日期按北京时间，日志里的 `at` 是前一日 19:2x UTC）的观察：
+
+| 北京时间 | 结论 |
+|---|---|
+| 11-13 | claude-code、amp、zcode 为 `cost-only`；grok-build、deepseek-harness、kimi 为 `match`；codex 那次为 `error`，当日 09:43 单源补跑为 `match` |
+| 11-14 / 11-15 | claude-code、amp、zcode 为 `cost-only`，其余四源 `match` |
+| 11-16 至 11-19 | 同上，但 **kimi 转为 `cost-only`**（机制见 §2.3），即 4 cost-only + 3 match |
+
+除 §2 列出的 `costUsd` 口径差以外，没有出现任何其他差异（各记录的 `onlyInTs` / `onlyInGo` / `unexplainedRows` 全为 0）。
 
 ## 2. 差异总账
 
@@ -31,7 +39,7 @@ claude-code、amp、zcode 为 `cost-only`，其余四源 `match`，没有出现�
 | codex | match | 0 | — | preview 与 hook 两条路径均逐位一致 |
 | grok-build | match | 0 | — | 4 快照一致 |
 | deepseek-harness | match | 0 | — | 4 快照一致 |
-| kimi | match | 0 | — | 2 快照一致 |
+| kimi | cost-only（北京时间 2026-11-16 起） | 2 / 2 | deepseek 族费率差的又一次出现，见 §2.3 | G2 口径边界（在线表变了） |
 | claude-code | cost-only | 131 / 513（preview）、131 / 519（hook） | 见 §3.1–§3.3 | G2 口径边界 |
 | zcode | cost-only | 4 / 5 | 在线表对 `GLM-5.3` / `GLM-5.3-Flash` 无价，动态目录补了 | G2 口径边界（Go 多计价） |
 | amp | cost-only | 2 / 2 | 动态目录 override 比在线表便宜 | G2 口径边界（Go 少计价） |
@@ -58,6 +66,33 @@ claude-code、amp、zcode 为 `cost-only`，其余四源 `match`，没有出现�
 
 两条都说明：**Go 与「ccusage + 冻结配置」是同一种计算**，与在线 ccusage 的差异是输入不同，不是实现不同。
 
+### 2.3 kimi 从 match 变为 cost-only（2026-11-19 补记）
+
+定时双跑从**北京时间 2026-11-16 03:23** 那次起把 kimi 记为 `cost-only`（11-13 至 11-15 的三次是 `match`；
+日志 `at` 为 `2026-11-15T19:23:39Z`）：两条 `deepseek-v4.1-flash` 行，
+`2026-10-09` 在线 0.7678864213999999 / native 2.456199409999999，`2026-10-10` 在线 1.4907061078000006 /
+native 4.90099708，约 3.2 倍。2026-11-19 重跑 `shadow --source kimi` 复现同样的四个数
+（`onlyInTs` / `onlyInGo` / `liveWrite` 均为 0）。
+
+这仍是 §2 的 `costUsd` 口径差，不是新的分叉。2026-11-19 实测两侧各自逐位复现：
+
+```
+ccusage kimi daily --json --offline --config ~/.tokenboard/ccusage.dynamic.json --timezone Asia/Shanghai
+→ 2.456199409999999 / 4.90099708          # 与 native 逐位一致（不带 --config 也一样）
+ccusage kimi daily --json --timezone Asia/Shanghai
+→ 0.7678864213999999 / 1.4907061078000006  # 与 TS 侧逐位一致
+```
+
+即 Go 与「ccusage + 冻结语料」仍是同一种计算。两次记录的 token 字段完全相同、native 侧又只由冻结语料决定，
+所以 11-15 与 11-16 之间发生变化的只能是 TS 侧读到的**在线费率**——这一句是从上述事实推出的结论，
+本机没有保留 11-15 当天的在线表快照，无法直接比对。在线侧具体命中了哪一档费率也没有逐项还原
+（这两个数对不上本地 LiteLLM 缓存与动态目录里任何单一费率条目的直接线性组合，可能涉及 ccusage 自身的
+分层或合成规则）；本台账只钉住「差异在输入、不在实现」。
+
+由此产生的读数纪律：**本节任何一行的 `match` 都只对记录当天成立**。在线价表会变，双跑的分类会随之漂移，
+而 native 侧由冻结语料决定，不会跟着动。台账升级为「差异类型封闭且有归属」的证明，不承诺逐日的
+`match` 集合稳定。
+
 ## 3. 首次全量上传的影响（D7 落实）
 
 历史 `costUsd` 会被 native 重传覆盖，覆盖范围是「本机历史上传过的、仍在 D1 里、且再次被上传的
@@ -77,7 +112,8 @@ claude-code、amp、zcode 为 `cost-only`，其余四源 `match`，没有出现�
 
 按上表，覆盖后：
 
-- 非 claude 来源的费用变化只可能来自 zcode / amp 这类「动态目录 override」的差异；其余来源逐位不变。
+- 非 claude 来源的费用变化只可能来自 zcode / amp 这类「动态目录 override」的差异，或 kimi 这种在线表
+  自身变动（§2.3）；其余来源逐位不变。
 - claude-code 的历史行会整体从在线口径换成冻结口径：总量约 -7.7%，单行可能 ±2 倍以上（§2.1）。
   **这是已知且有意接受的覆盖**（D7），不是缺陷；如果之后要对账，用本台账的机制说明解释任何一条差异。
 
