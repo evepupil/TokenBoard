@@ -244,18 +244,32 @@ function validateOptionalBooleanString(value, field) {
   }
 }
 
+// The same route `check-production-route.mjs` preflights and wrangler publishes: the first
+// enabled custom domain. Taking `routes[0]` instead let a config whose first entry is a
+// zone route (or a disabled one) validate one host while the deploy preflight and the
+// published worker served another, so the OAuth origin check could pass against a domain
+// that is not where the app actually answers.
 function firstRoute(config) {
-  if (!Array.isArray(config.routes) || config.routes.length === 0 || !config.routes[0]) {
-    fail(`${CONFIG_FILE} is missing routes.`)
+  const route = Array.isArray(config.routes)
+    ? config.routes.find((value) => value && value.custom_domain === true && typeof value.pattern === 'string')
+    : undefined
+  if (!route) {
+    fail(`${CONFIG_FILE} is missing an enabled custom domain route.`)
   }
-  return config.routes[0]
+  return route
 }
 
 function d1Database(config) {
   if (!Array.isArray(config.d1_databases) || config.d1_databases.length === 0) {
     fail(`${CONFIG_FILE} is missing d1_databases.`)
   }
-  const database = config.d1_databases.find((item) => item?.binding === 'DB') ?? config.d1_databases[0]
+  // The `DB` binding is what the Worker and `wrangler d1 migrations` address; falling back
+  // to the first entry let a config with a renamed binding pass this check and fail later
+  // with wrangler's "Couldn't find a D1 DB with the name or binding 'DB'".
+  const database = config.d1_databases.find((item) => item?.binding === 'DB')
+  if (!database) {
+    fail(`${CONFIG_FILE} d1_databases has no entry bound as DB.`)
+  }
   return database
 }
 
@@ -356,7 +370,7 @@ function validateProductionRoute(value) {
 function validateAuthUrlMatchesRoute(authUrl, routePattern) {
   if (!routePatternCoversHostname(routePattern, new URL(authUrl).hostname)) {
     fail(
-      `${CONFIG_FILE} BETTER_AUTH_URL host must be covered by routes[0].pattern host, or OAuth redirects will target a different origin.`
+      `${CONFIG_FILE} BETTER_AUTH_URL host must be covered by the enabled custom domain route's pattern host, or OAuth redirects will target a different origin.`
     )
   }
 }

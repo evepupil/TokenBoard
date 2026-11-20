@@ -34,15 +34,18 @@ export function CustomSelect(props: {
         id={buttonId}
         type="button"
         class={props.buttonClass ?? customSelectButtonClass}
-        // The label renders as a sibling <span>, not a <label for>, so the button had no
-        // accessible name; a screen reader announced only "button" plus the current value.
-        aria-label={props.label}
+        // The label renders as a sibling <span>, not a <label for>, so the button needs a
+        // name of its own. An `aria-label` would replace the button's content in the
+        // accessible name, dropping the current selection; a visually hidden prefix
+        // (plus the visible value span, which stays the name's tail) announces
+        // "来源: 全部" the way a native select does.
         aria-haspopup="listbox"
         aria-expanded="false"
         aria-controls={menuId}
         data-custom-select-button="true"
         disabled={props.disabled}
       >
+        {props.label ? <span class="sr-only">{`${props.label}: `}</span> : null}
         <span data-custom-select-label="true">{selected?.label ?? ''}</span>
         <LucideIcon icon={ChevronDown} class="text-[var(--app-muted)]" size={16} />
       </button>

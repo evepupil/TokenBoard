@@ -121,7 +121,16 @@ function ProfileSettingsFields(props: { profile: ProfileSettings; collectorTimez
     <div class="space-y-4">
       <Label>
         显示名称
-        <Input name="displayName" value={props.profile.displayName} autocomplete="name" required />
+        <Input
+          name="displayName"
+          value={props.profile.displayName}
+          autocomplete="name"
+          required
+          // Same bound as the profile schema (max(80)) and the preview request: without
+          // it an 81-character name saved fine but froze the README preview, which
+          // silently refused the oversized payload.
+          maxLength={80}
+        />
       </Label>
       <ProfileSlugInput profile={props.profile} />
       <Label>

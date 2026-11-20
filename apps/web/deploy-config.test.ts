@@ -1409,13 +1409,84 @@ describe('Wrangler deploy config', () => {
 
       expect(result.status).toBe(1)
       expect(result.stderr).toContain('BETTER_AUTH_URL')
-      expect(result.stderr).toContain('routes[0].pattern')
+      expect(result.stderr).toContain('custom domain route')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
   })
 
-  test('production config checker rejects wildcard routes that wrangler custom domains do not accept', () => {
+  test('production config checker rejects a config whose D1 binding is not DB', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-d1-binding-renamed-'))
+    const outputFile = join(tempDir, 'wrangler.production.renamed-binding.jsonc')
+
+    try {
+      // The Worker and `wrangler d1 migrations` address the DB binding by name; a config
+      // that renames it fails later in the deploy with wrangler's own lookup error. The
+      // checker must not paper over that by validating whatever database happens to be first.
+      const content = filledProductionExample().replace('"binding": "DB"', '"binding": "PRIMARY"')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('bound as DB')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker validates the same custom domain route the deploy preflights', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-route-order-'))
+    const outputFile = join(tempDir, 'wrangler.production.route-order.jsonc')
+
+    try {
+      // check-production-route.mjs and wrangler both use the enabled custom domain, not the
+      // first array entry. With a zone route first, `routes[0]` validated one host while the
+      // OAuth origin check compared against the other.
+      const content = filledProductionExample().replace(
+        '"routes": [',
+        '"routes": [\n    {\n      "pattern": "tokenboard.example.com/*",\n      "zone_name": "example.com"\n    },'
+      )
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(0)
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker rejects a config with no enabled custom domain route', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-no-custom-domain-'))
+    const outputFile = join(tempDir, 'wrangler.production.no-custom-domain.jsonc')
+
+    try {
+      const content = filledProductionExample().replace('"custom_domain": true', '"custom_domain": false')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('custom domain route')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker rejects a wildcard route that wrangler custom domains do not accept', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-wildcard-route-'))
     const outputFile = join(tempDir, 'wrangler.production.wildcard.jsonc')
 
