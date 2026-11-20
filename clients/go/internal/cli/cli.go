@@ -315,7 +315,7 @@ func syncLocked(
 	}
 
 	phaseStarted = time.Now()
-	if err := acknowledgeUploadCursors(stateDir, outcome, options, cursorScope, env); err != nil {
+	if err := acknowledgeUploadCursors(stateDir, outcome, result, options, cursorScope, env); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
@@ -694,17 +694,47 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	// --hook is a boolean for `shadow` only: readFlags requires a value, and
 	// `--hook` is written bare. Pull it out first, then parse the rest
 	// normally so an unknown or valueless flag is still a usage error.
+	//
+	// The value spelling is accepted as a convenience (--hook=false, and the
+	// space-separated `--hook false`) but an unrecognised one is a usage
+	// error: treating `--hook=flase` as false ran a full preview while the
+	// operator believed they had asked for the hook path, and the report
+	// cannot tell them apart. The space form matters for the same reason in
+	// reverse — consumed only as the bare flag, `--hook false` enabled the
+	// hook path and dropped the `false`, the opposite of what was typed.
 	shadowHook := false
 	rest := args[1:]
 	if command == "shadow" {
 		kept := make([]string, 0, len(rest))
-		for _, arg := range rest {
+		for index := 0; index < len(rest); index++ {
+			arg := rest[index]
 			switch {
 			case arg == "--hook":
+				if index+1 < len(rest) && !strings.HasPrefix(rest[index+1], "--") {
+					switch rest[index+1] {
+					case "true", "1":
+						shadowHook = true
+						index++
+						continue
+					case "false", "0":
+						shadowHook = false
+						index++
+						continue
+					default:
+						return Options{}, fmt.Errorf("Invalid value for --hook: %s (want true, false, 1, or 0)", rest[index+1])
+					}
+				}
 				shadowHook = true
 			case strings.HasPrefix(arg, "--hook="):
 				value := strings.TrimPrefix(arg, "--hook=")
-				shadowHook = value == "true" || value == "1"
+				switch value {
+				case "true", "1":
+					shadowHook = true
+				case "false", "0":
+					shadowHook = false
+				default:
+					return Options{}, fmt.Errorf("Invalid value for --hook: %s (want true, false, 1, or 0)", value)
+				}
 			default:
 				kept = append(kept, arg)
 			}
@@ -749,6 +779,16 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	// TS resolves endpoint and token with `??`: a given flag wins, and an
 	// exported-but-empty variable is a value the required-config check then
 	// reports missing rather than silently using what the scheduler exported.
+	hookMode := env("TOKENBOARD_HOOK_MODE") == "1"
+	if command == "shadow" {
+		// Shadow computes its own hook flag from --hook and strips the ambient
+		// variable from both sides' environment (runShadow, shadowChildEnv).
+		// Reading the ambient value here let a notifier's TOKENBOARD_HOOK_MODE=1
+		// reject an explicit `shadow --until`, and hid an ambient
+		// TOKENBOARD_UNTIL, for a comparison that would have run as a full
+		// preview — the run's own semantics contradicted its validation.
+		hookMode = shadowHook
+	}
 	options := Options{
 		Command:     command,
 		Source:      source,
@@ -759,7 +799,7 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 		// The flag wins whenever it was given; the environment chain behind it
 		// uses `||`, so empty variables fall through there.
 		Since:           flagOrEnvChain(flags, "since", env, "TOKENBOARD_SINCE", "TOKENBOARD_DEFAULT_SINCE"),
-		HookMode:        env("TOKENBOARD_HOOK_MODE") == "1",
+		HookMode:        hookMode,
 		FailOnSourceErr: env("TOKENBOARD_FAIL_ON_SOURCE_ERROR") == "1",
 		ShadowHook:      shadowHook,
 	}
@@ -1091,6 +1131,15 @@ var Version = "dev"
 // actually succeeded reaches here: acknowledging a failed run would silently
 // drop the usage it carried.
 //
+// Within a successful run the groups come from result.Delivered plus the rows
+// the uploader dropped for a reason that can never change, not from the
+// collection. A row whose usageDate is outside the server's window never
+// reached the server, so acknowledging it blindly would clear the pending entry
+// it lives in — a clock that jumped a day ahead would lose that day for good
+// instead of retrying it. An invalid or before-history-window date can never
+// become uploadable, though, so its entry may be cleared; leaving it pending
+// would rescan its file and repeat the warning on every run.
+//
 // Mirrors the TS shouldAckCursor rule: the Antigravity sources always
 // acknowledge (their cursors track session markers), the session-file sources
 // only in hook mode (a range-mode run re-reads through ccusage anyway, and
@@ -1098,18 +1147,35 @@ var Version = "dev"
 func acknowledgeUploadCursors(
 	stateDir string,
 	outcome collection,
+	delivered upload.Result,
 	options Options,
 	cursorScope string,
 	env Env,
 ) error {
 	hookMode := env("TOKENBOARD_HOOK_MODE") == "1"
+	// A Codex row dropped only for being too far in the future keeps its file
+	// queued: the per-file acknowledgement cannot tell which file the row came
+	// from, so it is skipped this run and the group rule withholds the affected
+	// file until the clock catches up.
+	codexFutureRejected := false
+	for _, rejected := range delivered.Rejected {
+		if rejected.Snapshot.Source == contract.SourceCodex && rejected.Issue == "too-far-future" {
+			codexFutureRejected = true
+		}
+	}
 	for _, source := range outcome.collectedSources {
 		acknowledged := map[string]bool{}
-		for _, snapshot := range outcome.snapshots {
+		for _, snapshot := range delivered.Delivered {
 			if snapshot.Source != source {
 				continue
 			}
 			acknowledged[snapshot.AckGroupKey()] = true
+		}
+		for _, rejected := range delivered.Rejected {
+			if rejected.Snapshot.Source != source || rejected.Issue == "too-far-future" {
+				continue
+			}
+			acknowledged[rejected.Snapshot.AckGroupKey()] = true
 		}
 		if source == contract.SourceCodex {
 			if !hookMode {
@@ -1120,8 +1186,20 @@ func acknowledgeUploadCursors(
 			// the only proof of what reached the server. The scopes come from
 			// the same plan the hook runs use, so a profile cursor is never
 			// confused with the legacy one.
-			if err := acknowledgeCodexCursors(stateDir, outcome.codexAcknowledgement, env); err != nil {
-				return fmt.Errorf("%s cursor acknowledgement failed: %w", source, err)
+			//
+			// The file list alone proves nothing if one of these rows was
+			// dropped past the accepted date window: clearing the pending file
+			// would retire it without ever uploading the dropped bytes. The TS
+			// side reads its metadata off the delivered snapshots and falls back
+			// to the delivered-group rule when it is absent; mirror that.
+			var ackErr error
+			if len(acknowledged) > 0 && !codexFutureRejected {
+				ackErr = acknowledgeCodexCursors(stateDir, outcome.codexAcknowledgement, env)
+			} else {
+				ackErr = acknowledgeCodexGroups(stateDir, acknowledged, env)
+			}
+			if ackErr != nil {
+				return fmt.Errorf("%s cursor acknowledgement failed: %w", source, ackErr)
 			}
 			continue
 		}
@@ -1176,6 +1254,28 @@ func acknowledgeUploadCursors(
 	return nil
 }
 
+// codexAckScopes resolves the cursor scopes a Codex acknowledgement visits:
+// the legacy cursor always, plus one per profile when the profile cursors are
+// in use.
+func codexAckScopes(stateDir string, env Env) ([]string, error) {
+	homes, err := codex.ResolveHomes(codex.ResolveHomesInput{
+		JSONValue:   env("TOKENBOARD_CODEX_HOMES_JSON"),
+		LegacyValue: env("CODEX_HOME"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	plan, err := codex.ResolveHookCursorPlan(homes, stateDir)
+	if err != nil {
+		return nil, err
+	}
+	scopes := []string{""}
+	if plan.UsesProfileCursors {
+		scopes = append(scopes, plan.CursorScopes...)
+	}
+	return scopes, nil
+}
+
 // acknowledgeCodexCursors ports the Codex branch of ackUploadCursors: every
 // cursor scope the plan names is acknowledged with the files this run
 // uploaded for it. A scope the run uploaded nothing for is still visited, so
@@ -1185,20 +1285,9 @@ func acknowledgeCodexCursors(
 	acknowledgement []collect.CursorScopeFiles,
 	env Env,
 ) error {
-	homes, err := codex.ResolveHomes(codex.ResolveHomesInput{
-		JSONValue:   env("TOKENBOARD_CODEX_HOMES_JSON"),
-		LegacyValue: env("CODEX_HOME"),
-	})
+	scopes, err := codexAckScopes(stateDir, env)
 	if err != nil {
 		return err
-	}
-	plan, err := codex.ResolveHookCursorPlan(homes, stateDir)
-	if err != nil {
-		return err
-	}
-	scopes := []string{""}
-	if plan.UsesProfileCursors {
-		scopes = append(scopes, plan.CursorScopes...)
 	}
 	filesByScope := map[string][]sessioncursor.AcknowledgedFile{}
 	for _, entry := range acknowledgement {
@@ -1214,6 +1303,29 @@ func acknowledgeCodexCursors(
 			Source:            contract.SourceCodex,
 			CursorScope:       scope,
 			AcknowledgedFiles: files,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// acknowledgeCodexGroups is the fallback the TS side takes when the upload
+// delivered no Codex row: the per-file list is metadata on the snapshots that
+// uploaded, so an empty delivery leaves nothing to read it from, and the plain
+// group rule applies instead. A pending file keeps its flag unless every
+// snapshot it carries belongs to a group the server accepted.
+func acknowledgeCodexGroups(stateDir string, groups map[string]bool, env Env) error {
+	scopes, err := codexAckScopes(stateDir, env)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		if err := sessioncursor.AcknowledgePendingUploads(sessioncursor.AcknowledgeInput{
+			StateDir:           stateDir,
+			Source:             contract.SourceCodex,
+			CursorScope:        scope,
+			AcknowledgedGroups: groups,
 		}); err != nil {
 			return err
 		}

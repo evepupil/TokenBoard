@@ -317,6 +317,36 @@ func TestShadowHookModeReachesTheGoProvider(t *testing.T) {
 	}
 }
 
+// `--hook false` (space-separated) reads the same as --hook=false and must
+// disable hook mode, not silently enable it: the bare `--hook` spelling is
+// parsed first and left `false` orphaned, which the argument scanner then
+// dropped on the floor, so an operator who typed the space form ran the hook
+// path believing it was off.
+func TestShadowHookFalseSpaceFormDisablesHookMode(t *testing.T) {
+	repoDir := t.TempDir()
+	srcDir := filepath.Join(repoDir, "packages", "collector", "src")
+	if err := os.MkdirAll(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "cli.ts"), []byte("// fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe := &hookModeProbe{snapshots: []contract.Snapshot{shadowSnapshot()}}
+	stubSource(t, contract.SourceClaudeCode, probe)
+	stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+
+	code, stdout, stderr := runShadowCLI(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":      "UTC",
+		"TOKENBOARD_COLLECTOR_DIR": repoDir,
+	}, "shadow", "--source", "claude-code", "--hook", "false")
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr = %s; stdout = %s", code, stderr, stdout)
+	}
+	if probe.seen != "" {
+		t.Errorf("provider saw TOKENBOARD_HOOK_MODE = %q, want it off for `--hook` `false`", probe.seen)
+	}
+}
+
 // The same wiring must strip an ambient hook mode when --hook was not given:
 // a shadow started from a notifier's environment still compares previews, and
 // the provider must not see the notifier's flag.
@@ -422,6 +452,54 @@ func TestShadowIgnoresAmbientUntilInHookMode(t *testing.T) {
 	code, stdout, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", "--hook")
 	if code != ExitOK {
 		t.Fatalf("code = %d, stderr = %s; stdout = %s", code, stderr, stdout)
+	}
+}
+
+// An ambient TOKENBOARD_HOOK_MODE belongs to a notifier, not to the
+// comparison: shadow computes its hook flag from --hook and strips the
+// variable from both sides. Letting the ambient value drive the validation
+// rejected an explicit `--until` for a run that would have been a full
+// preview anyway.
+func TestShadowIgnoresAmbientHookModeForUntil(t *testing.T) {
+	env, _ := shadowEnv(t)
+	env["TOKENBOARD_HOOK_MODE"] = "1"
+	stubSource(t, contract.SourceClaudeCode, stubProvider{snapshots: []contract.Snapshot{shadowSnapshot()}})
+	var seenUntil string
+	previous := runShadowTS
+	runShadowTS = func(_ context.Context, input shadowTSInput) ([]contract.Snapshot, error) {
+		seenUntil = input.Until
+		return []contract.Snapshot{shadowSnapshot()}, nil
+	}
+	t.Cleanup(func() { runShadowTS = previous })
+
+	code, stdout, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", "--until", "2026-07-30")
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr = %s; stdout = %s", code, stderr, stdout)
+	}
+	if seenUntil != "2026-07-30" {
+		t.Errorf("TS side saw --until %q, want it forwarded", seenUntil)
+	}
+}
+
+// An unrecognised --hook value used to fall through as false, so a typo ran a
+// full preview while the operator believed they had asked for the hook path.
+func TestShadowRejectsAnUnrecognisedHookValue(t *testing.T) {
+	for _, value := range []string{"--hook=flase", "--hook=yes", "--hook="} {
+		env, _ := shadowEnv(t)
+		stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+
+		code, _, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", value)
+		if code != ExitUsage || !strings.Contains(stderr, "--hook") {
+			t.Errorf("%s: code = %d, stderr = %q; want a usage error naming --hook", value, code, stderr)
+		}
+	}
+	// The space-separated form must reject a wrong value too, rather than
+	// treating it as the bare flag and dropping the word.
+	env, _ := shadowEnv(t)
+	stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+	code, _, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", "--hook", "flase")
+	if code != ExitUsage || !strings.Contains(stderr, "--hook") {
+		t.Errorf("--hook flase: code = %d, stderr = %q; want a usage error naming --hook", code, stderr)
 	}
 }
 
