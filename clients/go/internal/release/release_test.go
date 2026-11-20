@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -236,6 +237,30 @@ func TestRepoValidation(t *testing.T) {
 		if _, err := Repo(value); err == nil {
 			t.Errorf("Repo(%q) accepted", value)
 		}
+	}
+}
+
+// An https -> http hop is refused even when the host never changes: the
+// checksums travel over the same redirect, so one intermediary on the
+// downgraded link could replace both the tarball and the file that vouches for
+// it. An http -> https upgrade stays allowed (a local mirror configured over
+// plain HTTP). sameRedirectHost is called directly because the httptest
+// servers in this file all speak plain HTTP; reaching for real TLS would test
+// the transport, not the rule.
+func TestDownloadRedirectRefusesHTTPSDowngrade(t *testing.T) {
+	origin := &url.URL{Scheme: "https", Host: "github.com"}
+	sameHostOverHTTP := &url.URL{Scheme: "http", Host: "github.com"}
+	if sameRedirectHost(origin, sameHostOverHTTP) {
+		t.Fatal("sameRedirectHost accepted an https -> http downgrade on the same host")
+	}
+	sameHostOverHTTPS := &url.URL{Scheme: "https", Host: "github.com"}
+	if !sameRedirectHost(origin, sameHostOverHTTPS) {
+		t.Fatal("sameRedirectHost refused an https -> https hop")
+	}
+	mirror := &url.URL{Scheme: "http", Host: "tokens.internal:8080"}
+	upgrade := &url.URL{Scheme: "https", Host: "tokens.internal:8080"}
+	if !sameRedirectHost(mirror, upgrade) {
+		t.Fatal("sameRedirectHost refused an http -> https upgrade")
 	}
 }
 

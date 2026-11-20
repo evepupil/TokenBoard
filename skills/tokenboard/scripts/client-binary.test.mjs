@@ -580,6 +580,54 @@ test('downloadBytes refuses a redirect that leaves the release host', async () =
   assert.equal(seen.length, 1)
 })
 
+// An https -> http hop is refused even when the host never changes: the
+// checksums travel over the same redirect, so one intermediary on the
+// downgraded link could replace both the tarball and the file that vouches for
+// it. An http -> https upgrade stays allowed.
+test('downloadBytes refuses an HTTPS downgrade to the same host', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const fetcher = () => ({
+    ok: false,
+    status: 307,
+    headers: { get: () => 'http://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz' },
+    body: null
+  })
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher
+      }),
+    /not the release host/
+  )
+})
+
+test('downloadBytes follows an HTTP->HTTPS upgrade for a local mirror', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const body = (async function* generate() {
+    yield Buffer.from('tarball')
+  })()
+  const responses = [
+    {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://mirror.internal:8080/assets/x' },
+      body: null
+    },
+    { ok: true, status: 200, headers: { get: () => null }, body }
+  ]
+  let calls = 0
+  const data = await downloadBytes({
+    url: 'http://mirror.internal:8080/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher: () => responses[calls++]
+  })
+  assert.equal(data.toString(), 'tarball')
+  assert.equal(calls, 2)
+})
+
 test('downloadBytes follows a redirect to the GitHub asset CDN', async () => {
   const { downloadBytes } = await import('./client-binary.mjs')
   const body = (async function* generate() {

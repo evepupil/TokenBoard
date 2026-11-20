@@ -196,8 +196,14 @@ async function latestTagHops({ repo, origin, current, fetcher, controller }) {
 const releaseRedirectHosts = ['objects.githubusercontent.com', 'release-assets.githubusercontent.com']
 
 // sameRedirectHost keeps the port: hostname alone would treat two servers on
-// the same address (a proxy, a test server, a local mirror) as one host.
+// the same address (a proxy, a test server, a local mirror) as one host. It
+// also refuses an https -> http hop: the checksums travel over the same
+// redirect, so a downgrade lets one intermediary replace both the binary and
+// the file that vouches for it. An http release base URL (a local mirror the
+// operator configured) may still upgrade to https; the reverse is the only
+// direction the rule forbids.
 function sameRedirectHost(origin, target) {
+  if (origin.protocol === 'https:' && target.protocol !== 'https:') return false
   if (origin.host.toLowerCase() === target.host.toLowerCase()) return true
   return releaseRedirectHosts.includes(target.hostname.toLowerCase())
 }

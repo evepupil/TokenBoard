@@ -348,8 +348,15 @@ func tagFromURL(pageURL string) (string, error) {
 // origin itself and the asset CDN GitHub redirects to.
 //
 // The comparison keeps the port: hostname alone would treat two servers on the
-// same address (a proxy, a test server, a local mirror) as the same host.
+// same address (a proxy, a test server, a local mirror) as the same host. It
+// also refuses an https -> http hop: the checksums travel over the same
+// redirect, so a downgrade lets one intermediary replace both the binary and
+// the file that vouches for it. An http release base URL (a local mirror) may
+// still upgrade to https; only the reverse is forbidden.
 func sameRedirectHost(origin, target *url.URL) bool {
+	if origin.Scheme == "https" && target.Scheme != "https" {
+		return false
+	}
 	if strings.EqualFold(origin.Host, target.Host) {
 		return true
 	}
