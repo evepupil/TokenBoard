@@ -23,7 +23,31 @@ export function buildWarmHookCursorArgs({ packageManager } = {}) {
 
 export function readSetupBaseUrl({ flags = {}, env = process.env } = {}) {
   const value = flags['base-url'] || env.TOKENBOARD_BASE_URL
-  return value ? String(value).replace(/\/$/, '') : null
+  const baseUrl = value ? String(value).replace(/\/$/, '') : null
+  if (baseUrl) assertSecureSetupBaseUrl(baseUrl)
+  return baseUrl
+}
+
+// The pairing code and the returned upload token cross the network on this URL
+// in the clear over plain HTTP, so the setup boundary matches the upload
+// endpoint's rule (`packages/collector/src/endpoint.ts`): https anywhere, http
+// only for a loopback host. There is no mirror or LAN exception — the pairing
+// code is a credential, and a typo'd `http://` is exactly the mistake that
+// hands it to the network.
+const loopbackSetupHostnames = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+
+export function assertSecureSetupBaseUrl(baseUrl) {
+  let parsed
+  try {
+    parsed = new URL(baseUrl)
+  } catch {
+    throw new Error(`TokenBoard base URL is not a valid URL: ${baseUrl}`)
+  }
+  if (parsed.protocol === 'https:') return baseUrl
+  if (parsed.protocol === 'http:' && loopbackSetupHostnames.has(parsed.hostname)) return baseUrl
+  throw new Error(
+    `TokenBoard base URL must use https (the pairing code and upload token travel over it); http is allowed only for a loopback host, not ${parsed.origin}`
+  )
 }
 
 export function resolveSetupInstallOptions({
@@ -149,6 +173,10 @@ export async function createPairingCodeFromDeviceLink({
   const response = await fetcher(`${baseOrigin}/api/v1/device/reconnect-pairing-codes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    // The body carries the install claim, a credential. Following a redirect
+    // would hand it to whatever host the answer names; the upload and release
+    // paths follow redirects by hand for the same reason.
+    redirect: 'manual',
     body: JSON.stringify({
       deviceId: deviceLink.deviceId,
       installationId: deviceLink.installationId,
