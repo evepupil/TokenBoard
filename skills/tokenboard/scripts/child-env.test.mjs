@@ -27,7 +27,8 @@ test('scrubbedChildEnv drops credentials and leaves everything else alone', () =
     TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_secret',
     TOKENBOARD_PAIRING_CODE: 'tb_pair_secret',
     TOKENBOARD_RELEASE_BASE_URL: 'https://user:token@feed.example',
-    TOKENBOARD_REPO_URL: 'https://user:token@git.example/mirror.git'
+    TOKENBOARD_REPO_URL: 'https://user:token@git.example/mirror.git',
+    TOKENBOARD_ARCHIVE_URL: 'https://files.example/tokenboard.zip?token=tb_archive_secret'
   }
   const scrubbed = scrubbedChildEnv(env)
   assert.deepEqual(scrubbed, { PATH: '/usr/bin:/bin', HOME: '/home/user' })

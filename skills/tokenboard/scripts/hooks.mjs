@@ -15,6 +15,7 @@ import {
   uninstallClaudeHook
 } from './claude-hook.mjs'
 import { configDir, parseArgs } from './config.mjs'
+import { credentialEnvKeys } from './child-env.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { assertCodexNotifyWritable, getCodexHookStatus, installCodexHook, uninstallCodexHook } from './codex-hook.mjs'
 import { errorMessage } from './error-message.mjs'
@@ -276,6 +277,13 @@ const NODE_PATH = process.platform === "win32"
   ? ${JSON.stringify(nodePath || process.execPath)}
   : process.execPath;
 const NOTIFY_SCRIPT = ${JSON.stringify(notifyScriptPath)};
+// The original notify command is the user's own tool, not TokenBoard code, so
+// it must not receive this device's credentials. The list is the skill's
+// credentialEnvKeys (./child-env.mjs), interpolated here because the generated
+// handler has to run standalone; child-env.test.mjs keeps the TypeScript,
+// skill and collector copies aligned. Declared here, in the header, because the
+// forwarder below can run before the helpers section's own body does.
+const ORIGINAL_NOTIFY_SCRUBBED_ENV_KEYS = ${JSON.stringify(credentialEnvKeys)};
 const SELF_PATH = resolve(__filename);
 const HOME_DIR = homedir();
 const HANDLER_ERROR_LOG_PATH = join(STATE_DIR, "notify-handler-errors.log");
@@ -427,12 +435,18 @@ if (source === "codex") {
 
 function notifyHandlerHelpers() {
   return `
+function scrubbedOriginalNotifyEnv() {
+  const env = { ...process.env };
+  for (const key of ORIGINAL_NOTIFY_SCRUBBED_ENV_KEYS) delete env[key];
+  return env;
+}
+
 function spawnOriginalNotify(command, args) {
   const options = {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env: { ...process.env },
+    env: scrubbedOriginalNotifyEnv(),
   };
   if (process.platform !== "win32" || !/\\.(cmd|bat)$/i.test(command)) {
     return spawn(command, args, options);

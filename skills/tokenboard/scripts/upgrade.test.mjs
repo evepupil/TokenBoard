@@ -364,7 +364,12 @@ test('refreshes installed notifier handlers from the upgraded collector checkout
       'repo-ref': 'feature/reliability',
       'skill-dir': `${collectorDir}/skills/tokenboard`
     },
-    env: { TOKENBOARD_CONFIG_DIR: configDirectory },
+    env: {
+      TOKENBOARD_CONFIG_DIR: configDirectory,
+      PATH: '/usr/bin:/bin',
+      TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_secret',
+      TOKENBOARD_PAIRING_CODE: 'tb_pair_secret'
+    },
     readConfigFile: () => ({
       collectorDir,
       repoUrl: 'https://github.com/example/TokenBoard.git',
@@ -395,6 +400,11 @@ test('refreshes installed notifier handlers from the upgraded collector checkout
   assert.ok(refreshIndex > installIndex)
   assert.deepEqual(calls[refreshIndex].args, [`${collectorDir}/skills/tokenboard/scripts/refresh-notify-handler.mjs`])
   assert.equal(calls[refreshIndex].options.env.TOKENBOARD_CONFIG_DIR, configDirectory)
+  // The refresh runs code from the freshly fetched checkout; it must not carry
+  // this device's credentials either.
+  assert.equal(calls[refreshIndex].options.env.TOKENBOARD_UPLOAD_TOKEN, undefined)
+  assert.equal(calls[refreshIndex].options.env.TOKENBOARD_PAIRING_CODE, undefined)
+  assert.equal(calls[refreshIndex].options.env.PATH, '/usr/bin:/bin')
 })
 
 test('fails visibly when the upgraded notifier handler refresh fails', () => {

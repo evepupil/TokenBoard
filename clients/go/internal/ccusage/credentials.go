@@ -27,11 +27,16 @@ import (
 // TOKENBOARD_REPO_URL is the same shape for a private checkout mirror. The
 // collector has no use for it either: only the skill's install and upgrade
 // steps consume it, and they do so in their own process.
+//
+// TOKENBOARD_ARCHIVE_URL can carry a signed-token query parameter for a private
+// release archive. The skill reads it itself to fetch the archive; a child it
+// downloads and runs has no use for it, so it is scrubbed like the feed URLs.
 var credentialEnvKeys = map[string]bool{
 	"TOKENBOARD_UPLOAD_TOKEN":     true,
 	"TOKENBOARD_PAIRING_CODE":     true,
 	"TOKENBOARD_RELEASE_BASE_URL": true,
 	"TOKENBOARD_REPO_URL":         true,
+	"TOKENBOARD_ARCHIVE_URL":      true,
 }
 
 // ScrubCredentialEnv returns env with credential-bearing entries removed. A nil

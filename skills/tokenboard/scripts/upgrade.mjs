@@ -305,7 +305,7 @@ export function refreshInstalledNotifyHandler({
     shell: false,
     windowsHide: true,
     env: {
-      ...env,
+      ...scrubbedChildEnv(env),
       TOKENBOARD_CONFIG_DIR: configDirectory
     }
   })

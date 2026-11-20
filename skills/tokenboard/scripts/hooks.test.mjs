@@ -111,15 +111,24 @@ test('notify handler forwards Codex payload args to the preserved original notif
   assert.match(source, /spawnOriginalNotify\(cmd\[0\], \[\.\.\.cmd\.slice\(1\), \.\.\.payloadArgs\]\)/)
 })
 
+// The generated handler declares the credential list in its header (the
+// forwarder can run before the helpers body) and the forwarding helpers in its
+// helpers section; a test that evaluates the forwarder needs both pieces.
+function originalNotifyForwarderSource(source) {
+  const declaration = source.split('\n').find((line) => line.startsWith('const ORIGINAL_NOTIFY_SCRUBBED_ENV_KEYS ='))
+  const start = source.indexOf('function scrubbedOriginalNotifyEnv()')
+  const end = source.indexOf('function acquireDispatchLock', start)
+  assert.ok(declaration && start >= 0 && end > start)
+  return `${declaration}\n${source.slice(start, end)}`
+}
+
 test('notify handler quotes Windows shim arguments and rejects shell metacharacters', () => {
   const source = buildNotifyHandler({
     stateDir: '/home/user/.tokenboard',
     notifyScriptPath: '/repo/scripts/notify.mjs',
     nodePath: '/usr/bin/node'
   })
-  const start = source.indexOf('function spawnOriginalNotify(')
-  const end = source.indexOf('function acquireDispatchLock', start)
-  assert.ok(start >= 0 && end > start)
+  const forwarder = originalNotifyForwarderSource(source)
 
   const calls = []
   const context = {
@@ -131,7 +140,7 @@ test('notify handler quotes Windows shim arguments and rejects shell metacharact
     result: undefined
   }
   runInNewContext(
-    `${source.slice(start, end)}\nresult = spawnOriginalNotify('C:\\\\Program Files (x86)\\\\notify.cmd', ['C:\\\\work\\\\', 'value with spaces']);`,
+    `${forwarder}\nresult = spawnOriginalNotify('C:\\\\Program Files (x86)\\\\notify.cmd', ['C:\\\\work\\\\', 'value with spaces']);`,
     context
   )
 
@@ -145,12 +154,47 @@ test('notify handler quotes Windows shim arguments and rejects shell metacharact
   assert.equal(calls[0][1][3].endsWith('"value with spaces""'), true)
   assert.throws(
     () =>
-      runInNewContext(
-        `${source.slice(start, end)}\nspawnOriginalNotify('C:\\\\notify.cmd', ['safe&unsafe']);`,
-        context
-      ),
+      // A fresh context per script: the slice now declares a top-level const,
+      // which a second run in the same context would redeclare.
+      runInNewContext(`${forwarder}\nspawnOriginalNotify('C:\\\\notify.cmd', ['safe&unsafe']);`, { ...context }),
     /Refusing unsafe Windows original notify argument/
   )
+})
+
+test('original notify command does not inherit TokenBoard credentials', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/home/user/.tokenboard',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const forwarder = originalNotifyForwarderSource(source)
+
+  const calls = []
+  const context = {
+    process: {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin:/bin',
+        TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_secret',
+        TOKENBOARD_PAIRING_CODE: 'tb_pair_secret',
+        TOKENBOARD_RELEASE_BASE_URL: 'https://user:token@feed.example',
+        TOKENBOARD_REPO_URL: 'https://user:token@git.example/mirror.git'
+      }
+    },
+    spawn: (...args) => {
+      calls.push(args)
+      return { once() {}, unref() {} }
+    }
+  }
+  runInNewContext(`${forwarder}\nspawnOriginalNotify('/usr/bin/notify', ['--payload', '{}']);`, context)
+
+  assert.equal(calls.length, 1)
+  const env = calls[0][2].env
+  assert.equal(env.PATH, '/usr/bin:/bin')
+  for (const key of Object.keys(context.process.env)) {
+    if (key === 'PATH') continue
+    assert.equal(key in env, false, `the original notify command must not see ${key}`)
+  }
 })
 
 test('notify handler treats shell-string references to itself as self notify commands', () => {

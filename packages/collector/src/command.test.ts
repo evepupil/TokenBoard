@@ -184,6 +184,7 @@ describe('runJsonCommand', () => {
           'pairing: process.env.TOKENBOARD_PAIRING_CODE ?? null, ' +
           'releaseBaseUrl: process.env.TOKENBOARD_RELEASE_BASE_URL ?? null, ' +
           'repoUrl: process.env.TOKENBOARD_REPO_URL ?? null, ' +
+          'archiveUrl: process.env.TOKENBOARD_ARCHIVE_URL ?? null, ' +
           'kept: process.env.TOKENBOARD_STATE_DIR ?? null }))'
       ],
       {
@@ -193,6 +194,7 @@ describe('runJsonCommand', () => {
           TOKENBOARD_PAIRING_CODE: 'tb_pair_must_not_leak',
           TOKENBOARD_RELEASE_BASE_URL: 'https://user:tb_release_must_not_leak@feed.example',
           TOKENBOARD_REPO_URL: 'https://user:tb_repo_must_not_leak@git.example/mirror.git',
+          TOKENBOARD_ARCHIVE_URL: 'https://files.example/tokenboard.zip?token=tb_archive_must_not_leak',
           TOKENBOARD_STATE_DIR: '/tmp/kept-for-the-child'
         }
       }
@@ -203,6 +205,7 @@ describe('runJsonCommand', () => {
       pairing: null,
       releaseBaseUrl: null,
       repoUrl: null,
+      archiveUrl: null,
       kept: '/tmp/kept-for-the-child'
     })
   })
