@@ -299,6 +299,38 @@ func TestCountsUsageEventsWithoutSequence(t *testing.T) {
 	}
 }
 
+// A quoted sequence is not a sequence: the TypeScript side tests `typeof
+// value === 'number'`, so a log that writes `"seq": "12"` gets no dedup key
+// there. Go's lenient number reader would have accepted the string, and the
+// two collectors would then merge (or keep) different rows for the same log.
+func TestIgnoresAQuotedSequence(t *testing.T) {
+	if _, ok := readEventSeq("12"); ok {
+		t.Fatal(`readEventSeq("12") accepted a string; the TypeScript side only accepts a number`)
+	}
+	if seq, ok := readEventSeq(json.Number("12")); !ok || seq != 12 {
+		t.Fatalf("readEventSeq(json.Number(12)) = %d, %v; want 12, true", seq, ok)
+	}
+
+	line := newMessage().withUsage(map[string]any{"inputTokens": 17, "outputTokens": 3}).render(t)
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	envelope["seq"] = "12"
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := dshHome(t, map[string]dshFile{
+		"project/session-a/session.jsonl": {lines: []string{string(encoded)}},
+	})
+
+	snapshot := mustCollect(t, home, nil)[0]
+	if snapshot.InputTokens != 17 {
+		t.Errorf("snapshot = %+v, want the row counted without a key", snapshot)
+	}
+}
+
 // Handing every frame the full 256 MiB cap bounds the *result* but not the
 // peak: the frames already decoded plus one more at full size can reach twice
 // the cap. Each frame is handed what is left instead. The peak-memory property

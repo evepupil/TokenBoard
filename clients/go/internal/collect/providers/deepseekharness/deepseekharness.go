@@ -8,7 +8,9 @@ package deepseekharness
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -187,9 +189,29 @@ func readUsageEvents(
 // accepted: a sequence that cannot be compared exactly cannot deduplicate
 // anything, and treating it as a key would merge distinct events instead of
 // skipping duplicates.
+//
+// The JSON number must also be a real number, not a string: the TypeScript
+// side tests `typeof value === 'number'`, and ReadFiniteNumber's lenient
+// string branch would accept `"12"` here — the two collectors would then
+// deduplicate the same log differently when a producer ever quotes the field.
 func readEventSeq(value any) (int64, bool) {
-	number, ok := sessionusage.ReadFiniteNumber(value)
-	if !ok || number != float64(int64(number)) {
+	var number float64
+	switch typed := value.(type) {
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		number = parsed
+	case float64:
+		number = typed
+	default:
+		return 0, false
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, false
+	}
+	if number != float64(int64(number)) {
 		return 0, false
 	}
 	seq := int64(number)
