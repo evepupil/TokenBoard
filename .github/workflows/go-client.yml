@@ -343,16 +343,24 @@ jobs:
       # host; this step pins the compiled instruction stream, because the
       # fusion only exists there. Route products through nativepricing.Product
       # rather than loosening this check.
-      - name: arm64 pricing code has no fused multiply-add
+      #
+      # The scan covers the whole module: a hand-kept package roster silently
+      # missed providers/codex, and the failure mode is invisible (the check
+      # passes on packages it does not name). A build failure must fail the
+      # step too - `go build ... | grep -c` would otherwise report 0 fused
+      # instructions for output that never compiled.
+      - name: arm64 code has no fused multiply-add
         working-directory: clients/go
         run: |
-          for pkg in ./internal/nativepricing ./internal/collect/adapters/claude ./internal/collect/adapters/codex ./internal/collect/adapters/tools ./internal/collect/adapters/copilot; do
-            fused=$(GOOS=darwin GOARCH=arm64 go build -gcflags='-S' "$pkg" 2>&1 | grep -c FMADDD || true)
-            if [ "$fused" -ne 0 ]; then
-              echo "$pkg compiles $fused fused multiply-adds (FMADDD); route the product through nativepricing.Product" >&2
-              exit 1
-            fi
-          done
+          out=$(mktemp -d)
+          trap 'rm -rf "$out"' EXIT
+          GOOS=darwin GOARCH=arm64 go build -gcflags='-S' -o "$out/" ./... 2>"$out/asm.txt"
+          fused=$(grep -c FMADDD "$out/asm.txt" || true)
+          if [ "$fused" -ne 0 ]; then
+            grep FMADDD "$out/asm.txt" >&2
+            echo "the arm64 build compiles $fused fused multiply-adds (FMADDD); route the product through nativepricing.Product (mtime.Millis shows the guard for non-pricing doubles)" >&2
+            exit 1
+          fi
 
       # The goldens are the other half of the gate: pin the generator's assets
       # and schema so a stale corpus cannot pass by comparing against itself.

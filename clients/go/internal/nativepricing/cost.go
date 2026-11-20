@@ -223,9 +223,10 @@ func roundedProduct(count int64, rate float64) float64 {
 // Product is roundedProduct's guarded form for cost formulas that live outside
 // this package: the Codex adapter's bucket and multiplier terms (codex
 // report.go). The same arm64 hazard applies there - Go fuses `count*rate + total`
-// into FMADDD, Rust rounds twice - and the adapter must not re-derive the guard
-// itself. TestCodexBucketAndUsageCostAreNotFused pins the bit pattern from the
-// adapter side.
+// into FMADDD, Rust rounds twice - so the adapter must build those sums from
+// Product and Sum rather than re-deriving `a*b + c*d` inline, which would fuse.
+// TestCostFromPricing_isFMAFreeOnArm64 (cost_test.go) pins the noinline
+// rounding this relies on.
 //
 //go:noinline
 func Product(left, right float64) float64 {

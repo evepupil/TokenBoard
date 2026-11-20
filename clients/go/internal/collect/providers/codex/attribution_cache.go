@@ -1097,7 +1097,7 @@ func attributionParseMillis(value string) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return float64(parsed.Unix())*1e3 + float64(parsed.Nanosecond())/1e6, true
+	return mtime.Millis(parsed), true
 }
 
 func encodeAttributionCacheState(state attributionCacheState) []byte {

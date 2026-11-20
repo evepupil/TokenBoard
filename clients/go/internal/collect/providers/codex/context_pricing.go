@@ -32,6 +32,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionwalk"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/jsdate"
+	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
 )
 
@@ -443,10 +444,12 @@ func (r *Rules) PriceCodexRequest(input PriceRequestInput) *float64 {
 	if input.UncachedInputTokens != nil {
 		uncachedInputTokens = *input.UncachedInputTokens
 	}
-	cost := multiplier * (uncachedInputTokens*rates.Input +
-		input.OutputTokens*rates.Output +
-		input.CacheReadTokens*rates.CacheRead +
-		input.CacheCreationTokens*rates.CacheCreation)
+	cost := nativepricing.Product(multiplier, nativepricing.Sum(
+		nativepricing.Product(uncachedInputTokens, rates.Input),
+		nativepricing.Product(input.OutputTokens, rates.Output),
+		nativepricing.Product(input.CacheReadTokens, rates.CacheRead),
+		nativepricing.Product(input.CacheCreationTokens, rates.CacheCreation),
+	))
 	return &cost
 }
 
@@ -465,10 +468,12 @@ func (r *Rules) priceCodexUsageAtTier(usage CodexContextPricingUsage) *float64 {
 		rates = rule.LongContext
 	}
 	multiplier := serviceTierMultiplier(rule, usage.ServiceTier)
-	cost := multiplier * (usage.UncachedInputTokens*rates.Input +
-		usage.OutputTokens*rates.Output +
-		usage.CacheReadTokens*rates.CacheRead +
-		usage.CacheCreationTokens*rates.CacheCreation)
+	cost := nativepricing.Product(multiplier, nativepricing.Sum(
+		nativepricing.Product(usage.UncachedInputTokens, rates.Input),
+		nativepricing.Product(usage.OutputTokens, rates.Output),
+		nativepricing.Product(usage.CacheReadTokens, rates.CacheRead),
+		nativepricing.Product(usage.CacheCreationTokens, rates.CacheCreation),
+	))
 	return &cost
 }
 
