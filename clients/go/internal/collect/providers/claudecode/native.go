@@ -146,23 +146,23 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 		return nil, err
 	}
 
-	// The ccusage path runs `ccusage claude daily`, so the rates and cost mode
-	// that apply are the ones ccusage resolves for that scope - root defaults
-	// plus commands.<...> and claude.* sections. Reading the config's root
-	// defaults block alone (or hardcoding the mode) would bill a machine that
-	// scopes its overrides differently from its own ccusage runs.
+	// The ccusage path runs `ccusage claude daily` and `ccusage claude session`
+	// as two invocations, so each report's rates and cost mode are the ones
+	// ccusage resolves for that scope - root defaults plus commands.<...> and
+	// claude.* sections. Resolving the scope once and feeding both reports
+	// would bill a machine that scopes its overrides per report from the wrong
+	// layer; the Codex provider resolves per report for the same reason
+	// (codex/native.go pricingFor).
 	scope := prepared.ResolveScope(pricing.Scope{Agent: "claude", Report: "daily"})
+	sessionScope := prepared.ResolveScope(pricing.Scope{Agent: "claude", Report: "session"})
 	mode := claudeCostMode(scope.Mode)
-	covered := prepared.CoveredModelIDs
-	if extra := scope.Overrides; len(extra) > 0 {
-		covered = make(map[string]bool, len(prepared.CoveredModelIDs)+len(extra))
-		for modelID := range prepared.CoveredModelIDs {
-			covered[modelID] = true
-		}
-		for modelID := range extra {
-			covered[modelID] = true
-		}
-	}
+	sessionMode := claudeCostMode(sessionScope.Mode)
+	// The unpriced warning reads the daily chain's coverage. Unpriced rows are
+	// the zero-cost ones, and a row the session chain priced carries a real
+	// cost, so a union with the session scope would only suppress warnings for
+	// daily rows the session overrides happen to cover — the rows whose cost is
+	// a silent 0 for exactly that reason.
+	covered := mergedCovered(prepared.CoveredModelIDs, scope.Overrides)
 
 	roots, err := resolveNativeRoots(env, input.options)
 	if err != nil {
@@ -182,16 +182,18 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 
 	if hookMode {
 		return nativeCollectHook(ctx, nativeHookInput{
-			env:         env,
-			stderr:      stderr,
-			timezone:    timezone,
-			collectedAt: collectedAt,
-			stateDir:    stateDir,
-			homeDir:     input.options.HomeDir,
-			roots:       roots,
-			overrides:   scope.Overrides,
-			mode:        mode,
-			covered:     covered,
+			env:              env,
+			stderr:           stderr,
+			timezone:         timezone,
+			collectedAt:      collectedAt,
+			stateDir:         stateDir,
+			homeDir:          input.options.HomeDir,
+			roots:            roots,
+			overrides:        scope.Overrides,
+			mode:             mode,
+			sessionOverrides: sessionScope.Overrides,
+			sessionMode:      sessionMode,
+			covered:          covered,
 		})
 	}
 
@@ -201,13 +203,16 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	// lower bound); no rule is duplicated here.
 	sinceBound, untilBound := resolveWindowEnv(input.options.Since, input.options.Until, env)
 	dailyJSON, sessionsJSON, err := claude.Collect(ctx, claude.Options{
-		Timezone:  timezone,
-		Since:     sinceBound,
-		Until:     untilBound,
-		Roots:     roots,
-		Overrides: scope.Overrides,
-		Mode:      mode,
-		Stderr:    stderr,
+		Timezone:         timezone,
+		Since:            sinceBound,
+		Until:            untilBound,
+		Roots:            roots,
+		Overrides:        scope.Overrides,
+		Mode:             mode,
+		SessionOverrides: sessionScope.Overrides,
+		SessionMode:      sessionMode,
+		HasSessionScope:  true,
+		Stderr:           stderr,
 	})
 	if err != nil {
 		return nil, err
@@ -255,6 +260,23 @@ func claudeCostMode(mode string) nativepricing.CostMode {
 	}
 }
 
+// mergedCovered is the catalogue's covered set plus one scope's overrides: the
+// models that scope's cost function can price. The unpriced warning asks it per
+// chain, since each chain prices with its own resolved scope.
+func mergedCovered(base map[string]bool, overrides map[string]any) map[string]bool {
+	if len(overrides) == 0 {
+		return base
+	}
+	merged := make(map[string]bool, len(base)+len(overrides))
+	for modelID := range base {
+		merged[modelID] = true
+	}
+	for modelID := range overrides {
+		merged[modelID] = true
+	}
+	return merged
+}
+
 // resolveNativeRoots is the root-resolution switch for the native path.
 //
 // CLAUDE_CONFIG_DIR is handed to ResolveRoots as "unset" (homeDir == "") so one
@@ -295,7 +317,12 @@ type nativeHookInput struct {
 	roots     claude.Roots
 	overrides map[string]any
 	mode      nativepricing.CostMode
-	covered   map[string]bool
+	// sessionOverrides and sessionMode are the `claude session` scope; a hook
+	// recompute prices the session report from it, exactly as the full run
+	// does.
+	sessionOverrides map[string]any
+	sessionMode      nativepricing.CostMode
+	covered          map[string]bool
 }
 
 // nativeCollectHook is the hook-mode half of the native path.
@@ -374,13 +401,16 @@ func nativeCollectHook(ctx context.Context, input nativeHookInput) ([]contract.S
 	}
 	if recompute {
 		dailyJSON, sessionsJSON, err := claude.Collect(ctx, claude.Options{
-			Timezone:  input.timezone,
-			Since:     since,
-			Until:     until,
-			Roots:     input.roots,
-			Overrides: input.overrides,
-			Mode:      input.mode,
-			Stderr:    input.stderr,
+			Timezone:         input.timezone,
+			Since:            since,
+			Until:            until,
+			Roots:            input.roots,
+			Overrides:        input.overrides,
+			Mode:             input.mode,
+			SessionOverrides: input.sessionOverrides,
+			SessionMode:      input.sessionMode,
+			HasSessionScope:  true,
+			Stderr:           input.stderr,
 		})
 		if err != nil {
 			return nil, err

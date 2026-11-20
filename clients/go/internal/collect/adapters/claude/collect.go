@@ -55,11 +55,25 @@ type Options struct {
 	// Roots is the resolved config-directory set (ResolveRoots). Empty Dirs is
 	// an empty window, not an error.
 	Roots Roots
-	// Overrides is the provider's pricing.Prepare output; nil means none.
+	// Overrides is the provider's pricing.Prepare output for the DAILY report
+	// scope; nil means none.
 	Overrides map[string]any
-	// Mode is ccusage's --mode. The zero value is ModeAuto, the ccusage
-	// default (types.rs:65).
+	// Mode is ccusage's --mode for the DAILY report scope. The zero value is
+	// ModeAuto, the ccusage default (types.rs:65).
 	Mode CostMode
+	// SessionOverrides and SessionMode are the same knobs resolved for the
+	// SESSION report scope. ccusage reads `claude daily` and `claude session` as
+	// separate invocations and resolves `commands["claude session"]` /
+	// `claude.commands.session` for the second one, so a config that scopes its
+	// overrides per report must bill the session chain from its own layer. A
+	// nil SessionOverrides falls back to Overrides; a zero SessionMode has no
+	// usable zero value (ModeAuto is 0), so the provider always sets it.
+	SessionOverrides map[string]any
+	SessionMode      CostMode
+	// HasSessionScope reports whether SessionOverrides/SessionMode were
+	// resolved; when false the session chain reuses the daily scope, which is
+	// what a caller that predates per-report scoping meant.
+	HasSessionScope bool
 	// Stderr receives progress lines such as the --since prune report. nil
 	// discards them.
 	Stderr func(string)
@@ -152,18 +166,35 @@ func Collect(ctx context.Context, opts Options) (dailyJSON, sessionsJSON []byte,
 		stderr(fmt.Sprintf("Skipped %d Claude session file%s last written before the --since window", skipped, plural))
 	}
 
-	// One pricing function per collection, exactly like each ccusage command
-	// loads its pricing map once and prices every entry before dedup.
+	// One pricing function per chain, exactly like each ccusage command loads
+	// its pricing map once and prices every entry before dedup. The two chains
+	// are separate ccusage invocations, so each gets the scope resolved for its
+	// own report: a config that overrides `claude session` pricing must not
+	// reprice the daily chain with it, and vice versa.
 	cost, err := NewCostFunc(opts.Overrides, opts.Mode)
 	if err != nil {
 		return nil, nil, err
+	}
+	sessionCost := cost
+	if opts.HasSessionScope {
+		// The documented fallback: a caller that only sets HasSessionScope
+		// means "the session report shares the daily scope", so nil overrides
+		// must not silently drop every override on the session chain.
+		sessionOverrides := opts.SessionOverrides
+		if sessionOverrides == nil {
+			sessionOverrides = opts.Overrides
+		}
+		sessionCost, err = NewCostFunc(sessionOverrides, opts.SessionMode)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	dailyEntries, err := streamChain(ctx, files, ParseDailyLineEntries, cost, NewDedupe(DedupeDaily), stderr)
 	if err != nil {
 		return nil, nil, err
 	}
-	sessionEntries, err := streamChain(ctx, files, ParseLineEntries, cost, NewDedupe(DedupeEntry), stderr)
+	sessionEntries, err := streamChain(ctx, files, ParseLineEntries, sessionCost, NewDedupe(DedupeEntry), stderr)
 	if err != nil {
 		return nil, nil, err
 	}

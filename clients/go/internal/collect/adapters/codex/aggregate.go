@@ -19,6 +19,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 )
 
@@ -35,9 +36,14 @@ const (
 
 // reportTimezone is the location ccusage's parse_tz falls back to when the
 // requested zone is unknown: the system zone (paths.rs:146-147 does the same).
+//
+// An Intl offset identifier ("+08:00") is accepted by the CLI and unknown to
+// the standard library, so the lookup goes through contract.LoadLocation: a
+// plain time.LoadLocation would fail and fall back to the system zone while the
+// snapshots still record the offset as their timezone.
 func reportTimezone(name string) *time.Location {
 	if name != "" {
-		if location, err := time.LoadLocation(name); err == nil {
+		if location, err := contract.LoadLocation(name); err == nil {
 			return location
 		}
 	}

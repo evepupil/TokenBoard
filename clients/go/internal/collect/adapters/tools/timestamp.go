@@ -1,6 +1,10 @@
 package tools
 
-import "time"
+import (
+	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+)
 
 // This file ports ccusage-core/src/date_utils.rs: the strict timestamp gate, the
 // fixed-width UTC formatter and the timezone-relative calendar day. The strict
@@ -107,11 +111,16 @@ func FormatDateTZ(millis int64, tz string) string {
 // loadReportLocation resolves a --timezone value the way parse_tz does; the CLI
 // validates the name before adapters run, so the fallback only matters for
 // direct callers and tests.
+//
+// An Intl offset identifier ("+08:00") is a zone the CLI accepts and the
+// standard library does not, so it resolves through contract.LoadLocation:
+// plain time.LoadLocation would fail and silently land the run on the system
+// zone, while the snapshot still records the offset as its timezone.
 func loadReportLocation(tz string) *time.Location {
 	if tz == "" || tz == "local" {
 		return time.Local
 	}
-	location, err := time.LoadLocation(tz)
+	location, err := contract.LoadLocation(tz)
 	if err != nil {
 		return time.Local
 	}

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
 // Source is one directory tree to scan (paths.rs:34-73): sessions and
@@ -309,7 +311,7 @@ func newFilterEligibility(since, until, timezone string) *filterEligibility {
 	if !hasSince && !hasUntil {
 		return nil
 	}
-	location, err := time.LoadLocation(timezone)
+	location, err := contract.LoadLocation(timezone)
 	if err != nil {
 		// parse_tz falls back to the system zone (paths.rs:146-147).
 		location = time.Local

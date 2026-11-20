@@ -256,6 +256,55 @@ func TestCollectAppliesOverridesToCost(t *testing.T) {
 	}
 }
 
+// The session chain is a separate ccusage invocation upstream
+// (`ccusage claude session`), so it resolves its own config scope: a config
+// that overrides only the session report must reprice the session rows and
+// leave the daily rows on the default rates. Feeding both chains one CostFunc
+// swapped which model owned sessionCount when tokens tied (normalize.go's
+// tie-break is cost-descending).
+func TestCollectPricesTheSessionChainFromItsOwnScope(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "proj-a", "sess-a", collectNow,
+		collectLine("sess-a", "msg_a", "req-a", "claude-sonnet-4-5", "2026-10-30T12:00:00.000Z", 1_000_000, 0, nil))
+
+	dailyJSON, sessionsJSON, err := Collect(context.Background(), Options{
+		Timezone: "UTC", Roots: collectRoots(root), Now: collectNow,
+		SessionOverrides: map[string]any{
+			"claude-sonnet-4-5": map[string]any{"inputCostPerToken": 1e-3},
+		},
+		HasSessionScope: true,
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	daily := reportRows(t, collectReport(t, dailyJSON), "daily")
+	sessions := reportRows(t, collectReport(t, sessionsJSON), "sessions")
+	if len(daily) != 1 || len(sessions) != 1 {
+		t.Fatalf("rows = %d daily / %d session, want 1/1", len(daily), len(sessions))
+	}
+	dailyCost := numberField(t, daily[0], "totalCost")
+	sessionCost := numberField(t, sessions[0], "totalCost")
+	if sessionCost <= dailyCost {
+		t.Fatalf("session cost = %v, daily cost = %v; the session scope override must only reprice its own chain", sessionCost, dailyCost)
+	}
+
+	// Without a resolved session scope the session chain reuses the daily one,
+	// which is what a caller that predates per-report scoping meant.
+	sharedDaily, sharedSessions, err := Collect(context.Background(), Options{
+		Timezone: "UTC", Roots: collectRoots(root), Now: collectNow,
+		Overrides: map[string]any{"claude-sonnet-4-5": map[string]any{"inputCostPerToken": 1e-3}},
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	sharedDailyCost := numberField(t, reportRows(t, collectReport(t, sharedDaily), "daily")[0], "totalCost")
+	sharedSessionCost := numberField(t, reportRows(t, collectReport(t, sharedSessions), "sessions")[0], "totalCost")
+	if sharedDailyCost != sharedSessionCost {
+		t.Fatalf("daily = %v, session = %v; a caller without a session scope must price both chains from the daily scope",
+			sharedDailyCost, sharedSessionCost)
+	}
+}
+
 func TestCollectRespectsSincePruningAndUntilFiltering(t *testing.T) {
 	root := t.TempDir()
 	// Three transcripts:
