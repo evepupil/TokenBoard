@@ -7,7 +7,7 @@ import { configPath, readConfig } from './config.mjs'
 import { binaryFileName, readVersion } from './client-binary.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { errorMessage } from './error-message.mjs'
-import { redactUrlCredentials } from './redact-credentials.mjs'
+import { redactPath } from './redact-path.mjs'
 import { deviceLinkStatus } from './device-link.mjs'
 import { hookStatus } from './hooks.mjs'
 import { readNotifyWorkerErrors } from './notify.mjs'
@@ -216,17 +216,10 @@ export function readClientVersionNotice(stateDir) {
   }
 }
 
-// A path is a run of path characters that contains a separator, so the run
-// spans spaces and parentheses inside the path too — `/Users/Alice Bob/x` and
-// `/home/alice(work)/x` are one path, and splitting them left "Bob" and
-// "(work)" behind. Credentials are redacted first so the path run can never
-// re-expose one the URL rules would have caught.
-export function redactPath(message) {
-  return redactUrlCredentials(message)
-    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/\S*)/gi, '<url>')
-    .replace(/[^\s'"`]*[\\/][^\s'"`]*/g, '<path>')
-    .replace(/(open |'|")<path>(?: [^'"`:\n]*)+/g, (_, lead) => `${lead}<path>`)
-}
+// The rule lives in ./redact-path.mjs because notify.mjs records the same class
+// of diagnostic into its worker error log, which also gets pasted into issues.
+// Re-exported here so existing importers keep working.
+export { redactPath }
 
 function hookState(value) {
   return value === 'installed' || value === 'installed-local-history' || value === 'not-installed' || value === 'error'
@@ -402,8 +395,10 @@ if (isMainModule(import.meta.url)) {
   } catch (error) {
     // Node's uncaught-exception handler prints the throwing source line, and for this
     // script that line can be the config file's contents — including the upload token.
-    // Printing only the message keeps the diagnosis and the secret apart.
-    console.error(errorMessage(error))
+    // Printing only the message keeps the diagnosis and the secret apart. The message
+    // itself can still carry an absolute path (an fs EACCES names the directory), so it
+    // is redacted before it reaches stderr — status output is pasted into issues.
+    console.error(redactPath(errorMessage(error)))
     process.exit(1)
   }
 }

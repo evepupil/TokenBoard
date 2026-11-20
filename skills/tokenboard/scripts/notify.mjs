@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
+import { redactLocalPaths } from './redact-path.mjs'
 import { configDir, parseArgs, readConfig } from './config.mjs'
 import { parseScheduleTimes } from './schedule.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
@@ -411,9 +412,11 @@ export function recordNotifyWorkerError(
     if (typeof logPath !== 'string' || !logPath) return
     mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 })
     // The same redaction every other output path uses: a config or endpoint
-    // error can echo `tb_upload_…` or `https://user:token@host/…`, and this
-    // file outlives the process.
-    const entry = `${JSON.stringify({ message: redactUrlCredentials(String(message)), at: new Date().toISOString() })}\n`
+    // error can echo `tb_upload_…` or `https://user:token@host/…`, and a file
+    // system error carries the absolute path, whose home-directory account name
+    // is not the reader's to see — this file outlives the process and is read
+    // back by status and pasted into issues.
+    const entry = `${JSON.stringify({ message: redactLocalPaths(String(message)), at: new Date().toISOString() })}\n`
 
     // Trim only when the file has actually outgrown the bound. The check is a stat
     // rather than a read so the common path stays one append and holds no stale

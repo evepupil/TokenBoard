@@ -162,6 +162,33 @@ test('the worker error log redacts credentials', async () => {
   }
 })
 
+// The endpoint survives (with credentials stripped) — that is what the
+// operator needs — but a filesystem path in the same message still names the
+// home directory, and this file is read back by status and pasted into issues.
+test('the worker error log redacts local paths but keeps the endpoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-redact-path-'))
+  try {
+    await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: () => {},
+      runNotify: () => ({
+        error: 'POST https://host.example/ingest failed: EACCES reading /Users/Alice Bob/.tokenboard/state.json',
+        trailingScheduled: false
+      })
+    })
+
+    const raw = await readFile(join(root, 'notify-worker-errors.log'), 'utf8')
+    assert.doesNotMatch(raw, /Alice|Bob/)
+    assert.doesNotMatch(raw, /\.tokenboard[\\/]state\.json/)
+    assert.match(raw, /https:\/\/host\.example\/ingest/)
+    assert.match(raw, /<path>/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 // The append has to be one `O_APPEND` write, not a read-modify-rewrite. Rewriting the whole file
 // truncates before it writes, so `status.mjs` (which reads this while a detached worker appends)
 // could see it empty and drop the earlier entries; temp-file-plus-rename fixed that reader but
