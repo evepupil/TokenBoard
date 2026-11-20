@@ -25,6 +25,60 @@ export type ExistingSnapshotHash = UsageSnapshotKey & {
   snapshotHash: string
 }
 
+/**
+ * The subset of the input an upload actually delivered (posted, or already
+ * present server-side). The cursor acknowledgement reads this instead of the
+ * collection: a row dropped for an out-of-window usageDate never reached the
+ * server, and clearing its pending entry would lose it for good instead of
+ * retrying it once the clock is right.
+ *
+ * An injected test double that returns a plain object carries no delivery set;
+ * the caller then falls back to acknowledging the whole collection, which is
+ * what those stubs have always exercised.
+ */
+export const uploadDeliveredSymbol = Symbol('tokenboard.uploadDelivered')
+
+export function readUploadDelivered(value: unknown): UsageSnapshot[] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const delivered = (value as { [uploadDeliveredSymbol]?: UsageSnapshot[] })[uploadDeliveredSymbol]
+  return Array.isArray(delivered) ? delivered : undefined
+}
+
+// The rows the upload dropped, with the reason. The cursor acknowledgement reads
+// this to tell a row that can never be uploaded (an invalid or before-window
+// usageDate) from one that is merely too far in the future and will become
+// uploadable once the clock catches up: the first may be acknowledged away so it
+// is not rescanned forever, the second must stay pending so it is retried.
+export const uploadRejectedSymbol = Symbol('tokenboard.uploadRejected')
+
+export type RejectedUploadSnapshot = { snapshot: UsageSnapshot; issue: string }
+
+export function readUploadRejected(value: unknown): RejectedUploadSnapshot[] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const rejected = (value as { [uploadRejectedSymbol]?: RejectedUploadSnapshot[] })[uploadRejectedSymbol]
+  return Array.isArray(rejected) ? rejected : undefined
+}
+
+function withDelivered<T extends object>(
+  payload: T,
+  delivered: UsageSnapshot[],
+  rejected: RejectedUploadSnapshot[]
+): T {
+  Object.defineProperty(payload, uploadDeliveredSymbol, {
+    configurable: false,
+    enumerable: false,
+    value: delivered,
+    writable: false
+  })
+  Object.defineProperty(payload, uploadRejectedSymbol, {
+    configurable: false,
+    enumerable: false,
+    value: rejected,
+    writable: false
+  })
+  return payload
+}
+
 export async function uploadSnapshots(
   config: CollectorConfig,
   snapshots: UsageSnapshot[],
@@ -64,7 +118,7 @@ export async function uploadSnapshots(
     // all, so the server's `upserted: 0` keeps answering the same way it does for a
     // genuinely empty run, but never send the rows it would reject.
     const upserted = snapshots.length === 0 ? await uploadSnapshotBatch(config, [], fetcher) : 0
-    return withRejectionCount({ upserted, skipped: 0 }, rejected.length)
+    return withDelivered(withRejectionCount({ upserted, skipped: 0 }, rejected.length), [], rejected)
   }
 
   let upserted = 0
@@ -90,7 +144,7 @@ export async function uploadSnapshots(
     upserted += await uploadSnapshotBatch(config, [], fetcher)
   }
 
-  return withRejectionCount({ upserted, skipped }, rejected.length)
+  return withDelivered(withRejectionCount({ upserted, skipped }, rejected.length), uploadable, rejected)
 }
 
 // Only surfaces the count when something was actually dropped, so a clean run's result

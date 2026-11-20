@@ -9,6 +9,7 @@ import { usageSources, type UsageSnapshot } from '@tokenboard/usage-core'
 import { runCollectorCli, transientSyncExitCode } from './cli'
 import { attachCodexHookAcknowledgement } from './providers/codex-hook-profiles'
 import { cursorSnapshotGroupKey } from './providers/session-cursor'
+import { uploadDeliveredSymbol, uploadRejectedSymbol } from './upload'
 
 const claudeSnapshot: UsageSnapshot = {
   source: 'claude-code',
@@ -1168,6 +1169,133 @@ describe('runCollectorCli', () => {
 
     expect(result).toBe(0)
     expect(acknowledged).toEqual([cursorSnapshotGroupKey(codexSnapshot)])
+  })
+
+  test('does not acknowledge a hook cursor whose row the upload dropped as out of window', async () => {
+    let acknowledged: string[] | undefined
+    let acked = false
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'codex'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token',
+        TOKENBOARD_TIMEZONE: 'Asia/Shanghai',
+        TOKENBOARD_HOOK_MODE: '1',
+        TOKENBOARD_STATE_DIR: '/state'
+      },
+      {
+        stdout: () => undefined,
+        stderr: () => undefined,
+        collectClaudeCodeUsage: async () => {
+          throw new Error('codex-only test must not collect Claude Code')
+        },
+        collectCodexUsage: async () => [codexSnapshot],
+        // What uploadSnapshots returns when the only row carried a usageDate outside
+        // the accepted window: nothing reached the server, so nothing may be acked.
+        uploadSnapshots: async () => ({ upserted: 0, [uploadDeliveredSymbol]: [] }),
+        clearPendingUploadCursors: async (input) => {
+          acked = true
+          acknowledged = input.acknowledgedSnapshotGroups
+        }
+      }
+    )
+
+    expect(result).toBe(0)
+    expect(acked).toBe(true)
+    expect(acknowledged).toEqual([])
+  })
+
+  test('withholds Codex file acknowledgement when a row was only too far in the future', async () => {
+    // The file-level ack cannot tell which file a dropped row came from, so when
+    // a Codex row is dropped only for being too far in the future the file ack is
+    // skipped and the per-snapshot group rule withholds the future row's group,
+    // keeping the file queued so that row is retried once the clock catches up.
+    const calls: Array<{
+      cursorScope: string | undefined
+      files: ReadonlyArray<{ relativePath: string; sha256: string }> | undefined
+      groups: string[] | undefined
+    }> = []
+    const delivered = attachCodexHookAcknowledgement(
+      [{ ...codexSnapshot }],
+      [{ files: [{ relativePath: 'current.jsonl', sha256: 'b'.repeat(64) }] }]
+    )[0]
+    const future = { ...codexSnapshot, usageDate: '2999-01-01' }
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'codex'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token',
+        TOKENBOARD_TIMEZONE: 'Asia/Shanghai',
+        TOKENBOARD_HOOK_MODE: '1',
+        TOKENBOARD_STATE_DIR: '/state'
+      },
+      {
+        stdout: () => undefined,
+        stderr: () => undefined,
+        collectClaudeCodeUsage: async () => {
+          throw new Error('codex-only test must not collect Claude Code')
+        },
+        collectCodexUsage: async () => [delivered, future],
+        uploadSnapshots: async () => ({
+          upserted: 1,
+          [uploadDeliveredSymbol]: [delivered],
+          [uploadRejectedSymbol]: [{ snapshot: future, issue: 'too-far-future' }]
+        }),
+        clearPendingUploadCursors: async (input) => {
+          calls.push({
+            cursorScope: input.cursorScope,
+            files: input.acknowledgedSnapshotFiles,
+            groups: input.acknowledgedSnapshotGroups
+          })
+        }
+      }
+    )
+
+    expect(result).toBe(0)
+    expect(calls.length).toBeGreaterThan(0)
+    // The tagged file must not be acknowledged by any cursor whose scope saw the drop.
+    expect(calls.every((call) => call.files === undefined)).toBe(true)
+    expect(calls.find((call) => call.cursorScope === undefined)?.groups).toEqual([cursorSnapshotGroupKey(delivered)])
+  })
+
+  test('acknowledges a row the upload can never accept so it is not rescanned forever', async () => {
+    // An invalid usageDate can never be uploaded. Leaving it out of the ack would
+    // keep its pending entry forever and rescan the file every run; including it
+    // clears the entry without losing data that could never have been sent.
+    let acknowledged: string[] | undefined
+    const invalid = { ...claudeSnapshot, usageDate: 'not-a-date' }
+
+    const result = await runCollectorCli(
+      ['sync', '--source', 'claude-code'],
+      {
+        TOKENBOARD_ENDPOINT: 'https://tokenboard.example.com/api/v1/ingest',
+        TOKENBOARD_UPLOAD_TOKEN: 'test-upload-token',
+        TOKENBOARD_TIMEZONE: 'Asia/Shanghai',
+        TOKENBOARD_HOOK_MODE: '1',
+        TOKENBOARD_STATE_DIR: '/state'
+      },
+      {
+        stdout: () => undefined,
+        stderr: () => undefined,
+        collectClaudeCodeUsage: async () => [invalid],
+        collectCodexUsage: async () => {
+          throw new Error('claude-only test must not collect Codex')
+        },
+        uploadSnapshots: async () => ({
+          upserted: 0,
+          [uploadDeliveredSymbol]: [],
+          [uploadRejectedSymbol]: [{ snapshot: invalid, issue: 'invalid' }]
+        }),
+        clearPendingUploadCursors: async (input) => {
+          acknowledged = input.acknowledgedSnapshotGroups
+        }
+      }
+    )
+
+    expect(result).toBe(0)
+    expect(acknowledged).toEqual([cursorSnapshotGroupKey(invalid)])
   })
 
   test('forwards Codex file-level acknowledgement metadata without snapshot groups', async () => {

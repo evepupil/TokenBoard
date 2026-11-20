@@ -28,7 +28,7 @@ import { withCursorLock } from './providers/session-cursor-store'
 import { isTransientNetworkError } from './transient-error'
 import { assertSecureEndpoint } from './endpoint'
 import { isUploadPaused, recordUploadFailure, recordUploadSuccess, summarize } from './upload-backoff'
-import { uploadSnapshots } from './upload'
+import { readUploadDelivered, readUploadRejected, uploadSnapshots, type RejectedUploadSnapshot } from './upload'
 import { assertValidTimeZone } from './timezone'
 import { isAllDateFilter } from './iso-calendar-date'
 
@@ -204,6 +204,8 @@ export async function runCollectorCli(
 
     let uploadSucceeded = false
     let uploadError: unknown
+    let delivered = collection.snapshots
+    let rejected: RejectedUploadSnapshot[] | undefined
     let result: unknown
     try {
       result = await timePhase(timings, 'upload', () =>
@@ -218,6 +220,8 @@ export async function runCollectorCli(
           { stderr: collectorDeps.stderr }
         )
       )
+      delivered = readUploadDelivered(result) ?? collection.snapshots
+      rejected = readUploadRejected(result)
       uploadSucceeded = true
     } catch (error) {
       uploadError = error
@@ -239,12 +243,25 @@ export async function runCollectorCli(
     }
     if (uploadSucceeded) await recordUploadSuccess(uploadStateDir)
 
+    // Rows we may acknowledge away: the delivered set plus any row dropped for a
+    // reason that can never change (an invalid or before-window usageDate). Those
+    // can never upload, so leaving them pending would rescan them forever. A row
+    // dropped only for `too-far-future` stays out of this set: it becomes uploadable
+    // once the clock catches up, so its pending entry must survive to retry it.
+    const ackSnapshots =
+      rejected === undefined
+        ? delivered
+        : [...delivered, ...rejected.filter((entry) => entry.issue !== 'too-far-future').map((entry) => entry.snapshot)]
+    const codexFutureRejected =
+      rejected !== undefined &&
+      rejected.some((entry) => entry.snapshot.source === 'codex' && entry.issue === 'too-far-future')
     await timePhase(timings, 'cursorAck', () =>
       ackUploadCursors({
         collectedSources: collection.collectedSources,
         cursorScope,
         since: options.since,
-        snapshots: collection.snapshots,
+        snapshots: ackSnapshots,
+        codexFutureRejected,
         timezone: options.timezone,
         deps,
         env
@@ -647,6 +664,11 @@ async function ackUploadCursors(input: {
   cursorScope?: string
   since: string
   snapshots: UsageSnapshot[]
+  // True when a Codex row was dropped only for being too far in the future. The
+  // per-file acknowledgement cannot tell which file that row came from, so it is
+  // skipped entirely this run and the (per-snapshot) group rule withholds the
+  // files that still hold the future row, keeping it queued for a later retry.
+  codexFutureRejected?: boolean
   timezone: string
   deps: CliDeps
   env: CliEnv
@@ -658,7 +680,8 @@ async function ackUploadCursors(input: {
     if (!shouldAckCursor(source, input.env)) continue
     try {
       const cursorScopes = source === 'codex' ? await codexCursorScopes(input.env, stateDir) : [undefined]
-      const codexAcknowledgement = source === 'codex' ? readCodexHookAcknowledgement(input.snapshots) : undefined
+      const codexAcknowledgement =
+        source === 'codex' && !input.codexFutureRejected ? readCodexHookAcknowledgement(input.snapshots) : undefined
       for (const cursorScope of cursorScopes) {
         const acknowledgedFiles = codexAcknowledgement?.find((entry) => entry.cursorScope === cursorScope)?.files
         await input.deps.clearPendingUploadCursors?.({
