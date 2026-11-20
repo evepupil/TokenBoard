@@ -1,6 +1,9 @@
 package copilot
 
 import (
+	"errors"
+	"io/fs"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -50,31 +53,52 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 	parsed := make([]SourceUsage, len(sources))
 	failures := make([]error, len(sources))
 	// Files are read in parallel but keep their discovery order, so the merge
-	// below is the serial one.
-	var group sync.WaitGroup
-	for index, source := range sources {
-		group.Add(1)
-		go func(index int, source SourceFile) {
-			defer group.Done()
-			usage, err := readSourceFile(source, ceiling)
-			parsed[index], failures[index] = usage, err
-		}(index, source)
+	// below is the serial one. Concurrency is bounded and the run's context is
+	// checked between batches: the old child-process path killed ccusage at the
+	// timeout, so the in-process path must stop starting reads once the budget is
+	// gone rather than scan the whole tree past it. A cancelled budget returns an
+	// error, never a silent partial success, so the caller reports a timeout.
+	const readBatch = 16
+	for start := 0; start < len(sources); start += readBatch {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
+		end := min(start+readBatch, len(sources))
+		var group sync.WaitGroup
+		for index := start; index < end; index++ {
+			group.Add(1)
+			go func(index int, source SourceFile) {
+				defer group.Done()
+				usage, err := readSourceFile(source, ceiling)
+				parsed[index], failures[index] = usage, err
+			}(index, sources[index])
+		}
+		group.Wait()
 	}
-	group.Wait()
 
 	otelEntries := []Entry{}
 	sessionStateEntries := []Entry{}
 	creditSnapshots := []CreditSnapshot{}
 	for index, source := range sources {
 		if err := failures[index]; err != nil {
-			// A failed file only loses its own rows (loader.rs:54-68).
+			// A failed file only loses its own rows (loader.rs:54-68). A read
+			// failure is reported through ReadErrors (base name only: the line
+			// reaches stderr, which operators paste into issues); a vanished
+			// file since discovery stays a debug line.
 			kind := "OTEL"
 			if source.Kind == KindSessionState {
 				kind = "session-state"
 			}
-			if o.Debug != nil {
-				o.Debug("Failed to read Copilot " + kind + " file " + source.Path + ": " + err.Error())
+			var pathErr *fs.PathError
+			cause := error(err)
+			if errors.As(err, &pathErr) {
+				cause = pathErr.Err
 			}
+			if errors.Is(cause, fs.ErrNotExist) {
+				o.Debugf("Failed to read Copilot " + kind + " file " + filepath.Base(source.Path) + ": " + cause.Error())
+				continue
+			}
+			o.ReadErrorf(source.Path, "Failed to read Copilot "+kind+" file "+filepath.Base(source.Path)+": "+cause.Error())
 			continue
 		}
 		switch source.Kind {

@@ -390,7 +390,7 @@ func (run *providerRun) collectScopedUsage(input scopedRunInput) ([]contract.Sna
 		Env:               run.env,
 		HomeDir:           run.options.HomeDir,
 		OnMissingSessionFile: func(sessionPath string) {
-			run.stderr("Skipping Codex session file that disappeared before copy: " + sessionPath)
+			run.stderr("Skipping Codex session file that disappeared before copy: " + filepath.Base(sessionPath))
 		},
 		OnCopyFallback:         run.stderr,
 		OnProjectionDiagnostic: run.stderr,
@@ -602,7 +602,7 @@ func (run *providerRun) collectBoundedUsageAttempt(input boundedRunInput) ([]con
 		HomeDir:           run.options.HomeDir,
 		OnMissingSessionFile: func(sessionPath string) {
 			missingSessionFiles++
-			run.stderr("Skipping Codex session file that disappeared before bounded copy: " + sessionPath)
+			run.stderr("Skipping Codex session file that disappeared before bounded copy: " + filepath.Base(sessionPath))
 		},
 		OnCopyFallback:         run.stderr,
 		OnProjectionDiagnostic: run.stderr,
@@ -841,7 +841,7 @@ func (run *providerRun) collectCanonicalAttributionsForMissingFiles(
 			Env:               run.env,
 			HomeDir:           run.options.HomeDir,
 			OnMissingSessionFile: func(sessionPath string) {
-				run.stderr("Skipping Codex session file that disappeared before canonical attribution: " + sessionPath)
+				run.stderr("Skipping Codex session file that disappeared before canonical attribution: " + filepath.Base(sessionPath))
 			},
 			OnCopyFallback:         run.stderr,
 			OnProjectionDiagnostic: run.stderr,

@@ -4,9 +4,13 @@ package tools
 // rust/adapters/amp/src/parser.rs.
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +45,71 @@ func ampOptions(t *testing.T, root string, mode nativepricing.CostMode) Options 
 func writeAmpThread(t *testing.T, root, name, content string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "threads", name), content)
+}
+
+// TestAmpReportsAnUnreadableThreadFile pins the read-failure rule: a parse
+// problem is skipped quietly (the ccusage rule), but a file that cannot be read
+// at all under-counts the user's usage silently, so it is recorded for the
+// provider to report. The other files still count.
+func TestAmpReportsAnUnreadableThreadFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not deny the owner a read on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file")
+	}
+	root := t.TempDir()
+	writeAmpThread(t, root, "T-good.json",
+		`{"id":"thread-good","messages":[{"role":"assistant","timestamp":"2026-01-02T03:04:05.000Z","model":"gpt-5.5","usage":{"inputTokens":10}}]}`)
+	writeAmpThread(t, root, "T-broken.json",
+		`{"id":"thread-broken","messages":[]}`)
+	broken := filepath.Join(root, "threads", "T-broken.json")
+	// Discovery accepts the name; the read then fails with EACCES, which is an
+	// I/O failure rather than the disappeared-file race.
+	if err := os.Chmod(broken, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(broken, 0o600) })
+	var readErrors []ReadError
+	options := ampOptions(t, root, nativepricing.ModeAuto)
+	options.ReadErrors = &readErrors
+
+	entries, err := LoadAmp(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %+v, want the readable thread only", entries)
+	}
+	if len(readErrors) != 1 || !strings.Contains(readErrors[0].Line, "T-broken.json") {
+		t.Fatalf("readErrors = %v, want one line naming the unreadable file", readErrors)
+	}
+	if strings.Contains(readErrors[0].Line, root) {
+		t.Fatalf("readErrors[0] = %q, want the base name rather than the full path", readErrors[0].Line)
+	}
+}
+
+// TestAmpStopsScanningWhenTheBudgetExpires pins the cancellation seam: the
+// subprocess path killed the child at TimeoutMs, and the in-process replacement
+// has to notice the dead budget between files instead of finishing the tree.
+func TestAmpStopsScanningWhenTheBudgetExpires(t *testing.T) {
+	root := t.TempDir()
+	for index := 0; index < 32; index++ {
+		writeAmpThread(t, root, "T-"+strconv.Itoa(index)+".json",
+			`{"id":"thread-`+strconv.Itoa(index)+`","messages":[{"role":"assistant","timestamp":"2026-01-02T03:04:05.000Z","model":"gpt-5.5","usage":{"inputTokens":10}}]}`)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	options := ampOptions(t, root, nativepricing.ModeAuto)
+	options.Context = ctx
+
+	entries, err := LoadAmp(options)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want none from a cancelled scan", len(entries))
+	}
 }
 
 // TestAmpLedgerPathJoinsCacheByMessageID pins the legacy ledger schema

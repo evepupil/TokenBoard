@@ -295,6 +295,30 @@ func TestOpenclawSqliteWithoutTranscriptEventsIsIgnored(t *testing.T) {
 	}
 }
 
+// TestOpenclawHasTranscriptEventsReportsAReadError pins the signature split: a
+// database that cannot be queried must return an error, not the "no such table"
+// answer (false, nil) the old bool-only probe collapsed every failure into. The
+// caller turns that error into a reported read failure instead of silently
+// counting a corrupt or locked store as an uninstalled source.
+func TestOpenclawHasTranscriptEventsReportsAReadError(t *testing.T) {
+	database, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "x.sqlite")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A closed *sql.DB answers every query with "sql: database is closed" — a real
+	// failure that is neither ErrNoRows nor a usable result.
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	hasEvents, err := openclawHasTranscriptEvents(database, Options{})
+	if err == nil {
+		t.Fatalf("err = nil, want a read error; hasEvents = %v", hasEvents)
+	}
+	if hasEvents {
+		t.Fatal("hasEvents = true on a database that could not be queried")
+	}
+}
+
 // TestOpenclawCollectsArchivedSessionFiles pins is_openclaw_session_file and
 // extract_session_id (paths.rs:44-97, parser.rs:443-457).
 func TestOpenclawCollectsArchivedSessionFiles(t *testing.T) {

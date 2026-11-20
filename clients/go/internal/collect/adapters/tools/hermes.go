@@ -85,6 +85,9 @@ func LoadHermes(o Options) ([]Entry, error) {
 	// single-threaded read would keep (loader.rs:24-40).
 	loaded := make([][]hermesSessionRow, len(dbPaths))
 	for index, dbPath := range dbPaths {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		loaded[index] = loadHermesStateDB(dbPath, o)
 	}
 	entries := []Entry{}
@@ -145,17 +148,19 @@ type hermesSessionRow struct {
 }
 
 // loadHermesStateDB is load_state_db_entries (loader.rs:45-98). A database that
-// cannot be opened or queried is skipped with a debug line, not an error.
+// cannot be opened or queried never fails the source: a vanished file is a
+// debug line, and a real I/O failure is recorded for the provider to report.
+
 func loadHermesStateDB(dbPath string, o Options) []hermesSessionRow {
 	database, err := openReadOnlyToolDB(dbPath)
 	if err != nil {
-		o.debugf("Failed to open Hermes state database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to open Hermes state database", dbPath, err)
 		return nil
 	}
 	defer database.Close()
-	rows, err := database.Query(hermesSessionQuery)
+	rows, err := database.QueryContext(o.contextOrBackground(), hermesSessionQuery)
 	if err != nil {
-		o.debugf("Failed to read Hermes state database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to read Hermes state database", dbPath, err)
 		return nil
 	}
 	defer rows.Close()
@@ -177,7 +182,7 @@ func loadHermesStateDB(dbPath string, o Options) []hermesSessionRow {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		o.debugf("Failed to query Hermes state database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to query Hermes state database", dbPath, err)
 	}
 	return collected
 }

@@ -78,6 +78,9 @@ func LoadKimi(o Options) ([]Entry, error) {
 	seen := map[string]bool{}
 	entries := []Entry{}
 	for _, file := range files {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		for _, wire := range parseKimiWireFile(file, o) {
 			key := wire.key()
 			if seen[key] {
@@ -113,9 +116,8 @@ func kimiWireDepth(sessions, file string) bool {
 func parseKimiWireFile(file string, o Options) []kimiWireEntry {
 	model := kimiConfigModel(file)
 	fallback := kimiFileModifiedMillis(file)
-	content, err := os.ReadFile(file)
-	if err != nil {
-		o.debugf("Failed to read Kimi wire file " + file + ": " + err.Error())
+	content, read := readToolFile(file, "Kimi wire file", o)
+	if !read {
 		return nil
 	}
 	entries := []kimiWireEntry{}

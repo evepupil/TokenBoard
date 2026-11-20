@@ -61,6 +61,9 @@ func LoadQwen(o Options) ([]Entry, error) {
 	seen := map[string]bool{}
 	entries := []Entry{}
 	for _, file := range files {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		for _, chat := range parseQwenChatFile(file, o) {
 			key := qwenEntryID(chat)
 			if seen[key] {
@@ -103,9 +106,8 @@ func qwenProjectFromFile(file string) (string, bool) {
 // parseQwenChatFile is read_chat_file (parser.rs:98-117).
 func parseQwenChatFile(file string, o Options) []qwenChatEntry {
 	fallback := qwenFileTimestamp(file, o)
-	content, err := os.ReadFile(file)
-	if err != nil {
-		o.debugf("Failed to read Qwen chat file " + file + ": " + err.Error())
+	content, read := readToolFile(file, "Qwen chat file", o)
+	if !read {
 		return nil
 	}
 	entries := []qwenChatEntry{}
@@ -260,12 +262,12 @@ func FilterQwenSessionRows(rows []Row, since, until string) []Row {
 func qwenFileTimestamp(file string, o Options) int64 {
 	info, err := os.Stat(file)
 	if err != nil {
-		o.debugf("Failed to read Qwen chat file timestamp for " + file + ": " + err.Error())
+		o.debugf("Failed to read Qwen chat file timestamp for " + filepath.Base(file) + ": " + err.Error())
 		return time.Now().UnixMilli()
 	}
 	millis := info.ModTime().UnixMilli()
 	if millis < 0 {
-		o.debugf("Failed to read Qwen chat file timestamp for " + file + ": file time is before the Unix epoch")
+		o.debugf("Failed to read Qwen chat file timestamp for " + filepath.Base(file) + ": file time is before the Unix epoch")
 		return time.Now().UnixMilli()
 	}
 	return millis

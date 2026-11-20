@@ -56,6 +56,9 @@ func LoadGemini(o Options) ([]Entry, error) {
 	files = DedupePaths(files)
 	entries := []Entry{}
 	for _, file := range files {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		if geminiIsJSONL(file) {
 			entries = append(entries, parseGeminiJSONLFile(file, o)...)
 		} else {
@@ -89,9 +92,8 @@ type geminiTokens struct {
 // event, then the stats block.
 func parseGeminiJSONFile(file string, o Options) []Entry {
 	fallback := geminiFileModifiedMillis(file)
-	content, err := os.ReadFile(file)
-	if err != nil {
-		o.debugf("Failed to read Gemini log file " + file + ": " + err.Error())
+	content, read := readToolFile(file, "Gemini log file", o)
+	if !read {
 		return nil
 	}
 	record, ok := geminiDecodeObject(content)
@@ -147,9 +149,8 @@ func parseGeminiJSONFile(file string, o Options) []Entry {
 // same id in place, and anything else contributes its stats block.
 func parseGeminiJSONLFile(file string, o Options) []Entry {
 	fallback := geminiFileModifiedMillis(file)
-	content, err := os.ReadFile(file)
-	if err != nil {
-		o.debugf("Failed to read Gemini log file " + file + ": " + err.Error())
+	content, read := readToolFile(file, "Gemini log file", o)
+	if !read {
 		return nil
 	}
 	sessionID := geminiFileStem(file)

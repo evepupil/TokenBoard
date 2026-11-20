@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -70,9 +72,31 @@ func LoadOpenclaw(o Options) ([]Entry, error) {
 			return nil, err
 		}
 		for _, file := range files {
+			if err := o.ContextErr(); err != nil {
+				return nil, err
+			}
 			fileEntries, err := openclawParseSessionFile(file, o)
 			if err != nil {
-				o.debugf("Failed to read OpenClaw session file " + file + ": " + err.Error())
+				// A budget that ended mid-read aborts the load with the budget
+				// error itself; reporting it as a broken file would add a
+				// spurious warning to every timeout.
+				if ctxErr := o.ContextErr(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				// A session file that could not be read loses its rows; skipping
+				// it silently under-counts the user's usage, so it is reported
+				// (with the base name only) like every other read failure. A
+				// file that vanished since discovery keeps the quiet debug path.
+				var pathErr *fs.PathError
+				cause := err
+				if errors.As(err, &pathErr) {
+					cause = pathErr.Err
+				}
+				if errors.Is(cause, fs.ErrNotExist) {
+					o.debugf("Failed to read OpenClaw session file " + filepath.Base(file) + ": " + cause.Error())
+					continue
+				}
+				o.readErrorf(file, "Failed to read OpenClaw session file "+filepath.Base(file)+": "+cause.Error())
 				continue
 			}
 			for _, entry := range fileEntries {
@@ -227,7 +251,7 @@ func openclawSessionID(path string) string {
 func openclawParseSessionFile(path string, o Options) ([]Entry, error) {
 	sessionID := openclawSessionID(path)
 	fallback := openclawFileMtimeMillis(path)
-	content, err := os.ReadFile(path)
+	content, err := readFileWithinBudget(o, path)
 	if err != nil {
 		return nil, err
 	}
@@ -650,17 +674,24 @@ func openclawIsFileNoSymlink(path string) bool {
 func openclawDatabaseEntries(dbPath string, o Options) []Entry {
 	database, err := openToolReadOnlySQLiteDatabase(dbPath)
 	if err != nil {
-		o.debugf("Failed to open OpenClaw agent database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to open OpenClaw agent database", dbPath, err)
 		return nil
 	}
 	defer database.Close()
-	if !openclawHasTranscriptEvents(database) {
-		o.debugf("OpenClaw agent database has no transcript_events table: " + dbPath)
+	hasTranscripts, err := openclawHasTranscriptEvents(database, o)
+	if err != nil {
+		// A corrupt or locked database is not "no table": report it as a read
+		// failure instead of silently miscounting the source as uninstalled.
+		recordDatabaseReadError(o, "Failed to query OpenClaw agent database", dbPath, err)
 		return nil
 	}
-	rows, err := database.Query("SELECT session_id, seq, event_json, created_at FROM transcript_events ORDER BY session_id ASC, seq ASC")
+	if !hasTranscripts {
+		o.debugf("OpenClaw agent database has no transcript_events table: " + filepath.Base(dbPath))
+		return nil
+	}
+	rows, err := database.QueryContext(o.contextOrBackground(), "SELECT session_id, seq, event_json, created_at FROM transcript_events ORDER BY session_id ASC, seq ASC")
 	if err != nil {
-		o.debugf("Failed to query OpenClaw agent database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to query OpenClaw agent database", dbPath, err)
 		return nil
 	}
 	defer rows.Close()
@@ -715,14 +746,23 @@ func openclawDatabaseEntries(dbPath string, o Options) []Entry {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		o.debugf("Failed to read OpenClaw agent database " + dbPath + ": " + err.Error())
+		recordDatabaseReadError(o, "Failed to read OpenClaw agent database", dbPath, err)
 	}
 	return entries
 }
 
-// openclawHasTranscriptEvents is table_exists (sqlite.rs:180-190).
-func openclawHasTranscriptEvents(database *sql.DB) bool {
+// openclawHasTranscriptEvents is table_exists (sqlite.rs:180-190). The second
+// return separates "the table is absent" (no rows → false, nil) from "the
+// database could not be read" (false, err); the latter must surface as a read
+// failure instead of masquerading as an uninstalled source.
+func openclawHasTranscriptEvents(database *sql.DB, o Options) (bool, error) {
 	var one int
-	err := database.QueryRow("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1", "transcript_events").Scan(&one)
-	return err == nil
+	err := database.QueryRowContext(o.contextOrBackground(), "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1", "transcript_events").Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

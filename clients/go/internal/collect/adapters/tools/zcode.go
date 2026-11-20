@@ -53,6 +53,9 @@ func LoadZcode(o Options) ([]Entry, error) {
 	entries := []Entry{}
 	seen := map[string]bool{}
 	for _, dbPath := range dbPaths {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		for _, entry := range zcodeDatabaseEntries(dbPath, o) {
 			// Cross-database first-wins dedup on model_usage.id (loader.rs:65-81).
 			if seen[entry.MessageID] {
@@ -97,7 +100,7 @@ func zcodeDatabasePaths(o Options) ([]string, error) {
 		candidate := filepath.Join(root, zcodeDBRelativePath)
 		info, err := os.Stat(candidate)
 		if err != nil || !info.Mode().IsRegular() {
-			o.debugf("Unable to access ZCode database " + candidate)
+			o.debugf("Unable to access ZCode database " + filepath.Base(candidate))
 			continue
 		}
 		canonical, ok := zcodeCanonicalPath(candidate)
@@ -153,7 +156,7 @@ func zcodeCanonicalPath(path string) (string, bool) {
 func zcodeDatabaseEntries(dbPath string, o Options) []Entry {
 	database, err := openToolReadOnlySQLiteDatabase(dbPath)
 	if err != nil {
-		o.debugf("Failed to open ZCode database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to open ZCode database", dbPath, err)
 		return nil
 	}
 	defer database.Close()
@@ -161,9 +164,9 @@ func zcodeDatabaseEntries(dbPath string, o Options) []Entry {
 	if !ok {
 		return nil
 	}
-	rows, err := database.Query(zcodeSelectStatement(schema))
+	rows, err := database.QueryContext(o.contextOrBackground(), zcodeSelectStatement(schema))
 	if err != nil {
-		o.debugf("Failed to query ZCode database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to query ZCode database", dbPath, err)
 		return nil
 	}
 	defer rows.Close()
@@ -183,7 +186,7 @@ func zcodeDatabaseEntries(dbPath string, o Options) []Entry {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		o.debugf("Failed to read ZCode database " + dbPath + ": " + err.Error())
+		recordDatabaseReadError(o, "Failed to read ZCode database", dbPath, err)
 	}
 	return entries
 }
@@ -191,25 +194,33 @@ func zcodeDatabaseEntries(dbPath string, o Options) []Entry {
 // zcodeReadSchema is read_schema (loader.rs:194-258): both tables must exist and
 // carry every required column.
 func zcodeReadSchema(database *sql.DB, dbPath string, o Options) (zcodeSchema, bool) {
-	modelColumns, ok := zcodeTableColumns(database, "model_usage")
-	if !ok {
-		o.debugf("Failed to inspect ZCode model_usage schema at " + dbPath)
+	modelColumns, ok, err := zcodeTableColumns(database, "model_usage", o)
+	if err != nil {
+		recordDatabaseReadError(o, "Failed to inspect ZCode database schema", dbPath, err)
 		return zcodeSchema{}, false
 	}
-	sessionColumns, ok := zcodeTableColumns(database, "session")
 	if !ok {
-		o.debugf("Failed to inspect ZCode session schema at " + dbPath)
+		o.debugf("Failed to inspect ZCode model_usage schema at " + filepath.Base(dbPath))
+		return zcodeSchema{}, false
+	}
+	sessionColumns, ok, err := zcodeTableColumns(database, "session", o)
+	if err != nil {
+		recordDatabaseReadError(o, "Failed to inspect ZCode database schema", dbPath, err)
+		return zcodeSchema{}, false
+	}
+	if !ok {
+		o.debugf("Failed to inspect ZCode session schema at " + filepath.Base(dbPath))
 		return zcodeSchema{}, false
 	}
 	for _, column := range zcodeRequiredModelColumns {
 		if !modelColumns[column] {
-			o.debugf("Unsupported ZCode SQLite schema at " + dbPath + ": model_usage is missing " + column)
+			o.debugf("Unsupported ZCode SQLite schema at " + filepath.Base(dbPath) + ": model_usage is missing " + column)
 			return zcodeSchema{}, false
 		}
 	}
 	for _, column := range zcodeRequiredSessionColumns {
 		if !sessionColumns[column] {
-			o.debugf("Unsupported ZCode SQLite schema at " + dbPath + ": session is missing " + column)
+			o.debugf("Unsupported ZCode SQLite schema at " + filepath.Base(dbPath) + ": session is missing " + column)
 			return zcodeSchema{}, false
 		}
 	}
@@ -224,21 +235,34 @@ func zcodeReadSchema(database *sql.DB, dbPath string, o Options) (zcodeSchema, b
 
 // zcodeTableColumns is table_columns (loader.rs:260-266): column metadata
 // without materializing a row, so content columns never enter this process.
-func zcodeTableColumns(database *sql.DB, table string) (map[string]bool, bool) {
-	rows, err := database.Query(`SELECT * FROM "` + table + `" LIMIT 0`)
+// A missing table yields ok=false (an unsupported schema); a query failure
+// yields err (a locked or damaged database), which the caller reports as a
+// read failure instead of quietly treating the database as empty.
+func zcodeTableColumns(database *sql.DB, table string, o Options) (map[string]bool, bool, error) {
+	rows, err := database.QueryContext(o.contextOrBackground(), `SELECT * FROM "`+table+`" LIMIT 0`)
 	if err != nil {
-		return nil, false
+		if isMissingTableError(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	defer rows.Close()
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	set := make(map[string]bool, len(columns))
 	for _, column := range columns {
 		set[column] = true
 	}
-	return set, true
+	return set, true, nil
+}
+
+// isMissingTableError distinguishes an unsupported schema — a database that
+// simply has no such table, which the adapter skips the way the Rust loader
+// does — from a database that failed to answer at all.
+func isMissingTableError(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "no such table")
 }
 
 // zcodeSelectStatement builds the versioned query (loader.rs:132-159).

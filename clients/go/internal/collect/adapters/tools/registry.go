@@ -8,8 +8,9 @@ import (
 // LoadCommand dispatches one ccusage subcommand name to its adapter. The name
 // is the CLI command (gemini, not gemini-cli), matching
 // contract.CcusageToolCommand. Every loader takes Options only; the context
-// wrapper below carries cancellation between files for the native provider's
-// timeout budget.
+// wrapper below carries cancellation between files, and the read/query helpers
+// in read.go consult the same budget while a single file or statement is in
+// flight.
 func LoadCommand(ctx context.Context, command string, o Options) ([]Entry, error) {
 	return LoadCommandInWindow(ctx, command, o, nil)
 }
@@ -20,6 +21,12 @@ func LoadCommandInWindow(ctx context.Context, command string, o Options, window 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// The adapters read the budget through Options: the subprocess path killed
+	// the child at the deadline, and the in-process replacement has to stop at
+	// the same point. Checking only before and after the load let an
+	// over-budget scan run to completion and then report a timeout, spending
+	// the very time the budget exists to bound.
+	o.Context = ctx
 	var (
 		entries []Entry
 		err     error

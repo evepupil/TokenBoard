@@ -4,6 +4,7 @@ package tools
 // rust/adapters/zcode/src/{paths,parser,loader}.rs.
 
 import (
+	"context"
 	"database/sql"
 	"math"
 	"os"
@@ -483,5 +484,40 @@ func TestZcodeOutOfRangeRealTimestampDropsTheRow(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].MessageID != "ok" {
 		t.Fatalf("entries = %+v, want only the in-range row", entries)
+	}
+}
+
+// TestZcodeReportsSchemaQueryFailure pins the line between an unsupported
+// schema (a table that is simply absent — skip quietly, as the Rust loader
+// does) and a database that failed to answer at all. The latter must reach
+// ReadErrors: otherwise a locked or damaged ZCode database yields an empty
+// report that looks like a clean run and silently under-counts usage.
+func TestZcodeReportsSchemaQueryFailure(t *testing.T) {
+	root := t.TempDir()
+	seedZcodeDatabase(t, root, zcodeCurrentSchema, zcodeCurrentSession)
+	databasePath := filepath.Join(root, "cli", "db", "db.sqlite")
+	database, err := sql.Open("sqlite", "file:"+filepath.ToSlash(databasePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An exclusive lock makes the schema probe fail even though the file opens.
+	connection, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.ExecContext(context.Background(), `BEGIN EXCLUSIVE`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	defer func() { _, _ = connection.ExecContext(context.Background(), `ROLLBACK`) }()
+
+	var readErrors []ReadError
+	o := zcodeOptions(t, zcodeDefaultHome(t), &root, nativepricing.ModeDisplay, testCorpus(t))
+	o.ReadErrors = &readErrors
+	if entries, err := LoadZcode(o); err != nil || len(entries) != 0 {
+		t.Fatalf("LoadZcode = (%d entries, %v), want no data and no fatal error", len(entries), err)
+	}
+	if len(readErrors) == 0 {
+		t.Fatal("a locked ZCode database must be reported as a read failure, not skipped silently")
 	}
 }

@@ -62,6 +62,9 @@ func LoadGoose(o Options) ([]Entry, error) {
 	entries := []Entry{}
 	seen := make(map[string]bool, len(dbPaths))
 	for _, dbPath := range dbPaths {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		for _, entry := range loadGooseStateDB(dbPath, o) {
 			key := dbPath + ":" + entry.SessionID
 			if seen[key] {
@@ -125,17 +128,19 @@ func gooseIsFile(path string) bool {
 }
 
 // loadGooseStateDB is load_entries_from_db (loader.rs:52-95). A database that
-// cannot be opened or queried is skipped with a debug line, not an error.
+// cannot be opened or queried never fails the source: a vanished file is a
+// debug line, and a real I/O failure is recorded for the provider to report
+// (see Options.readErrorf).
 func loadGooseStateDB(dbPath string, o Options) []Entry {
 	database, err := openReadOnlyToolDB(dbPath)
 	if err != nil {
-		o.debugf("Failed to open Goose database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to open Goose database", dbPath, err)
 		return nil
 	}
 	defer database.Close()
-	rows, err := database.Query(gooseSessionQuery)
+	rows, err := database.QueryContext(o.contextOrBackground(), gooseSessionQuery)
 	if err != nil {
-		o.debugf("Failed to read Goose database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to read Goose database", dbPath, err)
 		return nil
 	}
 	defer rows.Close()
@@ -155,7 +160,7 @@ func loadGooseStateDB(dbPath string, o Options) []Entry {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		o.debugf("Failed to query Goose database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to query Goose database", dbPath, err)
 	}
 	return entries
 }

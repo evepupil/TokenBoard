@@ -74,6 +74,13 @@ type nativeToolRunner struct {
 	// their fixture tree this way, even when the maintainer's shell sets it).
 	overrides map[string]string
 	pricing   map[string]nativeToolPricing
+	// reportedReadErrors dedupes the read failures across the two reports one
+	// Collect runs (daily, then session): both scan the same files, so a single
+	// unreadable one would otherwise print the same line twice. The key is the
+	// file's full-path identity, not the printed line, so two different files
+	// that happen to share a base name (e.g. a `logs.json` in each project dir)
+	// are still reported separately rather than merged into one.
+	reportedReadErrors map[string]bool
 }
 
 type nativeToolPricing struct {
@@ -86,14 +93,43 @@ func newNativeToolRunner(prepared pricing.PreparedConfig, homeDir string, env fu
 		env = func(string) string { return "" }
 	}
 	return &nativeToolRunner{prepared: prepared, homeDir: homeDir, envFn: env, debug: debug,
-		pricing: map[string]nativeToolPricing{}}
+		pricing: map[string]nativeToolPricing{}, reportedReadErrors: map[string]bool{}}
+}
+
+// reportReadErrors prints the read failures the adapter recorded, each once
+// across the two reports of one Collect run. debug is the operator sink; with
+// no sink there is nowhere to print, so a nil debug is a no-op rather than a
+// silent drop the caller could observe.
+func (runner *nativeToolRunner) reportReadErrors(readErrors []tools.ReadError) {
+	if runner.debug == nil {
+		return
+	}
+	for _, entry := range readErrors {
+		if runner.reportedReadErrors[entry.Identity] {
+			continue
+		}
+		runner.reportedReadErrors[entry.Identity] = true
+		runner.debug(entry.Line)
+	}
 }
 
 // toolEnvLookup layers the provider probe over the process environment the way
-// the subprocess would inherit it.
-func (runner *nativeToolRunner) toolEnvLookup() func(string) (string, bool) {
+// the subprocess would inherit it. commandEnv is the invocation's own
+// KEY=VALUE list (ccusage.CommandOptions.Env): the subprocess path handed it to
+// the child, so its entries have to win here too, or a caller that scopes a
+// run to a data directory would silently read the default one.
+func (runner *nativeToolRunner) toolEnvLookup(commandEnv []string) func(string) (string, bool) {
+	fromCommand := make(map[string]string, len(commandEnv))
+	for _, entry := range commandEnv {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			fromCommand[key] = value
+		}
+	}
 	return func(key string) (string, bool) {
 		if value, overridden := runner.overrides[key]; overridden {
+			return value, true
+		}
+		if value, given := fromCommand[key]; given {
 			return value, true
 		}
 		if value := runner.envFn(key); value != "" {
@@ -106,11 +142,10 @@ func (runner *nativeToolRunner) toolEnvLookup() func(string) (string, bool) {
 // Run implements ccusage.CommandRunner.
 func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string, options ccusage.CommandOptions) (any, error) {
 	// The subprocess path bounds the run by killing the child at TimeoutMs.
-	// Here the same budget becomes a context deadline, but the adapters' loader
-	// signature (func(Options) ([]Entry, error)) cannot observe it: LoadCommand
-	// checks it before and after the load only, so an over-budget scan finishes
-	// before the deadline is noticed. The run still fails with
-	// nativeTimeoutError; it just cannot stop mid-scan.
+	// Here the same budget becomes a context deadline that LoadCommandInWindow
+	// hands to the adapter, whose per-file loops check it between files; an
+	// over-budget scan therefore stops where a killed child would have, and the
+	// run fails with nativeTimeoutError.
 	var budgetCtx context.Context
 	if options.TimeoutMs > 0 {
 		var cancel context.CancelFunc
@@ -129,12 +164,20 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	if err != nil {
 		return nil, err
 	}
+	// Files the adapter could not read at all are reported once the load
+	// returns. They are not a source failure: failing the whole source would
+	// drop every other file's usage, and the adapter has already kept the rest.
+	// The report still carries the rows it could read. A line already printed
+	// for the daily report is not repeated for the session one: both scan the
+	// same files.
+	var readErrors []tools.ReadError
 	opts := tools.Options{
-		Env:      runner.toolEnvLookup(),
-		Timezone: call.timezone,
-		Mode:     resolved.mode,
-		Corpus:   resolved.corpus,
-		Debug:    runner.debug,
+		Env:        runner.toolEnvLookup(options.Env),
+		Timezone:   call.timezone,
+		Mode:       resolved.mode,
+		Corpus:     resolved.corpus,
+		Debug:      runner.debug,
+		ReadErrors: &readErrors,
 	}
 	if runner.homeDir != "" {
 		opts.HomeDir = func() (string, error) { return runner.homeDir, nil }
@@ -145,6 +188,10 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	sinceMs, untilMs := tools.DateRangeBoundsMs(call.since, call.until, call.timezone)
 	entries, err := tools.LoadCommandInWindow(ctx, call.command, opts,
 		&tools.Window{Since: call.since, Until: call.until, SinceMs: sinceMs, UntilMs: untilMs})
+	// Report the per-file read failures before deciding what the load produced:
+	// a load that aborts still had files it could not read, and dropping those
+	// records (the old order returned on the error first) would hide why.
+	runner.reportReadErrors(readErrors)
 	if err != nil {
 		if budgetCtx != nil && budgetCtx.Err() == context.DeadlineExceeded {
 			return nil, nativeTimeoutError(options.TimeoutMs, args)

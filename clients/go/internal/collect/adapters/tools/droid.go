@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,9 +53,29 @@ func LoadDroid(o Options) ([]Entry, error) {
 
 	records := make([]droidRecord, 0, len(files))
 	for _, file := range files {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		record, ok, err := loadDroidSettingsFile(file)
 		if err != nil {
-			o.debugf("Failed to read Droid settings file " + file + ": " + err.Error())
+			// A malformed settings file is a parse problem the Rust loader skips
+			// (loader.rs:29-40); an I/O failure (beyond the vanished-file case
+			// loadDroidSettingsFile already swallows) is recorded so it reaches
+			// the run's stderr instead of disappearing under --debug only.
+			var readErr *droidReadError
+			if errors.As(err, &readErr) {
+				// The cause is the errno, not the *fs.PathError that spells the
+				// full path out again: this line reaches stderr, which operators
+				// paste into issues.
+				cause := error(readErr)
+				var pathErr *fs.PathError
+				if errors.As(err, &pathErr) {
+					cause = pathErr.Err
+				}
+				o.readErrorf(file, "Failed to read Droid settings file "+filepath.Base(file)+": "+cause.Error())
+				continue
+			}
+			o.debugf("Failed to read Droid settings file " + filepath.Base(file) + ": " + err.Error())
 			continue
 		}
 		if ok {
@@ -78,16 +99,24 @@ func LoadDroid(o Options) ([]Entry, error) {
 	return entries, nil
 }
 
+// droidReadError marks a settings file that could not be opened at all, as
+// opposed to a document that opened and failed to parse. The loader reports the
+// former to the operator and keeps the latter under --debug.
+type droidReadError struct{ err error }
+
+func (e *droidReadError) Error() string { return e.err.Error() }
+func (e *droidReadError) Unwrap() error { return e.err }
+
 // loadDroidSettingsFile is load_settings_file (parser.rs:32-94). ok is false
-// for a document that carries no usable snapshot; err is only a read or parse
-// failure, which the loader downgrades to a debug line.
+// for a document that carries no usable snapshot; err is a parse failure (a
+// debug line) or an open failure (a *droidReadError, which the loader reports).
 func loadDroidSettingsFile(path string) (droidRecord, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return droidRecord{}, false, nil
 		}
-		return droidRecord{}, false, err
+		return droidRecord{}, false, &droidReadError{err}
 	}
 	var decoded any
 	decoder := json.NewDecoder(bytes.NewReader(content))

@@ -13,6 +13,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -213,6 +214,11 @@ func TestNativeToolRunnerAnswersGeminiUnderTheCLICommandName(t *testing.T) {
 // TestNativeToolRunnerHonoursTheCommandTimeout pins the TimeoutMs contract: the
 // subprocess path kills the child at the prepared budget, and the in-process
 // source must turn the same budget into a deadline instead of ignoring it.
+//
+// The fixture is only reachable through CommandOptions.Env, so this also pins
+// that the runner hands the invocation's environment to the adapter: without
+// it the run reads the default data directory, finds nothing, and the test
+// passes without ever scanning 400 files.
 func TestNativeToolRunnerHonoursTheCommandTimeout(t *testing.T) {
 	root, env := ampFixtureHome(t)
 	_ = root
@@ -224,7 +230,18 @@ func TestNativeToolRunnerHonoursTheCommandTimeout(t *testing.T) {
 		}
 	}
 	runner := newNativeToolRunner(preparedForTest(t), "", nil, nil)
-	_, err := runner.Run(context.Background(), "ccusage",
+	// The same fixture with a real budget must produce rows: that is what makes
+	// the timeout run below a scan of the fixture rather than of an empty root.
+	report, err := runner.Run(context.Background(), "ccusage",
+		[]string{"amp", "daily", "--json", "--timezone", "UTC"},
+		ccusage.CommandOptions{Env: []string{"AMP_DATA_DIR=" + env("AMP_DATA_DIR")}, TimeoutMs: 60_000})
+	if err != nil {
+		t.Fatalf("unbounded run: %v", err)
+	}
+	if !ccusage.HasDailyRows(report) {
+		t.Fatalf("report = %v, want rows from the AMP_DATA_DIR in CommandOptions.Env", report)
+	}
+	_, err = runner.Run(context.Background(), "ccusage",
 		[]string{"amp", "daily", "--json", "--timezone", "UTC"},
 		ccusage.CommandOptions{
 			Env:       []string{"AMP_DATA_DIR=" + env("AMP_DATA_DIR")},
@@ -291,5 +308,46 @@ func TestCopilotAdapterIsImportedFromAProductionFile(t *testing.T) {
 	if !found {
 		t.Fatal("no non-test file of providers/ccusagetool imports " + target +
 			"; the copilot adapter would not register in a production build")
+	}
+}
+
+// TestNativeToolRunnerReportsAReadFailureOncePerCollect pins the dedupe: one
+// Collect runs the daily report and then the session report over the same
+// files, so an unreadable file would otherwise print its warning twice. The
+// operator-facing read-error line names the file without its directory: the
+// run's stderr is pasted into issues.
+func TestNativeToolRunnerReportsAReadFailureOncePerCollect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not deny the owner a read on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file")
+	}
+	root, env := ampFixtureHome(t)
+	blocked := filepath.Join(root, "threads", "T-blocked.json")
+	if err := os.WriteFile(blocked, []byte(`{"id":"thread-2","messages":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o600) })
+
+	lines := []string{}
+	runner := newNativeToolRunner(preparedForTest(t), "", env, func(line string) { lines = append(lines, line) })
+	for _, report := range []string{"daily", "session"} {
+		if _, err := runner.Run(context.Background(), "ccusage",
+			[]string{"amp", report, "--json", "--timezone", "UTC"}, ccusage.CommandOptions{TimeoutMs: 30000}); err != nil {
+			t.Fatalf("%s report: %v", report, err)
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("lines = %q, want the read failure reported once across both reports", lines)
+	}
+	if strings.Contains(lines[0], root) {
+		t.Fatalf("lines[0] = %q, want the base name rather than the full path", lines[0])
+	}
+	if !strings.Contains(lines[0], "T-blocked.json") {
+		t.Fatalf("lines[0] = %q, want it to name the unreadable file", lines[0])
 	}
 }

@@ -44,6 +44,9 @@ func LoadKilo(o Options) ([]Entry, error) {
 	entries := []Entry{}
 	seen := map[string]bool{}
 	for _, dbPath := range dbPaths {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		for _, entry := range kiloDatabaseEntries(dbPath, o) {
 			// Cross-database first-wins dedup on the entry's message id
 			// (loader.rs:26-43); the database order is the root order.
@@ -62,13 +65,13 @@ func LoadKilo(o Options) ([]Entry, error) {
 func kiloDatabaseEntries(dbPath string, o Options) []Entry {
 	database, err := openToolReadOnlySQLiteDatabase(dbPath)
 	if err != nil {
-		o.debugf("Failed to open Kilo database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to open Kilo database", dbPath, err)
 		return nil
 	}
 	defer database.Close()
-	rows, err := database.Query("SELECT id, session_id, data FROM message")
+	rows, err := database.QueryContext(o.contextOrBackground(), "SELECT id, session_id, data FROM message")
 	if err != nil {
-		o.debugf("Failed to read Kilo database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to read Kilo database", dbPath, err)
 		return nil
 	}
 	defer rows.Close()
@@ -98,7 +101,7 @@ func kiloDatabaseEntries(dbPath string, o Options) []Entry {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		o.debugf("Failed to query Kilo database: " + dbPath)
+		recordDatabaseReadError(o, "Failed to query Kilo database", dbPath, err)
 	}
 	return entries
 }

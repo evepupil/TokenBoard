@@ -4,7 +4,10 @@ package tools
 // rust/adapters/droid/src/{parser,loader}.rs.
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
@@ -366,5 +369,49 @@ func TestDroidDefaultsToFactorySessions(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].SessionID != "session" {
 		t.Fatalf("entries = %+v, want the default root's entry", entries)
+	}
+}
+
+// A settings file whose read fails (permission denied, device error) must be
+// reported through ReadErrors, and the line must name the file without its
+// directory: stderr is pasted into issues, where the home directory's account
+// name is not the reader's to see. os.ReadFile's *fs.PathError spells the full
+// path out, so the adapter has to unwrap to the errno first.
+func TestDroidReadErrorNamesTheFileWithoutItsPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not deny the owner a read on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode-000 file")
+	}
+	root := t.TempDir()
+	settingsDir := filepath.Join(root, "2026", "05", "22")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(settingsDir, "session.settings.json")
+	if err := os.WriteFile(path, []byte(`{"tokenUsage":{"inputTokens":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	var readErrors []ReadError
+	options := droidOptions(t, root)
+	options.ReadErrors = &readErrors
+
+	if _, err := LoadDroid(options); err != nil {
+		t.Fatal(err)
+	}
+	if len(readErrors) != 1 {
+		t.Fatalf("readErrors = %v, want one line for the unreadable settings file", readErrors)
+	}
+	if strings.Contains(readErrors[0].Line, root) {
+		t.Fatalf("readErrors[0] = %q, want the base name rather than the full path", readErrors[0].Line)
+	}
+	if !strings.Contains(readErrors[0].Line, "session.settings.json") {
+		t.Fatalf("readErrors[0] = %q, want it to name the file", readErrors[0].Line)
 	}
 }

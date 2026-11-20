@@ -74,9 +74,11 @@ func LoadCodebuff(o Options) ([]Entry, error) {
 	records := make([]codebuffRecord, 0, len(files))
 	positions := map[string]int{}
 	for _, file := range files {
-		content, err := os.ReadFile(file)
-		if err != nil {
-			o.debugf("Failed to read Codebuff chat file " + file + ": " + err.Error())
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
+		content, read := readToolFile(file, "Codebuff chat file", o)
+		if !read {
 			continue
 		}
 		for _, record := range parseCodebuffChatFile(content, file) {

@@ -29,14 +29,16 @@ func LoadAmp(o Options) ([]Entry, error) {
 			return strings.HasSuffix(name, ".json")
 		})
 		for _, file := range files {
-			content, err := os.ReadFile(file)
-			if err != nil {
-				o.debugf("Failed to read Amp thread file " + file + ": " + err.Error())
+			if err := o.ContextErr(); err != nil {
+				return nil, err
+			}
+			content, read := readToolFile(file, "Amp thread file", o)
+			if !read {
 				continue
 			}
 			parsed, err := parseAmpThread(content, o)
 			if err != nil {
-				o.debugf("Failed to read Amp thread file " + file + ": " + err.Error())
+				o.debugf("Failed to read Amp thread file " + filepath.Base(file) + ": " + err.Error())
 				continue
 			}
 			entries = append(entries, parsed...)

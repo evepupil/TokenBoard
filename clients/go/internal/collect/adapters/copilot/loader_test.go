@@ -1,6 +1,8 @@
 package copilot
 
 import (
+	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -307,10 +309,13 @@ func TestCopilotSessionReportShape(t *testing.T) {
 	}
 }
 
-// TestCopilotFailedFileIsSkippedWithADebugLine pins read_source_file's error
-// handling (loader.rs:49-68): one unreadable file loses its rows and a debug
-// line, and the other files still load.
-func TestCopilotFailedFileIsSkippedWithADebugLine(t *testing.T) {
+// TestCopilotFailedFileIsSkippedAndReported pins read_source_file's error
+// handling (loader.rs:49-68): one unreadable file loses its rows while the
+// other files still load. The failure is *reported*, not debug-only: a file
+// that cannot be read silently under-counts the user's usage, which the project
+// rules forbid ("真实读取失败必须报错"). Only a file that vanished since
+// discovery keeps the quiet debug path.
+func TestCopilotFailedFileIsSkippedAndReported(t *testing.T) {
 	home := t.TempDir()
 	writeOTel(t, home,
 		`{"type":"span","traceId":"t1","spanId":"s1","endTime":[1775934000,0],"attributes":{"gen_ai.operation.name":"chat","gen_ai.response.model":"m","gen_ai.usage.input_tokens":1}}`,
@@ -327,6 +332,7 @@ func TestCopilotFailedFileIsSkippedWithADebugLine(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o600) })
 	lines := []string{}
+	var readErrors []tools.ReadError
 	entries, err := Load(LoadInput{
 		Options: tools.Options{
 			Env: func(key string) (string, bool) {
@@ -335,17 +341,27 @@ func TestCopilotFailedFileIsSkippedWithADebugLine(t *testing.T) {
 				}
 				return "", false
 			},
-			Timezone: "UTC",
-			Mode:     nativepricing.ModeAuto,
-			Corpus:   loaderCorpus(t),
-			Debug:    func(line string) { lines = append(lines, line) },
+			Timezone:   "UTC",
+			Mode:       nativepricing.ModeAuto,
+			Corpus:     loaderCorpus(t),
+			Debug:      func(line string) { lines = append(lines, line) },
+			ReadErrors: &readErrors,
 		},
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(entries) != 1 || len(lines) != 1 || !strings.Contains(lines[0], "session-state") {
-		t.Fatalf("entries = %d debug = %v, want the OTel row and one session-state debug line", len(entries), lines)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want the OTel row still loaded", len(entries))
+	}
+	if len(readErrors) != 1 || !strings.Contains(readErrors[0].Line, "session-state") {
+		t.Fatalf("readErrors = %v, want one session-state failure", readErrors)
+	}
+	if strings.Contains(readErrors[0].Line, home) {
+		t.Fatalf("readErrors[0] = %q, want the base name rather than the full path", readErrors[0].Line)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("debug = %v, want no debug line for a real read failure", lines)
 	}
 }
 
@@ -383,5 +399,36 @@ func TestCopilotSessionStateUnreadableTimeDropsTheLine(t *testing.T) {
 	}
 	if len(usage.CreditSnapshots) != 1 || usage.CreditSnapshots[0].DedupKey != "credits:session-x:shutdown-ok" {
 		t.Fatalf("snapshots = %+v, want only the readable event", usage.CreditSnapshots)
+	}
+}
+
+// TestCopilotLoadStopsWhenTheBudgetIsCancelled pins that the loader honours the
+// run's context. The child-process path used to be killed at the timeout; now
+// the scan is in-process, so Load must stop starting reads once the budget is
+// gone instead of walking the whole tree past it. A cancelled budget returns an
+// error, never a silent partial success.
+func TestCopilotLoadStopsWhenTheBudgetIsCancelled(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, root, filepath.Join("otel", "one.jsonl"), "{}\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Load(LoadInput{
+		Options: tools.Options{
+			Env: func(key string) (string, bool) {
+				if key == "COPILOT_HOME" {
+					return root, true
+				}
+				return "", false
+			},
+			Timezone: "UTC",
+			Mode:     nativepricing.ModeAuto,
+			Corpus:   loaderCorpus(t),
+			Context:  ctx,
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled (a cancelled budget must stop the scan)", err)
 	}
 }

@@ -4,6 +4,7 @@ package tools
 // rust/adapters/kilo/src/{paths,parser,loader}.rs.
 
 import (
+	"context"
 	"database/sql"
 	"math"
 	"os"
@@ -374,5 +375,31 @@ func TestKiloSkipsNonAssistantAndMalformedRows(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].MessageID != "m5" {
 		t.Fatalf("entries = %+v, want only m5", entries)
+	}
+}
+
+// TestKiloStopsAtTheBudgetMidQuery pins the database side of the same rule: the
+// statement carries the budget, so a cancelled run stops the scan instead of
+// reading every row, and the stop is not reported as a database read failure.
+func TestKiloStopsAtTheBudgetMidQuery(t *testing.T) {
+	root := t.TempDir()
+	seedKiloMessage(t, root, [][3]string{{
+		"row-1", "session-a",
+		`{"id":"msg-1","role":"assistant","providerID":"deepseek","modelID":"deepseek-v4-flash","time":{"created":1767312000000},"tokens":{"input":10,"output":0,"cache":{"read":0,"write":0}},"cost":0.02}`,
+	}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var readErrors []ReadError
+	options := kiloOptions(t, []string{root}, nativepricing.ModeDisplay, testCorpus(t))
+	options.Context = ctx
+	options.ReadErrors = &readErrors
+	// Call the database reader directly: LoadKilo's loop-top check would abort
+	// before the query ran, which proves nothing about the statement itself.
+	entries := kiloDatabaseEntries(filepath.Join(root, "kilo.db"), options)
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want the cancelled query to stop the scan", len(entries))
+	}
+	if len(readErrors) != 0 {
+		t.Fatalf("a cancelled query must not be reported as a database failure: %v", readErrors)
 	}
 }
