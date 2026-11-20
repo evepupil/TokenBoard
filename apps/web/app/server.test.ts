@@ -323,11 +323,39 @@ describe('worker server', () => {
     expect(secondResponse.headers.get('x-cache-test')).toBe('hit')
     expect(secondResponse.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
     expect(await secondResponse.text()).toContain('<svg')
-    // Request 1: rate-limit read + profile + two summary reads. Request 2 hits the cache but
-    // still pays its rate-limit read.
-    expect(env.DB.prepare).toHaveBeenCalledTimes(8)
+    // Request 1: profile + two summary reads + the rate-limit read and increment. Request 2
+    // answers from the cache and pays nothing beyond the slug visibility recheck — the
+    // ceiling is charged on misses only, so a popular card behind a shared proxy egress is
+    // never 429'd out of a cache hit.
+    expect(env.DB.prepare).toHaveBeenCalledTimes(6)
     expect(cache.match).toHaveBeenCalledTimes(2)
     expect(cache.put).toHaveBeenCalledTimes(1)
+    const secondRequestStatements = env.sqlStatements.slice(env.sqlStatements.length - 1)
+    expect(secondRequestStatements.some((sql) => sql.includes('api_rate_limits'))).toBe(false)
+  })
+
+  // README cards are fetched through proxies (GitHub camo) whose readers share one egress
+  // IP. Charging cache hits against the IP ceiling meant a popular card returned a 429 JSON
+  // body inside an <img> at exactly the traffic the cache exists for.
+  test('serves a cache hit even when the caller is over the rate limit', async () => {
+    const cache = createCache()
+    globalThis.caches = { default: cache } as unknown as CacheStorage
+    const warm = createEnv({ publicProfile: true })
+    const ctx = createExecutionContext()
+    await worker.fetch(workerRequest('https://tokenboard.example/api/public/eve.svg'), warm, ctx)
+    await Promise.all(ctx.waitUntilPromises)
+
+    // A different reader on the same egress IP, already past the ceiling.
+    const env = createEnv({ publicProfile: true, rateLimitCount: 121 })
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/eve.svg'),
+      env,
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('x-cache-test')).toBe('hit')
+    expect(await response.text()).toContain('<svg')
   })
 
   test('serves cached public responses with immutable response headers', async () => {
@@ -572,10 +600,10 @@ describe('worker server', () => {
         message: 'Public profile not found'
       }
     })
-    // The miss fails on the profile lookup rather than on parsing, so the read-side rate limit
-    // runs first: an unauthenticated scanner guessing slugs is charged against the ceiling even
-    // though every guess is a 404 that is never cached.
-    expect(env.sqlStatements[0]).toContain('api_rate_limits')
+    // The miss is still charged against the ceiling: an unauthenticated scanner guessing
+    // slugs pays for every guess even though each 404 is never cached. The charge lands
+    // after the visibility lookup, because a cache hit must be answered without one.
+    expect(env.sqlStatements.some((sql) => sql.includes('api_rate_limits'))).toBe(true)
   })
 
   test('rejects unsupported public API extensions with JSON', async () => {

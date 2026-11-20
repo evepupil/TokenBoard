@@ -16,6 +16,7 @@ import { assertPublicUsageVisible } from './features/public-card/service'
 import { pruneDeviceRetention } from './features/device/retention'
 import { usageSummaryStrictMode } from './features/usage/deduped-daily-usage'
 import type { Bindings } from './lib/db'
+import { ApiError } from './lib/errors'
 import {
   clientIpRateLimitSubject,
   enforceRateLimit,
@@ -94,22 +95,46 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
     const route = parsePublicUsagePath(url.pathname)
     if (!route) return null
 
+    const summaryStrict = usageSummaryStrictMode(env)
+    const cache = publicApiCache()
+    let subject: PublicApiSubject
+    try {
+      subject = await assertPublicUsageVisible(env.DB, route.slug)
+    } catch (error) {
+      // A slug that does not exist (or is private) throws before the cache is even keyed, and
+      // its answer is `no-store` so it is never cached. Charge that guess before rethrowing:
+      // an unauthenticated scanner walking slugs must still spend the ceiling.
+      if (error instanceof ApiError && error.status === 404) {
+        await enforceRateLimit(env.DB, {
+          policy: readRateLimitPolicies.publicCardRead,
+          subject: clientIpRateLimitSubject(request.headers)
+        })
+      }
+      throw error
+    }
+    const cacheKey = cache ? await publicApiCacheKey(url, route, subject, summaryStrict) : null
+    if (cache && cacheKey) {
+      const cached = await cache.match(cacheKey)
+      // A cache hit is answered before the ceiling on purpose. README cards are fetched
+      // through proxies such as GitHub's camo, whose readers share one egress IP: charging
+      // hits meant a popular card turned into images broken by a 429 body at exactly the
+      // traffic the cache exists for. A hit costs the single slug-visibility read above and
+      // no counter write; misses below still pay the ceiling before the aggregate reads it
+      // exists to bound. That visibility read is a constant-cost MAX via
+      // daily_usage_summary_user_updated_idx (migration 0039), so exempting hits does not
+      // open an unbounded per-user scan.
+      if (cached) return publicApiClientCacheResponse(cached)
+    }
+
     // This entrypoint answers before the HonoX route does, so the ceiling has to live here as
-    // well; capping only the route would guard a path the worker never reaches. The 404 and
-    // private answers are `no-store` and never cached, so every anonymous probe reaches D1.
+    // well; capping only the route would guard a path the worker never reaches. Charging only
+    // the miss keeps the counter honest: it counts requests that reach the aggregate reads,
+    // and past the ceiling the counter read is the only *additional* D1 work a request does
+    // (the slug-visibility lookup that keys the cache already ran above).
     await enforceRateLimit(env.DB, {
       policy: readRateLimitPolicies.publicCardRead,
       subject: clientIpRateLimitSubject(request.headers)
     })
-
-    const summaryStrict = usageSummaryStrictMode(env)
-    const cache = publicApiCache()
-    const subject = await assertPublicUsageVisible(env.DB, route.slug)
-    const cacheKey = cache && subject ? await publicApiCacheKey(url, route, subject, summaryStrict) : null
-    if (cache && cacheKey) {
-      const cached = await cache.match(cacheKey)
-      if (cached) return publicApiClientCacheResponse(cached)
-    }
 
     const response = await createPublicUsageResponse({
       db: env.DB,
