@@ -28,7 +28,7 @@
 - 时间戳解析**按 ccusage 的长度门手写**（`date_utils.rs:111-145`：长度 20/25 且 `[19]∈{Z,+,-}`，或 24/29 且 `[19]=='.'` 恰 3 位小数），不得用 `time.RFC3339Nano`（它接受任意小数位与小写 t）。
 - **u64 饱和语义**：Rust 用 `saturating_add/sub`、`checked_mul`；Go 的 `uint64` 会静默回绕，必须写显式饱和函数（既有 `saturatingAddU64`/`saturatingSubU64` 在 `adapters/codex`，上提到共享层或复用 `usage-core` 等价物）。
 - 宽容字段读取必须逐字段实现（`lenient_u64`：非 u64→0；`lenient_f64`；`lenient_object`：非对象→None；`non_empty_string`：trim 后空→None），**不得用强类型 Unmarshal**（类型不符会让整行/整文件失败，与 Rust 行为分叉）。
-- 逐文件解析失败 = 跳过 + 可选 debug 日志，**不是**错误；但 provider 级 runner 错误必须原样返回，不得降级为空快照或回落 ccusage（claudecode `native.go:97-101`、codex `native.go:62-64`）。
+- 逐文件解析失败 = 跳过 + 可选 debug 日志，**不是**错误；但 provider 级 runner 错误必须原样返回，不得降级为空快照或回落 ccusage（claudecode `native.go:97-101`、codex `native.go:62-64`）。**2026-11-20 修订**：解析失败照旧跳过；「文件/数据库根本读不出来」（权限、I/O）不再静默——实现记录到 `tools.Options.ReadErrors`，provider 在 load 结束后打到 stderr，快照照常上传（2026-11-19 复核的裁决：AGENTS.md「真实读取失败必须报错」优先，但不让一个坏文件拖垮整源）。消失的文件（ENOENT）仍按竞态静默跳过。
 - 三平台（darwin/linux/windows × amd64/arm64）构建通过；`gofmt`/`go vet` 干净；`go test -race` 通过；成本公式若落在 `nativepricing` 包外，乘积必须经 `nativepricing.Product`/`Sum`（arm64 FMADDD 守卫，见 S3 Critical 1）。
 - 过渡开关**不是用户可见环境变量**（§10.1）：包内未导出常量，默认 ccusage，翻转是独立提交。
 - 只投影 token/model/timestamp/会话标识；不得读取或保存 prompt/completion/正文/本地路径（`projectPath` 是项目名或固定字面量，非绝对路径；zcode 的 `session.directory` 是例外，须裁剪为目录名并记入报告边界）。

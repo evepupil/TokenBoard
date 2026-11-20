@@ -43,6 +43,11 @@ the release feed rather than the repository branch. Do not switch an install to
 `binary` unless the user asks for it or the release feed is confirmed to be the
 intended source for that machine.
 
+`--base-url` must be `https`; `http` is accepted only for a loopback host
+(`localhost`, `127.0.0.1`, `::1`). The pairing code and the returned upload token
+travel over that URL, so setup refuses a plain-`http` remote before any credential
+is sent and exits with a one-line error.
+
 > **The binary channel has no published release as of 2026-10-23.** The client
 > is still under development and validation, so `v0.1.0` was turned back into a
 > draft. `--to-binary` and `self-update` against the default feed both fail

@@ -244,6 +244,16 @@ clients/go/
   - 门禁加固：`TestTheRegistryBuildsNoNativeSourceFromTheCallersRunner` 用 AST 扫 `providers/`、`codex/`、`ccusagetool/` 的接收者方法，禁止读或填 `Options.Runner`（三个「默认路径」测试此前只剩空 home 断言，看不出生产路径重新长岔路）；`split_test` 报错文案不再指向已删的子包，禁用导入补上 `archive/zip`。
   - 审查另报的「工具来源 `--since` 被绕过」**证伪**：`preview --source amp --since banana` 实测 exit 1 并报 `Invalid ccusage tool since date`。
 - 2026-10-21 发布链路预检：workflow 新增 `release-dry-run` job——`bundle-ccusage` + `goreleaser check` + `goreleaser release --snapshot --clean --skip=publish`，并断言产物契约（恰好 6 个 `tokenboard_<os>_<arch>.tar.gz` + `checksums.txt`；每个归档含 `tokenboard[.exe]`、`ccusage[.exe]`、`README.md`、`LICENSE.ccusage`；Linux 归档内二进制 `version` 必须是 `tokenboard (go) 0.0.0-SNAPSHOT-<sha>`，不是 `dev`）。`release` 以 `needs: [test, deps, shadow, release-dry-run]` 前置，首次真实 tag 不再是对该流水线的第一次执行。同一 job 末尾跑 `clients/go/scripts/e2e-self-update.mjs`：本地起 GitHub 形状的发布端点（`/releases/latest` 302 → tag 页 → 资产），用 snapshot 二进制作为「旧版」、用带 `9.9.9` 版本戳的重新构建作为发布资产，断言自更新完成换入、保留一份 backup、装上捆绑 ccusage、且第二次运行不再下载。首跑即抓到一个真实缺陷：`setup-node` 因 `package.json` 的 `packageManager` 字段默认启用 pnpm 缓存，缺少 `pnpm/action-setup` 时直接失败——`release` job 有同样形状，首次真实 tag 会以同样方式失败，两处已一并补上。
+
+**2026-11-19/20 全维度复查修复（未公开发版，与 TS collector 同步）**：
+
+- **ack 语义统一（两侧）**：cursor 确认集改为「已送达行 ∪ 永久不可上传行」——`invalid`/`before-history-window` 的 `usageDate` 永远无法上传，确认掉以免 pending 条目每轮重扫并重复告警；`too-far-future` 排除在外，保留重试。Codex 文件级确认无法辨识被丢行属于哪个文件，当本轮存在 `too-far-future` 被拒行时跳过整文件确认、退回按组确认（`cli.go` 的 `codexFutureRejected`，TS `cli.ts` 同名标志）。upload 层为此暴露完整被拒清单（TS `readUploadRejected`，Go `upload.Result.Rejected`）。
+- **tools 适配器 IO 预算化**：`Options.Context` 从「仅文件间检查」扩展到单个文件与单条 SQL 语句——`readFileWithinBudget` 按 64 KiB 分块、每块前查预算（取消返回 ctx 错误，不返回半截内容）；tools 包全部 `Query/QueryRow` 改 `QueryContext/QueryRowContext`（modernc 驱动会中断语句）；`recordDatabaseReadError` 在预算取消时闭嘴（中断不是数据库损坏）。Copilot 改为 16 个一批并发 + 批间 `ContextErr()`。
+- **读取失败可见（S4 计划 2026-11-20 修订的落地）**：文件/数据库**根本读不出**（权限、I/O、锁、损坏）不再静默——记录到 `tools.Options.ReadErrors`（`Identity`=全路径去重、`Line`=仅基名），provider 在 load 结束后统一打到 stderr；`no such table` 仍按「不支持 schema」安静跳过。ZCode 的 schema 探测失败也走这条通道，不再被当成空数据。
+- **定价作用域**：claude 的 daily/session 各自按自身报告作用域解析 ccusage 配置；codex 静态费率保持运行时除法、上下文定价乘加一律经 `nativepricing.Product/Sum`（arm64 FMADDD 守卫；`mtime.Millis` 同样拆成可证明不融合的运算），CI 增加全模块汇编扫描门禁。
+- **时区与输入**：codex 归属接受 Intl 偏移时区（`contract.LoadLocation` 统一 `"+08:00"` 这类标识）；DeepSeek Harness 的事件字段必须是真正的 JSON number（字符串不再被宽容解析）。
+- **发布通道**：`internal/release` 与 skill `client-binary.mjs` 同口径拒绝 https→http 跳转（checksums 与二进制同路径，降级即可被中间人同时替换）；`TOKENBOARD_ARCHIVE_URL` 补进三处凭据剥离名单（Go `credentials.go`、TS `child-env.ts`、skill `child-env.mjs`，现为 5 键）。
+- **gate 结果**：Go 全包测试、`gofmt`/`go vet` 干净、darwin+windows 构建通过；TS collector 1286 条、skill 1003 条、web typecheck 全绿。
 - 2026-10-20 发布链路（`.github/workflows/go-client.yml`）：
   - `test`：ubuntu/macos/windows 三平台 × `go-version-file: clients/go/go.mod`，跑 `gofmt -l`（非 Windows）、`go vet`、`go test -race`；Linux 上额外做 windows/linux/darwin arm64 交叉构建，把「3 OS × 2 arch」的另一半也纳入编译门禁。
   - `deps`：spec §5 的 ccusage 契约门禁。`pnpm install --filter @tokenboard/collector` 后跑 `clients/go/scripts/check-deps.sh`，金样本不一致即失败。本地已实测通过（`ccusage 20.0.33 output matches the goldens`）。
