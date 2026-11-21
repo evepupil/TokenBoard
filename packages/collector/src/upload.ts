@@ -114,9 +114,10 @@ export async function uploadSnapshots(
   }
 
   if (uploadable.length === 0) {
-    // Nothing left to send. Still post the empty batch when the caller had snapshots at
-    // all, so the server's `upserted: 0` keeps answering the same way it does for a
-    // genuinely empty run, but never send the rows it would reject.
+    // Nothing left to send. An empty batch only goes out when the caller had no snapshots
+    // at all, so the server's `upserted:0` keeps answering the same way for a genuinely
+    // empty run. A run whose only snapshots were rejected sends no batch: posting an
+    // empty one would claim a delivery that did not happen.
     const upserted = snapshots.length === 0 ? await uploadSnapshotBatch(config, [], fetcher) : 0
     return withDelivered(withRejectionCount({ upserted, skipped: 0 }, rejected.length), [], rejected)
   }
