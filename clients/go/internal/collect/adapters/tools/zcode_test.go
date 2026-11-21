@@ -500,6 +500,10 @@ func TestZcodeReportsSchemaQueryFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows refuses to remove the temp directory while this handle is open,
+	// and the deferred close must run last (defers are LIFO: rollback, then the
+	// connection, then the pool).
+	defer func() { _ = database.Close() }()
 	// An exclusive lock makes the schema probe fail even though the file opens.
 	connection, err := database.Conn(context.Background())
 	if err != nil {
