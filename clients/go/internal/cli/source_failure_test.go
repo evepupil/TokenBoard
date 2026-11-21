@@ -139,6 +139,26 @@ func TestPreviewConcreteSourcePartialFailureNeverPrintsTheRawMessage(t *testing.
 	}
 }
 
+func TestConcreteSourceFailureRedactsTheAccountDirectory(t *testing.T) {
+	// Every stderr line in the CLI passes through the redactor, not just the
+	// Antigravity categories: a provider error quotes the file it could not
+	// read, and the scheduled log must not name the machine's account.
+	path := filepath.Join("/Users/someone", "secret", "session.jsonl")
+	stubSource(t, contract.SourcePi, stubProvider{err: errors.New("Unable to read " + path)})
+
+	code, _, stderr := run(t, map[string]string{"TOKENBOARD_TIMEZONE": "UTC"},
+		"preview", "--source", "pi")
+	if code != ExitFailure {
+		t.Fatalf("code = %d, want failure", code)
+	}
+	if strings.Contains(stderr, "/Users/someone") {
+		t.Fatalf("stderr = %q, want the account path redacted", stderr)
+	}
+	if !strings.Contains(stderr, "/Users/<redacted>/secret/session.jsonl") {
+		t.Fatalf("stderr = %q, want the base path kept for debugging", stderr)
+	}
+}
+
 func TestPreviewAllSourceNonFatalPartialKeepsTheRunGreen(t *testing.T) {
 	// In an all-source run a non-fatal partial result is recorded but does not
 	// fail the run unless TOKENBOARD_FAIL_ON_SOURCE_ERROR asks for it.

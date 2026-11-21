@@ -24,6 +24,7 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/providers/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/redact"
 	"github.com/MisonL/TokenBoard/clients/go/internal/selfupdate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 	"github.com/MisonL/TokenBoard/clients/go/internal/upload"
@@ -88,6 +89,11 @@ func RunWithEnv(ctx context.Context, args []string, env Env, stdout, stderr io.W
 type lookupFunc func(string) (string, bool)
 
 func runWithLookup(ctx context.Context, args []string, lookup lookupFunc, stdout, stderr io.Writer) int {
+	// Every stderr line this process writes goes through the redactor: source
+	// errors quote the paths they failed on, and those logs are long-lived
+	// local files that get pasted into issues. The account segment is replaced;
+	// file names below it stay for debugging.
+	stderr = redact.Writer(stderr)
 	env := func(key string) string {
 		value, _ := lookup(key)
 		return value
