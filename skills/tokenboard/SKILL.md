@@ -1,6 +1,6 @@
 ---
 name: tokenboard
-description: Install and manage TokenBoard AI token usage collection for Claude Code, Codex, and Antigravity. Use when the user asks to install TokenBoard, connect TokenBoard, bind a TokenBoard pairing code, sync AI token usage, preview usage, check TokenBoard status, or set up daily token statistics.
+description: Install and manage TokenBoard AI token usage collection for Claude Code, Codex, Antigravity CLI/GUI/IDE, OpenCode, Pi, Grok Build, DeepSeek Harness and twelve further tool sources. Use when the user asks to install TokenBoard, connect TokenBoard, bind a TokenBoard pairing code, sync AI token usage, preview usage, check TokenBoard status, or set up daily token statistics.
 ---
 
 # TokenBoard
@@ -48,13 +48,13 @@ intended source for that machine.
 travel over that URL, so setup refuses a plain-`http` remote before any credential
 is sent and exits with a one-line error.
 
-> **The binary channel has no published release as of 2026-10-23.** The client
-> is still under development and validation, so `v0.1.0` was turned back into a
-> draft. `--to-binary` and `self-update` against the default feed both fail
-> closed in that state (`self-update` exits 1 with "release lookup did not land
-> on a tag page"), which is the intended behaviour rather than a bug — there is
-> simply nothing to install. Keep installs on `git` until a release is published
-> again.
+> **The default binary feed publishes no release.** `--to-binary` and `self-update` point at
+> `evepupil/TokenBoard` (`defaultReleaseRepo` in `client-binary.mjs`), and that repository has no
+> published release, so a binary install against the default feed fails closed — the intended
+> behaviour rather than a bug. Development releases live on the fork `MisonL/TokenBoard`
+> (v0.2.0,2026-11-12); to try the binary channel, pass `--release-repo MisonL/TokenBoard`
+> (or set `TOKENBOARD_RELEASE_REPO`) and keep the matching `TOKENBOARD_RELEASE_BASE_URL` for a
+> custom mirror. Otherwise keep installs on `git`.
 
 To roll an install back from `binary` to `git`, do not hand-edit the config
 file: with `activeServer`/`servers` present, `clientType` is profile-scoped and a
@@ -277,6 +277,6 @@ Scheduled runs write logs to `~/.tokenboard/logs/daily-sync.out.log` and `~/.tok
 
 ## Troubleshooting
 
-- If Node is missing or older than 22.23.4 (22.x) / 24.22.1 (24.x), ask the user to upgrade Node.js — the setup, sync, and collector install scripts refuse to run on older releases because they carry known TLS and decompression vulnerabilities.
+- If Node is missing or older than 22.23.4 (22.x) / 24.22.1 (24.x) / 26.12.1 (26.x), ask the user to upgrade Node.js — the setup, sync, and collector install scripts refuse to run on older releases because they carry known TLS and decompression vulnerabilities.
 - If the collector cannot reach the configured TokenBoard base URL, ask the user to configure proxy environment variables or verify the TokenBoard custom domain.
 - If pairing fails, ask the user to generate a new pairing code from TokenBoard.
