@@ -7,7 +7,7 @@ go 1.27
 // toolchains resolve any 1.27.x, so a machine still on 1.27.1 would silently
 // build and test a client that trusts those chains. A toolchain line makes
 // both ends fetch 1.27.3 before compiling.
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/klauspost/compress v1.20.3
