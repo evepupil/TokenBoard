@@ -143,6 +143,9 @@ func TestConcreteSourceFailureRedactsTheAccountDirectory(t *testing.T) {
 	// Every stderr line in the CLI passes through the redactor, not just the
 	// Antigravity categories: a provider error quotes the file it could not
 	// read, and the scheduled log must not name the machine's account.
+	// filepath.Join turns the prefix into backslashes on Windows; the redactor
+	// keeps whichever separator the path arrived with, so the assertions below
+	// only pin the account segment and the names below it.
 	path := filepath.Join("/Users/someone", "secret", "session.jsonl")
 	stubSource(t, contract.SourcePi, stubProvider{err: errors.New("Unable to read " + path)})
 
@@ -151,11 +154,13 @@ func TestConcreteSourceFailureRedactsTheAccountDirectory(t *testing.T) {
 	if code != ExitFailure {
 		t.Fatalf("code = %d, want failure", code)
 	}
-	if strings.Contains(stderr, "/Users/someone") {
-		t.Fatalf("stderr = %q, want the account path redacted", stderr)
+	if strings.Contains(stderr, "someone") {
+		t.Fatalf("stderr = %q, want the account name redacted", stderr)
 	}
-	if !strings.Contains(stderr, "/Users/<redacted>/secret/session.jsonl") {
-		t.Fatalf("stderr = %q, want the base path kept for debugging", stderr)
+	for _, kept := range []string{"<redacted>", "secret", "session.jsonl"} {
+		if !strings.Contains(stderr, kept) {
+			t.Fatalf("stderr = %q, want %q kept for debugging", stderr, kept)
+		}
 	}
 }
 
