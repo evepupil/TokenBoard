@@ -38,6 +38,23 @@ export async function listActiveUsageTimezones(db: D1Database, userId: string): 
  * the other zone's today, so the figure reads zero while the month total still counts the row.
  */
 export function findMismatchedUsageTimezones(profileTimezone: string, usageTimezones: string[]): string[] {
-  const profile = normalizeTimezone(profileTimezone)
-  return usageTimezones.filter((timezone) => timezone !== profile)
+  const profile = canonicalTimezone(normalizeTimezone(profileTimezone))
+  return usageTimezones.filter((timezone) => canonicalTimezone(timezone) !== profile)
+}
+
+/**
+ * Resolves a zone to the single name the host's time-zone database uses for it.
+ *
+ * `normalizeTimezone` only validates the spelling; it keeps the user's own name. Two spellings
+ * of the same zone ("UTC" and "Etc/UTC", "Asia/Kolkata" and the older "Asia/Calcutta") would
+ * otherwise be reported as a mismatch, telling the user to reinstall a collector that is
+ * already stamping the right calendar. An unknown name keeps its spelling; there is nothing to
+ * canonicalize it to.
+ */
+function canonicalTimezone(timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone
+  } catch {
+    return timezone
+  }
 }

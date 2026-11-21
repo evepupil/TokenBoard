@@ -72,4 +72,12 @@ describe('findMismatchedUsageTimezones', () => {
   test('treats an unusable profile zone as UTC rather than flagging every collector', () => {
     expect(findMismatchedUsageTimezones('Mars/Base', ['UTC'])).toEqual([])
   })
+
+  // `normalizeTimezone` only checks the spelling; the same calendar under two names (the older
+  // alias of a zone) is not a collector that needs reinstalling.
+  test('treats an alias of the same zone as the same zone', () => {
+    expect(findMismatchedUsageTimezones('UTC', ['Etc/UTC'])).toEqual([])
+    expect(findMismatchedUsageTimezones('Asia/Kolkata', ['Asia/Calcutta'])).toEqual([])
+    expect(findMismatchedUsageTimezones('Asia/Calcutta', ['Asia/Kolkata'])).toEqual([])
+  })
 })
