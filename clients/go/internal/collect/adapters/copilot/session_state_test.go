@@ -1,12 +1,18 @@
 package copilot
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"math"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 )
 
 // TestCopilotShutdownSubtractsCacheFromInput mirrors
@@ -126,7 +132,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 	// Leading spaces: Windows strips trailing spaces from directory names, so
 	// the name has to trim on the other side to stay portable.
 	named := writeFixtureFile(t, root, "  trimmed/events.jsonl", content)
-	usage, err := parseSessionStateFile(named)
+	usage, err := parseSessionStateFile(named, tools.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +148,7 @@ func TestCopilotSessionIDFromParentDir(t *testing.T) {
 		t.Skip("a whitespace-only directory name cannot be created on Windows")
 	}
 	blank := writeFixtureFile(t, filepath.Join(root, "  "), "events.jsonl", content)
-	usage, err = parseSessionStateFile(blank)
+	usage, err = parseSessionStateFile(blank, tools.Options{})
 	if err != nil {
 		t.Fatalf("a blank session directory must not be an error: %v", err)
 	}
@@ -181,7 +187,7 @@ func eventsFor(t *testing.T, session string, lines []string) (usage SourceUsage)
 
 func eventsAt(t *testing.T, path string) SourceUsage {
 	t.Helper()
-	usage, err := parseSessionStateFile(path)
+	usage, err := parseSessionStateFile(path, tools.Options{})
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
@@ -247,5 +253,25 @@ func TestCopilotSessionStateDropsALineWithTrailingContent(t *testing.T) {
 	})
 	if len(usage.CreditSnapshots) != 1 || usage.CreditSnapshots[0].DedupKey != "credits:session-1:kept" {
 		t.Fatalf("snapshots = %+v, want only the well-formed line", usage.CreditSnapshots)
+	}
+}
+
+// TestCopilotSessionStateScanStopsAtTheBudget pins the per-line budget check:
+// the loader's per-batch check never sees inside one events.jsonl, so the scan
+// itself must stop when the run's budget is gone.
+func TestCopilotSessionStateScanStopsAtTheBudget(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session-1", "events.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, bytes.Repeat([]byte(`{"type":"session.shutdown"}`+"\n"), 1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := parseSessionStateFile(path, tools.Options{Context: ctx})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

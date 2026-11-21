@@ -251,7 +251,7 @@ func openclawSessionID(path string) string {
 func openclawParseSessionFile(path string, o Options) ([]Entry, error) {
 	sessionID := openclawSessionID(path)
 	fallback := openclawFileMtimeMillis(path)
-	content, err := readFileWithinBudget(o, path)
+	content, err := ReadFileWithinBudget(o, path)
 	if err != nil {
 		return nil, err
 	}

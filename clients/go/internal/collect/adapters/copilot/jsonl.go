@@ -23,7 +23,7 @@ const jsonlBufferBytes = 64 * 1024
 // an error, while a bad line is not. decode is the line's Deserialize: it
 // returns the value to visit, or false for a line this reader cannot own.
 func scanJSONL(path string, prefilter func([]byte) bool, decode func(line []byte) (any, bool),
-	visit func(value any)) error {
+	visit func(value any), budget func() error) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -31,6 +31,13 @@ func scanJSONL(path string, prefilter func([]byte) bool, decode func(line []byte
 	defer file.Close()
 	reader := bufio.NewReaderSize(file, jsonlBufferBytes)
 	for {
+		// The budget is checked per line: a single events.jsonl can be tens of
+		// megabytes, and the loader's per-batch check never sees this loop.
+		if budget != nil {
+			if err := budget(); err != nil {
+				return err
+			}
+		}
 		line, readErr := readJSONLLine(reader)
 		if len(line) > 0 && prefilter(line) {
 			if value, ok := decode(line); ok {

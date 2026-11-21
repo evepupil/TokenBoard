@@ -17,11 +17,12 @@ import (
 // chunk.
 const readChunkBytes = 64 * 1024
 
-// readFileWithinBudget is os.ReadFile with the caller's budget consulted
+// ReadFileWithinBudget is os.ReadFile with the caller's budget consulted
 // between chunks. On cancellation it returns the context's error, not partial
 // content: a truncated read would parse as a smaller file and look like real
-// usage instead of a stopped one.
-func readFileWithinBudget(o Options, path string) ([]byte, error) {
+// usage instead of a stopped one. Exported for the adapters outside this
+// package (copilot) that read whole files too.
+func ReadFileWithinBudget(o Options, path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func readFileWithinBudget(o Options, path string) ([]byte, error) {
 // forwards Debug straight to that same stderr in production, so it would put
 // the path back and repeat the report twice.
 func readToolFile(path, label string, o Options) ([]byte, bool) {
-	content, err := readFileWithinBudget(o, path)
+	content, err := ReadFileWithinBudget(o, path)
 	if err != nil {
 		if o.ContextErr() != nil {
 			return nil, false

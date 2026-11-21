@@ -4,6 +4,8 @@ package tools
 // rust/adapters/droid/src/{parser,loader}.rs.
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -413,5 +415,21 @@ func TestDroidReadErrorNamesTheFileWithoutItsPath(t *testing.T) {
 	}
 	if !strings.Contains(readErrors[0].Line, "session.settings.json") {
 		t.Fatalf("readErrors[0] = %q, want it to name the file", readErrors[0].Line)
+	}
+}
+
+// TestDroidSettingsReadStopsAtTheBudget pins that one settings file cannot run
+// past the run's budget: the read is chunked and the budget is checked before
+// every chunk.
+func TestDroidSettingsReadStopsAtTheBudget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.settings.json")
+	if err := os.WriteFile(path, []byte(`{"id":"s1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := loadDroidSettingsFile(path, Options{Context: ctx})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

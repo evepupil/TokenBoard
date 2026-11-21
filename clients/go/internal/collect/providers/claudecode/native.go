@@ -1,15 +1,13 @@
 package claudecode
 
-// The native adapter seam (S2, Task 7). The in-process adapter
-// (internal/collect/adapters/claude) already produces ccusage-compatible
-// reports; this file wires it into the provider behind a compile-time switch
-// and registers it on the native registry so the parity harness can compare the
-// two implementations.
+// The native adapter seam (S2, Task 7; the switch was removed in S5). The
+// in-process adapter (internal/collect/adapters/claude) produces
+// ccusage-compatible reports; this file wires it into the provider and
+// registers it on the native registry so the parity harness can compare the two
+// implementations.
 //
-// The switch is a constant, not an environment variable: flipping it is a
-// reviewed commit, and a user must not be able to run an unvalidated code path
-// on their own data. Until it flips, Collect keeps the ccusage subprocess path
-// byte for byte.
+// There is no compile-time switch left: the native path is the only one, so a
+// constant nothing reads would be a switch a reader would believe in.
 
 import (
 	"context"
@@ -83,6 +81,48 @@ func (nativeProvider) Collect(ctx context.Context, options collect.Options) ([]c
 // to degrade into an empty result: an empty result is indistinguishable from
 // "this machine has no usage" on the dashboard.
 func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot, error) {
+	env := input.env
+	if env == nil {
+		env = os.Getenv
+	}
+	// The ccusage child used to be killed at TOKENBOARD_CCUSAGE_TIMEOUT_MS, and
+	// the claude-code provider applied that budget to every call. The native
+	// scan has no child, so the same budget becomes a deadline on the scan: a
+	// hung mount or an oversized history otherwise relies on the outer process
+	// being killed, with no structured timeout for the scheduler to report.
+	timeoutMs := readClaudeTimeoutMs(env)
+	budgetCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+	snapshots, err := nativeCollectUnbudgeted(budgetCtx, input)
+	if err != nil && budgetCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		// Only the budget added here, not the caller's own deadline: reporting
+		// "raise TOKENBOARD_CCUSAGE_TIMEOUT_MS" for a shutdown-triggered
+		// cancellation would point the operator at the wrong knob.
+		return nil, claudeTimeoutError(timeoutMs)
+	}
+	return snapshots, err
+}
+
+// defaultClaudeTimeoutMs mirrors the TS provider's DEFAULT_CCUSAGE_TIMEOUT_MS:
+// one shared budget for every ccusage-shaped call.
+const defaultClaudeTimeoutMs = 900_000
+
+func readClaudeTimeoutMs(env func(string) string) int {
+	// parseInt semantics: TS reads this with Number.parseInt(…, 10), so a
+	// trailing suffix ("1200abc", "1200.9") still yields a usable number.
+	if value, ok := contract.ParseInt(env("TOKENBOARD_CCUSAGE_TIMEOUT_MS")); ok && value > 0 {
+		return value
+	}
+	return defaultClaudeTimeoutMs
+}
+
+func claudeTimeoutError(timeoutMs int) error {
+	return fmt.Errorf(
+		"claude-code scan timed out after %dms (TOKENBOARD_CCUSAGE_TIMEOUT_MS); the run stopped before the whole history was read",
+		timeoutMs)
+}
+
+func nativeCollectUnbudgeted(ctx context.Context, input nativeInput) ([]contract.Snapshot, error) {
 	env := input.env
 	if env == nil {
 		env = os.Getenv

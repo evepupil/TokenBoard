@@ -390,7 +390,7 @@ func TestCopilotSessionStateUnreadableTimeDropsTheLine(t *testing.T) {
 	path := writeFixtureFile(t, t.TempDir(), "session-x/events.jsonl",
 		`{"type":"session.shutdown","id":"shutdown-bad","timestamp":"yesterday","data":{"modelMetrics":{"m":{"usage":{"inputTokens":5},"totalNanoAiu":7}}}}`+"\n"+
 			`{"type":"session.shutdown","id":"shutdown-ok","timestamp":"2026-01-02T03:04:05.000Z","data":{"modelMetrics":{"m":{"usage":{"inputTokens":1},"totalNanoAiu":2}}}}`+"\n")
-	usage, err := parseSessionStateFile(path)
+	usage, err := parseSessionStateFile(path, tools.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

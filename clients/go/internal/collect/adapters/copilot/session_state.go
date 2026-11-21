@@ -61,22 +61,22 @@ func ptrFloat(value float64) *float64 { return &value }
 // reads event by event: only session.shutdown and session.usage_checkpoint
 // count, a missing type, timestamp or parseable timestamp skips the line, and a
 // line that is not JSON is skipped the way jsonl::records skips it.
-func parseSessionStateFile(path string) (SourceUsage, error) {
+func parseSessionStateFile(path string, o tools.Options) (SourceUsage, error) {
 	parsed := SourceUsage{}
 	sessionID, ok := sessionIDFromPath(path)
 	if !ok {
 		return parsed, nil
 	}
-	return parseSessionStateContent(path, sessionID, &parsed)
+	return parseSessionStateContent(path, sessionID, &parsed, o)
 }
 
-func parseSessionStateContent(path, sessionID string, parsed *SourceUsage) (SourceUsage, error) {
+func parseSessionStateContent(path, sessionID string, parsed *SourceUsage, o tools.Options) (SourceUsage, error) {
 	prefilter := func(line []byte) bool {
 		return containsBytes(line, []byte(shutdownEvent)) || containsBytes(line, []byte(usageCheckpointEvent))
 	}
 	err := scanJSONL(path, prefilter, decodeSessionStateEvent, func(value any) {
 		visitSessionStateEvent(parsed, sessionID, value)
-	})
+	}, o.ContextErr)
 	return *parsed, err
 }
 

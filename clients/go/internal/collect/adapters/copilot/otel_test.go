@@ -1,20 +1,26 @@
 package copilot
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/adapters/tools"
 )
 
 // otelFixture writes one OTel exporter file and parses it.
 func otelFixture(t *testing.T, lines ...string) []Entry {
 	t.Helper()
 	path := writeFixtureFile(t, t.TempDir(), "otel/exporter.jsonl", strings.Join(lines, "\n")+"\n")
-	entries, err := parseOtelFile(path, 0)
+	entries, err := parseOtelFile(path, 0, tools.Options{})
 	if err != nil {
 		t.Fatalf("parseOtelFile: %v", err)
 	}
@@ -182,7 +188,7 @@ func TestCopilotTimestampPriorityAndMagnitudeGuess(t *testing.T) {
 	if err := os.Chtimes(path, modTime, modTime); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := parseOtelFile(path, 0)
+	entries, err := parseOtelFile(path, 0, tools.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,14 +198,14 @@ func TestCopilotTimestampPriorityAndMagnitudeGuess(t *testing.T) {
 
 	// A supplied ceiling is only the last resort when the mtime is unreadable;
 	// a readable mtime still wins.
-	entries, err = parseOtelFile(path, 1234)
+	entries, err = parseOtelFile(path, 1234, tools.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if entries[0].Timestamp != modTime.UnixMilli() {
 		t.Fatalf("timestamp = %d, want the mtime even with a ceiling", entries[0].Timestamp)
 	}
-	entries, err = parseOtelFile("/definitely/not/a/real/file.jsonl", 1234)
+	entries, err = parseOtelFile("/definitely/not/a/real/file.jsonl", 1234, tools.Options{})
 	if err == nil || entries != nil {
 		t.Fatalf("a missing file must be an error, got %v / %v", entries, err)
 	}
@@ -318,5 +324,22 @@ func TestCopilotTimestampFromPartsRejectsOverflow(t *testing.T) {
 	// The boundary that DOES fit keeps working: i64::MAX milliseconds.
 	if millis, ok := timestampFromParts([]any{json.Number("9223372036854775"), json.Number("807000000")}); !ok || millis != math.MaxInt64 {
 		t.Fatalf("boundary parts = %d/%v, want i64::MAX (checked_add succeeds)", millis, ok)
+	}
+}
+
+// TestCopilotOtelReadStopsAtTheBudget pins that a single exporter file is
+// bounded by the run's budget: a pre-cancelled context must stop the read
+// before it starts, not after the whole file is in memory.
+func TestCopilotOtelReadStopsAtTheBudget(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "otel.jsonl")
+	if err := os.WriteFile(path, bytes.Repeat([]byte(`{"attributes":{}}`+"\n"), 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := parseOtelFile(path, 0, tools.Options{Context: ctx})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

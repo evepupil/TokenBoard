@@ -908,3 +908,77 @@ func nativeRowAt(inputTokens int, timestamp string) string {
 		`"message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":%d,"output_tokens":1}}}`,
 		timestamp, inputTokens)
 }
+
+// TestClaudeTimeoutBudgetReadsCcusageTimeoutMs pins that the native claude
+// scan honours the budget the ccusage child used to get: the TS provider reads
+// TOKENBOARD_CCUSAGE_TIMEOUT_MS with parseInt semantics and defaults to 900s.
+func TestClaudeTimeoutBudgetReadsCcusageTimeoutMs(t *testing.T) {
+	if got := readClaudeTimeoutMs(testEnv(map[string]string{})); got != defaultClaudeTimeoutMs {
+		t.Fatalf("default timeout = %d, want %d", got, defaultClaudeTimeoutMs)
+	}
+	for raw, want := range map[string]int{
+		"1200":    1200,
+		"1200abc": 1200, // Number.parseInt stops at the first non-digit
+		"0":       defaultClaudeTimeoutMs,
+		"-5":      defaultClaudeTimeoutMs,
+		"":        defaultClaudeTimeoutMs,
+	} {
+		got := readClaudeTimeoutMs(testEnv(map[string]string{"TOKENBOARD_CCUSAGE_TIMEOUT_MS": raw}))
+		if got != want {
+			t.Fatalf("readClaudeTimeoutMs(%q) = %d, want %d", raw, got, want)
+		}
+	}
+}
+
+// TestClaudeTimeoutDoesNotRewriteCallerCancellation pins the boundary of the
+// timeout rewrite: a run whose own context was cancelled must surface that
+// error unchanged - telling the operator to raise the timeout would point at
+// the wrong knob.
+func TestClaudeTimeoutDoesNotRewriteCallerCancellation(t *testing.T) {
+	options := nativeTestOptions(t)
+	options.Env = testEnv(map[string]string{"CLAUDE_CONFIG_DIR": fixtureTree(t)})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := nativeCollect(ctx, nativeInput{
+		options:     options,
+		env:         options.Env,
+		timezone:    options.Timezone,
+		collectedAt: options.CollectedAt,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "TOKENBOARD_CCUSAGE_TIMEOUT_MS") {
+		t.Fatalf("err = %v, a caller cancellation must not be rewritten as a timeout budget", err)
+	}
+}
+
+// TestClaudeTimeoutBudgetStopsAnOverrunningScan pins that the budget actually
+// bounds the scan: a history file big enough to outlive a 1ms budget must fail
+// with the timeout error the operator can act on, not succeed after running
+// past it.
+func TestClaudeTimeoutBudgetStopsAnOverrunningScan(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "projects", "p1")
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	big := filepath.Join(projectDir, "session.jsonl")
+	if err := os.WriteFile(big, []byte(strings.Repeat("{}\n", 700_000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := nativeTestOptions(t)
+	options.Env = testEnv(map[string]string{
+		"CLAUDE_CONFIG_DIR":             root,
+		"TOKENBOARD_CCUSAGE_TIMEOUT_MS": "1",
+	})
+	_, err := nativeCollect(context.Background(), nativeInput{
+		options:     options,
+		env:         options.Env,
+		timezone:    options.Timezone,
+		collectedAt: options.CollectedAt,
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out after 1ms") {
+		t.Fatalf("err = %v, want the timeout budget to stop the scan", err)
+	}
+}

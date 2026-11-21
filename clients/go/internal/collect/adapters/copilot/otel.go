@@ -139,8 +139,8 @@ type traceContext struct {
 // parseOtelFile is parse_otel_file (parser.rs:126-163). ceiling is the instant
 // a record without any usable timestamp falls back to when the file's
 // modification time cannot be read.
-func parseOtelFile(path string, ceiling int64) ([]Entry, error) {
-	content, err := os.ReadFile(path)
+func parseOtelFile(path string, ceiling int64, o tools.Options) ([]Entry, error) {
+	content, err := tools.ReadFileWithinBudget(o, path)
 	if err != nil {
 		return nil, err
 	}

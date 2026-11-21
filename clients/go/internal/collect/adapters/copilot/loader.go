@@ -69,7 +69,7 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 			group.Add(1)
 			go func(index int, source SourceFile) {
 				defer group.Done()
-				usage, err := readSourceFile(source, ceiling)
+				usage, err := readSourceFile(source, ceiling, o)
 				parsed[index], failures[index] = usage, err
 			}(index, sources[index])
 		}
@@ -81,6 +81,12 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 	creditSnapshots := []CreditSnapshot{}
 	for index, source := range sources {
 		if err := failures[index]; err != nil {
+			// A budget that ended mid-read aborts the load with the budget
+			// error itself; recording it as a broken file would warn on every
+			// timeout.
+			if ctxErr := o.ContextErr(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			// A failed file only loses its own rows (loader.rs:54-68). A read
 			// failure is reported through ReadErrors (base name only: the line
 			// reaches stderr, which operators paste into issues); a vanished
@@ -148,16 +154,16 @@ func Load(input LoadInput) ([]tools.Entry, error) {
 }
 
 // readSourceFile is read_source_file (loader.rs:434-442).
-func readSourceFile(source SourceFile, ceiling int64) (SourceUsage, error) {
+func readSourceFile(source SourceFile, ceiling int64, o tools.Options) (SourceUsage, error) {
 	switch source.Kind {
 	case KindOtel:
-		entries, err := parseOtelFile(source.Path, ceiling)
+		entries, err := parseOtelFile(source.Path, ceiling, o)
 		if err != nil {
 			return SourceUsage{}, err
 		}
 		return SourceUsage{Entries: entries}, nil
 	default:
-		return parseSessionStateFile(source.Path)
+		return parseSessionStateFile(source.Path, o)
 	}
 }
 

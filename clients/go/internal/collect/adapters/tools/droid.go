@@ -56,8 +56,14 @@ func LoadDroid(o Options) ([]Entry, error) {
 		if err := o.ContextErr(); err != nil {
 			return nil, err
 		}
-		record, ok, err := loadDroidSettingsFile(file)
+		record, ok, err := loadDroidSettingsFile(file, o)
 		if err != nil {
+			// A budget that ended mid-read aborts the load with the budget
+			// error itself; reporting it as a broken file would add a warning
+			// to every timeout.
+			if ctxErr := o.ContextErr(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			// A malformed settings file is a parse problem the Rust loader skips
 			// (loader.rs:29-40); an I/O failure (beyond the vanished-file case
 			// loadDroidSettingsFile already swallows) is recorded so it reaches
@@ -110,8 +116,8 @@ func (e *droidReadError) Unwrap() error { return e.err }
 // loadDroidSettingsFile is load_settings_file (parser.rs:32-94). ok is false
 // for a document that carries no usable snapshot; err is a parse failure (a
 // debug line) or an open failure (a *droidReadError, which the loader reports).
-func loadDroidSettingsFile(path string) (droidRecord, bool, error) {
-	content, err := os.ReadFile(path)
+func loadDroidSettingsFile(path string, o Options) (droidRecord, bool, error) {
+	content, err := ReadFileWithinBudget(o, path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return droidRecord{}, false, nil
