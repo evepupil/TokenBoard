@@ -172,6 +172,26 @@ func TestSkipsRowsWithoutUsableTokenMetadata(t *testing.T) {
 	}
 }
 
+func TestSkipsTimestampsOutsideTheJSDateRange(t *testing.T) {
+	// TS built a Date from createdMs, and `new Date(x)` is invalid past
+	// ±8.64e15 ms; those rows were skipped. Here int64(createdMs) would wrap
+	// into a plausible-looking date, so the range must be checked first.
+	var skipped []string
+	snapshots := mustCollect(t, []map[string]any{
+		dbRow(map[string]any{"createdMs": 9.5e15}),
+		dbRow(map[string]any{"createdMs": 1e30}),
+	}, func(o *Options) {
+		o.Stderr = func(line string) { skipped = append(skipped, line) }
+	})
+
+	if len(snapshots) != 0 {
+		t.Errorf("snapshots = %+v, want none", snapshots)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "Skipped 2 OpenCode message rows") {
+		t.Errorf("skipped = %v", skipped)
+	}
+}
+
 func TestFallsBackToPlaceholderModelAndBoundsLongIds(t *testing.T) {
 	missing := mustCollect(t, []map[string]any{dbRow(map[string]any{"model": nil})}, nil)
 	if missing[0].Model != "unknown" {

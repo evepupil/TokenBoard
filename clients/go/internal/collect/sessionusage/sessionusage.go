@@ -224,7 +224,11 @@ const secondsThreshold = 100_000_000_000
 // null for those, falling back to the session timestamp.
 const maxJSDateMilliseconds = 8.64e15
 
-func inJSDateRange(milliseconds float64) bool {
+// InJSDateRange reports whether a millisecond timestamp survives a JS `new
+// Date(ms)`. Providers that convert a stored millisecond value to a Go time
+// must check it first: `int64(x)` past the int64 range wraps or saturates, and
+// TS would have seen an invalid Date instead.
+func InJSDateRange(milliseconds float64) bool {
 	return milliseconds >= -maxJSDateMilliseconds && milliseconds <= maxJSDateMilliseconds
 }
 
@@ -245,7 +249,7 @@ func ReadEventTimestamp(value any) (time.Time, bool) {
 		// Without the bound, int64(milliseconds) is undefined past 2^63 and
 		// time.UnixMilli renders whatever it produced, so a five-digit year would
 		// reach the snapshot and fail validation for the whole source.
-		if !inJSDateRange(milliseconds) {
+		if !InJSDateRange(milliseconds) {
 			return time.Time{}, false
 		}
 		return time.UnixMilli(int64(milliseconds)), true

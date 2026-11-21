@@ -455,7 +455,7 @@ func (run *providerRun) collectScopedBatch(
 		return scopedBatch{}, err
 	}
 	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
-		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
+		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env)))
 	if err != nil {
 		return scopedBatch{}, err
 	}
@@ -548,7 +548,7 @@ func (run *providerRun) collectSessionCounts(
 		return map[string]any{"data": []any{}}, nil
 	}
 	result, err := run.runner(run.ctx, ccusage.ReportCommand, args,
-		PackageCommandOptions(environOf(env), ReadSessionTimeoutMs(run.env), run.stderr))
+		PackageCommandOptions(environOf(env), ReadSessionTimeoutMs(run.env)))
 	if err != nil {
 		if required {
 			return nil, err
@@ -719,7 +719,7 @@ func (run *providerRun) collectFrozenBoundedBatch(
 		return frozenBoundedBatch{}, err
 	}
 	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
-		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env), run.stderr))
+		PackageCommandOptions(environOf(scopeEnv), ReadDailyTimeoutMs(run.env)))
 	if err != nil {
 		return frozenBoundedBatch{}, err
 	}
@@ -1042,7 +1042,7 @@ func (run *providerRun) collectUnboundedUsageAttempt(input unboundedRunInput) ([
 		return nil, err
 	}
 	daily, err := run.runner(run.ctx, ccusage.ReportCommand, args,
-		PackageCommandOptions(environOf(collectionEnv), ReadDailyTimeoutMs(run.env), run.stderr))
+		PackageCommandOptions(environOf(collectionEnv), ReadDailyTimeoutMs(run.env)))
 	if err != nil {
 		return nil, err
 	}

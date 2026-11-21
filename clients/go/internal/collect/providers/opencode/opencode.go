@@ -151,7 +151,9 @@ func Collect(options Options) ([]contract.Snapshot, error) {
 
 func parseUsageRow(row map[string]any, timezone string) (*usageRow, bool) {
 	createdMs, ok := sessionusage.ReadFiniteNumber(row["createdMs"])
-	if !ok || createdMs <= 0 {
+	if !ok || createdMs <= 0 || !sessionusage.InJSDateRange(createdMs) {
+		// Out of the JS Date range, TS produced an invalid Date and the row was
+		// skipped; int64(createdMs) here would wrap into a plausible date.
 		return nil, false
 	}
 	createdAt := time.UnixMilli(int64(createdMs))

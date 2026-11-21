@@ -12,16 +12,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 )
 
-// CommandOptions configures one report call.
+// CommandOptions configures one report call. The subprocess runner's retry
+// fields (Retries/RetryDelay/OnRetry) were deleted with it: the in-process
+// runners already answer from local stores, so a retry loop had nothing left
+// to retry. TOKENBOARD_PACKAGE_COMMAND_RETRIES survives only in the TS
+// collector, which still spawns ccusage.
 type CommandOptions struct {
-	Env        []string
-	TimeoutMs  int
-	Retries    int
-	RetryDelay time.Duration
-	OnRetry    func(line string)
+	Env       []string
+	TimeoutMs int
 }
 
 // ReportCommand is the label every runner receives. It names the report shape

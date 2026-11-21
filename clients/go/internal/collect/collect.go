@@ -85,11 +85,12 @@ func Lookup(source contract.Source) (Provider, bool) {
 	return provider, ok
 }
 
-// nativeRegistry maps a source to its native (in-process) pricing provider.
-// It is deliberately separate from registry: registry's providers mostly shell
-// out to ccusage, and a parity harness that took the "native" side from it
-// would compare ccusage with itself. Provider packages register their native
-// implementation from an init() or from the package that owns the seam.
+// nativeRegistry maps a source to its native (in-process) provider used by
+// the parity harness (cmd/parity). It stays deliberately separate from
+// registry: before the S5 flip (2026-11-10) registry's providers shelled out
+// to ccusage, and a parity run that took its "native" side from registry would
+// have compared ccusage with itself. Provider packages still register the
+// native side from init(), and cmd/parity remains the one caller.
 var nativeRegistry = map[contract.Source]Provider{}
 
 // RegisterNative installs a native provider for a source, called from S2+

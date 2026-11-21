@@ -97,8 +97,8 @@ func TestCcusageCoreKeepsOnlySharedContracts(t *testing.T) {
 	}
 	for name := range found {
 		if !sharedExports[name] {
-			t.Errorf("internal/ccusage exports %q; acquisition belongs in internal/ccusage/{acquire,exec,runner}, "+
-				"and a new shared contract has to be added to sharedExports deliberately", name)
+			t.Errorf("internal/ccusage exports %q; the report contract is a closed set and a new shared "+
+				"export has to be added to sharedExports deliberately", name)
 		}
 	}
 	for name := range sharedExports {

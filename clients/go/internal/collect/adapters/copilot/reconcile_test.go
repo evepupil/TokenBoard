@@ -317,10 +317,10 @@ func TestCopilotCreditGapSubtractsBeforeSince(t *testing.T) {
 	requireRows(t, creditRows(result, "UTC"), []string{"2026-01-03 unknown 0 20"})
 }
 
-// TestCopilotCreditGapLaterShutdownAttribution mirrors
-// does_not_count_credits_that_a_later_shutdown_attributes (loader.rs:1621-1640)
-// and TestCopilotCreditGapSuffixMinimumDecays: an earlier unexplained amount
-// that a later shutdown's model breakdown catches up on is never reported.
+// TestCopilotCreditGapSuffixMinimumDecays mirrors
+// does_not_count_credits_that_a_later_shutdown_attributes (loader.rs:1621-1640):
+// an earlier unexplained amount that a later shutdown's model breakdown
+// catches up on is never reported.
 func TestCopilotCreditGapSuffixMinimumDecays(t *testing.T) {
 	// A later shutdown that catches up on an earlier breakdown explains the
 	// earlier amount away: the 12:00 shutdown attributes 20 more than its own
