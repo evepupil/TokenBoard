@@ -338,27 +338,28 @@ jobs:
         run: go test ./internal/collect/adapters/tools/... ./internal/collect/adapters/copilot/... ./internal/collect/providers/ccusagetool/... -race -count=1
 
       # Costs are compared bit for bit against ccusage, and on arm64 Go fuses
-      # `a*b + c` into FMADDD where Rust rounds the product first - a 1 ULP
+      # `a*b + c` into FMADDD (and the subtract forms into FMSUBD/FNMSUBD/
+      # FNMADDD) where Rust and JavaScript round the product first - a 1 ULP
       # drift that forks snapshotHash. The cost tests pin the rounding on any
       # host; this step pins the compiled instruction stream, because the
       # fusion only exists there. Route products through nativepricing.Product
       # rather than loosening this check.
       #
-      # The scan covers the whole module: a hand-kept package roster silently
-      # missed providers/codex, and the failure mode is invisible (the check
-      # passes on packages it does not name). A build failure must fail the
-      # step too - `go build ... | grep -c` would otherwise report 0 fused
-      # instructions for output that never compiled.
+      # The scan covers the whole module and every fused opcode: a hand-kept
+      # package roster silently missed providers/codex, and a grep for FMADDD
+      # alone missed the FMSUBD that `total - base*count` compiles to. A build
+      # failure must fail the step too - `go build ... | grep -c` would
+      # otherwise report 0 fused instructions for output that never compiled.
       - name: arm64 code has no fused multiply-add
         working-directory: clients/go
         run: |
           out=$(mktemp -d)
           trap 'rm -rf "$out"' EXIT
           GOOS=darwin GOARCH=arm64 go build -gcflags='-S' -o "$out/" ./... 2>"$out/asm.txt"
-          fused=$(grep -c FMADDD "$out/asm.txt" || true)
+          fused=$(grep -cE 'FMADDD|FMSUBD|FNMSUBD|FNMADDD' "$out/asm.txt" || true)
           if [ "$fused" -ne 0 ]; then
-            grep FMADDD "$out/asm.txt" >&2
-            echo "the arm64 build compiles $fused fused multiply-adds (FMADDD); route the product through nativepricing.Product (mtime.Millis shows the guard for non-pricing doubles)" >&2
+            grep -E 'FMADDD|FMSUBD|FNMSUBD|FNMADDD' "$out/asm.txt" >&2
+            echo "the arm64 build compiles $fused fused multiply-adds; route products and products-in-subtractions through nativepricing.Product/Sum (mtime.Millis shows the guard for non-pricing doubles)" >&2
             exit 1
           fi
 

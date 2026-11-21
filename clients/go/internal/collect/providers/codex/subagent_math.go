@@ -3,6 +3,8 @@ package codex
 import (
 	"errors"
 	"math"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/nativepricing"
 )
 
 // Port of codex-subagent-usage-math.ts: the arithmetic the subagent usage
@@ -181,7 +183,11 @@ func splitInteger(total float64, weights []float64) []float64 {
 
 func splitEvenly(total float64, count int) []float64 {
 	base := math.Floor(total / float64(count))
-	remainder := total - base*float64(count)
+	// The TS side computes `total - base * count` as two rounded JavaScript
+	// operations. Inlining it here lets the arm64 compiler fuse the multiply
+	// and subtract into one FMSUBD, which rounds once and can differ by 1 ULP;
+	// the helpers keep the two steps apart the way the doubles are.
+	remainder := nativepricing.Sum(total, -nativepricing.Product(base, float64(count)))
 	out := make([]float64, count)
 	for index := 0; index < count; index++ {
 		if float64(index) < remainder {
