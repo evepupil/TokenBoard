@@ -38,6 +38,7 @@ for (const file of [
   'db/verify-critical-schema.sql',
   'db/verify-rate-limit-index.sql',
   'db/verify-retention-index.sql',
+  'db/verify-public-card-index.sql',
   'db/verify-foreign-keys.sql'
 ]) {
   runPnpm(['exec', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--file', file, '--yes', '--config', configPath])

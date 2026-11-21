@@ -474,7 +474,8 @@ describe('Wrangler deploy config', () => {
 
   // The ordering test above anchors the foreign-key check relative to migrations and the live
   // deploy, but all the gates share one array literal: reordering inside it, or dropping
-  // `verify-critical-schema.sql` / `verify-rate-limit-index.sql` / `verify-retention-index.sql`
+  // `verify-critical-schema.sql` / `verify-rate-limit-index.sql` / `verify-retention-index.sql` /
+  // `verify-public-card-index.sql`
   // from it, moves no anchor and would leave that test green. Pin the array itself, in order, so
   // the deploy loop cannot drift from the gate set the rest of this file asserts the contents of.
   test('deploy runs every schema gate in the documented order', () => {
@@ -483,6 +484,7 @@ describe('Wrangler deploy config', () => {
       'db/verify-critical-schema.sql',
       'db/verify-rate-limit-index.sql',
       'db/verify-retention-index.sql',
+      'db/verify-public-card-index.sql',
       'db/verify-foreign-keys.sql'
     ]
     const positions = gates.map((gate) => deployScript.indexOf(`'${gate}'`))
@@ -538,6 +540,60 @@ describe('Wrangler deploy config', () => {
       rmSync(tempDir, { recursive: true, force: true })
     }
   }, 30_000)
+
+  // 0039's index is `CREATE INDEX IF NOT EXISTS`, so a same-name index over the wrong columns
+  // applies silently — SQLite skips it without comparing definitions and no gate noticed. This
+  // runs the real migrations, then proves both halves of the check: a missing index and a
+  // wrong-column index under the right name must fail, and the migrated index must pass.
+  test('the public-card index check accepts migrated data and rejects a wrong index', () => {
+    const schemaCheck = readPackageFile('db/verify-public-card-index.sql')
+    const migrationsDir = resolve(packageDir, 'db/migrations')
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-public-card-index-gate-'))
+    const dbPath = join(tempDir, 'public-card.db')
+
+    try {
+      for (const migration of readdirSync(migrationsDir)
+        .filter((name) => name.endsWith('.sql'))
+        .sort()) {
+        runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
+      }
+
+      const check = runSqlite(dbPath, schemaCheck, false)
+      expect(check.status).toBe(0)
+      expect(check.stderr).toBe('')
+
+      runSqlite(dbPath, 'DROP INDEX daily_usage_summary_user_updated_idx;')
+      const afterDrop = runSqlite(dbPath, schemaCheck, false)
+      expect(afterDrop.status).not.toBe(0)
+
+      // The name alone is not the contract: the rightmost column must be updated_at, or the
+      // MAX(updated_at) seek degrades back to a range scan.
+      runSqlite(
+        dbPath,
+        'CREATE INDEX daily_usage_summary_user_updated_idx ON daily_usage_summary(user_id, usage_date);'
+      )
+      const afterWrongColumns = runSqlite(dbPath, schemaCheck, false)
+      expect(afterWrongColumns.status).not.toBe(0)
+
+      runSqlite(
+        dbPath,
+        'DROP INDEX daily_usage_summary_user_updated_idx; CREATE INDEX daily_usage_summary_user_updated_idx ON daily_usage_summary(user_id, updated_at);'
+      )
+      const afterRestore = runSqlite(dbPath, schemaCheck, false)
+      expect(afterRestore.status).toBe(0)
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  // The migration is hand-written and `drizzle-kit generate` is banned (AGENTS.md), so the
+  // Drizzle declaration can drift from the SQL without either side failing. Pin the name and
+  // columns in the schema so deleting the declaration is caught here.
+  test('the schema declares the public-card index from 0039', () => {
+    const schema = readDrizzleSchema()
+
+    expect(schema).toContain("index('daily_usage_summary_user_updated_idx').on(table.userId, table.updatedAt)")
+  })
 
   // The retention indexes from 0036 were built the same way the rate-limit index was, and
   // suffered the same gap: nothing in the deploy gate knew they existed, so `DROP INDEX` on
