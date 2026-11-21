@@ -285,6 +285,40 @@ describe('listLeaderboard against SQLite', () => {
     expect(entries[0]?.costUsd).toBe(2)
     expect(entries[0]?.costAvailable).toBe(false)
   })
+
+  // A public account can create rows on purpose (one per date/source/model, each capped at 1e12
+  // tokens), so an integer SUM over a window is an overflow an uploader can trigger deliberately —
+  // and it would blank the board for every viewer, not just them. `SUM()` throws "integer
+  // overflow" past int64; `total()` accumulates in floating point and cannot. Two rows at int64
+  // max stand in for the ~9.2M capped rows that would reach the same sum, and the plain SUM
+  // check first proves the failure mode is real.
+  test('a window whose token sum overflows int64 still returns a row', async () => {
+    const { path, db } = createDb(tempDirs, {
+      profiles: [profile('u_alice', 'alice', { isPublic: 1, participates: 1 })]
+    })
+    runSql(
+      path,
+      `
+      INSERT INTO daily_usage (
+        user_id, device_id, source, usage_date, timezone, model,
+        input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+        total_tokens, cost_usd, session_count, snapshot_hash, synced_at
+      ) VALUES
+        ('u_alice', 'device-1', 'claude-code', '2026-05-10', 'UTC', 'model-a', 0, 0, 0, 0, 9223372036854775807, 0, 1, 'hash-a', '2026-05-10T00:00:00Z'),
+        ('u_alice', 'device-2', 'claude-code', '2026-05-11', 'UTC', 'model-b', 0, 0, 0, 0, 9223372036854775807, 0, 1, 'hash-b', '2026-05-11T00:00:00Z');
+    `
+    )
+
+    expect(() => runSql(path, 'SELECT SUM(total_tokens) FROM daily_usage')).toThrow(/integer overflow/)
+
+    const entries = await listLeaderboard(db, monthly({ metric: 'tokens' }))
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.totalTokens).toBeGreaterThan(9e18)
+    expect(Number.isFinite(entries[0]?.totalTokens ?? Number.NaN)).toBe(true)
+    // The per-source CTE sums the same rows and must survive the same overflow.
+    expect(entries[0]?.sourceBreakdown.map((item) => item.source)).toEqual(['claude-code'])
+  })
 })
 
 function monthly(input: Partial<LeaderboardQuery> = {}): LeaderboardQuery {
