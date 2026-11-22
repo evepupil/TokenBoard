@@ -15,13 +15,13 @@ import (
 // the account segment to cross a Write boundary *below* the line-buffering
 // layer; this composition prevents it, and a reordering (redactor above the
 // sink, or the sink bypassed) would fail here — including the chunk split
-// exactly inside `/Users/mison`.
+// exactly inside the account name.
 func TestSinkRedactsSplitChildWrites(t *testing.T) {
 	var out bytes.Buffer
 	sink := newPricingDiagnosticSink(redact.Writer(&out))
 
-	first := []byte("Unable to inspect session directory /Users/mis")
-	second := []byte("on/.claude/projects: permission denied\n")
+	first := []byte("Unable to inspect session directory /Users/some")
+	second := []byte("one/.claude/projects: permission denied\n")
 	if _, err := sink.Write(first); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestSinkRedactsSplitChildWrites(t *testing.T) {
 	sink.Flush()
 
 	got := out.String()
-	if strings.Contains(got, "mison") {
+	if strings.Contains(got, "someone") {
 		t.Fatalf("account name survived the split: %q", got)
 	}
 	if !strings.Contains(got, "/Users/<redacted>/.claude/projects: permission denied") {

@@ -349,6 +349,52 @@ func TestCopilotOtelReadStopsAtTheBudget(t *testing.T) {
 // finished reading just before the deadline does not keep burning CPU past
 // it (the cancellation must also reach parseOtelFile as an error, not a
 // silently truncated record set).
+// budgetExhaustingContext trips Err() after a fixed number of checks, so a
+// test can place the cancellation exactly where it wants to exercise: small
+// files spend two checks inside ReadFileWithinBudget (one per loop pass), so
+// remaining=2 leaves the first parse-phase check as the one that trips.
+type budgetExhaustingContext struct {
+	context.Context
+	checksRemaining int
+}
+
+func (c *budgetExhaustingContext) Err() error {
+	if c.checksRemaining > 0 {
+		c.checksRemaining--
+		return nil
+	}
+	return context.Canceled
+}
+
+// TestCopilotOtelParsePhaseReportsTheCancelledBudget pins the fallback that
+// turns a mid-parse stop into an error: forEachJSONLine returns silently, and
+// without the ContextErr check after it, parseOtelFile would hand the loader
+// a truncated record set as a success.
+func TestCopilotOtelParsePhaseReportsTheCancelledBudget(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "otel.jsonl")
+	content := strings.Repeat(`{"attributes":{}}`+"\n", 50)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	budget := &budgetExhaustingContext{Context: context.Background(), checksRemaining: 2}
+	entries, err := parseOtelFile(path, 0, tools.Options{Context: budget})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, entries = %v, want context.Canceled from the parse phase", err, entries)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("entries = %v, want none alongside the error", entries)
+	}
+
+	// An uncapped budget reads the same file completely, proving the trip (and
+	// only the trip) produces the error.
+	full, err := parseOtelFile(path, 0, tools.Options{})
+	if err != nil || len(full) != 0 {
+		t.Fatalf("uncapped parse = (%d entries, %v); records without usage decode to no entries", len(full), err)
+	}
+}
+
 func TestForEachJSONLineStopsAtTheBudget(t *testing.T) {
 	content := []byte(strings.Repeat(`{"attributes":{}}`+"\n", 100))
 	visited := 0
