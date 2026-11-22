@@ -94,11 +94,12 @@ export const usageTimezoneSchema = z
 export const usageModelSchema = z.string().min(1).max(maxUsageModelNameLength)
 
 /**
- * Ceiling for a single snapshot's `costUsd`. Cost is the one field the aggregation layer
- * sums across rows, so an extreme value would overflow that sum to `Infinity`, which then
- * serialises to `null` in the public JSON. Six orders of magnitude above the largest
- * per-snapshot cost seen in production, so it bounds the arithmetic without constraining
- * real usage.
+ * Ceiling for a single snapshot's `costUsd`. Cost is summed by the aggregation
+ * layer alongside the token fields (each of which carries its own ceiling
+ * below); an extreme per-row value would drive that sum to `Infinity`, which
+ * then serialises to `null` in the public JSON. Six orders of magnitude above
+ * the largest per-snapshot cost seen in production, so it bounds the
+ * arithmetic without constraining real usage.
  */
 export const maxSnapshotCostUsd = 1_000_000_000
 
