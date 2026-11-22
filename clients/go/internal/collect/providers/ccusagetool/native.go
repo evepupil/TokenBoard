@@ -148,7 +148,7 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	var budgetCtx context.Context
 	if options.TimeoutMs > 0 {
 		var cancel context.CancelFunc
-		budgetCtx, cancel = context.WithTimeout(ctx, ccusage.ReportTimeoutBudget(options.TimeoutMs))
+		budgetCtx, cancel = context.WithTimeout(ctx, ccusage.TimeoutBudget(options.TimeoutMs))
 		defer cancel()
 		ctx = budgetCtx
 	}

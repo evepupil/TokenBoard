@@ -131,11 +131,11 @@ func TestWithConfigArgsBlankDynamicFallsThroughToTheExplicitConfig(t *testing.T)
 	}
 }
 
-// TestReportTimeoutBudgetSaturates pins the 1x deadline conversion shared by
+// TestTimeoutBudgetSaturates pins the 1x deadline conversion shared by
 // the native codex and tool providers: multiplying a huge millisecond value
 // used to wrap to a negative Duration (instant cancellation) or a short
 // positive one — the opposite of an effectively-unbounded knob.
-func TestReportTimeoutBudgetSaturates(t *testing.T) {
+func TestTimeoutBudgetSaturates(t *testing.T) {
 	cases := []struct {
 		ms   int
 		want time.Duration
@@ -146,9 +146,9 @@ func TestReportTimeoutBudgetSaturates(t *testing.T) {
 		{10_000_000_000_000, time.Duration(math.MaxInt64)},
 	}
 	for _, tc := range cases {
-		got := ReportTimeoutBudget(tc.ms)
+		got := TimeoutBudget(tc.ms)
 		if got != tc.want {
-			t.Fatalf("ReportTimeoutBudget(%d) = %v, want %v", tc.ms, got, tc.want)
+			t.Fatalf("TimeoutBudget(%d) = %v, want %v", tc.ms, got, tc.want)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), got)
 		defer cancel()

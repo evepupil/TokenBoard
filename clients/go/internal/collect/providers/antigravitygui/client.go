@@ -217,8 +217,11 @@ func (p *languageServerProcess) waitForReady(port int, probe probeFunc) error {
 func readReadyTimeout() time.Duration {
 	// TS reads this with Number.parseInt(…, 10); Atoi would reject the
 	// trailing-suffix forms parseInt accepts and fall back to the default.
+	// The shared budget saturates a knob huge enough to overflow the
+	// millisecond-to-Duration multiply: a wrapped negative deadline would fail
+	// the readiness probe instantly on the machine that asked for more time.
 	if value, ok := contract.ParseInt(os.Getenv("TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS")); ok && value > 0 {
-		return time.Duration(value) * time.Millisecond
+		return ccusage.TimeoutBudget(value)
 	}
 	return defaultReadyTimeout
 }

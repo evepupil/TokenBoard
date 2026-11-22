@@ -26,12 +26,12 @@ type CommandOptions struct {
 	TimeoutMs int
 }
 
-// ReportTimeoutBudget converts one millisecond knob to a context deadline.
+// TimeoutBudget converts one millisecond knob to a context deadline.
 // Multiplying a value above MaxInt64/1ms wraps time.Duration: a negative
 // deadline cancels the scan instantly, and the wrap can also land on a short
 // positive budget — the opposite of the effectively-unbounded value the
 // operator set. Saturate at MaxInt64 (~292 years) instead.
-func ReportTimeoutBudget(timeoutMs int) time.Duration {
+func TimeoutBudget(timeoutMs int) time.Duration {
 	if int64(timeoutMs) > maxReportTimeoutMs {
 		return math.MaxInt64
 	}
