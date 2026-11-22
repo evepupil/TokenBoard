@@ -1,5 +1,5 @@
 // The credential variables the collector must never hand to a child process
-// (AGENTS.md "跨端协议不变量"). The same four keys are stripped by
+// (AGENTS.md "跨端协议不变量"). The same five keys are stripped by
 // packages/collector/src/child-env.ts, clients/go/internal/ccusage/credentials.go
 // and skills/tokenboard/scripts/child-env.mjs; the generators here exec
 // third-party binaries (ccusage, and through CCUSAGE_BIN anything a maintainer
@@ -8,7 +8,8 @@ export const SCRUBBED_ENV_KEYS = [
   'TOKENBOARD_UPLOAD_TOKEN',
   'TOKENBOARD_PAIRING_CODE',
   'TOKENBOARD_RELEASE_BASE_URL',
-  'TOKENBOARD_REPO_URL'
+  'TOKENBOARD_REPO_URL',
+  'TOKENBOARD_ARCHIVE_URL'
 ]
 
 /** A copy of `env` with the credential keys removed. */

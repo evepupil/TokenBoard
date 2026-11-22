@@ -118,11 +118,12 @@ canonicalize() {
 
 run_ccusage() {
   # CCUSAGE_BIN can point at any binary; strip the collector credentials before
-  # exec, the same four keys the collector itself removes (AGENTS.md
+  # exec, the same five keys the collector itself removes (AGENTS.md
   # "跨端协议不变量").
   CLAUDE_CONFIG_DIR="$work_dir/claude" env \
     -u TOKENBOARD_UPLOAD_TOKEN -u TOKENBOARD_PAIRING_CODE \
     -u TOKENBOARD_RELEASE_BASE_URL -u TOKENBOARD_REPO_URL \
+    -u TOKENBOARD_ARCHIVE_URL \
     "$ccusage_bin" "$@" --config "$config_path" -z UTC -s 20260428 -u 20260429
 }
 

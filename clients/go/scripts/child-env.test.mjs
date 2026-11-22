@@ -11,6 +11,7 @@ import { SCRUBBED_ENV_KEYS, scrubbedEnv } from './child-env.mjs'
 // leaks what the others strip.
 test('scrubbedEnv removes exactly the collector credential keys', () => {
   assert.deepEqual(SCRUBBED_ENV_KEYS.slice().sort(), [
+    'TOKENBOARD_ARCHIVE_URL',
     'TOKENBOARD_PAIRING_CODE',
     'TOKENBOARD_RELEASE_BASE_URL',
     'TOKENBOARD_REPO_URL',
@@ -22,7 +23,8 @@ test('scrubbedEnv removes exactly the collector credential keys', () => {
     TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_secret',
     TOKENBOARD_PAIRING_CODE: 'pairing',
     TOKENBOARD_RELEASE_BASE_URL: 'https://release.example',
-    TOKENBOARD_REPO_URL: 'https://repo.example'
+    TOKENBOARD_REPO_URL: 'https://repo.example',
+    TOKENBOARD_ARCHIVE_URL: 'https://archive.example?sig=secret'
   })
 
   assert.deepEqual(env, { PATH: '/usr/bin' })
