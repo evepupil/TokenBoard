@@ -395,6 +395,29 @@ func TestCopilotOtelParsePhaseReportsTheCancelledBudget(t *testing.T) {
 	}
 }
 
+func TestCopilotOtelLateCancellationDiscardsEntries(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		t.Run(strconv.Quote(newline), func(t *testing.T) {
+			path := writeFixtureFile(t, t.TempDir(), "otel.jsonl",
+				chatSpanLine("t1", "s1", 1_775_934_264, "r1", 100, 10)+newline+
+					chatSpanLine("t2", "s2", 1_775_934_265, "r2", 200, 20)+newline)
+			full, err := parseOtelFile(path, 0, tools.Options{})
+			if err != nil || len(full) != 2 || full[0].Input != 100 || full[1].Input != 200 {
+				t.Fatalf("uncapped parse = (%v, %v), want both usage entries", full, err)
+			}
+			for _, checks := range []int{11, 13, 15, 17, 19, 21, 23, 25, 26} {
+				t.Run(strconv.Itoa(checks), func(t *testing.T) {
+					budget := &budgetExhaustingContext{Context: context.Background(), checksRemaining: checks}
+					entries, err := parseOtelFile(path, 0, tools.Options{Context: budget})
+					if !errors.Is(err, context.Canceled) || entries != nil {
+						t.Fatalf("late cancellation returned (%v, %v), want no entries and context.Canceled", entries, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestForEachJSONLineStopsAtTheBudget(t *testing.T) {
 	content := []byte(strings.Repeat(`{"attributes":{}}`+"\n", 100))
 	visited := 0

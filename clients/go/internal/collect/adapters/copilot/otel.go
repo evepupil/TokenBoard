@@ -155,7 +155,10 @@ func parseOtelFile(path string, ceiling int64, o tools.Options) ([]Entry, error)
 	if err := o.ContextErr(); err != nil {
 		return nil, err
 	}
-	contexts := collectTraceContexts(records)
+	contexts, err := collectTraceContexts(records, o.ContextErr)
+	if err != nil {
+		return nil, err
+	}
 	fallback := fileModifiedTimestamp(path, ceiling)
 	candidates := make([]candidate, 0, len(records))
 	for index, record := range records {
@@ -168,9 +171,15 @@ func parseOtelFile(path string, ceiling int64, o tools.Options) ([]Entry, error)
 	}
 	// One set of suppression indexes per file (parser.rs:141-146): rebuilding it
 	// per candidate is the same answer at candidates×candidates work.
-	sets := newCandidateSets(candidates)
+	sets, err := newCandidateSets(candidates, o.ContextErr)
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]Entry, 0, len(candidates))
 	for index, cand := range candidates {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		if !shouldEmitCandidate(index, cand, sets) {
 			continue
 		}
@@ -190,6 +199,9 @@ func parseOtelFile(path string, ceiling int64, o tools.Options) ([]Entry, error)
 			DedupKey:      cand.dedupKey,
 		})
 	}
+	if err := o.ContextErr(); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -199,9 +211,14 @@ func formatRFC3339Millis(millis int64) string {
 
 // collectTraceContexts is collect_trace_contexts (parser.rs:375-398): per trace,
 // the first non-empty model and the best-priority session any record names.
-func collectTraceContexts(records []otelRecord) map[string]*traceContext {
+func collectTraceContexts(records []otelRecord, budget func() error) (map[string]*traceContext, error) {
 	contexts := map[string]*traceContext{}
 	for _, record := range records {
+		if budget != nil {
+			if err := budget(); err != nil {
+				return nil, err
+			}
+		}
 		traceID, ok := traceIDFromRecord(record)
 		if !ok || record.Attrs == nil {
 			continue
@@ -218,7 +235,7 @@ func collectTraceContexts(records []otelRecord) map[string]*traceContext {
 			context.sessionID, context.hasSession, context.sessionPhysics = sessionID, true, priority
 		}
 	}
-	return contexts
+	return contexts, nil
 }
 
 // toCandidate is to_candidate (parser.rs:400-492).

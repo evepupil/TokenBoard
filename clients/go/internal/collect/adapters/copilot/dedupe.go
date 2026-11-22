@@ -18,38 +18,82 @@ type CandidateSets struct {
 }
 
 // newCandidateSets is CandidateSets::new (parser.rs:505-521).
-func newCandidateSets(candidates []candidate) *CandidateSets {
-	return &CandidateSets{
-		RepeatedChat:     repeatedChatSpans(candidates),
-		ChatTraces:       sourceTraceIDs(candidates, chatSpan),
-		InferenceTraces:  sourceTraceIDs(candidates, inferenceLog),
-		AgentTurnTraces:  sourceTraceIDs(candidates, agentTurnLog),
-		ChatResponseIDs:  sourceResponseIDs(candidates, chatSpan),
-		InferenceRespIDs: sourceResponseIDs(candidates, inferenceLog),
-		AgentTurnRespIDs: sourceResponseIDs(candidates, agentTurnLog),
+//
+// budget is consulted inside every scan: each set walks all candidates, so the
+// suppression phase costs several passes over the same list. Without a check
+// here a deadline that expired during the decode still ran every pass to
+// completion and returned a full entry list as if it were complete. An error
+// means the caller must discard the file, not use a partial set.
+func newCandidateSets(candidates []candidate, budget func() error) (*CandidateSets, error) {
+	repeated, err := repeatedChatSpans(candidates, budget)
+	if err != nil {
+		return nil, err
 	}
+	chatTraces, err := sourceTraceIDs(candidates, chatSpan, budget)
+	if err != nil {
+		return nil, err
+	}
+	inferenceTraces, err := sourceTraceIDs(candidates, inferenceLog, budget)
+	if err != nil {
+		return nil, err
+	}
+	agentTurnTraces, err := sourceTraceIDs(candidates, agentTurnLog, budget)
+	if err != nil {
+		return nil, err
+	}
+	chatResponses, err := sourceResponseIDs(candidates, chatSpan, budget)
+	if err != nil {
+		return nil, err
+	}
+	inferenceResponses, err := sourceResponseIDs(candidates, inferenceLog, budget)
+	if err != nil {
+		return nil, err
+	}
+	agentTurnResponses, err := sourceResponseIDs(candidates, agentTurnLog, budget)
+	if err != nil {
+		return nil, err
+	}
+	return &CandidateSets{
+		RepeatedChat:     repeated,
+		ChatTraces:       chatTraces,
+		InferenceTraces:  inferenceTraces,
+		AgentTurnTraces:  agentTurnTraces,
+		ChatResponseIDs:  chatResponses,
+		InferenceRespIDs: inferenceResponses,
+		AgentTurnRespIDs: agentTurnResponses,
+	}, nil
 }
 
 // sourceTraceIDs is source_trace_ids (parser.rs:524-533).
-func sourceTraceIDs(candidates []candidate, source otelUsageSource) map[string]bool {
+func sourceTraceIDs(candidates []candidate, source otelUsageSource, budget func() error) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, cand := range candidates {
+		if budget != nil {
+			if err := budget(); err != nil {
+				return nil, err
+			}
+		}
 		if cand.source == source && cand.hasTrace {
 			out[cand.traceID] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 // sourceResponseIDs is source_response_ids (parser.rs:535-544).
-func sourceResponseIDs(candidates []candidate, source otelUsageSource) map[string]bool {
+func sourceResponseIDs(candidates []candidate, source otelUsageSource, budget func() error) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, cand := range candidates {
+		if budget != nil {
+			if err := budget(); err != nil {
+				return nil, err
+			}
+		}
 		if cand.source == source && cand.hasResponse {
 			out[cand.responseID] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 // repeatedChatCall is the identity key of repeated_chat_spans (parser.rs:560-569):
@@ -71,10 +115,15 @@ type repeatedChatCall struct {
 // is recognised by its response id and usage, and the earliest copy is kept.
 // One response id with different usage (VS Code reports the turn's id on every
 // call) stays several calls.
-func repeatedChatSpans(candidates []candidate) map[int]bool {
+func repeatedChatSpans(candidates []candidate, budget func() error) (map[int]bool, error) {
 	earliest := map[repeatedChatCall]int{}
 	repeated := map[int]bool{}
 	for index, cand := range candidates {
+		if budget != nil {
+			if err := budget(); err != nil {
+				return nil, err
+			}
+		}
 		if cand.source != chatSpan || !cand.hasResponse {
 			continue
 		}
@@ -92,7 +141,7 @@ func repeatedChatSpans(candidates []candidate) map[int]bool {
 		}
 		repeated[index] = true
 	}
-	return repeated
+	return repeated, nil
 }
 
 // shouldEmitCandidate is should_emit_candidate (parser.rs:584-621).
