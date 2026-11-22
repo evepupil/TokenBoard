@@ -131,6 +131,11 @@ describe('ProfilePage timezone consequence', () => {
     )
 
     expect(html).toContain('Asia/Shanghai')
+    // The positive half of the canonical comparison: a zone that is really
+    // different (no alias folds UTC onto Asia/Shanghai) must render the
+    // mismatch sentence, or the alias test above proves only that nothing is
+    // ever flagged.
+    expect(html).toContain('与这里的时区不一致')
   })
 })
 
