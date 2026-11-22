@@ -978,7 +978,20 @@ func TestClaudeTimeoutBudgetStopsAnOverrunningScan(t *testing.T) {
 		timezone:    options.Timezone,
 		collectedAt: options.CollectedAt,
 	})
-	if err == nil || !strings.Contains(err.Error(), "timed out after 1ms") {
+	if err == nil || !strings.Contains(err.Error(), "timed out after 2ms") {
 		t.Fatalf("err = %v, want the timeout budget to stop the scan", err)
+	}
+}
+
+// TestClaudeScanBudgetCoversBothReports pins the parity shape: the TS provider
+// gives `claude daily` and `claude session` one TOKENBOARD_CCUSAGE_TIMEOUT_MS
+// each, so the native scan of the same history must get two — a single budget
+// would fail runs the TS collector accepts.
+func TestClaudeScanBudgetCoversBothReports(t *testing.T) {
+	if got, want := claudeScanBudget(900_000), 2*time.Duration(defaultClaudeTimeoutMs)*time.Millisecond; got != want {
+		t.Fatalf("claudeScanBudget(900000) = %v, want %v", got, want)
+	}
+	if got, want := claudeScanBudget(1), 2*time.Millisecond; got != want {
+		t.Fatalf("claudeScanBudget(1) = %v, want %v", got, want)
 	}
 }

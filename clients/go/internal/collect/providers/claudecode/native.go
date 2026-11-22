@@ -91,7 +91,14 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 	// hung mount or an oversized history otherwise relies on the outer process
 	// being killed, with no structured timeout for the scheduler to report.
 	timeoutMs := readClaudeTimeoutMs(env)
-	budgetCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	// The ccusage path ran `claude daily` and `claude session` as two
+	// invocations, each with its own TOKENBOARD_CCUSAGE_TIMEOUT_MS budget, so a
+	// machine whose history needs 800s per report fits in 1600s of total scan.
+	// One shared budget would fail that machine at 900s while the TS collector
+	// succeeds — the same divergence direction the timeout was added to
+	// prevent. The native path gives the whole scan two reports' worth; the
+	// error keeps naming the per-report value the knob controls.
+	budgetCtx, cancel := context.WithTimeout(ctx, claudeScanBudget(timeoutMs))
 	defer cancel()
 	snapshots, err := nativeCollectUnbudgeted(budgetCtx, input)
 	if err != nil && budgetCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
@@ -107,6 +114,12 @@ func nativeCollect(ctx context.Context, input nativeInput) ([]contract.Snapshot,
 // one shared budget for every ccusage-shaped call.
 const defaultClaudeTimeoutMs = 900_000
 
+// claudeScanBudget is the whole-scan deadline: one TOKENBOARD_CCUSAGE_TIMEOUT_MS
+// budget per ccusage-shaped report, matching the TS provider's two invocations.
+func claudeScanBudget(timeoutMs int) time.Duration {
+	return 2 * time.Duration(timeoutMs) * time.Millisecond
+}
+
 func readClaudeTimeoutMs(env func(string) string) int {
 	// parseInt semantics: TS reads this with Number.parseInt(…, 10), so a
 	// trailing suffix ("1200abc", "1200.9") still yields a usable number.
@@ -117,9 +130,11 @@ func readClaudeTimeoutMs(env func(string) string) int {
 }
 
 func claudeTimeoutError(timeoutMs int) error {
+	// The number quoted is the total the scan actually got (two reports'
+	// worth); the knob named is the per-report value the operator raises.
 	return fmt.Errorf(
-		"claude-code scan timed out after %dms (TOKENBOARD_CCUSAGE_TIMEOUT_MS); the run stopped before the whole history was read",
-		timeoutMs)
+		"claude-code scan timed out after %dms (2x TOKENBOARD_CCUSAGE_TIMEOUT_MS=%d); the run stopped before the whole history was read",
+		claudeScanBudget(timeoutMs).Milliseconds(), timeoutMs)
 }
 
 func nativeCollectUnbudgeted(ctx context.Context, input nativeInput) ([]contract.Snapshot, error) {
