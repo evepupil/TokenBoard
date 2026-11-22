@@ -984,6 +984,11 @@ func TestClaudeTimeoutBudgetStopsAnOverrunningScan(t *testing.T) {
 	}
 }
 
+// TestClaudeScanBudgetDoesNotOverflow pins the saturation added after the
+// doubling was found to wrap: a huge positive knob value must yield a huge
+// positive budget, never a negative one (instant cancellation) and never a
+// wrapped short one (4m41s for 4611686018568000), which would fail the very
+// long scans the operator raised the knob to allow.
 func TestClaudeScanBudgetDoesNotOverflow(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -1011,6 +1016,10 @@ func TestClaudeScanBudgetDoesNotOverflow(t *testing.T) {
 	}
 }
 
+// TestClaudeScanBudgetCoversBothReports pins the parity shape: the TS provider
+// gives `claude daily` and `claude session` one TOKENBOARD_CCUSAGE_TIMEOUT_MS
+// each, so the native scan of the same history must get two — a single budget
+// would fail runs the TS collector accepts.
 func TestClaudeScanBudgetCoversBothReports(t *testing.T) {
 	if got, want := claudeScanBudget(900_000), 2*time.Duration(defaultClaudeTimeoutMs)*time.Millisecond; got != want {
 		t.Fatalf("claudeScanBudget(900000) = %v, want %v", got, want)
