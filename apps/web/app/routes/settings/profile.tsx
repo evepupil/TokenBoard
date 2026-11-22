@@ -16,7 +16,7 @@ import {
   type ProfileSettings
 } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
-import { listActiveUsageTimezones } from '../../features/usage/queries/usage-timezone-scope'
+import { findMismatchedUsageTimezones, listActiveUsageTimezones } from '../../features/usage/queries/usage-timezone-scope'
 
 export const GET = createRoute(async (c) => {
   const user = await requireUser(c)
@@ -188,7 +188,10 @@ function CollectorTimezoneNotice(props: { timezone: string; collectorTimezones?:
   // No collectors means nothing is stamping dates yet, so there is nothing to warn about.
   if (collectorTimezones.length === 0) return null
 
-  const stale = collectorTimezones.filter((timezone) => timezone !== props.timezone)
+  // Same canonical comparison the dashboard warning uses: "UTC" vs "Etc/UTC" is
+  // one calendar, and a raw string compare here would tell the user to
+  // reinstall a collector that already stamps the right day.
+  const stale = findMismatchedUsageTimezones(props.timezone, collectorTimezones)
 
   return (
     <p
