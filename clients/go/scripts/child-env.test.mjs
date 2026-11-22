@@ -33,7 +33,11 @@ test('scrubbedEnv removes exactly the collector credential keys', () => {
 test('the key list matches the Go and skill mirrors', () => {
   const mirrors = [
     new URL('../internal/ccusage/credentials.go', import.meta.url),
-    new URL('../../../skills/tokenboard/scripts/child-env.mjs', import.meta.url)
+    new URL('../../../skills/tokenboard/scripts/child-env.mjs', import.meta.url),
+    // check-deps.sh is a hand-copied `env -u` list: the 2026-11-21 audit found
+    // it had silently kept the old four keys after the runtime lists grew a
+    // fifth, so it belongs in the drift check as well.
+    new URL('./check-deps.sh', import.meta.url)
   ]
   for (const mirror of mirrors) {
     const source = readFileSync(mirror, 'utf8')
