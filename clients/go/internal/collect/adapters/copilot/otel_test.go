@@ -343,3 +343,34 @@ func TestCopilotOtelReadStopsAtTheBudget(t *testing.T) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
+
+// TestForEachJSONLineStopsAtTheBudget pins the parse-phase check directly:
+// a budget that trips mid-file must stop the decode loop, so a document that
+// finished reading just before the deadline does not keep burning CPU past
+// it (the cancellation must also reach parseOtelFile as an error, not a
+// silently truncated record set).
+func TestForEachJSONLineStopsAtTheBudget(t *testing.T) {
+	content := []byte(strings.Repeat(`{"attributes":{}}`+"\n", 100))
+	visited := 0
+	tripped := errors.New("context canceled")
+	forEachJSONLine(content,
+		func([]byte) bool { return true },
+		DecodeJSONLineStrict,
+		func(any) { visited++ },
+		func() error {
+			if visited == 10 {
+				return tripped
+			}
+			return nil
+		})
+	if visited != 10 {
+		t.Fatalf("visited = %d, want the loop to stop at the budget", visited)
+	}
+
+	// A nil budget keeps the old whole-file behaviour.
+	visited = 0
+	forEachJSONLine(content, func([]byte) bool { return true }, DecodeJSONLineStrict, func(any) { visited++ }, nil)
+	if visited != 100 {
+		t.Fatalf("visited = %d, want all records with no budget", visited)
+	}
+}

@@ -151,11 +151,17 @@ func parseOtelFile(path string, ceiling int64, o tools.Options) ([]Entry, error)
 		if record, ok := decodeOtelRecord(value); ok {
 			records = append(records, record)
 		}
-	})
+	}, o.ContextErr)
+	if err := o.ContextErr(); err != nil {
+		return nil, err
+	}
 	contexts := collectTraceContexts(records)
 	fallback := fileModifiedTimestamp(path, ceiling)
 	candidates := make([]candidate, 0, len(records))
 	for index, record := range records {
+		if err := o.ContextErr(); err != nil {
+			return nil, err
+		}
 		if converted, ok := toCandidate(record, index, fallback, contexts); ok {
 			candidates = append(candidates, converted)
 		}
@@ -651,8 +657,17 @@ func fileModifiedTimestamp(path string, ceiling int64) int64 {
 // forEachJSONLine splits content into lines the way jsonl::records does and
 // hands each prefiltered line that decodes to visit.
 func forEachJSONLine(content []byte, prefilter func([]byte) bool, decode func([]byte) (any, bool),
-	visit func(value any)) {
+	visit func(value any), budget func() error) {
 	for _, line := range strings.Split(string(content), "\n") {
+		// Reading stopped being the only long phase once the file was capped:
+		// a whole 64 MiB document still decodes record by record after the
+		// read, so the budget is consulted per line the same way scanJSONL
+		// does. A stop here is a cancellation, not a malformed file.
+		if budget != nil {
+			if err := budget(); err != nil {
+				return
+			}
+		}
 		raw := []byte(strings.TrimSuffix(line, "\r"))
 		if len(raw) == 0 || !prefilter(raw) {
 			continue
