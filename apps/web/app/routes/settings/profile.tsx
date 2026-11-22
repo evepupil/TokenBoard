@@ -16,7 +16,10 @@ import {
   type ProfileSettings
 } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
-import { findMismatchedUsageTimezones, listActiveUsageTimezones } from '../../features/usage/queries/usage-timezone-scope'
+import {
+  findMismatchedUsageTimezones,
+  listActiveUsageTimezones
+} from '../../features/usage/queries/usage-timezone-scope'
 
 export const GET = createRoute(async (c) => {
   const user = await requireUser(c)
