@@ -12,6 +12,7 @@ package claudecode
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,8 +118,15 @@ const defaultClaudeTimeoutMs = 900_000
 // claudeScanBudget is the whole-scan deadline: one TOKENBOARD_CCUSAGE_TIMEOUT_MS
 // budget per ccusage-shaped report, matching the TS provider's two invocations.
 func claudeScanBudget(timeoutMs int) time.Duration {
+	if int64(timeoutMs) > maxClaudeScanTimeoutMs {
+		return math.MaxInt64
+	}
 	return 2 * time.Duration(timeoutMs) * time.Millisecond
 }
+
+// maxClaudeScanTimeoutMs is the largest knob value whose doubled budget still
+// fits time.Duration: floor(MaxInt64 / (2 * time.Millisecond)).
+const maxClaudeScanTimeoutMs = int64(math.MaxInt64 / int64(2*time.Millisecond))
 
 func readClaudeTimeoutMs(env func(string) string) int {
 	// parseInt semantics: TS reads this with Number.parseInt(…, 10), so a

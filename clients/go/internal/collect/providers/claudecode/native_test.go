@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -983,10 +984,33 @@ func TestClaudeTimeoutBudgetStopsAnOverrunningScan(t *testing.T) {
 	}
 }
 
-// TestClaudeScanBudgetCoversBothReports pins the parity shape: the TS provider
-// gives `claude daily` and `claude session` one TOKENBOARD_CCUSAGE_TIMEOUT_MS
-// each, so the native scan of the same history must get two — a single budget
-// would fail runs the TS collector accepts.
+func TestClaudeScanBudgetDoesNotOverflow(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want time.Duration
+	}{
+		{"4611686018427", 9_223_372_036_854_000_000},
+		{"4611686018428", time.Duration(math.MaxInt64)},
+		{"5000000000000", time.Duration(math.MaxInt64)},
+		{"4611686018568000", time.Duration(math.MaxInt64)},
+		{"999999999999999999999999", time.Duration(math.MaxInt64)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			timeoutMs := readClaudeTimeoutMs(testEnv(map[string]string{"TOKENBOARD_CCUSAGE_TIMEOUT_MS": tc.raw}))
+			got := claudeScanBudget(timeoutMs)
+			if got != tc.want {
+				t.Fatalf("budget = %v, want %v", got, tc.want)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), got)
+			defer cancel()
+			if err := ctx.Err(); err != nil {
+				t.Fatalf("large positive budget cancelled the scan immediately: %v", err)
+			}
+		})
+	}
+}
+
 func TestClaudeScanBudgetCoversBothReports(t *testing.T) {
 	if got, want := claudeScanBudget(900_000), 2*time.Duration(defaultClaudeTimeoutMs)*time.Millisecond; got != want {
 		t.Fatalf("claudeScanBudget(900000) = %v, want %v", got, want)
