@@ -254,6 +254,15 @@ clients/go/
 - **时区与输入**：codex 归属接受 Intl 偏移时区（`contract.LoadLocation` 统一 `"+08:00"` 这类标识）；DeepSeek Harness 的事件字段必须是真正的 JSON number（字符串不再被宽容解析）。
 - **发布通道**：`internal/release` 与 skill `client-binary.mjs` 同口径拒绝 https→http 跳转（checksums 与二进制同路径，降级即可被中间人同时替换）；`TOKENBOARD_ARCHIVE_URL` 补进三处凭据剥离名单（Go `credentials.go`、TS `child-env.ts`、skill `child-env.mjs`，现为 5 键）。
 - **gate 结果**：Go 全包测试、`gofmt`/`go vet` 干净、darwin+windows 构建通过；TS collector 1286 条、skill 1003 条、web typecheck 全绿。
+- **2026-11-21/22 收口（多 agent + codex 连续三轮复查，`129b4ca..61ece04`）**：
+  - **凭据名单第五处镜像**：维护侧 `clients/go/scripts/child-env.mjs` 与 `check-deps.sh` 曾停在 4 键、漏 `TOKENBOARD_ARCHIVE_URL`（`129b4ca` 补齐，`2d7e735` 把 check-deps.sh 纳入 `child-env.test.mjs` 漂移对照——五处名单自此全在闸门内）。
+  - **stderr 脱敏组合**：`internal/redact` 包住 CLI 全部 stderr（`bb7ba2a`）；「sink 在 redactor 之上、子进程输出按任意字节块切分」的组合有专门测试钉住（`541b376`），Windows 断言平台无关化（`928e788`）。
+  - **超时预算饱和（本轮关键族）**：`TOKENBOARD_CCUSAGE_TIMEOUT_MS` / `TOKENBOARD_CODEX_DAILY_TIMEOUT_MS` / `TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS` 一类毫秒旋钮转 `time.Duration` 时会溢出——超大值回绕成负 deadline（扫描瞬间取消）或荒谬短预算（与操作员意图相反）。修复分三处落齐：claude扫描的 2x 预算饱和（`64e1295`）、1x 报告预算提取为共享的 `ccusage.TimeoutBudget`（`b354947`）、语言服务器 ready 超时走同一助手（`61ece04`）。全仓毫秒→Duration 与 timer 构造穷尽复扫：upload 已有 clamp、sqlite/release 吃常量，无第四处。TS 侧同名旋钮是 JS 浮点、无回绕，不需对应。
+  - **OTel 阶段化取消检查**：copilot `parseOtelFile` 的预算检查曾止于解码段；`collectTraceContexts`、`newCandidateSets` 的七个抑制集合扫描与发射循环现在每记录查预算、取消一律 `nil, err` fail-closed（`cb019d6`/`febb3c0`），新测试在 LF/CRLF 两种换行下把 trip 点钉遍每个检查位（`b24a5ea`）。
+  - **claude 双报告预算 parity**：TS 的 `claude daily` 与 `claude session` 各有独立 `TOKENBOARD_CCUSAGE_TIMEOUT_MS`，原生单次扫描取 2x 对齐（`dea65b7`，错误文案同时报总预算与旋钮值）。
+  - **web 两处**：collector 时区比对统一走 canonical 名（Intl resolvedOptions，`6268e88`；profile 页与 dashboard 不再可能各说一套，`bff8e7b`），并补「真实不一致必须渲染告警文案」的正向断言（`2b32dc5`）；公共卡片/排行榜 token 求和改 `total()` 免疫 int64溢出（`5e30b9e`），部署门禁补 `verify-public-card-index.sql`（`3cdfb94`）。
+  - **文档订正**：`maxSnapshotTokens`/`maxSnapshotCostUsd` 注释如实表述单行上限与跨行求和语义（`ca8f62d`/`0601c4c`）；README/AGENTS/SKILL 十条失实口径回写（`cdc1600`，含 Node 三档下限、双客户端现状、五项 verify 门禁）。
+  - **证伪与保留**：shadow stderr 绕过脱敏、slug 限流绕过、codex 非 hook ack 不对称、systemd oneshot 90s 砍同步——四条均实测证伪；arm64 FMA 融合复扫（四类 opcode）为 0。CI：`61ece04` @ run 45044103474 十项 job 全绿。
 - 2026-10-20 发布链路（`.github/workflows/go-client.yml`）：
   - `test`：ubuntu/macos/windows 三平台 × `go-version-file: clients/go/go.mod`，跑 `gofmt -l`（非 Windows）、`go vet`、`go test -race`；Linux 上额外做 windows/linux/darwin arm64 交叉构建，把「3 OS × 2 arch」的另一半也纳入编译门禁。
   - `deps`：spec §5 的 ccusage 契约门禁。`pnpm install --filter @tokenboard/collector` 后跑 `clients/go/scripts/check-deps.sh`，金样本不一致即失败。本地已实测通过（`ccusage 20.0.33 output matches the goldens`）。
