@@ -1,8 +1,11 @@
 package ccusage
 
 import (
+	"context"
+	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // withEnv builds an env lookup from a map, the way the providers receive one.
@@ -125,5 +128,32 @@ func TestWithConfigArgsBlankDynamicFallsThroughToTheExplicitConfig(t *testing.T)
 	want := []string{"amp", "daily", "--config", "/cfg/explicit.json"}
 	if !reflect.DeepEqual(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
+	}
+}
+
+// TestReportTimeoutBudgetSaturates pins the 1x deadline conversion shared by
+// the native codex and tool providers: multiplying a huge millisecond value
+// used to wrap to a negative Duration (instant cancellation) or a short
+// positive one — the opposite of an effectively-unbounded knob.
+func TestReportTimeoutBudgetSaturates(t *testing.T) {
+	cases := []struct {
+		ms   int
+		want time.Duration
+	}{
+		{900_000, 900 * time.Second},
+		{9_223_372_036_854, 9_223_372_036_854 * time.Millisecond},
+		{9_223_372_036_855, time.Duration(math.MaxInt64)},
+		{10_000_000_000_000, time.Duration(math.MaxInt64)},
+	}
+	for _, tc := range cases {
+		got := ReportTimeoutBudget(tc.ms)
+		if got != tc.want {
+			t.Fatalf("ReportTimeoutBudget(%d) = %v, want %v", tc.ms, got, tc.want)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), got)
+		defer cancel()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("huge budget cancelled the context immediately: %v", err)
+		}
 	}
 }

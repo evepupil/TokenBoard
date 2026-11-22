@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
@@ -149,7 +148,7 @@ func (runner *nativeToolRunner) Run(ctx context.Context, _ string, args []string
 	var budgetCtx context.Context
 	if options.TimeoutMs > 0 {
 		var cancel context.CancelFunc
-		budgetCtx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutMs)*time.Millisecond)
+		budgetCtx, cancel = context.WithTimeout(ctx, ccusage.ReportTimeoutBudget(options.TimeoutMs))
 		defer cancel()
 		ctx = budgetCtx
 	}

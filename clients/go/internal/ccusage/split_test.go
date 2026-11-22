@@ -40,11 +40,14 @@ var sharedExports = map[string]bool{
 	"ScrubCredentialEnv": true,
 	// report.go: the report-source seam every provider calls. It names a
 	// report shape, not a binary; the acquisition and execution layers that
-	// used to back it are gone.
-	"CommandOptions": true,
-	"CommandRunner":  true,
-	"ReportCommand":  true,
-	"WithConfigArgs": true,
+	// used to back it are gone. ReportTimeoutBudget joins it because the
+	// native providers' deadline conversion must saturate the same way for
+	// every knob, not per provider.
+	"CommandOptions":      true,
+	"CommandRunner":       true,
+	"ReportCommand":       true,
+	"ReportTimeoutBudget": true,
+	"WithConfigArgs":      true,
 }
 
 func TestCcusageCoreKeepsOnlySharedContracts(t *testing.T) {

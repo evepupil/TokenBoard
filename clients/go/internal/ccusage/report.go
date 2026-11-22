@@ -11,7 +11,9 @@ package ccusage
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 )
 
 // CommandOptions configures one report call. The subprocess runner's retry
@@ -23,6 +25,20 @@ type CommandOptions struct {
 	Env       []string
 	TimeoutMs int
 }
+
+// ReportTimeoutBudget converts one millisecond knob to a context deadline.
+// Multiplying a value above MaxInt64/1ms wraps time.Duration: a negative
+// deadline cancels the scan instantly, and the wrap can also land on a short
+// positive budget — the opposite of the effectively-unbounded value the
+// operator set. Saturate at MaxInt64 (~292 years) instead.
+func ReportTimeoutBudget(timeoutMs int) time.Duration {
+	if int64(timeoutMs) > maxReportTimeoutMs {
+		return math.MaxInt64
+	}
+	return time.Duration(timeoutMs) * time.Millisecond
+}
+
+const maxReportTimeoutMs = int64(math.MaxInt64 / time.Millisecond)
 
 // ReportCommand is the label every runner receives. It names the report shape
 // (a ccusage JSON document), not a binary that runs.
