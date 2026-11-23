@@ -109,6 +109,7 @@ function readPublicCardPreviewPayload(form: HTMLFormElement, image: HTMLImageEle
       title: String(formData.get('cardTitle') || ''),
       subtitle: String(formData.get('cardSubtitle') || ''),
       showPublicUrl: formData.get('cardShowPublicUrl') === 'on',
+      showUpdatedAt: formData.get('cardShowUpdatedAt') === 'on',
       glow: {
         enabled: formData.get('cardGlowEnabled') === 'on',
         intensity: Number(formData.get('cardGlowIntensity') || 0.28),

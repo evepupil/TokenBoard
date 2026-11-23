@@ -97,6 +97,7 @@ export async function getPublicUsageProfileCore(
     totalCostAvailable: Boolean(Number(totals?.totalCostAvailable ?? 1)),
     todayCostAvailable: Boolean(Number(totals?.todayCostAvailable ?? 1)),
     monthCostAvailable: Boolean(Number(totals?.monthCostAvailable ?? 1)),
+    dataUpdatedAt: totals?.dataUpdatedAt ?? null,
     publicCardConfig: parsePublicCardConfig(profile.publicCardConfig),
     sourceSplit: parseSourceSplit(totals?.sourceSplit),
     topModels: parseTopModels(totals?.topModels)

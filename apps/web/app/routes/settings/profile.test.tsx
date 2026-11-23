@@ -137,6 +137,21 @@ describe('ProfilePage timezone consequence', () => {
     // ever flagged.
     expect(html).toContain('与这里的时区不一致')
   })
+
+  // The freshness stamp is a stored card option; the settings page is the only
+  // way to reach it, so the control has to be on the page users find.
+  test('offers the data-updated stamp, off by default', async () => {
+    const html = await renderToString(<ProfilePage email="user@example.com" saved={false} profile={profile()} />)
+
+    expect(html).toContain('name="cardShowUpdatedAt"')
+    expect(html).toContain('显示数据更新时间')
+    // defaultPublicCardConfig.showUpdatedAt === false, so the checkbox renders
+    // without the checked attribute: opting in is the user's click, never the
+    // page's default.
+    const tag = html.match(/<input[^>]*name="cardShowUpdatedAt"[^>]*>/)?.[0]
+    expect(tag).toBeDefined()
+    expect(tag).not.toContain('checked')
+  })
 })
 
 describe('ProfilePage form errors', () => {

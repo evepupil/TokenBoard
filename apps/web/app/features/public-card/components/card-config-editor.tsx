@@ -135,8 +135,9 @@ export function PublicCardConfigEditor(props: {
         </Label>
       </div>
 
-      <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <ToggleField name="cardShowPublicUrl" checked={props.config.showPublicUrl} title="显示公开链接" />
+        <ToggleField name="cardShowUpdatedAt" checked={props.config.showUpdatedAt} title="显示数据更新时间" />
         <ToggleField name="cardGlowEnabled" checked={props.config.glow.enabled} title="背景炫光" />
       </div>
 

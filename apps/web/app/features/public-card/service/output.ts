@@ -1,5 +1,5 @@
 import { renderUsageCardSvg } from '../svg'
-import { timezoneOffsetLabel } from '../../../lib/time'
+import { localShortDateTime, timezoneOffsetLabel } from '../../../lib/time'
 import { getPublicUsageProfile, getPublicUsageProfileCore } from './profile'
 
 export async function getPublicUsageJson(db: D1Database, slug: string, now = new Date(), summaryStrict = false) {
@@ -70,7 +70,13 @@ export async function getPublicUsageCard(
       // JSON path (`getPublicUsageJson`) is where that data is actually consumed.
       // The card is read from anywhere, so it has to say which day its "今日" covers. Read at
       // the instant of rendering rather than cached, because the offset changes with the season.
-      timezoneLabel: timezoneOffsetLabel(profile.timezone, now)
+      timezoneLabel: timezoneOffsetLabel(profile.timezone, now),
+      // The stamp names the aggregates' own instant (when the newest row was read),
+      // formatted in the owner's zone — not this render's clock: the numbers above it
+      // came from the data, and a stamp that moves every fetch would claim freshness
+      // the totals do not have. Preview callers pass no totals at all, so they get no
+      // label and the renderer shows nothing.
+      updatedAtLabel: localShortDateTime(profile.dataUpdatedAt, profile.timezone)
     },
     profile.publicCardConfig
   )

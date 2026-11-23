@@ -14,6 +14,18 @@ export function renderUsageCardSvg(input: UsageCardInput, configInput?: Partial<
   const colorScheme = config.theme === 'light' ? 'only light' : 'dark'
   const unavailableCostNote = buildUnavailableCostNote(input, config)
   const timezoneNote = buildTimezoneNote(input, config)
+  const updatedNote = buildUpdatedNote(input, config)
+  // Two right-aligned notes cannot share y=211 — they would overlap and the card has no
+  // spare line to give (the fixed 520×220 is what README embeds size around). Joined into
+  // one line they read as one footer, and the cost note keeps the left end.
+  const footerRight =
+    timezoneNote && updatedNote
+      ? `<g data-card-timezone="true" data-card-updated="true"><text x="496" y="211" text-anchor="end" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="11">${escapeXml(`${timezoneNote} · ${updatedNote}`)}</text></g>`
+      : timezoneNote
+        ? `<g data-card-timezone="true"><text x="496" y="211" text-anchor="end" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="11">${escapeXml(timezoneNote)}</text></g>`
+        : updatedNote
+          ? `<g data-card-updated="true"><text x="496" y="211" text-anchor="end" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="11">${escapeXml(updatedNote)}</text></g>`
+          : ''
 
   // The card declares a fixed intrinsic size instead of sizing itself with a `style`
   // attribute. The response carries the app's CSP, and `style-src 'self'` drops style
@@ -48,7 +60,7 @@ export function renderUsageCardSvg(input: UsageCardInput, configInput?: Partial<
   <text x="94" y="64" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="13">${escapeXml(subtitle)}</text>
   ${metrics.join('\n  ')}
   ${unavailableCostNote ? `<text x="24" y="211" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="11">${escapeXml(unavailableCostNote)}</text>` : ''}
-  ${timezoneNote ? `<g data-card-timezone="true"><text x="496" y="211" text-anchor="end" fill="${palette.muted}" font-family="Arial, sans-serif" font-size="11">${escapeXml(timezoneNote)}</text></g>` : ''}
+  ${footerRight}
 </svg>`
 }
 
@@ -166,6 +178,17 @@ function buildTimezoneNote(input: UsageCardInput, config: PublicCardConfig) {
   if (!showsToday) return ''
 
   return config.language === 'en' ? `Today: ${input.timezoneLabel}` : `今日：${input.timezoneLabel}`
+}
+
+// The freshness stamp. Like the timezone note it is a caption of a caption — the card's
+// numbers were read at some instant and from one zone, and a viewer who has seen the
+// card for weeks cannot tell "nothing new today" from "nothing arrives anymore". The
+// label is the service's job (it knows the zone and the aggregates' own stamps); the
+// renderer only speaks the copy, and says nothing when no label was supplied rather
+// than showing a clock pretending to be data.
+function buildUpdatedNote(input: UsageCardInput, config: PublicCardConfig) {
+  if (!config.showUpdatedAt || !input.updatedAtLabel) return ''
+  return config.language === 'en' ? `Updated: ${input.updatedAtLabel}` : `数据更新：${input.updatedAtLabel}`
 }
 
 function costAvailabilityForMetric(input: UsageCardInput, metric: PublicCardMetric) {

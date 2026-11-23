@@ -30,6 +30,10 @@ export type PublicCardConfig = {
   title: string
   subtitle: string
   showPublicUrl: boolean
+  // A footer stamp saying when the card's totals were read. Off by default: the
+  // README card is a quiet statistic, and a ticking timestamp invites exactly the
+  // "is this stale?" question the number itself answers better.
+  showUpdatedAt: boolean
   glow: {
     enabled: boolean
     intensity: number
@@ -47,6 +51,7 @@ export const defaultPublicCardConfig: PublicCardConfig = {
   title: '',
   subtitle: '',
   showPublicUrl: true,
+  showUpdatedAt: false,
   glow: {
     enabled: true,
     intensity: 0.28,
@@ -65,6 +70,7 @@ export const publicCardConfigSchema = z
     title: z.string().trim().max(48).default(defaultPublicCardConfig.title),
     subtitle: z.string().trim().max(96).default(defaultPublicCardConfig.subtitle),
     showPublicUrl: z.boolean().default(defaultPublicCardConfig.showPublicUrl),
+    showUpdatedAt: z.boolean().default(defaultPublicCardConfig.showUpdatedAt),
     glow: z
       .object({
         enabled: z.boolean().default(defaultPublicCardConfig.glow.enabled),
@@ -101,6 +107,7 @@ export function parsePublicCardConfigForm(form: Record<string, unknown>): Public
     title: String(form.cardTitle || ''),
     subtitle: String(form.cardSubtitle || ''),
     showPublicUrl: form.cardShowPublicUrl === 'on',
+    showUpdatedAt: form.cardShowUpdatedAt === 'on',
     glow: {
       enabled: form.cardGlowEnabled === 'on',
       intensity: Number(form.cardGlowIntensity ?? defaultPublicCardConfig.glow.intensity),

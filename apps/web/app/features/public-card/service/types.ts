@@ -20,6 +20,14 @@ export type PublicUsageProfile = {
   totalCostAvailable: boolean
   todayCostAvailable: boolean
   monthCostAvailable: boolean
+  /**
+   * ISO instant of the freshest data behind the totals: either the cached rollup row's
+   * own stamp, or the newest summary row that overrode it. Null when the account has no
+   * usage rows at all. Only rendered on the SVG when the config enables `showUpdatedAt`,
+   * and deliberately absent from the public JSON — the option governs the visible card,
+   * and a JSON consumer that wants freshness can diff the numbers themselves.
+   */
+  dataUpdatedAt: string | null
   publicCardConfig: PublicCardConfig
   sourceSplit: Array<{
     source: UsageSource
@@ -59,6 +67,7 @@ export type TotalsRow = {
   totalCostAvailable: number | null
   todayCostAvailable: number | null
   monthCostAvailable: number | null
+  dataUpdatedAt: string | null
   sourceSplit: unknown
   topModels: unknown
 }

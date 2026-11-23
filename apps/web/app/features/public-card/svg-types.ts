@@ -32,6 +32,16 @@ export type UsageCardInput = {
    * none, and a guess would be worse than no note.
    */
   timezoneLabel?: string
+  /**
+   * The totals' freshness, already formatted in the owner's zone (e.g. `11-23 13:05`).
+   *
+   * The service supplies a label rather than an ISO instant because the card is read from
+   * anywhere while the stamp has to mean the *owner's* clock — the same reason
+   * `timezoneLabel` exists. Optional because the preview paths (SSR fixtures, the live
+   * editor POST) have no real totals behind them and inventing a fresh time would be a
+   * lie; they leave it unset. Rendered only when the config's `showUpdatedAt` is on.
+   */
+  updatedAtLabel?: string | null
 }
 
 export type Palette = {
