@@ -140,6 +140,20 @@ describe('ProfilePage timezone consequence', () => {
 
   // The freshness stamp is a stored card option; the settings page is the only
   // way to reach it, so the control has to be on the page users find.
+  // The preview is a data URI rendered from the server; there is no network request to
+  // defer, so `loading="lazy"` bought nothing and earned a DevTools complaint. The explicit
+  // width/height stay: they are what keeps the layout stable when the live preview swaps
+  // the source.
+  test('renders the card preview without lazy loading', async () => {
+    const html = await renderToString(<ProfilePage email="user@example.com" saved={false} profile={profile()} />)
+
+    const img = html.match(/<img[^>]*data-public-card-preview="true"[^>]*>/)?.[0]
+    expect(img).toBeDefined()
+    expect(img).not.toContain('loading="lazy"')
+    expect(img).toContain('width="520"')
+    expect(img).toContain('height="220"')
+  })
+
   test('offers the data-updated stamp, off by default', async () => {
     const html = await renderToString(<ProfilePage email="user@example.com" saved={false} profile={profile()} />)
 

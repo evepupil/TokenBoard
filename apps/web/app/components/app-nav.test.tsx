@@ -29,6 +29,18 @@ describe('AppNav', () => {
     expect(html).toContain('data-submitting-label="正在退出..."')
   })
 
+  // The press feedback is a transform, which browsers ignore on an inline box — this pins
+  // both the inline-flex display and the class that carries the scale, so a refactor cannot
+  // silently make the nav feel dead again.
+  test('nav links carry the press-scale feedback', async () => {
+    const html = await renderToString(<AppNav active="dashboard" email="user@example.com" />)
+
+    const link = html.match(/<a[^>]*data-app-nav-link="true"[^>]*>/)?.[0]
+    expect(link).toBeDefined()
+    expect(link).toContain('inline-flex')
+    expect(link).toContain('active:scale-[0.96]')
+  })
+
   test('supports compact dashboard navigation density', async () => {
     const html = await renderToString(<AppNav active="dashboard" email="user@example.com" compact />)
 

@@ -72,13 +72,16 @@ export function PublicCardConfigEditor(props: {
       </div>
 
       <div class="app-surface-subtle overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-2">
+        {/* Not `loading="lazy"`: the source is a data URI built from the server render, so
+            there is no network request to defer, and the preview sits above the fold. Lazy
+            loading it only gave DevTools a reason to flag the page (lazy images want explicit
+            dimensions; this one has them, the audit still fires on the data URI). */}
         <img
           class="block h-auto w-full rounded-md"
           src={previewSrc}
           alt="TokenBoard README SVG 预览"
           width="520"
           height="220"
-          loading="lazy"
           data-public-card-preview="true"
           data-public-card-public-url={props.preview.publicUrl}
         />

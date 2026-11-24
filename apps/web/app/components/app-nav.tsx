@@ -12,9 +12,9 @@ type AppNavProps = {
 
 const repositoryUrl = 'https://github.com/evepupil/TokenBoard'
 const iconButtonClass =
-  'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+  'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)] active:scale-[0.96]'
 const signOutButtonClass =
-  'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
+  'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)] active:scale-[0.96]'
 
 export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
@@ -144,10 +144,13 @@ function NavLink(props: {
   return (
     <a
       class={cn(
-        'shrink-0 rounded-xl font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
+        // `inline-flex` rather than the default inline box: a transform on an inline
+        // element is ignored, so the press-scale would do nothing without it.
+        'inline-flex shrink-0 items-center rounded-xl font-bold text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)] active:scale-[0.96]',
         props.compact ? 'px-3 py-2' : 'px-3 py-2 sm:px-4 sm:py-3',
         props.active && 'bg-lime-300 text-stone-950 shadow-sm shadow-lime-950/10 hover:bg-lime-300 hover:text-stone-950'
       )}
+      data-app-nav-link="true"
       data-login-focus={props.loginFocus ? 'true' : undefined}
       aria-current={props.active ? 'page' : undefined}
       href={props.href}

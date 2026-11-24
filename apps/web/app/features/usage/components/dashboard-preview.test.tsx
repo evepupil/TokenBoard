@@ -71,6 +71,8 @@ describe('DashboardPreview', () => {
     expect(html).toContain('本月缓存率')
     expect(html).toContain('data-usage-metric-grid="true"')
     expect(html).toContain('data-usage-metric-card="true"')
+    // The hover effect's hook: the lift and sheen live in `style.css` under this class.
+    expect(html).toContain('app-metric-card')
     expect(html).toContain('app-surface-raised')
     expect(html).toContain('rounded-2xl border p-4 backdrop-blur')
     expect(html).toContain('bg-[var(--app-panel)] text-[var(--app-text)]')
@@ -242,10 +244,14 @@ describe('DashboardPreview', () => {
 function metricCardHtml(html: string, label: string) {
   const labelIndex = html.indexOf(`>${label}</p>`)
   expect(labelIndex).toBeGreaterThanOrEqual(0)
-  const start = html.lastIndexOf('<div class="app-surface-raised', labelIndex)
-  const next = html.indexOf('<div class="app-surface-raised', labelIndex)
-  expect(start).toBeGreaterThanOrEqual(0)
-  return html.slice(start, next > start ? next : undefined)
+  // Anchor on the data attribute, not the class list: the card's utility classes are styling
+  // detail and change (a hover effect was added once already) without the card's meaning
+  // changing. The attribute is the component's contract.
+  const anchor = html.lastIndexOf('data-usage-metric-card="true"', labelIndex)
+  expect(anchor).toBeGreaterThanOrEqual(0)
+  const start = html.lastIndexOf('<div', anchor)
+  const next = html.indexOf('data-usage-metric-card="true"', anchor + 1)
+  return html.slice(start, next > start ? html.lastIndexOf('<div', next) : undefined)
 }
 
 // "Today" is the user's local day, and the dashboard is the one place a user checks it. The
