@@ -306,6 +306,7 @@ button[data-submitting='true'][data-submitting-tone='danger'] {
 @media (prefers-reduced-motion: reduce) {
   button,
   a[data-link-button='true'],
+  a[data-app-nav-link='true'],
   button[data-copy-target],
   button[data-submitting='true'],
   .app-login-card-attention,
@@ -314,11 +315,17 @@ button[data-submitting='true'][data-submitting-tone='danger'] {
   }
 
   /* The press-scale is a transform, so removing the transition alone would still snap the
-     button 4% smaller under the pointer. Drop the transform outright. */
+     button 4% smaller under the pointer. Drop the transform outright. Nav links express the
+     same press as the independent `scale` property (Tailwind `active:scale-[0.96]`), which
+     `transform: none` does not reset, so it is dropped separately. */
   button:active,
   a[data-link-button='true']:active,
   a[data-app-nav-link='true']:active {
     transform: none;
+  }
+
+  a[data-app-nav-link='true']:active {
+    scale: none;
   }
 
   button[data-submitting='true']::before {

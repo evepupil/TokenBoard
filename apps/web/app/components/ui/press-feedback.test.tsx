@@ -1,0 +1,30 @@
+import { readFileSync } from 'node:fs'
+import { renderToString } from 'hono/jsx/dom/server'
+import { describe, expect, test } from 'vitest'
+import { Button, LinkButton } from './button'
+
+// `style.css` already gives every `<button>` and every `a[data-link-button]` a press state
+// (`button:active { transform: ... scale(0.96) }`). Tailwind's `active:scale-[0.96]` sets the
+// independent `scale` property instead of touching `transform`, so putting both on the same
+// element multiplies them: 0.96 × 0.96 = 0.92, below the 0.95 floor where a press starts to
+// look exaggerated. These tests pin that premise and the classes that depend on it.
+function styleSource() {
+  return readFileSync(new URL('../../style.css', import.meta.url), 'utf8')
+}
+
+describe('press feedback', () => {
+  test('style.css owns the button press scale', () => {
+    const css = styleSource()
+    const rule = css.match(/button:active,\s*a\[data-link-button='true'\]:active\s*\{([^}]*)\}/)
+    expect(rule).not.toBeNull()
+    expect(rule?.[1]).toContain('scale(0.96)')
+  })
+
+  test('buttons do not stack a second press scale on top', async () => {
+    const html = await renderToString(<Button>保存</Button>)
+    const link = await renderToString(<LinkButton href="/dashboard">返回</LinkButton>)
+
+    expect(html).not.toContain('active:scale')
+    expect(link).not.toContain('active:scale')
+  })
+})

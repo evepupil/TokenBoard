@@ -11,10 +11,14 @@ type AppNavProps = {
 }
 
 const repositoryUrl = 'https://github.com/evepupil/TokenBoard'
+// Press feedback for buttons already comes from `style.css` (`button:active` /
+// `a[data-link-button]` shrink to 0.96). Adding Tailwind's `active:scale-[0.96]` on top of
+// that compounds the two scales to 0.92, so it is used only on the nav links below, which
+// had no press state of their own.
 const iconButtonClass =
-  'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)] active:scale-[0.96]'
+  'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
 const signOutButtonClass =
-  'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)] active:scale-[0.96]'
+  'min-h-11 rounded-xl border border-[var(--app-border)] px-4 py-3 text-xs font-bold text-[var(--app-muted)] transition hover:border-lime-300 hover:text-[var(--app-text)]'
 
 export function AppNav(props: AppNavProps) {
   const isAuthenticated = props.isAuthenticated ?? Boolean(props.email)
