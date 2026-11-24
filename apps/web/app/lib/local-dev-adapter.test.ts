@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import { test } from 'vitest'
 import { createLocalDevEnv } from './local-dev-adapter'
 
 test('localDevAdapter applies all D1 migrations cleanly and executes D1 queries', async () => {
