@@ -106,7 +106,19 @@ export function collectRecentRunSummary(
     throw error
   }
   const windowStartMs = now.getTime() - 7 * 24 * 60 * 60 * 1000
-  const summary = { windowDays: 7, total: 0, success: 0, error: 0, skipped: 0, invalid: 0, lastErrorAt: null }
+  const summary = {
+    windowDays: 7,
+    total: 0,
+    success: 0,
+    error: 0,
+    skipped: 0,
+    invalid: 0,
+    // Skips dominate a healthy week (cooldown, scheduled window), and without the split
+    // they hide the unhealthy kind: a host under sustained pressure, or an endpoint that
+    // keeps failing, looks exactly like a well-behaved one from the totals alone.
+    skippedReasons: {},
+    lastErrorAt: null
+  }
   for (const name of names) {
     const match = /^(\d{4}-\d{2}-\d{2})T/.exec(name)
     if (!match || !name.endsWith('.json')) continue
@@ -125,8 +137,13 @@ export function collectRecentRunSummary(
         if (Number.isFinite(runStarted) && (!summary.lastErrorAt || runStarted > Date.parse(summary.lastErrorAt))) {
           summary.lastErrorAt = new Date(runStarted).toISOString()
         }
-      } else if (parsed.status === 'skipped') summary.skipped += 1
-      else summary.invalid += 1
+      } else if (parsed.status === 'skipped') {
+        summary.skipped += 1
+        const reason = parsed.coordination?.skippedReason
+        if (typeof reason === 'string' && reason) {
+          summary.skippedReasons[reason] = (summary.skippedReasons[reason] || 0) + 1
+        }
+      } else summary.invalid += 1
     } catch {
       summary.invalid += 1
     }

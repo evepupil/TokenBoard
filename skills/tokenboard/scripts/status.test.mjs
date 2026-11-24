@@ -674,7 +674,10 @@ test('aggregates the last 7 days of run logs by filename prefix', () => {
     '2026-10-08T09-00-00.000Z-aaa111.json': JSON.stringify({ status: 'success' }),
     '2026-10-12T09-00-00.000Z-bbb222.json': JSON.stringify({ status: 'success' }),
     '2026-10-13T09-00-00.000Z-ccc333.json': JSON.stringify({ status: 'error' }),
-    '2026-10-13T10-00-00.000Z-ddd444.json': JSON.stringify({ status: 'skipped' }),
+    '2026-10-13T10-00-00.000Z-ddd444.json': JSON.stringify({
+      status: 'skipped',
+      coordination: { skippedSync: true, skippedReason: 'cooldown' }
+    }),
     '2026-10-06T09-00-00.000Z-eee555.json': JSON.stringify({ status: 'error' })
   }
   const summary = collectRecentRunSummary('/state/runs', {
@@ -692,9 +695,37 @@ test('aggregates the last 7 days of run logs by filename prefix', () => {
     success: 2,
     error: 1,
     skipped: 1,
+    skippedReasons: { cooldown: 1 },
     invalid: 0,
     lastErrorAt: '2026-10-13T09:00:00.000Z'
   })
+})
+
+// Skips outweigh successes in a normal week, so the totals alone cannot tell an operator
+// whether the collector is throttled by design or starved by a broken host or endpoint.
+test('breaks skipped runs down by reason', () => {
+  const files = {
+    '2026-10-13T09-00-00.000Z-a.json': JSON.stringify({
+      status: 'skipped',
+      coordination: { skippedReason: 'resource-pressure' }
+    }),
+    '2026-10-13T09-10-00.000Z-b.json': JSON.stringify({
+      status: 'skipped',
+      coordination: { skippedReason: 'resource-pressure' }
+    }),
+    '2026-10-13T09-20-00.000Z-c.json': JSON.stringify({
+      status: 'skipped',
+      coordination: { skippedReason: 'failure-backoff' }
+    }),
+    '2026-10-13T09-30-00.000Z-d.json': JSON.stringify({ status: 'skipped' })
+  }
+  const summary = collectRecentRunSummary('/state/runs', {
+    now: new Date('2026-10-14T00:00:00.000Z'),
+    readdir: () => Object.keys(files),
+    readFile: (path) => files[basename(path)]
+  })
+  assert.equal(summary.skipped, 4)
+  assert.deepEqual(summary.skippedReasons, { 'resource-pressure': 2, 'failure-backoff': 1 })
 })
 
 test('half-written run files count as invalid and never surface content', () => {
