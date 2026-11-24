@@ -164,6 +164,13 @@ and the Windows task scheduler all fire on local wall-clock time. The scheduled 
 `config.source` — `all` by default — so it collects the same usage the skipped hook would have; the
 skipped trigger's signal stays queued for the next hook run to acknowledge.
 
+A hook trigger is also skipped while the host reports resource pressure: free memory under 10%,
+swap at or above 90% used, Linux I/O PSI at or above 60, or load average over two per CPU. The
+signal is queued the same way and the scheduled run, which is never gated, collects it. The
+probe fails open, so an unreadable metric never stops a sync. Thresholds are tunable with
+`TOKENBOARD_RESOURCE_MEMORY_FREE_MIN_PERCENT`, `TOKENBOARD_RESOURCE_SWAP_USED_MAX_PERCENT` and
+`TOKENBOARD_RESOURCE_IO_AVG10_MAX`; `TOKENBOARD_RESOURCE_GUARD=off` disables the guard.
+
 When a scheduled sync cannot acquire that lock within its timeout, it writes a private deferred
 retry state under the TokenBoard config directory and performs a bounded in-process retry. The retry
 attempts only lock contention, makes at most five attempts with a one-minute delay after each

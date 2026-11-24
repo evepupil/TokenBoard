@@ -24,6 +24,7 @@ import { coordinatedSync } from './coordinator.mjs'
 import { errorMessage } from './error-message.mjs'
 import { transientSyncExitCode } from './scheduled-retry.mjs'
 import { currentProcessStartIdentity, probeProcessLiveness, probeProcessStartIdentity } from './process-liveness.mjs'
+import { createResourcePressureProbe } from './resource-pressure.mjs'
 
 // The child's stdout/stderr are captured to build the failure message and the run log, so the
 // buffer needs the same headroom every other spawn in the skill gives it. Node's default is
@@ -74,6 +75,9 @@ export function runNotify(options = {}) {
     nodeVersion: options.nodeVersion,
     runTasklist: options.runTasklist,
     trailingProcess: options.trailingProcess ?? hasTrailingDelay(env),
+    // Supplied by the real CLI entry (see the main block); `undefined` keeps the coordinator
+    // unguarded, which is what tests and embedders that never set it up expect.
+    resourcePressure: options.resourcePressure,
     // The attempt number this worker inherited from the coordinator that spawned it; the
     // coordinator caps the chain with it (see scheduleTransientRetries). `options.transientAttempts`
     // is how runNotifyCli passes the advanced count for its own in-process continuations.
@@ -325,6 +329,7 @@ export async function runNotifyCli(options = {}) {
           configScheduleTimes: config.scheduleTimes,
           trailingProcess: Boolean(trailingLockPath) || delayMs > 0,
           transientAttempts,
+          resourcePressure: options.resourcePressure,
           version: config.updatedAt || config.createdAt || 'unknown'
         })
         if (result.error) {
@@ -1117,6 +1122,9 @@ if (isMainModule(import.meta.url)) {
   if (printHelpIfRequested(process.argv.slice(2), 'Usage: notify.mjs --source codex|claude-code')) {
     process.exitCode = 0
   } else {
-    process.exitCode = await runNotifyCli()
+    // The real CLI entry is the only place the resource guard is wired. It is injected here
+    // rather than defaulted inside `runNotify` so in-process callers (tests, embedders) keep
+    // the pre-guard behaviour instead of shelling out to probe the host machine.
+    process.exitCode = await runNotifyCli({ resourcePressure: createResourcePressureProbe() })
   }
 }

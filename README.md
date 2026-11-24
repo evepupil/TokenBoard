@@ -185,6 +185,14 @@ continue to retry after one minute.
 A hook trigger landing within 30 minutes of a scheduled sync time (the config file's `scheduleTimes`)
 is skipped: the scheduled run collects the same usage minutes later, and the queued signal is left
 for the next hook run to acknowledge.
+A hook trigger is also skipped while the machine reports resource pressure — free memory below 10%,
+swap at or above 90% used, I/O pressure at or above 60 (Linux PSI), or load average above two per
+CPU. The signal is queued exactly like the other skips and the scheduled run, which is unaffected,
+collects it. This guard exists because a scan costs 4.6-7.6 GB of resident memory: on an already
+thrashing host it runs many times longer and can still fail at upload. Tune it with
+`TOKENBOARD_RESOURCE_MEMORY_FREE_MIN_PERCENT`, `TOKENBOARD_RESOURCE_SWAP_USED_MAX_PERCENT` and
+`TOKENBOARD_RESOURCE_IO_AVG10_MAX` (integer percentages, 1-99), or set
+`TOKENBOARD_RESOURCE_GUARD=off` to disable it. An unreadable metric never blocks a sync.
 If a scheduled sync reaches the lock timeout, it records a private deferred state and performs a
 bounded in-process retry: at most five attempts with a one-minute delay after each continued lock
 contention. The retry never runs checkout upgrade and stops immediately for a real collector failure.

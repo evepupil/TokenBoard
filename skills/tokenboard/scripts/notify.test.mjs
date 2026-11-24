@@ -391,6 +391,33 @@ test('notify refuses to start a hook sync without coordinator lock ownership', (
   )
 })
 
+test('notify forwards the resource-pressure probe to the coordinator', () => {
+  let runs = 0
+  const result = runNotify({
+    argv: ['--source', 'codex'],
+    stateDir: '/state',
+    cooldownMs: 0,
+    mkdir: () => {},
+    exists: () => false,
+    readFile: () => {
+      const error = new Error('ENOENT')
+      error.code = 'ENOENT'
+      throw error
+    },
+    writeFile: () => {},
+    unlink: () => {},
+    resourcePressure: () => ({ pressured: true, reason: 'memory', detail: 'memory free 2% < 10%' }),
+    executeSync: () => {
+      runs += 1
+      return {}
+    }
+  })
+
+  assert.equal(runs, 0)
+  assert.equal(result.skippedSync, true)
+  assert.equal(result.skippedReason, 'resource-pressure')
+})
+
 test('notify runs source-specific sync through coordinator', () => {
   const calls = []
   const result = runNotify({

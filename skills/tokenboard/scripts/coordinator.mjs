@@ -159,6 +159,24 @@ function runCoordinator(trigger, runtime, result) {
       keepCooldownTrigger(trigger, runtime, pendingSources, syncSources)
       return { ...result, waitedForLock: lock.waited, skippedSync: true, skippedReason: 'scheduled-window' }
     }
+    // A scan costs 4.6-7.6 GB of resident memory. On a machine that is already out of memory
+    // or swapping, it runs many times longer and can still fail on the way out (2026-11-24:
+    // a 26.4-minute hook run died on a TLS handshake timeout under 37.9 GB compressed memory,
+    // with the upload unacknowledged). The source is queued exactly like a cooldown skip and
+    // the scheduled sync — which never passes through here — is the backstop. No trailing
+    // retry is scheduled: under sustained pressure it would only re-probe and re-skip, and the
+    // next real trigger re-evaluates anyway.
+    const pressure = runtime.resourcePressure ? runtime.resourcePressure() : null
+    if (pressure?.pressured) {
+      keepCooldownTrigger(trigger, runtime, pendingSources, syncSources)
+      return {
+        ...result,
+        waitedForLock: lock.waited,
+        skippedSync: true,
+        skippedReason: 'resource-pressure',
+        resourcePressure: pressure.detail
+      }
+    }
 
     const completed = {
       ...result,
@@ -442,6 +460,9 @@ function buildRuntime(options = {}) {
         })),
     runProcessIdentity,
     scheduleTrailing: options.scheduleTrailing || (() => false),
+    // Only a caller that supplies a probe pays for one. `notify.mjs` wires the real probe in
+    // its main block; tests and any other embedder get the pre-guard behaviour by default.
+    resourcePressure: typeof options.resourcePressure === 'function' ? options.resourcePressure : null,
     mkdir: options.mkdir || mkdirSync,
     chmod: options.chmod || (hasCustomFileOps ? undefined : chmodSync),
     lstat: options.lstat || (hasCustomFileOps ? undefined : lstatSync),
@@ -700,6 +721,7 @@ function writeRunLogEntry(result, startedAtMs, runtime) {
       waitedForLock: result.waitedForLock,
       skippedSync: result.skippedSync,
       ...(result.skippedReason ? { skippedReason: result.skippedReason } : {}),
+      ...(result.resourcePressure ? { resourcePressure: result.resourcePressure } : {}),
       ...(result.cooldownRemainingMs != null ? { cooldownRemainingMs: result.cooldownRemainingMs } : {}),
       ...(result.trailingScheduled != null ? { trailingScheduled: result.trailingScheduled } : {}),
       ...(result.trailingDelayMs != null ? { trailingDelayMs: result.trailingDelayMs } : {}),
