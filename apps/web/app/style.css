@@ -85,12 +85,18 @@ body {
   color: #365314;
 }
 
-.app-accent-link:hover {
-  color: #d9f99d;
-}
+/* A tap on a touchscreen leaves `:hover` matching until the user taps elsewhere, so every
+   hand-written hover rule below is wrapped in `(hover: hover)` — the same guard Tailwind puts
+   around its `hover:` utilities. Without it, hover-only styling sticks to whatever was last
+   touched. `lib/hover-rules.test.ts` enforces the wrapper. */
+@media (hover: hover) {
+  .app-accent-link:hover {
+    color: #d9f99d;
+  }
 
-.theme-light .app-accent-link:hover {
-  color: #365314;
+  .theme-light .app-accent-link:hover {
+    color: #365314;
+  }
 }
 
 .app-surface-raised {
@@ -134,15 +140,17 @@ body {
   transition: transform 650ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.app-metric-card:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    0 0 0 1px rgba(190, 242, 100, 0.32),
-    var(--app-shadow-raised);
-}
+@media (hover: hover) {
+  .app-metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 0 0 1px rgba(190, 242, 100, 0.32),
+      var(--app-shadow-raised);
+  }
 
-.app-metric-card:hover::after {
-  transform: translateX(130%);
+  .app-metric-card:hover::after {
+    transform: translateX(130%);
+  }
 }
 
 .app-login-card {
@@ -224,10 +232,12 @@ a[data-link-button='true'] {
     filter 160ms ease;
 }
 
-button:hover:not(:active):not(:disabled):not([aria-disabled='true']),
-a[data-link-button='true']:hover:not(:active) {
-  transform: translateY(-1px);
-  filter: brightness(1.03);
+@media (hover: hover) {
+  button:hover:not(:active):not(:disabled):not([aria-disabled='true']),
+  a[data-link-button='true']:hover:not(:active) {
+    transform: translateY(-1px);
+    filter: brightness(1.03);
+  }
 }
 
 button:active,
@@ -614,17 +624,9 @@ button[data-copy-target][aria-disabled='true'] {
   color: #fca5a5;
 }
 
-.app-danger-action:hover {
-  background: rgba(248, 113, 113, 0.12);
-}
-
 .theme-light .app-danger-action {
   border-color: rgba(185, 28, 28, 0.34);
   color: #b91c1c;
-}
-
-.theme-light .app-danger-action:hover {
-  background: rgba(248, 113, 113, 0.14);
 }
 
 .app-danger-button {
@@ -633,20 +635,30 @@ button[data-copy-target][aria-disabled='true'] {
   color: #fecaca;
 }
 
-.app-danger-button:hover {
-  border-color: rgba(252, 165, 165, 0.62);
-  background: rgba(248, 113, 113, 0.22);
-}
-
 .theme-light .app-danger-button {
   border-color: rgba(185, 28, 28, 0.24);
   background: rgba(248, 113, 113, 0.1);
   color: #991b1b;
 }
 
-.theme-light .app-danger-button:hover {
-  border-color: rgba(185, 28, 28, 0.38);
-  background: rgba(248, 113, 113, 0.16);
+@media (hover: hover) {
+  .app-danger-action:hover {
+    background: rgba(248, 113, 113, 0.12);
+  }
+
+  .theme-light .app-danger-action:hover {
+    background: rgba(248, 113, 113, 0.14);
+  }
+
+  .app-danger-button:hover {
+    border-color: rgba(252, 165, 165, 0.62);
+    background: rgba(248, 113, 113, 0.22);
+  }
+
+  .theme-light .app-danger-button:hover {
+    border-color: rgba(185, 28, 28, 0.38);
+    background: rgba(248, 113, 113, 0.16);
+  }
 }
 
 .app-status-pill {
