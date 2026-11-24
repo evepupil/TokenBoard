@@ -124,6 +124,18 @@ describe('public usage route', () => {
     expect(mockedGetPublicUsageCard).not.toHaveBeenCalled()
   })
 
+  // Every fixed route under /api/public must be reserved, or a profile that owns the same
+  // slug is shadowed by the fixed route and the settings form accepts it anyway.
+  test('reserves the fixed version route slug', async () => {
+    const response = (await GET[0](
+      contextFor('version', 'https://tokenboard.example/api/public/version') as never,
+      async () => undefined
+    )) as Response
+
+    expect(response.status).toBe(404)
+    expect(mockedGetPublicUsageJson).not.toHaveBeenCalled()
+  })
+
   test('preserves API error headers', async () => {
     mockedGetPublicUsageJson.mockRejectedValue(
       new ApiError('RATE_LIMITED', 'Too many requests', 429, { 'Retry-After': '30' })

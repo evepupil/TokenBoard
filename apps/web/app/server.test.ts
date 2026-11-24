@@ -192,6 +192,24 @@ describe('worker server', () => {
     expect(mockedGetModelPricing).toHaveBeenCalledTimes(1)
   })
 
+  // `/api/public/version` is a fixed route like model-pricing, and the entrypoint answers
+  // public paths before the HonoX route does — without the explicit pass-through it would be
+  // parsed as a card slug and answer 404.
+  test('serves the public version route through the entrypoint', async () => {
+    const response = await worker.fetch(
+      workerRequest('https://tokenboard.example/api/public/version'),
+      createEnv(),
+      createExecutionContext()
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      serverVersion: expect.stringMatching(/^\d+\.\d+\.\d+$/),
+      clientVersion: expect.stringMatching(/^\d+\.\d+\.\d+$/)
+    })
+    expect(response.headers.get('cache-control')).toBe('no-store')
+  })
+
   test('serves the versioned model-pricing alias when the legacy slug is occupied', async () => {
     mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
     const env = createEnv({ publicProfile: true, profileSlug: 'model-pricing' })

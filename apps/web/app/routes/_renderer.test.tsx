@@ -2,6 +2,7 @@ import { renderToString } from 'hono/jsx/dom/server'
 import { describe, expect, test, vi } from 'vitest'
 import { AppNav } from '../components/app-nav'
 import { SkipLinkTarget } from '../components/skip-link-target'
+import { clientVersion, serverVersion } from '../lib/version'
 import renderer from './_renderer'
 
 // `_renderer` is the `jsxRenderer(...)` middleware: it installs a layout on the context and calls
@@ -61,5 +62,19 @@ describe('app renderer shell', () => {
 
     expect(linkTarget).toBeDefined()
     expect(fallbackId).toBe(linkTarget)
+  })
+
+  // The footer is the only place the running deployment names itself. Both numbers must come
+  // from the shared constants — a literal here would drift from `/api/public/version`, which is
+  // the machine-readable twin of this line.
+  test('renders the server and client versions in a footer after the page content', async () => {
+    const html = await renderShell(<main>content</main>)
+
+    expect(html).toContain(`服务端 v${serverVersion}`)
+    expect(html).toContain(`客户端 v${clientVersion}`)
+    expect(html).toContain('data-app-version="true"')
+    // The line belongs to the page shell, not to any route: it has to come after the content
+    // so it reads as a footer rather than a banner.
+    expect(html.indexOf('data-app-version')).toBeGreaterThan(html.indexOf('<main'))
   })
 })

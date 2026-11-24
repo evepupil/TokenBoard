@@ -2,6 +2,7 @@ import { jsxRenderer } from 'hono/jsx-renderer'
 import { Link } from 'honox/server'
 import { initialColorScheme, mobileNightModeOptOutMeta, themeChromeColors } from '../lib/theme'
 import { themeScript } from '../lib/theme-script'
+import { clientVersion, serverVersion } from '../lib/version'
 
 type Manifest = Record<string, { file?: string }>
 type ManifestModule = { default?: Manifest }
@@ -28,6 +29,13 @@ export default jsxRenderer(({ children }) => {
           跳到主要内容
         </a>
         {children}
+        {/* A quiet version line at the bottom of every page: "is the deployment behind
+            this URL the one I think it is" was otherwise only answerable by comparing
+            static-asset hashes. The two numbers come from `../lib/version` and are
+            versioned independently — see the comment there. */}
+        <footer class="px-4 pb-5 text-center text-xs text-[var(--app-muted)]" data-app-version="true">
+          TokenBoard · 服务端 v{serverVersion} · 客户端 v{clientVersion}
+        </footer>
       </body>
     </html>
   )

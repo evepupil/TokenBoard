@@ -604,7 +604,7 @@ skills/tokenboard/
   不加额外保护层；前提是差异逐条进台账（见 `docs/research/2026-11-13-s5-migration-diff-ledger.md`）。
   改采集端计价时不要以为「不重算历史」会挡住这次覆盖。
 - 部署模型定价前，`deploy.mjs` 的实际顺序是：配置校验 → build → dry-run → **生产路由检查** →
-  按序应用全部待执行 migration（当前到 `0039`）→ 五项 schema 校验（`verify-critical-schema.sql`、
+  按序应用全部待执行 migration（当前到 `0040`）→ 五项 schema 校验（`verify-critical-schema.sql`、
   `verify-rate-limit-index.sql`、`verify-retention-index.sql`、`verify-public-card-index.sql`、
   `verify-foreign-keys.sql`）→ 发布。
   每步 fail-fast（`spawnSync` 非零即 `process.exit`）。

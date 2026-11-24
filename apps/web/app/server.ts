@@ -74,6 +74,10 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
 
   try {
     const url = new URL(request.url)
+    // `/api/public/version` is a fixed route, not a card slug. Without this, the path
+    // falls into the slug lookup below and answers 404 (or, worse, a user profile that
+    // owns the slug) — the entrypoint answers before the HonoX route does.
+    if (url.pathname === '/api/public/version') return null
     if (url.pathname === '/api/public/model-pricing') {
       // The Worker cache only stores 200s, so a request that misses it — a novel
       // `?cursor=`, a rejected limit — reaches D1 every time. Without a ceiling that
