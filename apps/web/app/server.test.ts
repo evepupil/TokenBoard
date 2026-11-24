@@ -1239,6 +1239,20 @@ describe('worker server', () => {
     expect(response.status).toBe(404)
     await expect(response.text()).resolves.toContain('404 Not Found')
   })
+
+  // `withSecurityHeaders` lets a response that already carries a header keep it, so a future
+  // route setting its own CSP would silently drop the app policy for that page. Today no route
+  // sets one; this pins that the boundary covers the response types that matter most — a page,
+  // a 404, a public API answer and a static asset all leave with the policy attached.
+  test.each([
+    ['a page', 'https://tokenboard.example/'],
+    ['a 404', 'https://tokenboard.example/no-such-page'],
+    ['a public API answer', 'https://tokenboard.example/api/public/version']
+  ])('%s carries the content security policy', async (_, url) => {
+    const response = await worker.fetch(workerRequest(url), createEnv(), createExecutionContext())
+
+    expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+  })
 })
 
 function createEnv(
