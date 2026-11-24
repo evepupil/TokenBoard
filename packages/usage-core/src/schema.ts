@@ -1,5 +1,12 @@
 import { z } from 'zod'
 import { isValidIsoDate } from './dates'
+import { isValidTimezone, maxUsageTimezoneLength } from './timezone'
+
+// The timezone helpers live in `./timezone` so the browser can import the check without
+// zod: zod's JIT validators probe `Function("")` at module scope, which a CSP without
+// `unsafe-eval` blocks and reports as a console error. Re-exported here so the
+// `@tokenboard/usage-core` barrel keeps a single surface for server-side callers.
+export { isValidTimezone, maxUsageTimezoneLength, timezoneValidationCacheSize } from './timezone'
 
 export const usageSources = [
   'claude-code',
@@ -81,9 +88,7 @@ const costUnavailableMessages: Record<(typeof costUnavailableSources)[number], s
 }
 
 export const usageSourceSchema = z.enum(usageSources)
-export const maxUsageTimezoneLength = 80
 export const maxUsageModelNameLength = 160
-const validTimezoneCache = new Set<string>()
 
 export const usageTimezoneSchema = z
   .string()
@@ -184,27 +189,4 @@ export function snapshotHashPayload(snapshot: UsageSnapshot) {
     sessionCount: snapshot.sessionCount,
     correction: snapshot.correction
   })
-}
-
-export function isValidTimezone(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-
-  const timezone = value.trim()
-  if (!timezone || timezone !== value || timezone.length > maxUsageTimezoneLength) return false
-  const cacheKey = timezone.toLowerCase()
-  if (validTimezoneCache.has(cacheKey)) return true
-
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', { timeZone: timezone })
-    formatter.format(new Date(0))
-    validTimezoneCache.add(cacheKey)
-    validTimezoneCache.add(formatter.resolvedOptions().timeZone.toLowerCase())
-    return true
-  } catch (_) {
-    return false
-  }
-}
-
-export function timezoneValidationCacheSize() {
-  return validTimezoneCache.size
 }
