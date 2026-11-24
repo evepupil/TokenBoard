@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { assertCredentialsLockOwnership, withCredentialsLock } from './credentials-lock.mjs'
+import { usageSources } from './usage-sources.mjs'
 
 export function configDir() {
   return process.env.TOKENBOARD_CONFIG_DIR || join(homedir(), '.tokenboard')
@@ -11,6 +12,11 @@ export function configDir() {
 // Only touches a directory, and only when its mode is not already private, so a directory the
 // user owns and has already locked down is left exactly as-is.
 function chmodConfigDirPrivate(dir) {
+  // Windows has no POSIX permission bits: Go synthesizes them (every non-readonly entry reads as
+  // 0666, see Go's os/types_windows.go), so testing `mode & 0o077` would call every directory
+  // world-accessible and chmod here is a no-op anyway. Access is governed by the ACLs the state
+  // directory inherits from the user profile, which is private by default. Mirrors Go's
+  // internal/state/perm_windows.go.
   if (process.platform === 'win32') return
   try {
     const stats = statSync(dir)
@@ -75,6 +81,13 @@ export function readPerSource(config = {}) {
   }
   const resolved = {}
   for (const [source, value] of Object.entries(mapping)) {
+    // A misspelled source is not harmless: it never matches a real run, so the
+    // operator believes the migration is staged while every run stays on the
+    // machine-wide client. Refuse the name instead, the way the source list
+    // itself is a closed set.
+    if (!usageSources.includes(source)) {
+      throw new Error(`Invalid perSource entry for ${source}: unknown usage source.`)
+    }
     if (typeof value !== 'string') {
       throw new Error(`Invalid perSource entry for ${source}: expected git, ts, go or binary.`)
     }
@@ -407,12 +420,20 @@ const profileScopedRootKeys = new Set([
   'updatedAt'
 ])
 
+// Flags may be written as `--key value` or `--key=value`. The inline form is
+// what this project writes into its own hook commands (`--source=codex`), so a
+// user copying that spelling into sync.mjs must get the same result instead of
+// a flag literally named `source=codex` that every reader ignores.
 export function parseArgs(args) {
   const flags = {}
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (!arg.startsWith('--')) continue
-    const key = arg.slice(2)
+    const [key, inlineValue] = arg.slice(2).split(/=(.*)/s, 2)
+    if (inlineValue !== undefined) {
+      flags[key] = inlineValue
+      continue
+    }
     const next = args[index + 1]
     if (!next || next.startsWith('--')) {
       flags[key] = true

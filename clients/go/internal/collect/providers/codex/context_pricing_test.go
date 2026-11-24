@@ -26,8 +26,6 @@ const maxCodexChildSessionLineBytes = 1024 * 1024
 
 func floatPtr(value float64) *float64 { return &value }
 
-func stringPtr(value string) *string { return &value }
-
 func assertCloseTo(t *testing.T, got, want float64, digits int) {
 	t.Helper()
 	tolerance := 0.5 * math.Pow(10, -float64(digits))
@@ -167,9 +165,9 @@ func TestUsesTheGPT56RequestTierAtInputTokens(t *testing.T) {
 		inputTokens float64
 		inputRate   float64
 	}{
-		{271_999, 5.0 / 1_000_000.0},
-		{272_000, 5.0 / 1_000_000.0},
-		{272_001, 10.0 / 1_000_000.0},
+		{271_999, 4.0 / 1_000_000.0},
+		{272_000, 4.0 / 1_000_000.0},
+		{272_001, 8.0 / 1_000_000.0},
 	}
 	for _, testCase := range cases {
 		t.Run(fmt.Sprintf("%d", int64(testCase.inputTokens)), func(t *testing.T) {
@@ -188,7 +186,7 @@ func TestUsesTheLongContextTierWhenCacheCreationCrossesThe272kRequestBoundary(t 
 		InputTokens:         272_000,
 		CacheCreationTokens: 1,
 	})
-	assertPriceCloseTo(t, cost, (272_000*10+12.5)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (272_000*8+10)/1_000_000.0, 12)
 }
 
 func TestUsesTheGrokRequestTierAtInputTokens(t *testing.T) {
@@ -242,7 +240,7 @@ func TestPricesEveryComponentWithTheLongContextTierNotOnlyInputTokens(t *testing
 		CacheReadTokens:     1,
 		CacheCreationTokens: 1,
 	})
-	assertPriceCloseTo(t, cost, (272_000*10+1+12.5+45)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (272_000*8+0.8+10+30)/1_000_000.0, 12)
 }
 
 func TestPricesAdditiveCachedInputSeparatelyFromUncachedInput(t *testing.T) {
@@ -253,7 +251,7 @@ func TestPricesAdditiveCachedInputSeparatelyFromUncachedInput(t *testing.T) {
 		OutputTokens:        20,
 		CacheReadTokens:     150,
 	})
-	assertPriceCloseTo(t, cost, (50*5+150*0.5+20*30)/1_000_000.0, 12)
+	assertPriceCloseTo(t, cost, (50*4+150*0.4+20*20)/1_000_000.0, 12)
 }
 
 func TestAppliesTheFastAndPriorityMultiplierAndNormalizesDatedModelIDs(t *testing.T) {
@@ -383,7 +381,7 @@ func TestRemovesAStaleStaticRuleWhenALaterContextTierChangesTheEffectiveRates(t 
 		t.Fatalf("rules = %+v, want %+v", rules, want)
 	}
 	wantDiagnostics := []string{
-		"TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-multi-tier; multiple changing context tiers cannot be represented by the request-level rule",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier",
 	}
 	if !reflect.DeepEqual(diagnostics, wantDiagnostics) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, wantDiagnostics)
@@ -643,10 +641,79 @@ func TestSkipsADynamicContextRuleWhenCachePricesAreIncompleteWithoutAStaticFallb
 		t.Fatalf("rules = %+v, want none", rules)
 	}
 	want := []string{
-		"TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-cache-unknown; cache pricing is incomplete (cache-read, cache-write)",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown",
 	}
 	if !reflect.DeepEqual(diagnostics, want) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)
+	}
+}
+
+// TestAggregatesDynamicContextRuleSkips pins the diagnostic shape for models
+// whose dynamic context rule is skipped: one line per reason class, naming
+// every affected model, in catalogue order. The catalogue changes daily, and a
+// line per model ran to ~2600 identical-looking lines per scan in the
+// scheduled-sync log, burying real warnings. A model id is catalogue data, not
+// a local path, but it still goes through oneLineForLog so a crafted id cannot
+// inject line breaks into that log.
+func TestAggregatesDynamicContextRuleSkips(t *testing.T) {
+	models := []pricing.Model{
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-multi-tier-a"
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-cache-unknown-a"
+			model.CacheReadCostPerMillion = nil
+			model.CacheWriteCostPerMillion = nil
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-multi-tier-b"
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+			}}
+		}),
+		pricedModel(func(model *pricing.Model) {
+			model.ModelID = "gpt-6-cache-unknown-b"
+			model.CacheReadCostPerMillion = nil
+			model.CacheWriteCostPerMillion = nil
+			model.Pricing = map[string]any{"tiers": []any{
+				map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			}}
+		}),
+	}
+	var diagnostics []string
+	rules := BuildCodexContextPricingRules(models, []CodexContextPricingRule{},
+		func(line string) { diagnostics = append(diagnostics, line) }, nil)
+
+	if len(rules) != 0 {
+		t.Fatalf("rules = %+v, want none", rules)
+	}
+	want := []string{
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 2 models with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier-a, gpt-6-multi-tier-b",
+		"TokenBoard model pricing: skipping dynamic Codex context rule for 2 models with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown-a, gpt-6-cache-unknown-b",
+	}
+	if !reflect.DeepEqual(diagnostics, want) {
+		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)
+	}
+
+	// A model id carrying a newline must not split the line.
+	diagnostics = nil
+	BuildCodexContextPricingRules([]pricing.Model{pricedModel(func(model *pricing.Model) {
+		model.ModelID = "gpt-6-multi\ntier"
+		model.Pricing = map[string]any{"tiers": []any{
+			map[string]any{"tier": map[string]any{"type": "context", "size": float64(272_000)}, "input": float64(1), "output": float64(2)},
+			map[string]any{"tier": map[string]any{"type": "context", "size": float64(1_000_000)}, "input": float64(2), "output": float64(4)},
+		}}
+	})}, []CodexContextPricingRule{}, func(line string) { diagnostics = append(diagnostics, line) }, nil)
+	if len(diagnostics) != 1 || strings.Contains(diagnostics[0], "\n") {
+		t.Fatalf("diagnostics = %q, want one single-line summary", diagnostics)
 	}
 }
 
@@ -767,7 +834,7 @@ func TestReconstructsCumulativeTokenRowsAndDeduplicatesOnlyIdenticalEventsAcross
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (271_999*5+30)/1_000_000.0 + 2*((272_001*10+45)/1_000_000.0),
+		CostUSD:   (271_999*4+20)/1_000_000.0 + 2*((272_001*8+30)/1_000_000.0),
 	}})
 }
 
@@ -784,7 +851,7 @@ func TestDoesNotDeduplicateEqualUsageFromDifferentSessions(t *testing.T) {
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -799,7 +866,7 @@ func TestUsesTheStableSessionIDWhenCodexEmitsAPerRecordID(t *testing.T) {
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -844,7 +911,7 @@ func TestDeduplicatesAnArchivedCopyWhenSessionMetadataHasNoIdentity(t *testing.T
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -867,8 +934,53 @@ func TestPrefersTheActiveCopyWhenActiveAndArchivedContentsDiffer(t *testing.T) {
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
+}
+
+func TestAttributesALegacyForkToTheLatestSessionMetaAndCountsItOnce(t *testing.T) {
+	// Releases before Codex wrote session_id produce a forked file whose first
+	// session_meta names the child and whose second replays the parent, with no
+	// field to unify them. The file's records are the parent's, so adopting the
+	// latest meta must both stop the source from failing and keep the replay
+	// deduplicated against the parent's own file.
+	root := t.TempDir()
+	parent := filepath.Join(root, "sessions", "2026", "05", "20", "parent.jsonl")
+	forked := filepath.Join(root, "sessions", "2026", "05", "21", "forked.jsonl")
+	row := tokenCount("2026-05-01T00:00:00.000Z", map[string]any{"last_token_usage": usage(10)}, "gpt-5.6-sol")
+	writeJSONL(t, parent, []map[string]any{sessionMeta("parent-session"), row})
+	writeJSONL(t, forked, []map[string]any{sessionMeta("child-session"), sessionMeta("parent-session"), row})
+
+	costs := mustCostsFromFiles(t, CollectFilesInput{
+		FilePaths: []string{parent, forked},
+		Timezone:  "UTC",
+	})
+	assertCostsEqual(t, costs, []CodexContextPricingCost{{
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
+	}})
+}
+
+func TestRejectsTwoFilesClaimingOneAliasWithDifferentIdentities(t *testing.T) {
+	// The active copy and the archived copy share a relative path, so they share
+	// an alias. Two different session identities under it mean the files are not
+	// the same session, and deduplicating them would silently drop usage.
+	root := t.TempDir()
+	active := filepath.Join(root, "sessions", "2026", "05", "20", "same-file.jsonl")
+	archived := filepath.Join(root, "archived_sessions", "2026", "05", "20", "same-file.jsonl")
+	row := tokenCount("2026-05-01T00:00:00.000Z", map[string]any{"last_token_usage": usage(10)}, "gpt-5.6-sol")
+	writeJSONL(t, active, []map[string]any{sessionMeta("first-session"), row})
+	writeJSONL(t, archived, []map[string]any{sessionMeta("second-session"), row})
+
+	_, err := costsFromFiles(t, CollectFilesInput{
+		FilePaths: []string{active, archived},
+		Timezone:  "UTC",
+	})
+	if err == nil {
+		t.Fatal("expected conflicting identities for one alias to be rejected")
+	}
+	if !strings.Contains(err.Error(), "conflicting session identities") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestDeduplicatesAnArchivedCopyWhenOnlyTheActiveSessionHasAnIdentity(t *testing.T) {
@@ -884,7 +996,7 @@ func TestDeduplicatesAnArchivedCopyWhenOnlyTheActiveSessionHasAnIdentity(t *test
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -901,7 +1013,7 @@ func TestDeduplicatesAnActiveCopyWhenOnlyTheArchivedSessionHasAnIdentity(t *test
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -918,7 +1030,7 @@ func TestDoesNotDoubleCountWhenOnlyOneArchiveCopyExposesIdentityAfterTheOtherWas
 		Timezone:  "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -939,7 +1051,7 @@ func TestKeepsAnonymousSessionsWithTheSameFilenameSeparateAcrossProfiles(t *test
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -963,7 +1075,7 @@ func TestKeepsSessionsWithTheSameMetadataIDSeparateAcrossProfiles(t *testing.T) 
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -994,7 +1106,7 @@ func TestDeduplicatesASessionCopiedIntoASymlinkedArchiveRoot(t *testing.T) {
 		t.Fatalf("collect costs: %v", err)
 	}
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1018,7 +1130,7 @@ func TestKeepsCumulativeBaselinesSeparateWhenOneSessionChangesModels(t *testing.
 	if costs[0].UsageDate != "2026-05-01" || costs[0].Model != "gpt-5.6-sol" {
 		t.Fatalf("costs[0] = %+v", costs[0])
 	}
-	assertCloseTo(t, costs[0].CostUSD, (15*5)/1_000_000.0, 14)
+	assertCloseTo(t, costs[0].CostUSD, (15*4)/1_000_000.0, 14)
 	if costs[1].UsageDate != "2026-05-01" || costs[1].Model != "gpt-5.6-terra" {
 		t.Fatalf("costs[1] = %+v", costs[1])
 	}
@@ -1038,8 +1150,8 @@ func TestKeepsCumulativeBaselinesContinuousAcrossAliasesInOneModelFamily(t *test
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{
-		{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: (10 * 5) / 1_000_000.0},
-		{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (5 * 5) / 1_000_000.0},
+		{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: (10 * 4) / 1_000_000.0},
+		{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (5 * 4) / 1_000_000.0},
 	})
 }
 
@@ -1114,7 +1226,7 @@ func TestAggregatesOversizedIrrelevantRowsAcrossContextPricingScans(t *testing.T
 		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 	want := []string{fmt.Sprintf(
 		"Skipped 2 oversized Codex context pricing JSONL rows without usage or subagent metadata across 2 scans (largest %d bytes)",
@@ -1161,7 +1273,7 @@ func TestKeepsThePrimaryOversizedTurnContextModelWhenMetadataHasAConflictingFall
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-08-12", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1230,7 +1342,7 @@ func TestNormalizesADatedCanonicalModelHintBeforePricing(t *testing.T) {
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (10 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (10 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1251,7 +1363,7 @@ func TestPricesContextEventsAfterAMixedModelSessionWasAttributedToANonContextMod
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1272,7 +1384,7 @@ func TestPricesOnlyTheCumulativeIncrementAfterANonContextModelSwitch(t *testing.
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1313,7 +1425,7 @@ func TestKeepsAContextEventAfterAnInitialNonContextModelHasNoTokenRow(t *testing
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1331,7 +1443,7 @@ func TestKeepsContextTokenRowsWhenTheCanonicalNonContextFileHasNoTurnContextRow(
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1358,7 +1470,7 @@ func TestKeepsContextTokenRowsWhenTheExplicitModelIsNestedInThePayloadUsageFallb
 		Timezone:              "UTC",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-07-18", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1548,7 +1660,7 @@ func TestUsesTheFirstCumulativeOnlyChildRowAsABaseline(t *testing.T) {
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1569,7 +1681,7 @@ func TestUsesTheFirstCumulativeOnlyRowAsABaselineWhenChildMetadataOmitsTheParent
 
 	costs := mustCostsFromFiles(t, CollectFilesInput{FilePaths: []string{file}, Timezone: "UTC"})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: (50 * 4) / 1_000_000.0,
 	}})
 }
 
@@ -1589,29 +1701,47 @@ func TestFiltersRawEventsByTheConfiguredTimezoneAndInclusiveDateBounds(t *testin
 		Until:     "20260502",
 	})
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
-		UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: (20 * 5) / 1_000_000.0,
+		UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: (20 * 4) / 1_000_000.0,
 	}})
 }
 
-func TestFailsWhenACollectedRawCostHasNoMatchingDailySnapshot(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
-		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", TotalTokens: floatPtr(10)}},
+func TestReportsACollectedRawCostWithNoMatchingDailySnapshot(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
+		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 7, TotalTokens: floatPtr(10)}},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-02", Model: "gpt-5.6-sol", CostUSD: 1}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match daily snapshot") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0].CostUSD != 7 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
+	if len(diagnostics) != 2 ||
+		!strings.Contains(diagnostics[0], "usage without a matching daily snapshot") ||
+		!strings.Contains(diagnostics[1], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
-func TestFailsWhenRawContextPricingAttributesADateToADifferentModel(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
-		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-terra", TotalTokens: floatPtr(10)}},
+func TestReportsRawContextPricingThatAttributesADateToADifferentModel(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
+		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-terra", CostUSD: 3, TotalTokens: floatPtr(10)}},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 1}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match daily snapshot") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 || result[0].CostUSD != 3 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
+	if len(diagnostics) != 2 ||
+		!strings.Contains(diagnostics[0], "usage without a matching daily snapshot") ||
+		!strings.Contains(diagnostics[1], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
@@ -1670,17 +1800,26 @@ func TestKeepsSameDayGPT56AliasesAsIndependentCostMatches(t *testing.T) {
 	}
 }
 
-func TestFailsInsteadOfAssigningOneAliasRawCostToMultipleSameDaySnapshots(t *testing.T) {
-	_, err := ApplyCodexContextPricingCosts(
+func TestReportsOneAliasRawCostThatWouldFitMultipleSameDaySnapshots(t *testing.T) {
+	diagnostics := []string{}
+	result, err := ApplyCodexContextPricingCosts(
 		[]CostSnapshot{
-			{UsageDate: "2026-05-01", Model: "gpt-5.6", TotalTokens: floatPtr(10)},
-			{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", TotalTokens: floatPtr(20)},
+			{UsageDate: "2026-05-01", Model: "gpt-5.6", CostUSD: 5, TotalTokens: floatPtr(10)},
+			{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 6, TotalTokens: floatPtr(20)},
 		},
 		[]CodexContextPricingCost{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 2}},
-		nil,
+		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match raw cost") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// The exact key still matches its own snapshot; only the alias is left
+	// without an unambiguous raw cost, and it keeps the aggregate value.
+	if result[0].CostUSD != 5 || result[1].CostUSD != 2 {
+		t.Fatalf("result = %+v, want [5 2]", result)
+	}
+	if len(diagnostics) != 1 || !strings.Contains(diagnostics[0], "without an unambiguous raw cost") {
+		t.Fatalf("diagnostics = %q", diagnostics)
 	}
 }
 
@@ -1698,18 +1837,21 @@ func TestFailsInsteadOfAssigningOneExactRawCostToDuplicateSnapshots(t *testing.T
 	}
 }
 
-func TestFailsWhenAPricedDailySnapshotHasNoRawContextPricingCost(t *testing.T) {
+func TestKeepsTheAggregateCostWhenAPricedDailySnapshotHasNoRawContextPricingCost(t *testing.T) {
 	diagnostics := []string{}
-	_, err := ApplyCodexContextPricingCosts(
+	result, err := ApplyCodexContextPricingCosts(
 		[]CostSnapshot{{UsageDate: "2026-05-01", Model: "gpt-5.6-sol", CostUSD: 7, TotalTokens: floatPtr(10)}},
 		nil,
 		func(line string) { diagnostics = append(diagnostics, line) },
 	)
-	if err == nil || !strings.Contains(err.Error(), "Codex context pricing cannot match raw cost") {
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(result) != 1 || result[0].CostUSD != 7 {
+		t.Fatalf("result = %+v, want the aggregate cost kept", result)
+	}
 	want := []string{
-		"Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01",
+		"Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost",
 	}
 	if !reflect.DeepEqual(diagnostics, want) {
 		t.Fatalf("diagnostics = %v, want %v", diagnostics, want)
@@ -1843,7 +1985,7 @@ func TestAcceptsAdditiveCachedInputAndAppliesTheLongTierToFullContext(t *testing
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (200_000*10 + 100_000*1 + 1*45) / 1_000_000.0,
+		CostUSD:   (200_000*8 + 100_000*0.8 + 1*30) / 1_000_000.0,
 	}})
 }
 
@@ -1865,7 +2007,7 @@ func TestAppliesTheLongTierWhenCacheCreationCrossesTheRequestBoundary(t *testing
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (272_000*10 + 12.5) / 1_000_000.0,
+		CostUSD:   (272_000*8 + 10) / 1_000_000.0,
 	}})
 }
 
@@ -1888,7 +2030,7 @@ func TestAcceptsTheCurrentCacheWriteFieldAsCacheCreationInput(t *testing.T) {
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (10*5 + 4*0.5 + 3*6.25 + 2*30) / 1_000_000.0,
+		CostUSD:   (10*4 + 4*0.4 + 3*5 + 2*20) / 1_000_000.0,
 	}})
 }
 
@@ -1932,7 +2074,7 @@ func TestTreatsAZeroTotalAsLegacyCompatibleInsteadOfAddingCachedInputTwice(t *te
 	assertCostsEqual(t, costs, []CodexContextPricingCost{{
 		UsageDate: "2026-05-01",
 		Model:     "gpt-5.6-sol",
-		CostUSD:   (60*5 + 40*0.5 + 1*30) / 1_000_000.0,
+		CostUSD:   (60*4 + 40*0.4 + 1*20) / 1_000_000.0,
 	}})
 }
 
@@ -2006,7 +2148,7 @@ func TestReadsACacheReadLargerThanInputTokensAsAdditive(t *testing.T) {
 			assertCostsEqual(t, costs, []CodexContextPricingCost{{
 				UsageDate: "2026-05-01",
 				Model:     "gpt-5.6-sol",
-				CostUSD:   (100_000*10 + 200_000*1 + 1*45) / 1_000_000.0,
+				CostUSD:   (100_000*8 + 200_000*0.8 + 1*30) / 1_000_000.0,
 			}})
 		})
 	}
@@ -2266,5 +2408,102 @@ func TestDynamicPricingPrefersTheOfficialVendorRowAsTheCollapsedRepresentative(t
 	selected := SelectUnambiguousDynamicPricingModels(models)
 	if len(selected) != 1 || selected[0].Provider != "openai" {
 		t.Fatalf("selected = %+v, want the openai row", selected)
+	}
+}
+
+// Rows that agree on price can disagree on context window, and the
+// representative carries its own into the rule. The pick must not depend on
+// arrival order, which comes from the catalogue's ORDER BY.
+func TestDynamicPricingRepresentativeIsIndependentOfRowOrder(t *testing.T) {
+	zeta := pricedModel(func(model *pricing.Model) {
+		model.Provider = "zeta"
+		model.ModelID = "order-model"
+		model.ContextWindow = 128_000
+	})
+	alpha := pricedModel(func(model *pricing.Model) {
+		model.Provider = "alpha"
+		model.ModelID = "order-model"
+		model.ContextWindow = 400_000
+	})
+
+	forward := SelectUnambiguousDynamicPricingModels([]pricing.Model{zeta, alpha})
+	backward := SelectUnambiguousDynamicPricingModels([]pricing.Model{alpha, zeta})
+	if len(forward) != 1 || len(backward) != 1 {
+		t.Fatalf("selected %d/%d rows, want 1 each", len(forward), len(backward))
+	}
+	if forward[0].Provider != backward[0].Provider || forward[0].ContextWindow != backward[0].ContextWindow {
+		t.Fatalf("representative depends on row order: %s/%v vs %s/%v",
+			forward[0].Provider, forward[0].ContextWindow, backward[0].Provider, backward[0].ContextWindow)
+	}
+	if forward[0].Provider != "alpha" {
+		t.Fatalf("representative = %s, want the alphabetically first provider", forward[0].Provider)
+	}
+}
+
+// The static rates must be bit-identical to what the JS collector computes for the
+// same literal, or the two clients produce different costUsd for the same session
+// and snapshotHash() diverges: shadow reports a diff, and switching clients
+// re-uploads every day that used these models.
+//
+// JS computes double(0.2) / 1e6 (round the operand, then round the quotient). Go's
+// untyped constant arithmetic evaluates the same expression exactly and rounds once,
+// which lands 1 ULP lower for 0.2, 0.4, 0.8 and 1.8 — exactly the fractional rows
+// gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna carry. The expectations below are the
+// JS bit patterns.
+func TestStaticRatesMatchTheJavaScriptDoubles(t *testing.T) {
+	// Values measured from Node: DataView.setFloat64(v) for the same literal.
+	expected := map[string]map[string]uint64{
+		"gpt-5.6-sol": {
+			"standard.input":         0x3ed0c6f7a0b5ed8d, // 4 / 1e6
+			"standard.output":        0x3ef4f8b588e368f1, // 20 / 1e6
+			"standard.cacheRead":     0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"standard.cacheCreation": 0x3ed4f8b588e368f1, // 5 / 1e6
+			"long.input":             0x3ee0c6f7a0b5ed8d, // 8 / 1e6
+			"long.output":            0x3eff75104d551d69, // 30 / 1e6
+			"long.cacheRead":         0x3eaad7f29abcaf49, // 0.8 / 1e6 (const-fold gives ...af48)
+			"long.cacheCreation":     0x3ee4f8b588e368f1, // 10 / 1e6
+		},
+		"gpt-5.6-terra": {
+			"standard.input":         0x3ec0c6f7a0b5ed8d, // 2 / 1e6
+			"standard.output":        0x3ee92a737110e454, // 12 / 1e6
+			"standard.cacheRead":     0x3e8ad7f29abcaf49, // 0.2 / 1e6 (const-fold gives ...af48)
+			"standard.cacheCreation": 0x3ec4f8b588e368f1, // 2.5 / 1e6
+			"long.input":             0x3ed0c6f7a0b5ed8d, // 4 / 1e6
+			"long.output":            0x3ef2dfd694ccab3f, // 18 / 1e6
+			"long.cacheRead":         0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"long.cacheCreation":     0x3ed4f8b588e368f1, // 5 / 1e6
+		},
+		"gpt-5.6-luna": {
+			"standard.input":         0x3e8ad7f29abcaf49, // 0.2 / 1e6 (const-fold gives ...af48)
+			"standard.output":        0x3eb421f5f40d8376, // 1.2 / 1e6
+			"standard.cacheRead":     0x3e55798ee2308c3a, // 0.02 / 1e6
+			"standard.cacheCreation": 0x3e90c6f7a0b5ed8d, // 0.25 / 1e6
+			"long.input":             0x3e9ad7f29abcaf49, // 0.4 / 1e6 (const-fold gives ...af48)
+			"long.output":            0x3ebe32f0ee144532, // 1.8 / 1e6 (const-fold gives ...4531)
+			"long.cacheRead":         0x3e65798ee2308c3a, // 0.04 / 1e6
+			"long.cacheCreation":     0x3ea0c6f7a0b5ed8d, // 0.5 / 1e6
+		},
+	}
+
+	for _, rule := range CodexContextPricingRules {
+		want, ok := expected[rule.ModelIDs[0]]
+		if !ok {
+			continue
+		}
+		got := map[string]float64{
+			"standard.input":         rule.Standard.Input,
+			"standard.output":        rule.Standard.Output,
+			"standard.cacheRead":     rule.Standard.CacheRead,
+			"standard.cacheCreation": rule.Standard.CacheCreation,
+			"long.input":             rule.LongContext.Input,
+			"long.output":            rule.LongContext.Output,
+			"long.cacheRead":         rule.LongContext.CacheRead,
+			"long.cacheCreation":     rule.LongContext.CacheCreation,
+		}
+		for name, wantBits := range want {
+			if bits := math.Float64bits(got[name]); bits != wantBits {
+				t.Errorf("%s %s = %016x, want %016x", rule.ModelIDs[0], name, bits, wantBits)
+			}
+		}
 	}
 }

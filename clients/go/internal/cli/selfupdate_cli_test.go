@@ -3,8 +3,13 @@ package cli
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
 // The self-update subcommand's CLI boundary: flag parsing, env forwarding,
@@ -185,4 +190,73 @@ func TestSelfUpdateRepoFlagOverridesTheEnvironment(t *testing.T) {
 			t.Errorf("request %q did not use the --repo value; requests: %v", path, paths)
 		}
 	}
+}
+
+// self-update rewrites the executable, so two of them running at once can
+// delete each other's staged file mid-verification. Nothing else serializes
+// them: the skill's sync.lock only covers runs started through sync.mjs, and
+// `dispatch`'s collector-run.lock is entered after this subcommand returns.
+// A second instance therefore yields instead of racing: it reports the update
+// as already in progress, exits 0, and makes no release request at all.
+func TestSelfUpdateYieldsToAnotherUpdateHoldingItsLock(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	stateDir := t.TempDir()
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := state.Acquire(filepath.Join(stateDir, "self-update.lock"), time.Second)
+	if err != nil || lock == nil {
+		t.Fatalf("could not take the lock for the test: %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	env := map[string]string{
+		"TOKENBOARD_STATE_DIR":        stateDir,
+		"TOKENBOARD_RELEASE_BASE_URL": server.URL,
+		"TOKENBOARD_RELEASE_REPO":     "owner/repo",
+	}
+	code, stdout, stderr := run(t, env, "self-update")
+	if code != ExitOK {
+		t.Errorf("exit = %d, want %d; stderr: %s", code, ExitOK, stderr)
+	}
+	if requests != 0 {
+		t.Errorf("the yielding run made %d release requests, want none", requests)
+	}
+	if !strings.Contains(stdout, `"updated": false`) {
+		t.Errorf("stdout = %q, want an updated:false report", stdout)
+	}
+	if !strings.Contains(stderr, "already in progress") {
+		t.Errorf("stderr = %q, want a note that another update holds the lock", stderr)
+	}
+}
+
+// The lock is released when the run ends, so the next scheduled update is not
+// blocked by a previous attempt that could not reach the network.
+func TestSelfUpdateReleasesItsLockWhenTheUpdateFails(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	stateDir := t.TempDir()
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"TOKENBOARD_STATE_DIR":        stateDir,
+		"TOKENBOARD_RELEASE_BASE_URL": server.URL,
+		"TOKENBOARD_RELEASE_REPO":     "owner/repo",
+	}
+	if code, _, stderr := run(t, env, "self-update"); code != ExitFailure {
+		t.Fatalf("exit = %d, want %d; stderr: %s", code, ExitFailure, stderr)
+	}
+	lock, err := state.Acquire(filepath.Join(stateDir, "self-update.lock"), time.Second)
+	if err != nil || lock == nil {
+		t.Fatalf("the failed update left its lock behind: %v", err)
+	}
+	_ = lock.Release()
 }

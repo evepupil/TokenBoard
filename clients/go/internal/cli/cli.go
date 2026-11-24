@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,13 +24,17 @@ import (
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/providers/codex"
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessioncursor"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/redact"
 	"github.com/MisonL/TokenBoard/clients/go/internal/selfupdate"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 	"github.com/MisonL/TokenBoard/clients/go/internal/upload"
+	"github.com/MisonL/TokenBoard/clients/go/internal/urlorigin"
 )
 
-// Exit codes. 75 is the scheduler retry contract: a transient failure the
-// launchd/systemd/schtasks wrapper may re-run.
+// Exit codes. 75 is the "retry later" contract: a transient failure the
+// launchd/systemd/schtasks wrapper may re-run, or a hook run whose upload is
+// paused (its 0 would clear the source's queued signal and strand the
+// snapshots).
 //
 // ExitUsage is deliberately 2, where the TS collector returns 1 for the same
 // usage error. The TS CLI has a single failure code, so a usage error and a
@@ -85,6 +89,11 @@ func RunWithEnv(ctx context.Context, args []string, env Env, stdout, stderr io.W
 type lookupFunc func(string) (string, bool)
 
 func runWithLookup(ctx context.Context, args []string, lookup lookupFunc, stdout, stderr io.Writer) int {
+	// Every stderr line this process writes goes through the redactor: source
+	// errors quote the paths they failed on, and those logs are long-lived
+	// local files that get pasted into issues. The account segment is replaced;
+	// file names below it stay for debugging.
+	stderr = redact.Writer(stderr)
 	env := func(key string) string {
 		value, _ := lookup(key)
 		return value
@@ -129,10 +138,23 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		return ExitFailure
 	}
 	stateDir := state.ResolveDir(env, home)
+	// The collector takes collector-run.lock itself through withRunLock below;
+	// this flag is set by the *client's own recursion* (the skill's sync wrapper
+	// passes it through, and the TS CLI sets it the same way when it re-enters
+	// runCollectorCli under withCursorLock). It is not the hook wrapper: the hook
+	// wrapper holds the coordinator lock, a different file. Without the flag the
+	// inner call would wait out the outer call's own hold and time out.
+	lockHeld := env("TOKENBOARD_COLLECTOR_LOCK_HELD") == "1"
+	runLocked := func(body func() int) int {
+		if lockHeld {
+			return body()
+		}
+		return withRunLock(stateDir, stderr, body)
+	}
 
 	switch options.Command {
 	case "warm-hooks":
-		return withRunLock(stateDir, stderr, func() int {
+		return runLocked(func() int {
 			// The TS collector advances the hook cursors' high-water mark after
 			// a full scan so the next hook run does not rescan the whole tree.
 			// Only the two hook-installed sources have a cursor to warm; the
@@ -148,7 +170,7 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 			return ExitOK
 		})
 	case "preview":
-		return withRunLock(stateDir, stderr, func() int {
+		return runLocked(func() int {
 			outcome, abortErr := collectAll(ctx, options, env, stateDir, "", stderr)
 			if abortErr != nil {
 				fmt.Fprintln(stderr, abortErr.Error())
@@ -175,9 +197,9 @@ func dispatch(ctx context.Context, options Options, env Env, stdout, stderr io.W
 		// hooks fail with the lock timeout (observed 2026-10-21: the 18:00
 		// sync timed out behind a shadow run). A concurrent sync is safe: both
 		// sides only read the session files.
-		return runShadow(ctx, options, env, stdout, stderr)
+		return runShadow(ctx, options, env, stateDir, stdout, stderr)
 	case "sync":
-		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr)
+		return runSync(ctx, options, env, stateDir, startedAt, stdout, stderr, runLocked)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", options.Command)
 		return ExitUsage
@@ -194,8 +216,12 @@ func withRunLock(stateDir string, stderr io.Writer, body func() int) int {
 		return ExitFailure
 	}
 	if lock == nil {
+		// Held by a long scan: defer, do not fail. A plain failure is what the
+		// coordinator treats as "this source lost", so it cleared the queued
+		// signal and scheduled no retry. The literal stays the TS collector's
+		// because the skill's dual-run harness classifies it as busy.
 		fmt.Fprintln(stderr, "TokenBoard collector lock timed out")
-		return ExitFailure
+		return ExitTransient
 	}
 	defer func() { _ = lock.Release() }()
 	return body()
@@ -203,14 +229,20 @@ func withRunLock(stateDir string, stderr io.Writer, body func() int) int {
 
 func runSync(
 	ctx context.Context, options Options, env Env, stateDir string,
-	startedAt time.Time, stdout, stderr io.Writer,
+	startedAt time.Time, stdout, stderr io.Writer, runLocked func(func() int) int,
 ) int {
 	missing := requiredSyncConfig(options)
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "Missing required config for sync: %s\n", strings.Join(missing, ", "))
 		return ExitFailure
 	}
-	return withRunLock(stateDir, stderr, func() int {
+	// The token travels on every request; a plain-http endpoint leaks it and the
+	// usage data. Loopback stays allowed for the local dev server.
+	if err := assertSecureEndpoint(options.Endpoint); err != nil {
+		fmt.Fprintln(stderr, err.Error())
+		return ExitFailure
+	}
+	return runLocked(func() int {
 		return syncLocked(ctx, options, env, stateDir, startedAt, stdout, stderr)
 	})
 }
@@ -224,7 +256,15 @@ func syncLocked(
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	// The TS collector prints per-phase durations next to the upload result,
+	// and the skill's notify forwards them into the coordinator run record.
+	// Go's providers fold cursor scanning and the ccusage calls into one
+	// collection, so the phases it can attribute honestly are collect, upload
+	// and cursorAck; the names travel as-is and are additive.
+	timings := map[string]int64{}
+	phaseStarted := time.Now()
 	outcome, abortErr := collectAll(ctx, options, env, stateDir, cursorScope, stderr)
+	timings["collect"] = elapsedMillis(phaseStarted)
 	if abortErr != nil {
 		fmt.Fprintln(stderr, abortErr.Error())
 		return ExitFailure
@@ -238,11 +278,20 @@ func syncLocked(
 		if shouldFailForSourceErrors {
 			return ExitFailure
 		}
+		// A hook run's 0 means "this source is covered", and the coordinator
+		// clears its queued signal on that. Nothing was uploaded, so the
+		// transient code is the honest answer: defer, schedule the retry, and
+		// leave the snapshots queued in the cursor.
+		if options.HookMode {
+			return ExitTransient
+		}
 		return ExitOK
 	}
 
 	config := upload.Config{Endpoint: options.Endpoint, UploadToken: options.UploadToken}
+	phaseStarted = time.Now()
 	result, uploadErr := upload.UploadSnapshots(ctx, config, outcome.snapshots, nil)
+	timings["upload"] = elapsedMillis(phaseStarted)
 	if uploadErr == nil {
 		upload.RecordSuccess(stateDir)
 	} else {
@@ -271,10 +320,12 @@ func syncLocked(
 		return classifyFailure(uploadErr, options, env)
 	}
 
-	if err := acknowledgeUploadCursors(stateDir, outcome, options, cursorScope, env); err != nil {
+	phaseStarted = time.Now()
+	if err := acknowledgeUploadCursors(stateDir, outcome, result, options, cursorScope, env); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitFailure
 	}
+	timings["cursorAck"] = elapsedMillis(phaseStarted)
 	// The high-water mark claims a full scan covered everything up to the run's
 	// start; only the runs that actually did (unbounded, not hook mode) may
 	// advance it.
@@ -284,13 +335,49 @@ func syncLocked(
 		return ExitFailure
 	}
 
-	payload, _ := json.MarshalIndent(map[string]any{"upserted": result.Upserted, "skipped": result.Skipped}, "", "  ")
+	// Only surfaces when something was actually dropped, so a clean run's payload
+	// keeps the shape the TS collector prints. Each dropped row is named the way
+	// the TS uploader reports it — the count alone leaves the operator guessing
+	// which date was outside the window.
+	if result.RejectedUsageDates > 0 {
+		for index, rejected := range result.Rejected {
+			if index == 10 {
+				break
+			}
+			fmt.Fprintf(stderr,
+				"TokenBoard upload: dropping %s %s with usageDate %s (%s); the server rejects any batch containing it\n",
+				rejected.Snapshot.Source, rejected.Snapshot.Model, rejected.Snapshot.UsageDate, rejected.Issue)
+		}
+		if result.RejectedUsageDates > 10 {
+			fmt.Fprintf(stderr, "TokenBoard upload: %d more snapshots dropped for the same reason\n",
+				result.RejectedUsageDates-10)
+		}
+	}
+	payloadFields := map[string]any{
+		"upserted": result.Upserted,
+		"skipped":  result.Skipped,
+		"timings":  timings,
+	}
+	if result.RejectedUsageDates > 0 {
+		payloadFields["rejectedUsageDates"] = result.RejectedUsageDates
+	}
+	payload, _ := json.MarshalIndent(payloadFields, "", "  ")
 	fmt.Fprintln(stdout, string(payload))
 	if shouldFailForSourceErrors {
 		fmt.Fprintf(stderr, "One or more sources failed: %s\n", formatSourceFailures(outcome.failures))
 		return ExitFailure
 	}
 	return ExitOK
+}
+
+// elapsedMillis reports a phase duration the way the TS phase timings do:
+// rounded to whole milliseconds and never negative.
+func elapsedMillis(start time.Time) int64 {
+	elapsed := time.Since(start).Milliseconds()
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 // classifyFailure applies the exit-code contract: only a non-hook sync run
@@ -560,12 +647,12 @@ func expandWarmHookSources(source string) []string {
 }
 
 // cursorScopeFromEndpoint mirrors the TS cursorScopeFromEndpoint: the
-// endpoint URL's origin — lowercased host, default port dropped, IPv6 hosts
-// kept in brackets, port normalized — or empty when there is no endpoint. An
-// endpoint that does not parse is a failure; the TS new URL() throws and
-// aborts the run the same way. (The TS side would continue with the literal
-// origin "null" for scheme-less or file:// endpoints; refusing is the
-// fail-closed equivalent.)
+// endpoint URL's origin (normalized by urlorigin.Origin, shared with the
+// pricing cache identity), or empty when there is no endpoint. An endpoint
+// that does not parse, or whose host the URL parser would reject, is a
+// failure; the TS new URL() throws and aborts the run the same way. (The TS
+// side would continue with the literal origin "null" for scheme-less or
+// file:// endpoints; refusing is the fail-closed equivalent.)
 func cursorScopeFromEndpoint(endpoint string) (string, error) {
 	if endpoint == "" {
 		return "", nil
@@ -574,25 +661,11 @@ func cursorScopeFromEndpoint(endpoint string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("Invalid endpoint URL: %s", endpoint)
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]" // url.Hostname strips IPv6 brackets
-	}
-	if port := parsed.Port(); port != "" && !isDefaultPort(parsed.Scheme, port) {
-		host = host + ":" + port
-	}
-	return parsed.Scheme + "://" + host, nil
-}
-
-// isDefaultPort normalizes before comparing so a leading-zero port
-// ("https://h:0443") is recognized as default and dropped, the way the TS
-// URL parser canonicalizes it.
-func isDefaultPort(scheme, port string) bool {
-	normalized, err := strconv.Atoi(port)
+	origin, err := urlorigin.Origin(parsed)
 	if err != nil {
-		return false
+		return "", fmt.Errorf("Invalid endpoint URL: %s", endpoint)
 	}
-	return (scheme == "https" && normalized == 443) || (scheme == "http" && normalized == 80)
+	return origin, nil
 }
 
 func requiredSyncConfig(options Options) []string {
@@ -622,22 +695,52 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	switch command {
 	case "preview", "sync", "warm-hooks", "shadow":
 	default:
-		return Options{}, fmt.Errorf("Usage: %s", usageLine())
+		return Options{}, errors.New(usageLine())
 	}
 	// --hook is a boolean for `shadow` only: readFlags requires a value, and
 	// `--hook` is written bare. Pull it out first, then parse the rest
 	// normally so an unknown or valueless flag is still a usage error.
+	//
+	// The value spelling is accepted as a convenience (--hook=false, and the
+	// space-separated `--hook false`) but an unrecognised one is a usage
+	// error: treating `--hook=flase` as false ran a full preview while the
+	// operator believed they had asked for the hook path, and the report
+	// cannot tell them apart. The space form matters for the same reason in
+	// reverse — consumed only as the bare flag, `--hook false` enabled the
+	// hook path and dropped the `false`, the opposite of what was typed.
 	shadowHook := false
 	rest := args[1:]
 	if command == "shadow" {
 		kept := make([]string, 0, len(rest))
-		for _, arg := range rest {
+		for index := 0; index < len(rest); index++ {
+			arg := rest[index]
 			switch {
 			case arg == "--hook":
+				if index+1 < len(rest) && !strings.HasPrefix(rest[index+1], "--") {
+					switch rest[index+1] {
+					case "true", "1":
+						shadowHook = true
+						index++
+						continue
+					case "false", "0":
+						shadowHook = false
+						index++
+						continue
+					default:
+						return Options{}, fmt.Errorf("Invalid value for --hook: %s (want true, false, 1, or 0)", rest[index+1])
+					}
+				}
 				shadowHook = true
 			case strings.HasPrefix(arg, "--hook="):
 				value := strings.TrimPrefix(arg, "--hook=")
-				shadowHook = value == "true" || value == "1"
+				switch value {
+				case "true", "1":
+					shadowHook = true
+				case "false", "0":
+					shadowHook = false
+				default:
+					return Options{}, fmt.Errorf("Invalid value for --hook: %s (want true, false, 1, or 0)", value)
+				}
 			default:
 				kept = append(kept, arg)
 			}
@@ -663,9 +766,17 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	}
 	timezone := flags["timezone"]
 	if _, given := flags["timezone"]; !given {
-		timezone = localTimezone()
+		// TS resolves this with `??`, so the machine's zone is only consulted
+		// when the variable is unset — that ordering is also what keeps a
+		// Windows host working, since the fallback there fails closed.
 		if value, ok := lookup("TOKENBOARD_TIMEZONE"); ok {
 			timezone = value
+		} else {
+			detected, err := localTimezone()
+			if err != nil {
+				return Options{}, err
+			}
+			timezone = detected
 		}
 	}
 	if err := assertValidTimezone(timezone); err != nil {
@@ -674,6 +785,16 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	// TS resolves endpoint and token with `??`: a given flag wins, and an
 	// exported-but-empty variable is a value the required-config check then
 	// reports missing rather than silently using what the scheduler exported.
+	hookMode := env("TOKENBOARD_HOOK_MODE") == "1"
+	if command == "shadow" {
+		// Shadow computes its own hook flag from --hook and strips the ambient
+		// variable from both sides' environment (runShadow, shadowChildEnv).
+		// Reading the ambient value here let a notifier's TOKENBOARD_HOOK_MODE=1
+		// reject an explicit `shadow --until`, and hid an ambient
+		// TOKENBOARD_UNTIL, for a comparison that would have run as a full
+		// preview — the run's own semantics contradicted its validation.
+		hookMode = shadowHook
+	}
 	options := Options{
 		Command:     command,
 		Source:      source,
@@ -684,7 +805,7 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 		// The flag wins whenever it was given; the environment chain behind it
 		// uses `||`, so empty variables fall through there.
 		Since:           flagOrEnvChain(flags, "since", env, "TOKENBOARD_SINCE", "TOKENBOARD_DEFAULT_SINCE"),
-		HookMode:        env("TOKENBOARD_HOOK_MODE") == "1",
+		HookMode:        hookMode,
 		FailOnSourceErr: env("TOKENBOARD_FAIL_ON_SOURCE_ERROR") == "1",
 		ShadowHook:      shadowHook,
 	}
@@ -698,7 +819,25 @@ func parseArgsWithLookup(args []string, env Env, lookup lookupFunc) (Options, er
 	if err := assertSupportedUntil(options); err != nil {
 		return Options{}, err
 	}
+	if err := assertWarmHooksNotInHookMode(options); err != nil {
+		return Options{}, err
+	}
 	return options, nil
+}
+
+// assertWarmHooksNotInHookMode rejects a warm that cannot warm anything.
+//
+// warmHookCursors returns immediately when the run is a hook run (the high-water mark belongs to
+// the scheduled scan, and advancing it from inside a hook collection would move the cursor past
+// files that hook is about to read). The command still printed its `{"warmed":[...]}` payload and
+// exited 0, so a real warm and a silent no-op looked identical from the outside. This is the same
+// class as the --until rejection below: an input warm-hooks cannot honour is refused instead of
+// dropped. The TS collector takes the same position.
+func assertWarmHooksNotInHookMode(options Options) error {
+	if options.Command != "warm-hooks" || !options.HookMode {
+		return nil
+	}
+	return fmt.Errorf("warm-hooks is not supported in hook mode; a hook run consumes the hook cursors instead of advancing them")
 }
 
 // flagOrEnvChain is the `??` + `||` pair TS uses for --since: the flag wins
@@ -821,23 +960,37 @@ func firstNonEmpty(values ...string) string {
 // has no name, so the conventional system locations are consulted directly
 // before giving up — a silent UTC fallback would shift usageDate and fork the
 // server's dedup key against a TS collector on the same machine.
-func localTimezone() string {
+func localTimezone() (string, error) {
 	if name := strings.TrimSpace(os.Getenv("TZ")); name != "" {
-		return name // validated by assertValidTimezone, like the TS path
+		return name, nil // validated by assertValidTimezone, like the TS path
 	}
 	if name := time.Local.String(); name != "" && name != "Local" && contract.IsValidTimezone(name) {
-		return name
+		return name, nil
 	}
 	if name := systemTimezoneName(); name != "" {
-		return name
+		return name, nil
 	}
-	return "UTC"
+	return fallbackTimezone(runtime.GOOS)
+}
+
+// fallbackTimezone answers when nothing on the host named the zone. On Unix
+// the remaining case is a machine that genuinely runs UTC (a slim container
+// with neither /etc/timezone nor the /etc/localtime symlink), so UTC is the
+// right answer. Windows has neither file and Go reports time.Local as the
+// literal "Local", so the real zone cannot be recovered there and a UTC guess
+// would be silently wrong for every user east or west of Greenwich; fail with
+// the variable that fixes it instead.
+func fallbackTimezone(goos string) (string, error) {
+	if goos == "windows" {
+		return "", errors.New("Cannot determine the system timezone on Windows. Set TOKENBOARD_TIMEZONE (an IANA name such as Asia/Shanghai) or pass --timezone")
+	}
+	return "UTC", nil
 }
 
 // systemTimezoneName reads the host zone name from the conventional
 // locations: /etc/timezone (Debian and derivatives) and the /etc/localtime
 // symlink into a zoneinfo tree (macOS, most Linux). Windows has neither, so
-// it falls through to the caller's UTC fallback.
+// it falls through to fallbackTimezone, which refuses to guess there.
 func systemTimezoneName() string {
 	if data, err := os.ReadFile("/etc/timezone"); err == nil {
 		if name := strings.TrimSpace(string(data)); contract.IsValidTimezone(name) {
@@ -878,6 +1031,11 @@ func assertValidTimezone(value string) error {
 // keeps working on the version it has. A genuine update failure is reported
 // on stderr and still exits 0 for the scheduled path, so the scheduler does
 // not retry an upgrade it cannot influence.
+// selfUpdateLockWait bounds how long a second self-update tries for the lock.
+// The lock is acquired with a near-zero wait in practice: a contender yields
+// immediately rather than queueing behind a download it cannot shorten.
+const selfUpdateLockWait = 100 * time.Millisecond
+
 func runSelfUpdate(args []string, env Env, stdout, stderr io.Writer) int {
 	// --scheduled is a boolean: the scheduler writes it bare
 	// (`tokenboard self-update --scheduled`), which the value-requiring flag
@@ -901,6 +1059,38 @@ func runSelfUpdate(args []string, env Env, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitUsage
 	}
+
+	// Two updates at once rewrite the same executable: each stages to
+	// `<binary>.new` and swaps it in, so they can delete each other's staged
+	// file mid-verification, overwrite each other's backup, and lengthen the
+	// window in which the target path does not exist. Nothing else serializes
+	// them — this subcommand returns before `dispatch` takes
+	// collector-run.lock, and the skill's sync.lock only covers runs started
+	// through sync.mjs. A contender yields rather than waits: an update is not
+	// urgent, and the next scheduled run picks it up.
+	// os.UserHomeDir, not $HOME: Windows has no HOME by default, and resolving
+	// to a relative ".tokenboard" under the working directory would put this
+	// lock somewhere no other TokenBoard component looks.
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ".tokenboard"
+	}
+	lock, lockErr := state.Acquire(filepath.Join(state.ResolveDir(env, home), "self-update.lock"), selfUpdateLockWait)
+	if lockErr != nil {
+		fmt.Fprintln(stderr, lockErr.Error())
+		if scheduled {
+			return ExitOK
+		}
+		return ExitFailure
+	}
+	if lock == nil {
+		fmt.Fprintln(stderr, "TokenBoard self-update already in progress; leaving this one to it")
+		payload, _ := json.MarshalIndent(map[string]any{"version": strings.TrimPrefix(Version, "v"), "updated": false}, "", "  ")
+		fmt.Fprintln(stdout, string(payload))
+		return ExitOK
+	}
+	defer func() { _ = lock.Release() }()
+
 	// The flag is the operator's intent for this run and wins over the
 	// environment, which is the scheduler's channel; the skill spells both the
 	// same way (`flags['release-repo'] || env.TOKENBOARD_RELEASE_REPO`). A
@@ -947,6 +1137,15 @@ var Version = "dev"
 // actually succeeded reaches here: acknowledging a failed run would silently
 // drop the usage it carried.
 //
+// Within a successful run the groups come from result.Delivered plus the rows
+// the uploader dropped for a reason that can never change, not from the
+// collection. A row whose usageDate is outside the server's window never
+// reached the server, so acknowledging it blindly would clear the pending entry
+// it lives in — a clock that jumped a day ahead would lose that day for good
+// instead of retrying it. An invalid or before-history-window date can never
+// become uploadable, though, so its entry may be cleared; leaving it pending
+// would rescan its file and repeat the warning on every run.
+//
 // Mirrors the TS shouldAckCursor rule: the Antigravity sources always
 // acknowledge (their cursors track session markers), the session-file sources
 // only in hook mode (a range-mode run re-reads through ccusage anyway, and
@@ -954,18 +1153,35 @@ var Version = "dev"
 func acknowledgeUploadCursors(
 	stateDir string,
 	outcome collection,
+	delivered upload.Result,
 	options Options,
 	cursorScope string,
 	env Env,
 ) error {
 	hookMode := env("TOKENBOARD_HOOK_MODE") == "1"
+	// A Codex row dropped only for being too far in the future keeps its file
+	// queued: the per-file acknowledgement cannot tell which file the row came
+	// from, so it is skipped this run and the group rule withholds the affected
+	// file until the clock catches up.
+	codexFutureRejected := false
+	for _, rejected := range delivered.Rejected {
+		if rejected.Snapshot.Source == contract.SourceCodex && rejected.Issue == "too-far-future" {
+			codexFutureRejected = true
+		}
+	}
 	for _, source := range outcome.collectedSources {
 		acknowledged := map[string]bool{}
-		for _, snapshot := range outcome.snapshots {
+		for _, snapshot := range delivered.Delivered {
 			if snapshot.Source != source {
 				continue
 			}
 			acknowledged[snapshot.AckGroupKey()] = true
+		}
+		for _, rejected := range delivered.Rejected {
+			if rejected.Snapshot.Source != source || rejected.Issue == "too-far-future" {
+				continue
+			}
+			acknowledged[rejected.Snapshot.AckGroupKey()] = true
 		}
 		if source == contract.SourceCodex {
 			if !hookMode {
@@ -976,8 +1192,20 @@ func acknowledgeUploadCursors(
 			// the only proof of what reached the server. The scopes come from
 			// the same plan the hook runs use, so a profile cursor is never
 			// confused with the legacy one.
-			if err := acknowledgeCodexCursors(stateDir, outcome.codexAcknowledgement, env); err != nil {
-				return fmt.Errorf("%s cursor acknowledgement failed: %w", source, err)
+			//
+			// The file list alone proves nothing if one of these rows was
+			// dropped past the accepted date window: clearing the pending file
+			// would retire it without ever uploading the dropped bytes. The TS
+			// side reads its metadata off the delivered snapshots and falls back
+			// to the delivered-group rule when it is absent; mirror that.
+			var ackErr error
+			if len(acknowledged) > 0 && !codexFutureRejected {
+				ackErr = acknowledgeCodexCursors(stateDir, outcome.codexAcknowledgement, env)
+			} else {
+				ackErr = acknowledgeCodexGroups(stateDir, acknowledged, env)
+			}
+			if ackErr != nil {
+				return fmt.Errorf("%s cursor acknowledgement failed: %w", source, ackErr)
 			}
 			continue
 		}
@@ -1032,6 +1260,28 @@ func acknowledgeUploadCursors(
 	return nil
 }
 
+// codexAckScopes resolves the cursor scopes a Codex acknowledgement visits:
+// the legacy cursor always, plus one per profile when the profile cursors are
+// in use.
+func codexAckScopes(stateDir string, env Env) ([]string, error) {
+	homes, err := codex.ResolveHomes(codex.ResolveHomesInput{
+		JSONValue:   env("TOKENBOARD_CODEX_HOMES_JSON"),
+		LegacyValue: env("CODEX_HOME"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	plan, err := codex.ResolveHookCursorPlan(homes, stateDir)
+	if err != nil {
+		return nil, err
+	}
+	scopes := []string{""}
+	if plan.UsesProfileCursors {
+		scopes = append(scopes, plan.CursorScopes...)
+	}
+	return scopes, nil
+}
+
 // acknowledgeCodexCursors ports the Codex branch of ackUploadCursors: every
 // cursor scope the plan names is acknowledged with the files this run
 // uploaded for it. A scope the run uploaded nothing for is still visited, so
@@ -1041,20 +1291,9 @@ func acknowledgeCodexCursors(
 	acknowledgement []collect.CursorScopeFiles,
 	env Env,
 ) error {
-	homes, err := codex.ResolveHomes(codex.ResolveHomesInput{
-		JSONValue:   env("TOKENBOARD_CODEX_HOMES_JSON"),
-		LegacyValue: env("CODEX_HOME"),
-	})
+	scopes, err := codexAckScopes(stateDir, env)
 	if err != nil {
 		return err
-	}
-	plan, err := codex.ResolveHookCursorPlan(homes, stateDir)
-	if err != nil {
-		return err
-	}
-	scopes := []string{""}
-	if plan.UsesProfileCursors {
-		scopes = append(scopes, plan.CursorScopes...)
 	}
 	filesByScope := map[string][]sessioncursor.AcknowledgedFile{}
 	for _, entry := range acknowledgement {
@@ -1070,6 +1309,29 @@ func acknowledgeCodexCursors(
 			Source:            contract.SourceCodex,
 			CursorScope:       scope,
 			AcknowledgedFiles: files,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// acknowledgeCodexGroups is the fallback the TS side takes when the upload
+// delivered no Codex row: the per-file list is metadata on the snapshots that
+// uploaded, so an empty delivery leaves nothing to read it from, and the plain
+// group rule applies instead. A pending file keeps its flag unless every
+// snapshot it carries belongs to a group the server accepted.
+func acknowledgeCodexGroups(stateDir string, groups map[string]bool, env Env) error {
+	scopes, err := codexAckScopes(stateDir, env)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		if err := sessioncursor.AcknowledgePendingUploads(sessioncursor.AcknowledgeInput{
+			StateDir:           stateDir,
+			Source:             contract.SourceCodex,
+			CursorScope:        scope,
+			AcknowledgedGroups: groups,
 		}); err != nil {
 			return err
 		}

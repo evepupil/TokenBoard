@@ -16,6 +16,11 @@ export async function getPublicTotals(input: {
   includeBreakdown: boolean
   includeSourceSplit: boolean
 }) {
+  // Every token sum below is SQLite's `total()`, never `SUM()`. `SUM()` over integer columns
+  // throws "integer overflow" past int64, and a public account can build enough rows (at the
+  // 1e12 per-row cap, ~9.2M) to reach it on purpose; the whole public card would 500 for every
+  // viewer. `total()` accumulates in floating point — the precision D1 returns as a JS number
+  // anyway — so real totals are unchanged. Cost sums stay on `SUM()`: `cost_usd` is REAL.
   return input.db
     .prepare(
       `
@@ -74,7 +79,8 @@ export async function getPublicTotals(input: {
                 WHERE effective_daily_usage_summary.user_id = params.user_id
               ), 0)
               ELSE user_usage_totals.cost_usd
-            END as cost_usd
+            END as cost_usd,
+            user_usage_totals.updated_at as dataUpdatedAt
           FROM user_usage_totals
           JOIN params ON params.user_id = user_usage_totals.user_id
           WHERE NOT EXISTS (
@@ -86,9 +92,12 @@ export async function getPublicTotals(input: {
           UNION ALL
           SELECT
             params.user_id,
-            COALESCE(SUM(effective_daily_usage_summary.total_tokens), 0),
-            COALESCE(SUM(effective_daily_usage_summary.total_tokens_without_cache_read), 0),
-            COALESCE(SUM(${billableCostSql()}), 0)
+            COALESCE(total(effective_daily_usage_summary.total_tokens), 0),
+            COALESCE(total(effective_daily_usage_summary.total_tokens_without_cache_read), 0),
+            COALESCE(SUM(${billableCostSql()}), 0),
+            -- The freshest row behind the recomputed aggregates: the rollup cache is
+            -- stale or absent in this branch, so the summary stamps are the truth.
+            MAX(effective_daily_usage_summary.updated_at)
           FROM params
           LEFT JOIN effective_daily_usage_summary
             ON effective_daily_usage_summary.user_id = params.user_id
@@ -108,11 +117,12 @@ export async function getPublicTotals(input: {
           COALESCE(MAX(effective_totals.total_tokens), 0) as totalTokens,
           COALESCE(MAX(effective_totals.total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
           COALESCE(MAX(effective_totals.cost_usd), 0) as totalCostUsd,
-          COALESCE(SUM(CASE WHEN month_usage.usage_date = params.today THEN month_usage.total_tokens ELSE 0 END), 0) as todayTokens,
-          COALESCE(SUM(CASE WHEN month_usage.usage_date = params.today THEN month_usage.total_tokens_without_cache_read ELSE 0 END), 0) as todayTokensWithoutCacheRead,
+          MAX(effective_totals.dataUpdatedAt) as dataUpdatedAt,
+          COALESCE(total(CASE WHEN month_usage.usage_date = params.today THEN month_usage.total_tokens ELSE 0 END), 0) as todayTokens,
+          COALESCE(total(CASE WHEN month_usage.usage_date = params.today THEN month_usage.total_tokens_without_cache_read ELSE 0 END), 0) as todayTokensWithoutCacheRead,
           COALESCE(SUM(CASE WHEN month_usage.usage_date = params.today THEN ${billableCostSql({ sourceColumn: 'month_usage.source', costColumn: 'month_usage.cost_usd' })} ELSE 0 END), 0) as todayCostUsd,
-          COALESCE(SUM(month_usage.total_tokens), 0) as monthTokens,
-          COALESCE(SUM(month_usage.total_tokens_without_cache_read), 0) as monthTokensWithoutCacheRead,
+          COALESCE(total(month_usage.total_tokens), 0) as monthTokens,
+          COALESCE(total(month_usage.total_tokens_without_cache_read), 0) as monthTokensWithoutCacheRead,
           COALESCE(SUM(${billableCostSql({ sourceColumn: 'month_usage.source', costColumn: 'month_usage.cost_usd' })}), 0) as monthCostUsd
           , CASE WHEN EXISTS (SELECT 1 FROM total_source_usage WHERE source IN (${costUnavailableSourcesSql})) THEN 0 ELSE 1 END as totalCostAvailable
           , CASE WHEN EXISTS (SELECT 1 FROM today_source_usage WHERE source IN (${costUnavailableSourcesSql})) THEN 0 ELSE 1 END as todayCostAvailable
@@ -138,8 +148,8 @@ function sourceBreakdownCte() {
   return `source_usage AS (
           SELECT
             source,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(SUM(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read
+            COALESCE(total(total_tokens), 0) as total_tokens,
+            COALESCE(total(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read
           FROM month_usage
           GROUP BY source
         )`
@@ -149,8 +159,8 @@ function modelBreakdownCte() {
   return `model_usage AS (
           SELECT
             model,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COALESCE(SUM(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
+            COALESCE(total(total_tokens), 0) as total_tokens,
+            COALESCE(total(total_tokens_without_cache_read), 0) as total_tokens_without_cache_read,
             COALESCE(SUM(${billableCostSql()}), 0) as cost_usd,
             MIN(CASE
               WHEN source IN (${costUnavailableSourcesSql}) THEN 0

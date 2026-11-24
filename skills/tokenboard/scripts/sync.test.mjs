@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import {
   buildSyncInvocation,
@@ -12,11 +14,15 @@ import {
   readHookSyncTimeoutMs,
   refreshBundledCcusageConfig,
   runCollectorProcess,
+  recordClientVersionForInvocation,
+  upgradeThenRecordVersion,
   runPreCollectUpgrade,
+  recordScheduledFailure,
   runSyncInvocation,
   writeRedactedOutput
 } from './sync.mjs'
 import { buildDefaultSince, readSince } from './sync-options.mjs'
+import { transientSyncExitCode } from './scheduled-retry.mjs'
 import { normalizeMemoryPath } from './coordinator-test-helpers.mjs'
 
 test('buildDefaultSince returns compact local date for the lookback window', () => {
@@ -314,17 +320,19 @@ test('a binary client invocation runs the Go binary with the same env contract',
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
   // Same subcommand surface, no node and no tsx: the binary is the collector.
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  // `join` inside the invocation is the host's, so compare separator-insensitively.
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
   assert.equal(invocation.clientType, 'binary')
   // A binary install has no checkout, so the working directory is the binary's
   // own directory — pointing it at the absent collector dir made spawn fail
   // with ENOENT on the command itself.
-  assert.equal(invocation.cwd, normalizeMemoryPath('/home/user/.tokenboard/bin'))
+  assert.equal(normalizeMemoryPath(invocation.cwd), normalizeMemoryPath('/home/user/.tokenboard/bin'))
   // The endpoint contract is identical to the git client's.
   assert.equal(invocation.env.TOKENBOARD_ENDPOINT, 'https://tokenboard.example.com/api/v1/ingest')
   assert.equal(invocation.env.TOKENBOARD_UPLOAD_TOKEN, 'test-upload-token')
@@ -335,6 +343,26 @@ test('a binary client invocation runs the Go binary with the same env contract',
   // value in the environment is forwarded untouched — the same passthrough
   // rule the git client follows.
   assert.equal(invocation.env.TOKENBOARD_CCUSAGE_CONFIG, '/custom/pricing.json')
+  // The Go client has no package runner, so the selection that only the
+  // TypeScript checkout reads is not handed to it.
+  assert.equal(invocation.env.TOKENBOARD_PACKAGE_MANAGER, undefined)
+})
+
+test('a checkout client invocation still hands the TypeScript collector its package manager', () => {
+  const invocation = buildSyncInvocation({
+    flags: { mode: 'sync' },
+    env: {},
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo',
+      clientType: 'git',
+      packageManager: 'bun'
+    },
+    fileExists: () => true
+  })
+  assert.equal(invocation.env.TOKENBOARD_PACKAGE_MANAGER, 'bun')
 })
 
 test('the release source recorded in the config reaches the binary', () => {
@@ -414,7 +442,8 @@ test('the default client type stays git for an existing install', () => {
   })
 
   assert.equal(invocation.clientType, 'git')
-  assert.match(invocation.command, /node$/)
+  // The command is the running node itself (not the Go binary); `node.exe` on Windows.
+  assert.equal(invocation.command, process.execPath)
   assert.deepEqual(invocation.args.slice(0, 3), ['--import', 'tsx', 'src/cli.ts'])
 })
 
@@ -508,6 +537,34 @@ test('hook sync forwards hook mode and state directory to the collector', () => 
   assert.equal(normalizeMemoryPath(invocation.env.TOKENBOARD_STATE_DIR), '/home/user/.tokenboard')
   assert.equal(invocation.env.TOKENBOARD_COORDINATOR_LOCK_HELD, undefined)
   assert.equal(invocation.env.TOKENBOARD_COORDINATOR_LOCK_TOKEN, undefined)
+})
+
+// The collector re-execs itself under its own collector-run.lock and passes
+// this flag so the child does not take the same lock again. The Go client
+// honoured the flag but never received it: sync.mjs stripped the coordinator
+// variables (a different lock) without carrying the collector one through, so
+// every hook run waited out its own wrapper's hold before starting.
+test('hook sync forwards the collector lock-held flag to the collector', () => {
+  const invocation = buildSyncInvocation({
+    flags: { hook: true, source: 'codex' },
+    env: {
+      TOKENBOARD_COLLECTOR_LOCK_HELD: '1',
+      TOKENBOARD_COORDINATOR_LOCK_HELD: '1',
+      TOKENBOARD_COORDINATOR_LOCK_TOKEN: 'coordinator-token'
+    },
+    config: {
+      endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+      uploadToken: 'test-upload-token',
+      timezone: 'Asia/Shanghai',
+      collectorDir: '/repo'
+    },
+    homeDir: '/home/user',
+    nodePath: '/usr/local/bin/node',
+    pathEnv: '/usr/bin'
+  })
+
+  assert.equal(invocation.env.TOKENBOARD_COLLECTOR_LOCK_HELD, '1')
+  assert.equal(invocation.env.TOKENBOARD_COORDINATOR_LOCK_HELD, undefined)
 })
 
 test('hook sync preserves an explicit TokenBoard state directory', () => {
@@ -637,24 +694,104 @@ test('scheduled upgrade diagnostics redact credentials embedded in URLs', () => 
   assert.doesNotMatch(lines[1], /ci-token/)
 })
 
-test('a binary client honors the skip-upgrade switch', () => {
+// Every switch that holds a client on its current version must still run the
+// local recovery: restoring a binary left missing by an interrupted swap is a
+// rename on this machine, not an upgrade and not a network request.
+test('a binary client honors the skip-upgrade switch but still recovers a missing binary', () => {
   for (const options of [
     { flags: { 'skip-upgrade': true }, env: {} },
     { flags: {}, env: { TOKENBOARD_SKIP_UPGRADE: '1' } },
     { flags: {}, env: { TOKENBOARD_AUTO_UPGRADE: '0' } }
   ]) {
     const selfUpdates = []
+    const recoveries = []
     runPreCollectUpgrade({
       ...options,
       invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+      recover: (value) => recoveries.push(value.binaryPath),
       selfUpdate: (value) => selfUpdates.push(value),
-      binaryExists: () => true,
       log: () => {},
       warn: () => {}
     })
 
     assert.deepEqual(selfUpdates, [], JSON.stringify(options))
+    assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'], JSON.stringify(options))
   }
+})
+
+// A hook sync must not reach the network, but the recovery it runs is local:
+// a hook is often the only thing executing on a machine for hours, so it is
+// exactly where an interrupted swap should be repaired.
+test('a binary hook sync never upgrades but still recovers a missing binary', () => {
+  const selfUpdates = []
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: (options) => selfUpdates.push(options),
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(selfUpdates, [])
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
+})
+
+// The scheduled retry path adds --skip-upgrade, so without recovery before the
+// gate a swap interrupted on that path is never repaired.
+test('a scheduled retry that skips the upgrade still recovers a missing binary', () => {
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: { scheduled: true, 'skip-upgrade': true },
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {
+      throw new Error('the retry path must not self-update')
+    },
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
+})
+
+// A binary already in place is not the recovery case: the recovery must not
+// run (and must not touch the file) when there is nothing missing.
+test('a present binary is not recovered', () => {
+  const recoveries = []
+  runPreCollectUpgrade({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    binaryPresent: () => true,
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {},
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.deepEqual(recoveries, [])
+})
+
+// A recovery that cannot run (permissions, a corrupt directory) must stay a
+// warning: the collector may still work on the binary it has.
+test('a failed recovery warns instead of failing the sync', () => {
+  const warnings = []
+  assert.doesNotThrow(() =>
+    runPreCollectUpgrade({
+      flags: { 'skip-upgrade': true },
+      invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+      recover: () => {
+        throw new Error('EACCES: permission denied')
+      },
+      selfUpdate: () => {},
+      log: () => {},
+      warn: (message) => warnings.push(message)
+    })
+  )
+
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /recovery/i)
 })
 
 // The feed an install came from lives in the config, so an automatic update
@@ -676,7 +813,6 @@ test('a binary client self-updates from the release source it was installed from
     },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -697,7 +833,6 @@ test('a binary client upgrades through its own self-update, not the checkout', (
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: (message) => warnings.push(message)
   })
@@ -716,7 +851,6 @@ test('a binary hook sync never upgrades at all', () => {
     flags: { hook: true },
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -724,18 +858,25 @@ test('a binary hook sync never upgrades at all', () => {
   assert.deepEqual(selfUpdates, [])
 })
 
-test('a binary client whose binary is missing does not try to self-update it', () => {
+// A missing target is the recovery case, not a skip case. Recovery now runs
+// before the upgrade gate (it is local, and every switch that holds a version
+// still needs it), so the gate-passing path reaches self-update with the binary
+// already restored.
+test('a binary client whose binary is missing still reaches self-update so the swap can be recovered', () => {
   const selfUpdates = []
+  const recoveries = []
   runPreCollectUpgrade({
     flags: {},
     invocation: { clientType: 'binary', command: '/home/user/.tokenboard/bin/tokenboard' },
+    recover: (value) => recoveries.push(value.binaryPath),
     selfUpdate: (options) => selfUpdates.push(options),
-    binaryExists: () => false,
     log: () => {},
     warn: () => {}
   })
 
-  assert.deepEqual(selfUpdates, [])
+  assert.deepEqual(recoveries, ['/home/user/.tokenboard/bin/tokenboard'])
+  assert.equal(selfUpdates.length, 1)
+  assert.equal(selfUpdates[0].binaryPath, '/home/user/.tokenboard/bin/tokenboard')
 })
 
 test('a failed binary self-update warns instead of failing the sync', () => {
@@ -747,7 +888,6 @@ test('a failed binary self-update warns instead of failing the sync', () => {
       selfUpdate: () => {
         throw new Error('dial https://api-user:api-secret@example.invalid: timeout')
       },
-      binaryExists: () => true,
       log: () => {},
       warn: (message) => warnings.push(message)
     })
@@ -769,7 +909,6 @@ test('a git client still upgrades the checkout before collection', () => {
     selfUpdate: () => {
       throw new Error('a git client must not self-update')
     },
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -785,7 +924,6 @@ test('a git client honors the skip-upgrade switch', () => {
     invocation: { clientType: 'git', command: 'node' },
     env: {},
     upgrade: (options) => upgrades.push(options),
-    binaryExists: () => true,
     log: () => {},
     warn: () => {}
   })
@@ -858,6 +996,28 @@ test('a deferred run never records the internal transient exit code', async () =
   // `status.mjs` prints verbatim — should carry. The non-scheduled branch normalizes the
   // same code to 1 for the same reason.
   assert.equal(deferred.exitCode, undefined)
+})
+
+// 75 is an internal contract with the retry loop. `status.mjs` prints the
+// recorded exitCode verbatim, and a reader has no way to know 75 means "the
+// collector was busy" — so the state file records a plain failure and keeps
+// the cause in the error text.
+test('an exhausted retry records a plain failure and keeps the transient cause', async () => {
+  const states = []
+  await runSyncInvocation({
+    flags: { scheduled: true },
+    invocation: { source: 'all' },
+    stateDir: '/state',
+    now: () => Date.parse('2026-09-20T01:00:00.000Z'),
+    writeState: (state) => states.push(state),
+    runWithLock: () => transientSyncExitCode,
+    runRetry: () => ({ exitCode: transientSyncExitCode, exhausted: true, attempts: 2 })
+  })
+
+  const failed = states.at(-1)
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.exitCode, 1, 'the state file must not carry the internal 75')
+  assert.match(String(failed.error), /transient code 75/)
 })
 
 test('a skipped retry is deferred rather than failed', async () => {
@@ -972,7 +1132,13 @@ test('scheduled sync runs the real top-level entry without a temporal dead zone'
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1027,7 +1193,13 @@ test('a scheduled sync continues without logs when the log directory cannot be c
 
     const result = spawnSync(
       process.execPath,
-      [new URL('./sync.mjs', import.meta.url).pathname, '--scheduled', '--source', 'claude-code', '--skip-upgrade'],
+      [
+        fileURLToPath(new URL('./sync.mjs', import.meta.url)),
+        '--scheduled',
+        '--source',
+        'claude-code',
+        '--skip-upgrade'
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -1113,6 +1285,58 @@ test('an unscheduled collector run inherits the terminal instead of capturing', 
   assert.equal(result.error, null)
   assert.equal(calls.length, 1)
   assert.equal(calls[0].options.stdio, 'inherit')
+})
+
+// The hook path is exactly the unscheduled path: notify spawns sync.mjs with `--hook` and no
+// scheduled-log environment, so `logs` is null and the child inherits the terminal. The
+// wall-clock bound the hook mode advertises has to apply there too — a wedged ccusage scan on
+// a hook run would otherwise hold the coordinator's sync lock forever, and no timer exists to
+// kill it. This is the branch production hook traffic actually takes.
+test('a hook run without a scheduled log is still bounded by hookTimeoutMs', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  let killed = null
+  child.kill = (signal) => {
+    killed = signal
+    child.emit('exit', null, signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    { spawn: () => child, hookTimeoutMs: 5 }
+  )
+
+  assert.equal(killed, 'SIGKILL')
+  assert.equal(result.status, 1)
+  assert.equal(result.error.code, 'ETIMEDOUT')
+})
+
+// A run that finishes inside the bound must clear the timer, or the parent's event loop stays
+// alive for the full timeout after every successful hook.
+test('a hook run that finishes in time is not killed and reports its exit code', async () => {
+  const { EventEmitter } = await import('node:events')
+  const child = new EventEmitter()
+  const killed = []
+  child.kill = (signal) => {
+    killed.push(signal)
+    return true
+  }
+  const result = await runCollectorProcess(
+    { command: 'collector', args: ['--hook'], cwd: '/repo', env: {}, shell: false },
+    null,
+    {
+      spawn: () => {
+        queueMicrotask(() => child.emit('exit', 0, null))
+        return child
+      },
+      hookTimeoutMs: 50
+    }
+  )
+
+  assert.deepEqual(killed, [])
+  assert.equal(result.status, 0)
+  assert.equal(result.error, null)
 })
 
 test('an unscheduled run reports a spawn failure and a zero exit as success', async () => {
@@ -1304,6 +1528,11 @@ test('readHookSyncTimeoutMs parses the env override and rejects invalid values',
     () => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '0' }),
     /TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be/
   )
+  // setTimeout clamps a delay past 2^31-1 to 1ms, so an "effectively infinite" bound would
+  // kill every hook run instantly — the opposite of what the operator asked for. Refuse it
+  // at parse time rather than letting the timer silently invert the intent.
+  assert.throws(() => readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483648' }), /at most 2147483647/)
+  assert.equal(readHookSyncTimeoutMs({ TOKENBOARD_HOOK_SYNC_TIMEOUT_MS: '2147483647' }), 2_147_483_647)
 })
 
 test('a timed-out hook run resolves with an ETIMEDOUT error for runSync to report', async () => {
@@ -1482,10 +1711,11 @@ test('perSource runs a named source on the client it maps to', () => {
       homeDir: '/home/user',
       nodePath: '/usr/local/bin/node',
       pathEnv: '/usr/bin',
+      platform: 'linux',
       fileExists: () => true
     })
 
-    assert.equal(invocation.command, expectedCommand, `perSource pi=${mapped}`)
+    assert.equal(normalizeMemoryPath(invocation.command), expectedCommand, `perSource pi=${mapped}`)
     assert.deepEqual(invocation.args.slice(-2), ['--source', 'pi'])
   }
 })
@@ -1532,10 +1762,11 @@ test('perSource runs an all-source request when the mapping agrees', () => {
     homeDir: '/home/user',
     nodePath: '/usr/local/bin/node',
     pathEnv: '/usr/bin',
+    platform: 'linux',
     fileExists: () => true
   })
 
-  assert.equal(invocation.command, normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
+  assert.equal(normalizeMemoryPath(invocation.command), normalizeMemoryPath('/home/user/.tokenboard/bin/tokenboard'))
   assert.deepEqual(invocation.args, ['sync', '--source', 'all'])
 })
 
@@ -1560,4 +1791,387 @@ test('perSource rejects an unknown client name', () => {
       }),
     /pi/
   )
+})
+
+// A hook run cannot retry inline, but it does have a caller that can act on the code: notify.mjs
+// turns 75 into a `transient` marker and the coordinator schedules a trailing retry. Collapsing
+// it to 1 here (the behaviour before 2026-11-15) made a busy collector lock indistinguishable
+// from a broken provider, so the source sat in the signal queue until some unrelated trigger
+// happened to cover it. This has to be pinned here, at the layer that does the normalizing:
+// the notify and coordinator tests both stub this boundary away, so neither would notice.
+test('a hook run propagates the transient code so its caller can schedule a retry', async () => {
+  let retryCalls = 0
+  const result = await runSyncInvocation({
+    flags: { hook: true, mode: 'sync' },
+    invocation: { source: 'codex' },
+    stateDir: '/state',
+    runWithLock: () => 75,
+    runRetry: async () => {
+      retryCalls += 1
+      return { exitCode: 0 }
+    }
+  })
+
+  assert.equal(result, 75)
+  assert.equal(retryCalls, 0, 'a hook must not run the retry loop inline')
+})
+
+// A scheduled run that dies before `runCli` opens the log runtime had its reason discarded on the
+// platforms whose scheduler drops stderr (Windows recorded exit 1 with no output for weeks).
+// recordScheduledFailure is the seam that puts the reason into the file an operator reads.
+test('a startup failure writes its reason to the scheduled error log', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-startup-failure-'))
+  const logDir = join(root, 'logs')
+  try {
+    const written = recordScheduledFailure(
+      'TokenBoard requires Node.js ^24.22.1',
+      { TOKENBOARD_SCHEDULED_SYNC: '1', TOKENBOARD_LOG_DIR: logDir },
+      { now: new Date('2026-11-16T02:00:00.000Z') }
+    )
+
+    assert.equal(written, true)
+    assert.equal(
+      readFileSync(join(logDir, 'daily-sync.err.log'), 'utf8'),
+      '2026-11-16T02:00:00.000Z TokenBoard requires Node.js ^24.22.1\n'
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// A manual preview (or a hook) must not create scheduled log files: those runs already print to
+// their caller's terminal, and writing a daily-sync log would make status look like a scheduled
+// run happened.
+test('a startup failure in an unscheduled run does not create scheduled logs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-startup-failure-unscheduled-'))
+  const logDir = join(root, 'logs')
+  try {
+    const written = recordScheduledFailure('bad node', { TOKENBOARD_LOG_DIR: logDir })
+
+    assert.equal(written, false)
+    assert.equal(existsSync(join(logDir, 'daily-sync.err.log')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// The helper tests above cannot prove the guard calls it: `isMain()` only runs in a real process,
+// and the floor check reads the real `process.versions.node`. Pin the wiring in the entry block so
+// removing the call cannot quietly restore the zero-diagnosis failure.
+test('the Node version guard calls the scheduled-failure recorder', () => {
+  const source = readFileSync(fileURLToPath(new URL('./sync.mjs', import.meta.url)), 'utf8')
+  const guard = source.slice(source.indexOf('if (isMain())'), source.indexOf('runCli()'))
+
+  assert.match(guard, /assertSupportedNodeVersion\(process\.versions\.node\)/)
+  assert.match(guard, /recordScheduledFailure\(message, process\.env\)/)
+  assert.match(guard, /process\.exit\(1\)/)
+})
+
+// A hook sync can reach recovery without sync.lock, while a self-update
+// elsewhere is between its two renames — the only moment the target is
+// legitimately absent. Recovery must not move that update's backup.
+test('recovery waits for the self-update lock and yields when it is held', async () => {
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { selfUpdateLockFileName, stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recover-lock-'))
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  const owner = acquireLock(join(dir, selfUpdateLockFileName), runtime)
+  const logs = []
+  const recoveries = []
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: (value) => recoveries.push(value),
+    selfUpdate: () => {},
+    log: (line) => logs.push(line),
+    warn: () => {}
+  })
+  releaseLock(join(dir, selfUpdateLockFileName), runtime, owner)
+
+  assert.deepEqual(recoveries, [], 'recovery must not run while an update holds the lock')
+  assert.match(logs.join('\n'), /self-update holds/)
+})
+
+// Once the lock is free, recovery runs and releases it so the next update
+// is not blocked by a recovery that failed.
+test('recovery releases the self-update lock when it fails', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recover-fail-'))
+  const warnings = []
+  runPreCollectUpgrade({
+    flags: {},
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /recovery/i)
+  // The lock is free: a second run can take it.
+  assert.doesNotThrow(() => {
+    runPreCollectUpgrade({
+      flags: {},
+      env: { TOKENBOARD_STATE_DIR: dir },
+      invocation: { clientType: 'binary', command: join(dir, 'bin', 'tokenboard') },
+      binaryPresent: () => false,
+      recover: () => {},
+      selfUpdate: () => {},
+      log: () => {},
+      warn: () => {}
+    })
+  })
+})
+
+// A first run on a fresh machine has no state directory, so the lock cannot be
+// created. That must not leave a missing binary unrecovered: with no lock
+// directory, no self-update can be mid-swap.
+test('recovery runs when the lock directory does not exist yet', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-no-state-'))
+  const stateDir = join(base, 'missing', 'state')
+  const recoveries = []
+  const warnings = []
+
+  runPreCollectUpgrade({
+    flags: { 'skip-upgrade': true },
+    env: { TOKENBOARD_STATE_DIR: stateDir },
+    invocation: { clientType: 'binary', command: join(base, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: (value) => recoveries.push(value.binaryPath),
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.deepEqual(recoveries, [join(base, 'bin', 'tokenboard')])
+  assert.deepEqual(warnings, [])
+})
+
+// The sync path must actually repair the file, not only take the lock: this
+// drives the real recoverOrphanedBinary through runPreCollectUpgrade with no
+// stubs, so a broken wiring between the two would fail here.
+test('a hook run repairs a missing binary from its backup end to end', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-e2e-recover-'))
+  const binaryDir = join(dir, 'bin')
+  mkdirSync(binaryDir, { recursive: true })
+  const binaryPath = join(binaryDir, 'tokenboard')
+  const backup = `${binaryPath}.backup-20260101T000000Z-000001`
+  writeFileSync(backup, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', { mode: 0o755 })
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: dir },
+    invocation: { clientType: 'binary', command: binaryPath },
+    selfUpdate: () => {
+      throw new Error('a hook must not self-update')
+    },
+    log: () => {},
+    warn: () => {}
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the binary must be back in place')
+  assert.equal(existsSync(backup), false, 'the backup must have been renamed, not copied')
+})
+
+// A state directory that exists but cannot be written is not "no lock
+// directory": another account's self-update may hold it. Recovery is skipped
+// with a warning rather than run blind, and the sync continues.
+test('recovery warns instead of failing when the state directory is not writable', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-ro-state-'))
+  const warn = []
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: join(base, 'missing', 'deep') },
+    invocation: { clientType: 'binary', command: join(base, 'bin', 'tokenboard') },
+    binaryPresent: () => false,
+    recover: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warn.push(line)
+  })
+  // The missing directory falls through to recovery, whose own failure is a
+  // warning, never a throw.
+  assert.equal(warn.length, 1)
+  assert.match(warn[0], /recovery skipped/)
+})
+
+// The path above stubs `recover`, so it never proves the wiring. This one uses
+// the real recoverUnderInstallLock: a regular file where the state directory
+// should be makes the lock acquisition fail with ENOTDIR on every platform,
+// which is the "no usable lock directory" branch — recovery must still run
+// directly instead of the sync losing its client.
+test('recovery runs directly when the lock directory is a file', () => {
+  const base = mkdtempSync(join(tmpdir(), 'tokenboard-file-state-'))
+  const statePath = join(base, 'state')
+  writeFileSync(statePath, 'not a directory')
+  const binaryDir = join(base, 'bin')
+  mkdirSync(binaryDir, { recursive: true })
+  const binaryPath = join(binaryDir, 'tokenboard')
+  const backup = `${binaryPath}.backup-20260101T000000Z-000001`
+  writeFileSync(backup, 'previous', { mode: 0o755 })
+  const warn = []
+
+  runPreCollectUpgrade({
+    flags: { hook: true },
+    env: { TOKENBOARD_STATE_DIR: statePath },
+    invocation: { clientType: 'binary', command: binaryPath },
+    binaryPresent: () => false,
+    selfUpdate: () => {},
+    log: () => {},
+    warn: (line) => warn.push(line)
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the backup must have been restored')
+  assert.deepEqual(warn, [], 'a missing lock directory is not a warning')
+})
+
+// After an upgrade the client cannot say whether the new version collects
+// correctly. Recording the installed version at sync time gives status.mjs the
+// one fact needed to answer that later: which version was running when the
+// failures started.
+test('a sync records the client version it is about to run', async () => {
+  const { readClientVersionState } = await import('./client-version-state.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-record-'))
+  const binaryPath = join(dir, 'bin', 'tokenboard')
+  mkdirSync(join(dir, 'bin'), { recursive: true })
+  writeFileSync(binaryPath, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', { mode: 0o755 })
+
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: binaryPath, env: { TOKENBOARD_STATE_DIR: dir } },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' })
+  })
+
+  assert.equal(readClientVersionState(dir)?.version, '0.2.0')
+})
+
+// A git client has no single binary version to record; it must be skipped, not
+// recorded as null.
+test('a git client records no version', async () => {
+  const { readClientVersionState } = await import('./client-version-state.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-version-git-'))
+
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'git', command: 'node', env: { TOKENBOARD_STATE_DIR: dir } }
+  })
+
+  assert.equal(readClientVersionState(dir), null)
+})
+
+// self-update rewrites the binary at the same path in place, so the version
+// that matters is the one present after the upgrade step — that is what the
+// collector spawns. Recording before the upgrade would report the change one
+// run late and stamp `since` at the old version's start.
+test('the version is recorded after the upgrade step, not before', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const order = []
+  const logs = []
+  const result = upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: { stdoutFd: 7 },
+    upgrade: () => order.push('upgrade'),
+    record: ({ invocation }) => {
+      order.push('record')
+      assert.equal(invocation.command, '/x/tokenboard', 'the same invocation must reach the record step')
+      return { changed: true, version: '0.2.1', previous: '0.2.0' }
+    },
+    write: (fd, line) => logs.push({ fd, line })
+  })
+
+  assert.deepEqual(order, ['upgrade', 'record'])
+  assert.deepEqual(logs, [{ fd: 7, line: 'TokenBoard client version 0.2.1 (was 0.2.0)\n' }])
+  assert.equal(result.version, '0.2.1')
+})
+
+// With no log file (an interactive run) the change still surfaces, on stderr.
+test('a version change without a log file goes to the warning sink', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const warnings = []
+  upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: null,
+    upgrade: () => {},
+    record: () => ({ changed: true, version: '0.2.1', previous: undefined }),
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.deepEqual(warnings, ['TokenBoard client version 0.2.1'])
+})
+
+// An unchanged version writes nothing: the scheduled log is long-lived.
+test('an unchanged version writes no line', async () => {
+  const { upgradeThenRecordVersion } = await import('./sync.mjs')
+  const written = []
+  upgradeThenRecordVersion({
+    flags: {},
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    logs: { stdoutFd: 7 },
+    upgrade: () => {},
+    record: () => ({ changed: false, version: '0.2.0' }),
+    write: (fd, line) => written.push(line)
+  })
+
+  assert.deepEqual(written, [])
+})
+
+// A manual sync sets neither TOKENBOARD_STATE_DIR nor TOKENBOARD_CONFIG_DIR, so
+// without the ~/.tokenboard fallback it recorded nothing at all.
+test('a manual sync with no state env still records under the home directory', async () => {
+  const { homedir } = await import('node:os')
+  const seen = []
+  recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: {} },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' }),
+    record: ({ stateDir }) => {
+      seen.push(stateDir)
+      return { changed: false }
+    }
+  })
+
+  assert.deepEqual(seen, [join(homedir(), '.tokenboard')])
+})
+
+// A probe that cannot name a version must leave a warning, not look like a
+// healthy run that had nothing to record. This is how the missing-import bug
+// (`spawnSync is not defined`) stayed invisible until a real hook failed.
+test('a failed version probe warns instead of failing silently', () => {
+  const warnings = []
+  const result = recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: { TOKENBOARD_STATE_DIR: '/tmp/x' } },
+    spawn: () => {
+      throw new ReferenceError('spawnSync is not defined')
+    },
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(result, null)
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /not recorded/)
+})
+
+// The same warning fires when the version record itself throws.
+test('a failing version write warns instead of failing silently', () => {
+  const warnings = []
+  const result = recordClientVersionForInvocation({
+    invocation: { clientType: 'binary', command: '/x/tokenboard', env: { TOKENBOARD_STATE_DIR: '/tmp/x' } },
+    spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n', stderr: '' }),
+    record: () => {
+      throw new Error('EACCES: permission denied')
+    },
+    warn: (line) => warnings.push(line)
+  })
+
+  assert.equal(result, null)
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /not recorded/)
 })

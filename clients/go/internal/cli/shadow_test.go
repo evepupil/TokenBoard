@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -316,6 +317,36 @@ func TestShadowHookModeReachesTheGoProvider(t *testing.T) {
 	}
 }
 
+// `--hook false` (space-separated) reads the same as --hook=false and must
+// disable hook mode, not silently enable it: the bare `--hook` spelling is
+// parsed first and left `false` orphaned, which the argument scanner then
+// dropped on the floor, so an operator who typed the space form ran the hook
+// path believing it was off.
+func TestShadowHookFalseSpaceFormDisablesHookMode(t *testing.T) {
+	repoDir := t.TempDir()
+	srcDir := filepath.Join(repoDir, "packages", "collector", "src")
+	if err := os.MkdirAll(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "cli.ts"), []byte("// fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe := &hookModeProbe{snapshots: []contract.Snapshot{shadowSnapshot()}}
+	stubSource(t, contract.SourceClaudeCode, probe)
+	stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+
+	code, stdout, stderr := runShadowCLI(t, map[string]string{
+		"TOKENBOARD_TIMEZONE":      "UTC",
+		"TOKENBOARD_COLLECTOR_DIR": repoDir,
+	}, "shadow", "--source", "claude-code", "--hook", "false")
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr = %s; stdout = %s", code, stderr, stdout)
+	}
+	if probe.seen != "" {
+		t.Errorf("provider saw TOKENBOARD_HOOK_MODE = %q, want it off for `--hook` `false`", probe.seen)
+	}
+}
+
 // The same wiring must strip an ambient hook mode when --hook was not given:
 // a shadow started from a notifier's environment still compares previews, and
 // the provider must not see the notifier's flag.
@@ -424,12 +455,63 @@ func TestShadowIgnoresAmbientUntilInHookMode(t *testing.T) {
 	}
 }
 
+// An ambient TOKENBOARD_HOOK_MODE belongs to a notifier, not to the
+// comparison: shadow computes its hook flag from --hook and strips the
+// variable from both sides. Letting the ambient value drive the validation
+// rejected an explicit `--until` for a run that would have been a full
+// preview anyway.
+func TestShadowIgnoresAmbientHookModeForUntil(t *testing.T) {
+	env, _ := shadowEnv(t)
+	env["TOKENBOARD_HOOK_MODE"] = "1"
+	stubSource(t, contract.SourceClaudeCode, stubProvider{snapshots: []contract.Snapshot{shadowSnapshot()}})
+	var seenUntil string
+	previous := runShadowTS
+	runShadowTS = func(_ context.Context, input shadowTSInput) ([]contract.Snapshot, error) {
+		seenUntil = input.Until
+		return []contract.Snapshot{shadowSnapshot()}, nil
+	}
+	t.Cleanup(func() { runShadowTS = previous })
+
+	code, stdout, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", "--until", "2026-07-30")
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr = %s; stdout = %s", code, stderr, stdout)
+	}
+	if seenUntil != "2026-07-30" {
+		t.Errorf("TS side saw --until %q, want it forwarded", seenUntil)
+	}
+}
+
+// An unrecognised --hook value used to fall through as false, so a typo ran a
+// full preview while the operator believed they had asked for the hook path.
+func TestShadowRejectsAnUnrecognisedHookValue(t *testing.T) {
+	for _, value := range []string{"--hook=flase", "--hook=yes", "--hook="} {
+		env, _ := shadowEnv(t)
+		stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+
+		code, _, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", value)
+		if code != ExitUsage || !strings.Contains(stderr, "--hook") {
+			t.Errorf("%s: code = %d, stderr = %q; want a usage error naming --hook", value, code, stderr)
+		}
+	}
+	// The space-separated form must reject a wrong value too, rather than
+	// treating it as the bare flag and dropping the word.
+	env, _ := shadowEnv(t)
+	stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+	code, _, stderr := runShadowCLI(t, env, "shadow", "--source", "claude-code", "--hook", "flase")
+	if code != ExitUsage || !strings.Contains(stderr, "--hook") {
+		t.Errorf("--hook flase: code = %d, stderr = %q; want a usage error naming --hook", code, stderr)
+	}
+}
+
 // liveWriteSnapshot is a row for *today* whose TypeScript side (the later
 // scan) saw more usage than the Go side did. That shape is what an actively
 // written session file produces, and shadow must not report it as drift.
 func liveWriteSnapshot(now time.Time) (goSnapshot, tsSnapshot contract.Snapshot) {
 	goSnapshot = shadowSnapshot()
-	goSnapshot.UsageDate = now.Format("2006-01-02")
+	// The row declares UTC, so "today" is UTC's date: formatting the local
+	// clock instead would put the row on tomorrow between 16:00 and 24:00 UTC
+	// and turn the live-write case into an unexplained diff.
+	goSnapshot.UsageDate = now.UTC().Format("2006-01-02")
 	goSnapshot.Timezone = "UTC"
 	goSnapshot.InputTokens = 1000
 	goSnapshot.OutputTokens = 10
@@ -573,5 +655,113 @@ func TestShadowStillReportsOneSidedRowsOnTodaysDate(t *testing.T) {
 	}
 	if len(report.OnlyInGo) != 1 {
 		t.Errorf("onlyInGo = %+v, want the row reported", report.OnlyInGo)
+	}
+}
+
+// The TS preview's stdout is buffered to parse it, so the buffer itself is the
+// only bound on a child that prints something other than the snapshot array.
+// Past the cap the write fails and the run fails closed instead of growing
+// until the process runs out of memory.
+func TestLimitedBufferRefusesOutputPastTheCap(t *testing.T) {
+	var buffer limitedBuffer
+	buffer.limit = 8
+	if _, err := buffer.Write([]byte("12345678")); err != nil {
+		t.Fatalf("write within the cap: %v", err)
+	}
+	if _, err := buffer.Write([]byte("9")); err == nil {
+		t.Fatal("write past the cap succeeded")
+	}
+	if got := buffer.String(); got != "12345678" {
+		t.Errorf("buffer = %q, want the accepted bytes only", got)
+	}
+}
+
+// Both sides of the comparison run in fresh temporary state directories, so
+// without seeding they always fall back to the bundled static pricing config
+// and the dynamic catalogue path is never compared. The machine's cache is
+// what production prices with, and it keeps the run offline.
+func TestShadowSeedsThePricingCatalogueCacheForBothSides(t *testing.T) {
+	sourceDir := t.TempDir()
+	cacheBody := []byte(`{"schemaVersion":1,"models":[]}`)
+	if err := os.WriteFile(filepath.Join(sourceDir, "model-pricing-cache.json"), cacheBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	goDir, tsDir := t.TempDir(), t.TempDir()
+	var stderr bytes.Buffer
+
+	seedShadowPricingCache(sourceDir, []string{goDir, tsDir}, &stderr)
+
+	for _, dir := range []string{goDir, tsDir} {
+		seeded, err := os.ReadFile(filepath.Join(dir, "model-pricing-cache.json"))
+		if err != nil {
+			t.Fatalf("read seeded cache in %s: %v", dir, err)
+		}
+		if !bytes.Equal(seeded, cacheBody) {
+			t.Fatalf("seeded cache in %s = %q, want %q", dir, seeded, cacheBody)
+		}
+	}
+	if !strings.Contains(stderr.String(), "using the pricing catalogue cache from") {
+		t.Errorf("stderr = %q, want the seed note", stderr.String())
+	}
+}
+
+// A machine that never synced has no cache: both sides stay on the static
+// fallback and the run is still a comparison, not a failure.
+func TestShadowLeavesPricingStaticWithoutACatalogueCache(t *testing.T) {
+	goDir, tsDir := t.TempDir(), t.TempDir()
+	var stderr bytes.Buffer
+
+	seedShadowPricingCache(t.TempDir(), []string{goDir, tsDir}, &stderr)
+
+	for _, dir := range []string{goDir, tsDir} {
+		if _, err := os.Stat(filepath.Join(dir, "model-pricing-cache.json")); !os.IsNotExist(err) {
+			t.Fatalf("cache appeared in %s without a source", dir)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want silence", stderr.String())
+	}
+}
+
+// A half-seeded run would compare a dynamic side against a static one and call
+// the difference drift, so a failed copy has to undo the copies already made.
+func TestShadowUndoesTheSeedWhenACopyFails(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "model-pricing-cache.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	goDir := t.TempDir()
+	notADirectory := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADirectory, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+
+	seedShadowPricingCache(sourceDir, []string{goDir, notADirectory}, &stderr)
+
+	if _, err := os.Stat(filepath.Join(goDir, "model-pricing-cache.json")); !os.IsNotExist(err) {
+		t.Fatalf("first target kept a cache after the second copy failed")
+	}
+	if !strings.Contains(stderr.String(), "both sides use static pricing") {
+		t.Errorf("stderr = %q, want the failure note", stderr.String())
+	}
+}
+
+// The run itself has to report which pricing source the comparison measured.
+func TestShadowReportsTheSeededPricingCatalogue(t *testing.T) {
+	env, _ := shadowEnv(t)
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "model-pricing-cache.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["TOKENBOARD_STATE_DIR"] = stateDir
+	stubShadowTS(t, []contract.Snapshot{shadowSnapshot()}, nil)
+
+	code, _, stderr := runShadowCLI(t, env, "shadow", "--source", "grok-build")
+	if code != ExitOK {
+		t.Fatalf("code = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "using the pricing catalogue cache from") {
+		t.Errorf("stderr = %q, want the seed note", stderr)
 	}
 }

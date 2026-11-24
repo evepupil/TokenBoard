@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { win32 as windowsPath } from 'node:path'
+import { existsSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { stateLockRuntime } from './state-lock-runtime.mjs'
 import { acquireLock, lockHasToken, releaseLock } from './coordinator-lock.mjs'
 import { coordinatedSync } from './coordinator.mjs'
 import {
@@ -910,4 +914,89 @@ test('coordinator recovers a stale lock through tasklist on legacy Windows Node'
   assert.equal(result.error, undefined)
   assert.equal(tasklistCalls, 1)
   assert.equal(fs.files.has('/state/sync.lock'), false)
+})
+
+// A holder creates its lock file with O_EXCL and writes the record next. A
+// contender that reads between those two steps sees an empty file; treating it
+// as dead lets both believe they hold the lock. The creation window fences it,
+// the same way Go's lockStaleWindow does.
+test('a fresh unparseable lock is not swept inside the creation window', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-window-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+
+  const owner = acquireLock(lockPath, runtime)
+
+  // acquireLock reports a held lock as a falsy value: `false` when the
+  // existing record was judged live, `null` when the retry budget ran out.
+  assert.ok(!owner, 'a lock written moments ago must be honoured, not swept')
+  assert.equal(existsSync(lockPath), true, 'the fresh lock file must survive')
+})
+
+// The age of a lock that cannot be stat'ed is unknown, not zero. Go's
+// removeStale propagates the same error rather than sweeping; treating it as
+// "too old" would let a contender steal the lock a holder is still writing.
+test('an unparseable lock whose age cannot be read is not swept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-stat-fail-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const runtime = {
+    ...stateLockRuntime({ lockTimeoutMs: 0 }),
+    stat: () => {
+      const error = new Error('EACCES: permission denied')
+      error.code = 'EACCES'
+      throw error
+    }
+  }
+
+  assert.throws(() => acquireLock(lockPath, runtime), /EACCES/)
+  assert.equal(existsSync(lockPath), true, 'the lock must survive an unreadable stat')
+})
+
+// Past the window an empty record with no live process is genuinely stale.
+test('an aged unparseable lock is swept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-lock-aged-'))
+  const lockPath = join(dir, 'self-update.lock')
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  const old = new Date(Date.now() - 31_000)
+  utimesSync(lockPath, old, old)
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+
+  const owner = acquireLock(lockPath, runtime)
+
+  assert.ok(owner, 'an aged empty lock must be swept and re-acquired')
+})
+
+// The creation window only exists when the runtime can stat the lock. A
+// production runtime without it silently falls back to sweeping a fresh empty
+// record, which is the exact race the window fences, so both real runtimes
+// must carry a stat — calling the real coordinatedSync against a real
+// directory is what proves the wiring, not a unit test of the helper.
+test('coordinatedSync gives its lock runtime a usable stat', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-coordinator-stat-'))
+  const lockPath = join(dir, 'sync.lock')
+  // Empty and brand new: only the creation window can tell a contender this
+  // record is a holder mid-write rather than a dead lock.
+  writeFileSync(lockPath, '', { mode: 0o600, flag: 'wx' })
+  let ran = false
+
+  const result = coordinatedSync(
+    { kind: 'notify', source: 'codex' },
+    {
+      stateDir: dir,
+      cooldownMs: 0,
+      lockTimeoutMs: 0,
+      process: fakeProcess(process.pid),
+      homeDir: dir,
+      executeSync: () => {
+        ran = true
+        return { ok: true }
+      }
+    }
+  )
+
+  assert.equal(ran, false, 'a fresh empty lock must block the sync')
+  assert.equal(result.skippedReason, 'lock-timeout')
+  assert.equal(existsSync(lockPath), true, 'the fresh lock must survive')
 })

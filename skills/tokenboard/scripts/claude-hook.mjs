@@ -3,6 +3,7 @@ import {
   loadJsonObject,
   normalizeArray,
   normalizeObject,
+  normalizePathForComparison,
   quoteShellArg,
   writeJsonWithBackup
 } from './hooks-utils.mjs'
@@ -99,10 +100,11 @@ function hasClaudeCommand(entries, notifyPath) {
   })
 }
 
-function isClaudeNotifyHook(hook, notifyPath) {
+export function isClaudeNotifyHook(hook, notifyPath) {
   if (!hook || typeof hook !== 'object' || typeof hook.command !== 'string') return false
   const argv = splitCommandArgs(hook.command)
-  const notifyIndex = argv.findIndex((arg) => arg === notifyPath)
+  const wanted = normalizePathForComparison(notifyPath)
+  const notifyIndex = argv.findIndex((arg) => normalizePathForComparison(arg) === wanted)
   return isNodeExecutingNotify(argv, notifyIndex) && hasSourceArg(argv, notifyIndex + 1, claudeSource)
 }
 

@@ -106,6 +106,17 @@ describe('ProfilePage timezone consequence', () => {
     expect(html).toContain('/settings/install')
   })
 
+  // The dashboard uses the canonical comparison; the profile page must agree, or the two
+  // surfaces tell opposite stories about the same install ("UTC" vs "Etc/UTC").
+  test('does not flag a collector zone that is an alias of the profile zone', async () => {
+    const html = await renderToString(
+      <ProfilePage email="user@example.com" saved={false} profile={profile()} collectorTimezones={['Etc/UTC']} />
+    )
+
+    expect(html).toContain('data-timezone-collector-notice="true"')
+    expect(html).not.toContain('与这里的时区不一致')
+  })
+
   test('does not tell a user with no devices to reinstall anything', async () => {
     const html = await renderToString(
       <ProfilePage email="user@example.com" saved={false} profile={profile()} collectorTimezones={[]} />
@@ -120,6 +131,26 @@ describe('ProfilePage timezone consequence', () => {
     )
 
     expect(html).toContain('Asia/Shanghai')
+    // The positive half of the canonical comparison: a zone that is really
+    // different (no alias folds UTC onto Asia/Shanghai) must render the
+    // mismatch sentence, or the alias test above proves only that nothing is
+    // ever flagged.
+    expect(html).toContain('与这里的时区不一致')
+  })
+
+  // The freshness stamp is a stored card option; the settings page is the only
+  // way to reach it, so the control has to be on the page users find.
+  test('offers the data-updated stamp, off by default', async () => {
+    const html = await renderToString(<ProfilePage email="user@example.com" saved={false} profile={profile()} />)
+
+    expect(html).toContain('name="cardShowUpdatedAt"')
+    expect(html).toContain('显示数据更新时间')
+    // defaultPublicCardConfig.showUpdatedAt === false, so the checkbox renders
+    // without the checked attribute: opting in is the user's click, never the
+    // page's default.
+    const tag = html.match(/<input[^>]*name="cardShowUpdatedAt"[^>]*>/)?.[0]
+    expect(tag).toBeDefined()
+    expect(tag).not.toContain('checked')
   })
 })
 

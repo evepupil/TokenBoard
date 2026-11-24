@@ -6,6 +6,7 @@ import {
   readdirSync,
   renameSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -18,6 +19,7 @@ import {
   prepareLegacyRetryFenceForAll,
   releaseLegacyRetryFence
 } from './scheduled-retry-legacy-fence.mjs'
+import { usageSources } from './usage-sources.mjs'
 
 export const scheduledRetryStateFileName = 'scheduled-sync-retry.json'
 export const scheduledRetryLockFileName = 'scheduled-sync-retry.lock'
@@ -30,7 +32,13 @@ export const defaultScheduledRetryDelayMs = 60_000
 // constant cannot be imported from the TypeScript package, so the collector test
 // suite asserts both sides still agree.
 export const transientSyncExitCode = 75
-const scheduledRetryGuardSources = ['antigravity', 'antigravity-cli', 'antigravity-ide', 'claude-code', 'codex']
+// An all-source retry has to hold every per-source retry lock, or a concurrent
+// single-source retry could collect at the same time as the all-source pass and
+// double-count the same snapshots. Deriving the list from the closed source set
+// is what keeps it complete: a hand-written copy went stale once already, and
+// the failure is silent — the new sources simply kept the mutual exclusion the
+// collector needs but not the retry layer.
+const scheduledRetryGuardSources = usageSources
 const scheduledRetryTransitionLockFileName = 'scheduled-sync-retry.transition.lock'
 
 export async function runScheduledRetry(options = {}) {
@@ -183,7 +191,11 @@ async function executeScheduledRetry({ source, maxAttempts, delayMs, runAttempt,
           }),
           runtime
         )
-        return { exitCode: 1, skipped: false, attempts: attempt, exhausted: true }
+        // The transient code is carried out, not flattened to 1: the caller
+        // records `failed` either way, but a reader that sees 75 knows the
+        // collector was busy and the snapshots are still in the cursor, while
+        // 1 says something actually broke.
+        return { exitCode: transientSyncExitCode, skipped: false, attempts: attempt, exhausted: true }
       }
       const retryAt = runtime.now()
       writeRetryState(
@@ -532,6 +544,7 @@ function retryRuntime(options) {
     runTasklist: options.runTasklist || provided.runTasklist,
     mkdir: options.mkdir || provided.mkdir || mkdirSync,
     readFile: options.readFile || provided.readFile || ((path) => readFileSync(path, 'utf8')),
+    stat: options.stat || provided.stat || statSync,
     readdir: options.readdir || provided.readdir || readdirSync,
     writeFile: options.writeFile || provided.writeFile || writeFileSync,
     rename: options.rename || provided.rename || renameSync,

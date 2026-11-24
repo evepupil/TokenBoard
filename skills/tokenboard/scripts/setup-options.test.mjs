@@ -185,6 +185,21 @@ test('setup base url must come from flags or environment', () => {
     }),
     'https://install.tokenboard.example.com'
   )
+  // The local dev server is the one place plain http is safe.
+  assert.equal(readSetupBaseUrl({ flags: { 'base-url': 'http://localhost:8787/' } }), 'http://localhost:8787')
+  assert.equal(readSetupBaseUrl({ flags: { 'base-url': 'http://127.0.0.1:8787' } }), 'http://127.0.0.1:8787')
+})
+
+// The pairing code and the returned upload token cross the network on this
+// URL; a typo'd `http://` would hand both to the network. Same rule as the
+// collector's upload endpoint (packages/collector/src/endpoint.ts).
+test('setup base url refuses plain http outside loopback', () => {
+  assert.throws(() => readSetupBaseUrl({ flags: { 'base-url': 'http://tokenboard.example.com' } }), /must use https/)
+  assert.throws(
+    () => readSetupBaseUrl({ flags: {}, env: { TOKENBOARD_BASE_URL: 'http://192.0.2.10:8787' } }),
+    /must use https/
+  )
+  assert.throws(() => readSetupBaseUrl({ flags: { 'base-url': 'not-a-url' } }), /not a valid URL/)
 })
 
 test('device-link reconnect setup is explicit opt-in', () => {
@@ -220,6 +235,7 @@ test('device-link reconnect exchanges local claim for a pairing code', async () 
   assert.equal(requestedServerOrigin, 'https://tokenboard.example.com')
   assert.deepEqual(writes, [])
   assert.equal(requests[0].url, 'https://tokenboard.example.com/api/v1/device/reconnect-pairing-codes')
+  assert.equal(requests[0].init.redirect, 'manual')
   assert.deepEqual(JSON.parse(requests[0].init.body), {
     deviceId: 'dev_1',
     installationId: 'inst_1',

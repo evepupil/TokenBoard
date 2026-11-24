@@ -71,34 +71,10 @@ async function prepareUsageUpsert(db: D1Database, record: IngestRecord) {
     // server receipt time is tracked separately by the device heartbeat rows.
     record.collectedAt,
     // One correction-flag bind per `?` that guards a correction exemption: six in the
-    // token/cost CASE arms, one in the cost CASE's unchanged-measurement arm, one in the
-    // WHERE clause.
-    ...Array.from({ length: 8 }, () => correctionFlag)
+    // token/cost CASE arms, and one in the WHERE clause.
+    ...Array.from({ length: 7 }, () => correctionFlag)
   )
 }
-
-/**
- * True when the stored row and the incoming snapshot measured the same tokens.
- *
- * Cost is a function of the price catalogue *at the moment of measurement*, not of the
- * catalogue now, so a re-scan that finds identical token counts is not a new measurement —
- * it is the old one re-derived. Adopting its cost would silently rewrite already-reported
- * spend whenever models.dev adjusts a price, with nothing in the data to show it happened.
- * A real re-measurement (more turns, a different model) changes the counts and takes the
- * incoming cost with it.
- *
- * Callers must pair this with `? = 0` (see the cost CASE): a correction row's tokens are
- * structurally always zero, so the comparison is trivially true for it on every re-derive.
- * Its cost is a derived remainder that moves when the day grows, and freezing it would
- * strand the row on its first correction.
- */
-const unchangedTokenMeasurementSql = `
-  daily_usage.input_tokens = excluded.input_tokens
-  AND daily_usage.output_tokens = excluded.output_tokens
-  AND daily_usage.cache_creation_tokens = excluded.cache_creation_tokens
-  AND daily_usage.cache_read_tokens = excluded.cache_read_tokens
-  AND daily_usage.total_tokens = excluded.total_tokens
-`
 
 const preserveCodexSessionOnlySql = `
   ? = 0
@@ -119,6 +95,30 @@ const preserveCodexSessionOnlySql = `
   )
 `
 
+/**
+ * A re-upload whose only difference is `costUsd` overwrites the stored cost.
+ *
+ * The snapshot hash covers `costUsd`, so a re-price IS a different snapshot by the protocol's
+ * own definition, and the `snapshot_hash <> excluded.snapshot_hash` guard below lets that update
+ * through. The cost column therefore has to follow the payload. Freezing it on the theory that
+ * "identical token counts mean the old measurement" left the row describing a snapshot that was
+ * never stored: `snapshot_hash` was still assigned `excluded.snapshot_hash`, so the stored hash
+ * no longer matched the stored row, and anything that recomputes the hash from the row would
+ * read it as never delivered.
+ *
+ * This is the accepted semantic of the native-client design (D7,
+ * `docs/superpowers/specs/2026-11-03-native-usage-sources-design.md` §9.4.1): a cost-accounting
+ * change reaches history through the client's next upload, and the diff is tracked in
+ * `docs/research/2026-11-13-s5-migration-diff-ledger.md` rather than blocked here.
+ *
+ * Not every branch below keeps `snapshot_hash` equal to the stored row, and it is worth being
+ * precise about that: `preserveCodexSessionOnlySql` deliberately keeps the stored tokens AND cost
+ * while the statement still writes the incoming hash — that is its whole purpose (a token-less
+ * session-only report must not wipe a row's usage), so a recomputation from the row would differ
+ * there by design. The invariant this file guarantees is the narrower, checkable one: **for a row
+ * whose tokens the statement replaced, the stored cost is the payload's cost** — which is what
+ * `idempotency.sqlite.test.ts` asserts.
+ */
 const upsertUsageSql = `
   INSERT INTO daily_usage (
     user_id,
@@ -147,7 +147,6 @@ const upsertUsageSql = `
     total_tokens = CASE WHEN ${preserveCodexSessionOnlySql} THEN daily_usage.total_tokens ELSE excluded.total_tokens END,
     cost_usd = CASE
       WHEN ${preserveCodexSessionOnlySql} THEN daily_usage.cost_usd
-      WHEN ? = 0 AND ${unchangedTokenMeasurementSql} THEN daily_usage.cost_usd
       ELSE excluded.cost_usd
     END,
     session_count = excluded.session_count,

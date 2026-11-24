@@ -1,0 +1,4 @@
+{"type":"session_meta","timestamp":"2026-05-26T09:00:00.000Z","payload":{"id":"fast"}}
+{"type":"event_msg","timestamp":"2026-05-26T09:00:30.000Z","payload":{"type":"thread_settings_applied","thread_settings":{"service_tier":"fast"}}}
+{"type":"turn_context","payload":{"model":"gpt-5.4"}}
+{"type":"event_msg","timestamp":"2026-05-26T09:01:00.000Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":100,"total_tokens":1100},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":100,"total_tokens":1100}}}}

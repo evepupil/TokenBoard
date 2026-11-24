@@ -123,6 +123,126 @@ test('removes the macOS LaunchAgent even when launchctl is missing', () => {
   }
 })
 
+// Same rule as Windows: the macOS path unlinks the plist regardless, so a
+// failed `launchctl bootout` (a permission problem, a corrupted job) would
+// otherwise be reported as a clean removal while the job kept running. Exit 3
+// is the exception: it means the job was not loaded (nothing to remove), which
+// its own test covers.
+test('reports a failed launchctl bootout instead of swallowing it', () => {
+  const harness = createHarness('darwin')
+  try {
+    const plistPath = join(harness.homeDir, 'Library', 'LaunchAgents', 'com.tokenboard.daily-sync.plist')
+    mkdirSync(dirname(plistPath), { recursive: true })
+    writeFileSync(plistPath, '<plist/>')
+    harness.options.spawn = () => ({ status: 1, error: undefined })
+
+    uninstallSchedule(harness.options)
+
+    assert.equal(existsSync(plistPath), false)
+    assert.equal(harness.errors.length, 1)
+    assert.match(harness.errors[0], /launchctl bootout/)
+    assert.match(harness.errors[0], /exit code 1/)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('treats a not-loaded launchctl bootout (exit 3) as a clean removal', () => {
+  // `launchctl bootout` exits 3 ("No such process") when the job is not loaded.
+  // An uninstall with nothing to remove must not print "the LaunchAgent may
+  // still be running" — that contradicts the "removed" line it prints next.
+  const harness = createHarness('darwin')
+  try {
+    const plistPath = join(harness.homeDir, 'Library', 'LaunchAgents', 'com.tokenboard.daily-sync.plist')
+    mkdirSync(dirname(plistPath), { recursive: true })
+    writeFileSync(plistPath, '<plist/>')
+    harness.options.spawn = () => ({ status: 3, error: undefined })
+
+    uninstallSchedule(harness.options)
+
+    assert.equal(existsSync(plistPath), false)
+    assert.deepEqual(harness.errors, [])
+  } finally {
+    harness.cleanup()
+  }
+})
+
+// The two systemctl calls are independent: `disable --now` failing must not
+// stop the unit files from being removed or the reload from being attempted,
+// and the reload failure is reported on its own.
+test('reports failed systemctl disable and daemon-reload instead of swallowing them', () => {
+  const harness = createHarness('linux')
+  try {
+    const unitDir = join(harness.homeDir, '.config', 'systemd', 'user')
+    mkdirSync(unitDir, { recursive: true })
+    writeFileSync(join(unitDir, 'tokenboard-daily-sync.service'), 'service')
+    writeFileSync(join(unitDir, 'tokenboard-daily-sync.timer'), 'timer')
+    harness.options.spawn = (command, args) => {
+      harness.calls.push({ command, args })
+      return { status: 1, error: undefined }
+    }
+
+    uninstallSchedule(harness.options)
+
+    // Files are still removed and every call still ran, including the is-active
+    // probe that decides whether the failed disable removed anything.
+    assert.equal(existsSync(join(unitDir, 'tokenboard-daily-sync.service')), false)
+    assert.equal(existsSync(join(unitDir, 'tokenboard-daily-sync.timer')), false)
+    assert.equal(harness.calls.length, 3)
+    assert.equal(harness.errors.length, 2)
+    assert.match(harness.errors[0], /systemctl --user disable --now tokenboard-daily-sync\.timer/)
+    assert.match(harness.errors[1], /systemctl --user daemon-reload/)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test('does not report a disable failure when the timer is not loaded', () => {
+  // No unit files exist and the timer is not loaded, so `systemctl disable
+  // --now` reports "Unit ... not loaded" (non-zero) and `is-active` answers 3
+  // (inactive) — the timer was never installed. Only the daemon-reload failure,
+  // which is independent of presence, is worth reporting.
+  const harness = createHarness('linux')
+  try {
+    harness.options.spawn = (command, args) => {
+      harness.calls.push({ command, args })
+      return { status: args.includes('is-active') ? 3 : 1, error: undefined }
+    }
+
+    uninstallSchedule(harness.options)
+
+    assert.equal(harness.errors.length, 1)
+    assert.match(harness.errors[0], /systemctl --user daemon-reload/)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+// A missing unit file does not mean the timer is gone: the files can be deleted
+// while systemd still holds and runs the loaded unit, and `disable` then fails
+// on the missing file. Reporting "removed" from file absence alone would leave
+// the timer firing with no trace; the is-active probe tells the two apart.
+test('reports a disable failure when the unit files are gone but the timer is still active', () => {
+  const harness = createHarness('linux')
+  try {
+    harness.options.spawn = (command, args) => {
+      harness.calls.push({ command, args })
+      // disable fails on the missing file, the probe finds the timer active,
+      // and the reload succeeds so only the disable failure is reported.
+      if (args.includes('is-active')) return { status: 0, error: undefined }
+      return { status: args.includes('disable') ? 1 : 0, error: undefined }
+    }
+
+    uninstallSchedule(harness.options)
+
+    assert.equal(harness.errors.length, 1)
+    assert.match(harness.errors[0], /systemctl --user disable --now tokenboard-daily-sync\.timer/)
+    assert.match(harness.errors[0], /the timer may still be enabled/)
+  } finally {
+    harness.cleanup()
+  }
+})
+
 test('ignores invalid configured Windows schedule times during uninstall', () => {
   const harness = createHarness('win32', { scheduleTimes: ['08:15', '9:00', 1200, '24:00', '21:45'] })
   try {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import {
   chmodSync,
@@ -17,18 +17,24 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { isMainModule } from './is-main.mjs'
 import { readConfig, parseArgs, collectorDir, readPackageManager, resolveClientForSource } from './config.mjs'
-import { clientBinaryPath } from './client-binary.mjs'
+import {
+  clientBinaryPath,
+  readVersion,
+  recoverOrphanedBinary,
+  recoverUnderInstallLock,
+  runSelfUpdate
+} from './client-binary.mjs'
 import { printHelpIfRequested, hasHelpFlag } from './cli-help.mjs'
 import { normalizePathEnv } from './schedule.mjs'
+import { recordClientVersion } from './client-version-state.mjs'
 import { readSince } from './sync-options.mjs'
 import { closeScheduledLogRuntime, createScheduledLogRuntime } from './logs.mjs'
 import { runUpgrade } from './upgrade.mjs'
-import { runSelfUpdate } from './client-binary.mjs'
 import { errorMessage } from './error-message.mjs'
 import { assertSupportedNodeVersion } from './node-version.mjs'
 import { acquireLock, lockHasToken, releaseLock, waitForLock } from './coordinator-lock.mjs'
 import { runScheduledRetry, transientSyncExitCode } from './scheduled-retry.mjs'
-import { currentProcessStartIdentity } from './process-liveness.mjs'
+import { selfUpdateLockFileName, stateLockRuntime } from './state-lock-runtime.mjs'
 import { writeScheduledSyncState } from './scheduled-sync-state.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
 
@@ -40,6 +46,11 @@ const defaultSyncLockTimeoutMs = 60_000
 // value trades a lost hook cycle for faster failure visibility. Manual and scheduled runs
 // are never bounded.
 const defaultHookSyncTimeoutMs = 30 * 60 * 1000
+// setTimeout stores its delay in a signed 32-bit integer and silently clamps anything
+// larger to 1ms (with a TimeoutOverflowWarning). A configured bound past this ceiling would
+// therefore kill every hook run immediately instead of never — the opposite of what the
+// operator asked for. `coordinator.mjs` documents the same clamp for its continuation delay.
+const maxHookSyncTimeoutMs = 2_147_483_647
 
 export function readHookSyncTimeoutMs(env = process.env) {
   const configured = env.TOKENBOARD_HOOK_SYNC_TIMEOUT_MS
@@ -47,7 +58,13 @@ export function readHookSyncTimeoutMs(env = process.env) {
   if (!/^[1-9][0-9]*$/.test(configured)) {
     throw new Error('TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be a positive integer number of milliseconds')
   }
-  return Number(configured)
+  const timeoutMs = Number(configured)
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs > maxHookSyncTimeoutMs) {
+    throw new Error(
+      `TOKENBOARD_HOOK_SYNC_TIMEOUT_MS must be at most ${maxHookSyncTimeoutMs}; larger values are clamped by setTimeout to 1ms and would kill every hook run`
+    )
+  }
+  return timeoutMs
 }
 
 if (isMain()) {
@@ -58,7 +75,9 @@ if (isMain()) {
     try {
       assertSupportedNodeVersion(process.versions.node)
     } catch (error) {
-      console.error(redactUrlCredentials(errorMessage(error)))
+      const message = redactUrlCredentials(errorMessage(error))
+      console.error(message)
+      recordScheduledFailure(message, process.env)
       process.exit(1)
     }
   }
@@ -122,6 +141,31 @@ async function runCli() {
   }
 }
 
+// recordScheduledFailure mirrors a startup failure into the scheduled sync's error log.
+//
+// The Node-floor guard (and anything else that gives up before `runCli` opens the log runtime)
+// exits while the runner's own capture is the only place the message lands. On Windows that
+// capture is discarded — the task recorded `LastTaskResult: 1` for every run from 2026-10-30 to
+// 2026-11-16 with no output at all — and launchd drops stdout/stderr unless a path is set. Writing
+// the message into `daily-sync.err.log` puts it where an operator already looks. Failures to log
+// are swallowed: the exit code is the contract, and logging must not mask the reason.
+export function recordScheduledFailure(message, env = process.env, { now = new Date() } = {}) {
+  try {
+    const runtime = createScheduledLogRuntime({
+      env,
+      homeDir: homedir(),
+      scheduled: env.TOKENBOARD_SCHEDULED_SYNC === '1',
+      now
+    })
+    if (!runtime) return false
+    writeFileSync(runtime.stderrFd, `${now.toISOString()} ${message}\n`)
+    closeScheduledLogRuntime(runtime, { now })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function runSyncInvocation({
   flags = {},
   invocation,
@@ -147,7 +191,7 @@ export async function runSyncInvocation({
         updatedAt: now(),
         ...(status === 'running' ? {} : { completedAt: now() }),
         ...(Number.isSafeInteger(details.exitCode) ? { exitCode: recordableExitCode(details.exitCode) } : {}),
-        ...(details.error ? { error: errorMessage(details.error) } : {})
+        ...(details.error ? { error: redactUrlCredentials(errorMessage(details.error)) } : {})
       })
     } catch (error) {
       try {
@@ -170,6 +214,15 @@ export async function runSyncInvocation({
     const result = await run()
     const exitCode = typeof result === 'number' ? result : 0
     if (exitCode === transientSyncExitCode) {
+      if (flags.hook === true) {
+        // A hook has a caller that can act on this after all: notify.mjs turns the code into
+        // a `transient` marker and the coordinator schedules a trailing retry. Collapsing it
+        // to 1 here (the pre-2026-11-15 behaviour) made a busy collector lock indistinguishable
+        // from a broken provider, so the source sat in the signal queue until some later
+        // trigger happened to cover it. The hook handler spawns this script detached with
+        // stdio ignored, so the code is read by notify.mjs only.
+        return exitCode
+      }
       if (!canDeferScheduledRun(flags)) {
         // Nothing retries an unscheduled run, so report a plain failure instead
         // of surfacing an internal deferral code the caller cannot act on.
@@ -222,11 +275,21 @@ export async function runSyncInvocation({
   // code to report, so none is recorded.
   const skipped = result.skipped === true
   const status = skipped ? 'deferred' : result.exhausted || exitCode !== 0 ? 'failed' : 'success'
+  // 75 is an internal contract with the retry loop, not something the state file — which
+  // `status.mjs` prints verbatim — should carry: a reader has no way to know it means
+  // "the collector was busy". An exhausted budget is a recorded failure, with the cause
+  // kept in the error text so the distinction is not lost.
+  const recordedExitCode = result.exhausted ? 1 : exitCode
+  const recordedError =
+    result.error ??
+    (result.exhausted && exitCode === transientSyncExitCode
+      ? `sync exited with transient code ${transientSyncExitCode} through ${result.attempts} attempts; snapshots remain queued`
+      : undefined)
   recordState(status, {
-    ...(skipped ? {} : { exitCode }),
-    ...(result.error ? { error: result.error } : {})
+    ...(skipped ? {} : { exitCode: recordedExitCode }),
+    ...(recordedError ? { error: recordedError } : {})
   })
-  return exitCode
+  return recordedExitCode
 }
 
 // runPreCollectUpgrade is the upgrade step that runs before collection.
@@ -241,6 +304,15 @@ export async function runSyncInvocation({
 // upgrade at all: they only enqueue and reconcile usage, and a hook must not
 // make a network request it cannot afford.
 //
+// Recovery runs before the upgrade gate. Restoring a binary left missing by a
+// swap interrupted between its two renames is a local `rename`, not an upgrade
+// and not a network call — so every switch that holds a client on its current
+// version (`--skip-upgrade`, `TOKENBOARD_AUTO_UPGRADE=0`, the scheduled retry's
+// own `skip-upgrade`) and the hook mode still get it. Running it only inside
+// `runSelfUpdate` put the repair behind those switches, and a machine that
+// interrupted a swap while they were set reported "client is not installed" on
+// every later run with no automatic way back.
+//
 // A failure on either path is a warning, never a sync failure: an offline
 // machine is a normal state, and the collector keeps working on the version it
 // has.
@@ -251,16 +323,39 @@ export function runPreCollectUpgrade({
   env = process.env,
   upgrade = runUpgrade,
   selfUpdate = runSelfUpdate,
-  binaryExists = existsSync,
+  recover = recoverOrphanedBinary,
+  binaryPresent = existsSync,
   log = createUpgradeLogger(logs),
   warn = (message) => console.error(message)
 } = {}) {
   if (invocation?.clientType === 'binary') {
+    // Only when the target is genuinely missing: recovery renames a backup into
+    // place, so it must never run over a working install. `runSelfUpdate` keeps
+    // its own call as a second line of defence — it becomes the only caller when
+    // this one is skipped, and it re-checks existence before deciding.
+    //
+    // A hook run can reach here without sync.lock (the coordinator-lock
+    // shortcut above), and a self-update elsewhere sits in the window between
+    // its two renames, where the target is absent by design. Recovery takes the
+    // same self-update.lock the swap holds, so it cannot pull a backup out from
+    // under a live update; if the lock is held, the target is missing for a
+    // reason another process is handling, and the next run recovers instead.
+    if (!binaryPresent(invocation.command)) {
+      recoverUnderUpdateLock({
+        binaryPath: invocation.command,
+        stateDir: env.TOKENBOARD_STATE_DIR,
+        configDir: env.TOKENBOARD_CONFIG_DIR,
+        recover,
+        log,
+        warn,
+        redact: redactUrlCredentials
+      })
+    }
     // The switches that hold the git client on its current version must hold
     // the binary too: an automatic self-update rewrites the executable itself,
     // which is harder to undo than a checkout `git checkout` can revert.
     // `shouldRunUpgrade` also covers `--hook`, so a hook still never upgrades.
-    if (!shouldRunUpgrade({ flags, env }) || !binaryExists(invocation.command)) {
+    if (!shouldRunUpgrade({ flags, env })) {
       return
     }
     try {
@@ -289,8 +384,87 @@ export function runPreCollectUpgrade({
   }
 }
 
+// recoverUnderUpdateLock is the sync path's entry to the shared recovery: it
+// takes the same self-update.lock the Go swap holds, so a hook run (which can
+// reach here without sync.lock) cannot move an in-flight update's backup away.
+// The lock logic lives with the recovery it guards, in client-binary.mjs.
+function recoverUnderUpdateLock({ binaryPath, stateDir, configDir, recover, log, warn, redact }) {
+  const env = { TOKENBOARD_STATE_DIR: stateDir ?? '', TOKENBOARD_CONFIG_DIR: configDir ?? '' }
+  try {
+    recoverUnderInstallLock({ binaryPath, env, log, recover })
+  } catch (error) {
+    warn(`TokenBoard binary recovery skipped: ${redact(errorMessage(error))}`)
+  }
+}
+
+// recordClientVersionForInvocation notes the version this run is about to
+// execute, so status.mjs can report "this version, since then" next to the
+// sync results. A git client has no single binary version; it records nothing.
+// Failures to record never fail the sync, but they do warn: a record that
+// silently stopped working looked identical to a healthy run with no change.
+export function recordClientVersionForInvocation({
+  invocation,
+  spawn,
+  now = Date.now,
+  record = recordClientVersion,
+  warn = () => {}
+} = {}) {
+  if (invocation?.clientType !== 'binary') return null
+  try {
+    // readVersion defaults to the real spawnSync; passing undefined here keeps
+    // a git-only process from ever needing child_process to be reachable.
+    const version = readVersion(invocation.command, spawn ?? spawnSync, ['version'])
+    if (!version) {
+      // readVersion answers null for a binary that cannot run or prints
+      // nothing. Nothing to record, but a broken probe looked exactly like a
+      // healthy one that had no version, so say so once.
+      if (typeof warn === 'function')
+        warn(`TokenBoard client version not recorded: ${invocation.command} did not answer version`)
+      return null
+    }
+    // Same resolution as the sync lock and the Go side: an explicit state dir,
+    // then the config dir, then ~/.tokenboard. Without the last step a manual
+    // sync (which sets neither variable) recorded nothing at all.
+    const stateDir =
+      invocation.env?.TOKENBOARD_STATE_DIR || invocation.env?.TOKENBOARD_CONFIG_DIR || join(homedir(), '.tokenboard')
+    return record({ stateDir, version, now })
+  } catch (error) {
+    // A diagnostic must never fail the sync, but it must not vanish either: a
+    // broken probe looked exactly like "no version to record".
+    if (typeof warn === 'function') warn(`TokenBoard client version not recorded: ${errorMessage(error)}`)
+    return null
+  }
+}
+
+// upgradeThenRecordVersion runs the upgrade step and only then notes the
+// version this run will execute. self-update replaces the binary at the same
+// path in place, so the version present after the upgrade is exactly the one
+// the collector is about to spawn; recording first would report the change a
+// run late and stamp `since` at the old version's start.
+export function upgradeThenRecordVersion({
+  flags,
+  invocation,
+  logs,
+  upgrade = runPreCollectUpgrade,
+  record = recordClientVersionForInvocation,
+  write = writeSync,
+  warn = (message) => console.error(message)
+} = {}) {
+  upgrade({ flags, invocation, logs })
+  const changed = record({ invocation, warn })
+  if (!changed?.changed) return changed
+  const from = changed.previous ? ` (was ${changed.previous})` : ''
+  try {
+    if (logs) write(logs.stdoutFd, `TokenBoard client version ${changed.version}${from}\n`)
+    else warn(`TokenBoard client version ${changed.version}${from}`)
+  } catch {
+    // A diagnostic line must never fail the sync.
+  }
+  return changed
+}
+
 async function runSync({ flags, invocation, logs }) {
-  runPreCollectUpgrade({ flags, invocation, logs })
+  upgradeThenRecordVersion({ flags, invocation, logs })
 
   const effectiveInvocation = refreshBundledCcusageConfig(invocation)
 
@@ -333,30 +507,89 @@ async function runSync({ flags, invocation, logs }) {
 // Output streams line by line instead of accumulating in a 64 MiB buffer: a run killed
 // mid-flight keeps everything it already printed, memory stays flat regardless of run length,
 // and per-line redaction is equivalent because every redact rule is single-line anchored.
+// A hook run's child is the collector, which spawns ccusage (or a language server) of its
+// own. Killing only the direct child leaves those grandchildren running: the collector is
+// gone, but the scan that blew the budget keeps burning CPU and memory with nothing left to
+// stop it. Spawning detached makes the child a process-group leader on POSIX, so the kill
+// can take the whole tree.
+//
+// `detached` is only set when a bound will actually be enforced. A manual run has no bound,
+// and detaching it would take the child out of the terminal's foreground process group —
+// Ctrl-C would then stop sync.mjs but leave the collector running.
+//
+// Windows has no process groups in that sense, and `detached` there means a new console
+// rather than a new group, so the direct-child kill stays the best available answer.
+function spawnOptionsFor(invocation, stdio, bounded) {
+  return {
+    cwd: invocation.cwd,
+    env: invocation.env,
+    stdio,
+    shell: invocation.shell,
+    detached: Boolean(bounded) && process.platform !== 'win32'
+  }
+}
+
+function killProcessTree(child, signal = 'SIGKILL') {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // The group is already gone (ESRCH) or the child never became a leader; fall through
+      // to the direct kill rather than reporting a timeout we did not actually enforce.
+    }
+  }
+  try {
+    child.kill(signal)
+  } catch {}
+}
+
 export async function runCollectorProcess(invocation, logs, options = {}) {
   const spawnChild = options.spawn || spawn
   const write = options.write || writeSync
   if (!logs) {
     // Interactive mode keeps the child on the real terminal, but the process must still be
     // awaited: spawn returns a ChildProcess, not a result, and the caller reads `status`.
-    const child = spawnChild(invocation.command, invocation.args, {
-      cwd: invocation.cwd,
-      env: invocation.env,
-      stdio: 'inherit',
-      shell: invocation.shell
+    //
+    // The hook timeout applies here too. A hook run is exactly this branch — notify spawns
+    // sync.mjs with `--hook` and no scheduled-log environment — so bounding only the logged
+    // branch left the production hook path unbounded, and a wedged scan there holds the
+    // coordinator's sync lock with nothing to kill it.
+    const child = spawnChild(
+      invocation.command,
+      invocation.args,
+      spawnOptionsFor(invocation, 'inherit', Boolean(options.hookTimeoutMs))
+    )
+    let timedOut = false
+    let timer
+    if (options.hookTimeoutMs) {
+      timer = setTimeout(() => {
+        timedOut = true
+        killProcessTree(child)
+      }, options.hookTimeoutMs)
+    }
+    const outcome = await new Promise((resolve) => {
+      child.once('error', (error) => resolve({ error }))
+      child.once('exit', (code, signal) => resolve({ code, signal }))
     })
-    return await new Promise((resolve) => {
-      child.once('error', (error) => resolve({ status: 1, error }))
-      child.once('exit', (code, signal) => resolve({ status: code ?? (signal ? 1 : 0), error: null }))
-    })
+    clearTimeout(timer)
+    if (outcome.error) return { status: 1, error: outcome.error }
+    if (timedOut) {
+      return {
+        status: 1,
+        error: Object.assign(new Error(`collector run exceeded the ${options.hookTimeoutMs} ms hook timeout`), {
+          code: 'ETIMEDOUT'
+        })
+      }
+    }
+    return { status: outcome.code ?? (outcome.signal ? 1 : 0), error: null }
   }
 
-  const child = spawnChild(invocation.command, invocation.args, {
-    cwd: invocation.cwd,
-    env: invocation.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: invocation.shell
-  })
+  const child = spawnChild(
+    invocation.command,
+    invocation.args,
+    spawnOptionsFor(invocation, ['ignore', 'pipe', 'pipe'], Boolean(options.hookTimeoutMs))
+  )
   const stdoutPipe = pipeRedacted(child.stdout, logs.stdoutFd, write)
   const stderrPipe = pipeRedacted(child.stderr, logs.stderrFd, write)
   let timedOut = false
@@ -365,7 +598,7 @@ export async function runCollectorProcess(invocation, logs, options = {}) {
     // Only hook-mode callers pass a bound; manual and scheduled runs are never killed.
     timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGKILL')
+      killProcessTree(child)
     }, options.hookTimeoutMs)
   }
 
@@ -516,9 +749,14 @@ export function buildSyncInvocation({
   const packageManager = readPackageManager(flags, config)
   const since = readSince({ flags, config, env })
   const delimiter = platform === 'win32' ? ';' : ':'
+  // The coordinator-lock flag and token are this process's state, not the
+  // collector's. The collector's own held-lock flag is the opposite: it must
+  // reach the child, or the child retakes collector-run.lock inside the wrapper
+  // that already holds it.
   const {
     TOKENBOARD_COORDINATOR_LOCK_HELD: _coordinatorLockHeld,
     TOKENBOARD_COORDINATOR_LOCK_TOKEN: _coordinatorLockToken,
+    TOKENBOARD_COLLECTOR_LOCK_HELD: collectorLockHeld,
     ...collectorEnv
   } = env
   const onlyWhenUnset = (key, value) => {
@@ -546,7 +784,6 @@ export function buildSyncInvocation({
     TOKENBOARD_UPLOAD_TOKEN: config.uploadToken,
     TOKENBOARD_TIMEZONE: config.timezone,
     TOKENBOARD_SOURCE: source,
-    TOKENBOARD_PACKAGE_MANAGER: packageManager,
     ...codexSymlinkRoots,
     ...(until !== undefined ? { TOKENBOARD_UNTIL: until } : {}),
     TOKENBOARD_SINCE: since,
@@ -563,7 +800,8 @@ export function buildSyncInvocation({
           TOKENBOARD_HOOK_MODE: '1',
           TOKENBOARD_STATE_DIR: env.TOKENBOARD_STATE_DIR || env.TOKENBOARD_CONFIG_DIR || join(homeDir, '.tokenboard')
         }
-      : {})
+      : {}),
+    ...(collectorLockHeld ? { TOKENBOARD_COLLECTOR_LOCK_HELD: collectorLockHeld } : {})
   }
 
   // A binary install runs the Go client directly: the same subcommand
@@ -608,6 +846,10 @@ export function buildSyncInvocation({
     shell: false,
     env: {
       ...sharedEnv,
+      // The checkout client is the TypeScript collector, which still reaches
+      // ccusage through a package manager (spec D6). The Go binary does not,
+      // so only this branch carries the selection.
+      TOKENBOARD_PACKAGE_MANAGER: packageManager,
       ...(ccusageConfig ? { TOKENBOARD_CCUSAGE_CONFIG: ccusageConfig } : {})
     }
   }
@@ -738,30 +980,7 @@ function configDirFromInvocation(invocation, homeDir) {
 }
 
 function syncLockRuntime() {
-  let processStartIdentity
-  return {
-    lockTimeoutMs: defaultSyncLockTimeoutMs,
-    chmod: (path, mode) => chmodSync(path, mode),
-    lstat: (path) => lstatSync(path),
-    mkdir: (path, options) => mkdirSync(path, options),
-    now: Date.now,
-    process,
-    getProcessStartIdentity: () => {
-      if (processStartIdentity) return processStartIdentity
-      processStartIdentity = currentProcessStartIdentity()
-      return processStartIdentity
-    },
-    readFile: (path) => readFileSync(path, 'utf8'),
-    rename: renameSync,
-    link: linkSync,
-    sleep: sleepSync,
-    unlink: unlinkSync,
-    writeFile: writeFileSync
-  }
-}
-
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms))
+  return stateLockRuntime({ lockTimeoutMs: defaultSyncLockTimeoutMs })
 }
 
 function isMain() {

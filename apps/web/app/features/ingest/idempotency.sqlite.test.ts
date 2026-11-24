@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createSqliteD1, runSql } from '../../test/sqlite-d1'
 import { upsertUsageSnapshots, type IngestRecord } from './repository'
+import { snapshotHash } from './repository/types'
 
 const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../../db/migrations')
 
@@ -119,17 +120,29 @@ describe('ingest idempotency', () => {
     expect(totalTokens(path)).toBe(150)
   })
 
-  // Cost is the price at the moment of measurement, not the price now. A scheduled sync re-scans
-  // its lookback window every run, so when models.dev adjusts a price the same day is re-derived
-  // with a new cost but identical token counts. Adopting that cost would silently rewrite spend
-  // the user already saw; the stored value must survive an unchanged measurement.
-  test('an unchanged token measurement keeps the stored cost when the price moved', async () => {
+  // A client re-upload whose only difference is `costUsd` overwrites the stored cost. That is the
+  // accepted semantic (native-usage-sources design D7, §9.4.1): the snapshot hash covers costUsd,
+  // so a new cost IS a different measurement by the protocol's own definition, and the upsert that
+  // the hash mismatch lets through writes `excluded.cost_usd`.
+  //
+  // The rule this replaced froze the stored cost whenever the token counts matched, on the theory
+  // that a re-scan re-deriving the same counts should not adopt a newly published price. That left
+  // the row inconsistent with itself: `snapshot_hash` was still assigned `excluded.snapshot_hash`,
+  // so the stored hash described a payload that was never stored — `snapshotHash(stored) !==
+  // snapshot_hash`. Anything that recomputes the hash from the row (a backfill, a repair script, a
+  // future freshness check) would then read the row as never having been delivered, and a
+  // price-table change would rewrite spend anyway as soon as the counts moved. D7 chose to accept
+  // the overwrite rather than add a protection layer; the second assertion below is what keeps the
+  // hash and the row from drifting apart again.
+  test('a cost-only re-upload adopts the incoming cost and its hash', async () => {
     const { db, path } = createDb(tempDirs)
+    const repriced = makeRecord({ costUsd: 0.34 })
 
     await upsertUsageSnapshots(db, [makeRecord({ costUsd: 0.12 })])
-    await upsertUsageSnapshots(db, [makeRecord({ costUsd: 0.34 })])
+    await upsertUsageSnapshots(db, [repriced])
 
-    expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.12')
+    expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.34')
+    expect(scalarText(path, 'SELECT snapshot_hash FROM daily_usage')).toBe(await snapshotHash(repriced))
   })
 
   // The other half of the rule: a real re-measurement moves the token counts, so it is a new
@@ -144,17 +157,23 @@ describe('ingest idempotency', () => {
     expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.34')
   })
 
-  // A correction row's tokens are always zero — that is what makes it a correction — so the
-  // "unchanged measurement" test is trivially true on every re-derive. Its cost is not zero:
-  // it is what the context-priced split left behind, and when the day grows or the split
-  // changes, the corrected remainder moves. Freezing it would strand the row on the first
-  // correction forever, so corrections are exempted from the unchanged-measurement rule the
-  // same way they are exempted from the session-only preservation above.
+  // A correction row's tokens are always zero — that is what makes it a correction — while its
+  // cost is not: it is the remainder the context-priced split left behind, and it moves whenever
+  // the day grows or the split changes. So a correction's cost must follow every re-derive. With
+  // the token-equality cost freeze gone this holds by construction, and the test stays as the pin
+  // that a future shortcut keyed on token equality cannot come back and strand a correction on its
+  // first value.
+  //
+  // `source: 'codex'` and the default `sessionCount: 2` are both load-bearing, not decoration: the
+  // session-only preservation rule fires only on codex rows that report a positive session count,
+  // so with the default claude-code source — or a zero session count — this fixture would pass
+  // even if the rule started swallowing corrections.
   test('a second correction adopts the newly derived cost', async () => {
     const { db, path } = createDb(tempDirs)
 
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,
@@ -166,6 +185,7 @@ describe('ingest idempotency', () => {
     ])
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,
@@ -179,19 +199,22 @@ describe('ingest idempotency', () => {
     expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.03')
   })
 
-  // The exemption composes with a real re-measurement in one sequence: after the normal row
-  // is replaced, the first correction re-derives the remainder, and the second must too — the
-  // unchanged-measurement arm compares all-zero tokens against all-zero stored tokens here,
-  // so without the `? = 0` guard the row would freeze at 0.05 forever. The correction's zero
-  // tokens replacing the re-measured counts is its defined shape: the split moved those
-  // tokens to the context model's row, and the canonical row keeps only the cost remainder.
+  // The sequence in one go: after the normal row is replaced, the first correction re-derives the
+  // remainder and the second must too. What could still strand it is the session-only preservation
+  // rule — a zero-token row over a row that has tokens is exactly what it guards — so its `? = 0`
+  // correction exemption is what this pins. The correction's zero tokens replacing the re-measured
+  // counts is its defined shape: the split moved those tokens to the context model's row, and the
+  // canonical row keeps only the cost remainder.
   test('a correction after a re-measured row still adopts each new cost', async () => {
     const { db, path } = createDb(tempDirs)
 
-    await upsertUsageSnapshots(db, [makeRecord({ costUsd: 0.12 })])
-    await upsertUsageSnapshots(db, [makeRecord({ totalTokens: 200, inputTokens: 135, costUsd: 0.08 })])
+    // All four are `codex` on purpose: the preservation rule only fires on that source, so a
+    // claude-code fixture would pass whether or not the correction exemption exists.
+    await upsertUsageSnapshots(db, [makeRecord({ source: 'codex', costUsd: 0.12 })])
+    await upsertUsageSnapshots(db, [makeRecord({ source: 'codex', totalTokens: 200, inputTokens: 135, costUsd: 0.08 })])
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,
@@ -203,6 +226,7 @@ describe('ingest idempotency', () => {
     ])
     await upsertUsageSnapshots(db, [
       makeRecord({
+        source: 'codex',
         correction: 'codex-context-pricing',
         totalTokens: 0,
         inputTokens: 0,
@@ -216,6 +240,35 @@ describe('ingest idempotency', () => {
     expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.03')
     expect(scalarText(path, 'SELECT total_tokens FROM daily_usage')).toBe('0')
     expect(scalarText(path, 'SELECT input_tokens FROM daily_usage')).toBe('0')
+  })
+  // The WHERE clause carries its own copy of the codex shapes, with `session_count = 0` where the
+  // SET arms have `> 0`. That arm decides whether the row is touched at all; the SET arms only
+  // decide what a permitted update writes. Both correction fixtures above use `sessionCount: 2`,
+  // so they exercise the SET side; without a case here, deleting the WHERE arm would still pass.
+  //
+  // A token-less codex report that also reports no sessions, arriving over a row that has usage,
+  // is rejected outright — the row does not even lose its session_count. That is the arm working:
+  // the source has no tokens to report, so its report says nothing about this row's usage.
+  test('a zero-session codex report leaves a populated row entirely untouched', async () => {
+    const { db, path } = createDb(tempDirs)
+
+    await upsertUsageSnapshots(db, [makeRecord({ source: 'codex', costUsd: 0.12 })])
+    await upsertUsageSnapshots(db, [
+      makeRecord({
+        source: 'codex',
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0.5,
+        sessionCount: 0
+      })
+    ])
+
+    expect(scalarText(path, 'SELECT total_tokens FROM daily_usage')).toBe('165')
+    expect(scalarText(path, 'SELECT cost_usd FROM daily_usage')).toBe('0.12')
+    expect(scalarText(path, 'SELECT session_count FROM daily_usage')).toBe('2')
   })
 })
 

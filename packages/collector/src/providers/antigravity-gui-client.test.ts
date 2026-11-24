@@ -9,7 +9,9 @@ import {
   formatMetadataRequestHttpError,
   formatMetadataRequestTransportError,
   listAntigravityCascades,
+  missingDefaultLanguageServer,
   requestGeneratorMetadata,
+  spawnLanguageServer,
   waitForReady,
   type AntigravityCascadeFileSystem
 } from './antigravity-gui-client'
@@ -629,3 +631,69 @@ function restoreEnv(key: string, value: string | undefined) {
 function cascadeId(index: number) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 }
+
+// The language server is a third-party binary. `spawn` inherits the whole
+// process environment when `env` is omitted, and the upload token lives there,
+// so a launch that skipped the scrub would hand the credential to it.
+describe('missingDefaultLanguageServer', () => {
+  // The app bundle, not the binary, decides "not installed": a bundle that is
+  // present but lacks the binary is a layout change that must keep reaching
+  // the spawn, and strict mode's failure report with it.
+  test('covers only an absent app bundle at the default path', () => {
+    const defaultPath = '/Applications/Antigravity.app/Contents/Resources/bin/language_server'
+    expect(missingDefaultLanguageServer(defaultPath, () => false)).toBe(true)
+    expect(missingDefaultLanguageServer(defaultPath, () => true)).toBe(false)
+    expect(missingDefaultLanguageServer('/opt/custom/language_server', () => false)).toBe(false)
+  })
+})
+
+describe('spawnLanguageServer', () => {
+  test('reports an absent app instead of spawning when the default path is in use', () => {
+    const previous = process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER
+    delete process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER
+    try {
+      expect(() =>
+        spawnLanguageServer({ source: 'antigravity', port: 1, csrfToken: 'csrf', exists: () => false })
+      ).toThrow(/^Antigravity language server is not installed at /)
+    } finally {
+      if (previous !== undefined) process.env.TOKENBOARD_ANTIGRAVITY_LANGUAGE_SERVER = previous
+    }
+  })
+
+  test('never hands the child the credential environment', async () => {
+    if (process.platform === 'win32') return // The stand-in is a shell script.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-ls-env-'))
+    try {
+      const marker = join(root, 'seen.txt')
+      const standIn = join(root, 'server.sh')
+      await writeFile(
+        standIn,
+        `#!/bin/sh\nif [ -n "$TOKENBOARD_UPLOAD_TOKEN" ]; then echo LEAKED > '${marker}'; else echo CLEAN > '${marker}'; fi\n`,
+        { mode: 0o755 }
+      )
+      const previous = process.env.TOKENBOARD_UPLOAD_TOKEN
+      process.env.TOKENBOARD_UPLOAD_TOKEN = 'tb_probe_secret'
+      try {
+        const server = spawnLanguageServer({
+          source: 'antigravity',
+          languageServerPath: standIn,
+          port: 12345,
+          csrfToken: 'csrf'
+        })
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('the stand-in did not finish')), 5000)
+          server.on('exit', () => {
+            clearTimeout(timer)
+            resolve(undefined)
+          })
+        })
+        expect((await readFile(marker, 'utf8')).trim()).toBe('CLEAN')
+      } finally {
+        if (previous === undefined) delete process.env.TOKENBOARD_UPLOAD_TOKEN
+        else process.env.TOKENBOARD_UPLOAD_TOKEN = previous
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 import { minimumNodeRange } from './node-version.mjs'
 
@@ -62,7 +62,9 @@ for (const name of ['setup.mjs', 'sync.mjs', 'install-collector.mjs']) {
       "Object.defineProperty(process.versions, 'node', { value: '22.18.0', configurable: true, writable: true, enumerable: true })\n"
     )
     try {
-      const result = spawnSync(process.execPath, ['--import', preload, scriptPath(name)], {
+      // Windows rejects a bare drive path as an ESM specifier ("C:" reads as a
+      // protocol), so the preload has to be passed as a file:// URL there.
+      const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, scriptPath(name)], {
         encoding: 'utf8',
         timeout: 20_000,
         env: {
@@ -89,3 +91,18 @@ for (const name of ['setup.mjs', 'sync.mjs', 'install-collector.mjs']) {
     }
   })
 }
+
+// The floors also live in README.md and SKILL.md's troubleshooting text; no script reads
+// either, so a bump that skips them leaves the docs telling users to install a release with
+// the TLS bypasses. Derive the expected strings from minimumNodeRange instead of repeating
+// them here, so this test follows the range wherever it moves.
+test('README and SKILL.md name every supported Node floor', () => {
+  const versions = minimumNodeRange.match(/\d+\.\d+\.\d+/g) ?? []
+  assert.ok(versions.length >= 3, `unexpected minimumNodeRange: ${minimumNodeRange}`)
+  const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
+  const skill = readFileSync(join(repoRoot, 'skills/tokenboard/SKILL.md'), 'utf8')
+  assert.ok(readme.includes(minimumNodeRange), 'README must quote the exact engines range')
+  for (const version of versions) {
+    assert.ok(skill.includes(`${version} (`), `SKILL.md troubleshooting must name ${version}`)
+  }
+})

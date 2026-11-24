@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   buildCodexContextPricingRules,
   codexContextPricingRules,
+  officialVendorProviderIds,
   selectUnambiguousDynamicPricingModels,
   type CodexContextPricingRule
 } from './providers/codex-context-pricing'
@@ -308,12 +309,134 @@ export function createCcusagePricingOverrides(
     const override = toCcusagePricingOverride(model)
     if (override) dynamicOverrides[model.modelId] = override
   }
+  for (const [modelId, override] of officialAnchorOverrides(models, dynamicOverrides)) {
+    dynamicOverrides[modelId] = override
+  }
+  applyCaseVariantAliases(models, dynamicOverrides)
   return mergePricingOverrides(
     fallbackConfig ? readPricingOverrides(fallbackConfig) : {},
     dynamicOverrides,
     {},
     nonRepresentableContextPricingModelIds(models, dynamicOverrides)
   )
+}
+
+// ccusage matches an override key to the model name it sees in a session by folding provider
+// prefixes and variant suffixes, so a key like `xiaomi/mimo-v2.6-flash-uncensored` can price a
+// plain `mimo-v2.6-flash` day. When the base id is unresolved (its reseller rows disagree) that
+// folding key is the only one left and it wins — one machine billed 3.6x the official rate for
+// mimo-v2.6-flash this way. An exact key beats a folding one, so the official vendor row is
+// emitted as the base id's own key and restores the right rate.
+//
+// Only an official row is used. Falling back to a reseller row would re-introduce exactly the
+// ambiguity the unresolved id was dropped for, and turning that into an explicit anchor would
+// launder an arbitrary reseller price into an authoritative one.
+function officialAnchorOverrides(
+  models: readonly CollectorPricingModel[],
+  emitted: Readonly<Record<string, CcusagePricingOverride>>
+): Array<[string, CcusagePricingOverride]> {
+  const byBase = new Map<string, CollectorPricingModel[]>()
+  for (const model of models) {
+    const base = foldToBaseModelId(model.modelId)
+    if (base === model.modelId.trim().toLowerCase()) continue
+    const entries = byBase.get(base) ?? []
+    entries.push(model)
+    byBase.set(base, entries)
+  }
+  if (byBase.size === 0) return []
+
+  const haveExact = new Set(Object.keys(emitted).map((key) => key.trim().toLowerCase()))
+  const byId = new Map<string, CollectorPricingModel[]>()
+  for (const model of models) {
+    const id = model.modelId.trim().toLowerCase()
+    if (!byBase.has(id) || haveExact.has(id)) continue
+    const entries = byId.get(id) ?? []
+    entries.push(model)
+    byId.set(id, entries)
+  }
+
+  const anchors: Array<[string, CcusagePricingOverride]> = []
+  for (const [, rows] of byId) {
+    const official = pickAnchorOfficialRow(rows)
+    if (!official) continue
+    const override = toCcusagePricingOverride(official)
+    if (override) anchors.push([rows[0]!.modelId, override])
+  }
+  return anchors
+}
+
+// Several official vendors can price one id differently — an international and
+// a domestic endpoint of the same vendor is the common case. Picking the first
+// match would make the anchor depend on the order rows arrive in, and that order
+// comes from the server's `ORDER BY provider, model_id`; a change there would
+// silently move what every collector bills. Sort first so the choice is a
+// property of this function, not of how the catalogue happened to be serialized.
+function pickAnchorOfficialRow(rows: readonly CollectorPricingModel[]): CollectorPricingModel | null {
+  const officials = rows
+    .filter((row) => officialVendorProviderIds.has(row.provider.trim().toLowerCase()) && priceRowIsPositive(row))
+    .sort((left, right) => compareProviderThenId(left, right))
+  return officials[0] ?? null
+}
+
+function compareProviderThenId(left: CollectorPricingModel, right: CollectorPricingModel) {
+  const leftProvider = left.provider.trim().toLowerCase()
+  const rightProvider = right.provider.trim().toLowerCase()
+  if (leftProvider !== rightProvider) return leftProvider < rightProvider ? -1 : 1
+  return left.modelId < right.modelId ? -1 : left.modelId > right.modelId ? 1 : 0
+}
+
+// ccusage matches an override key case-sensitively: a session model `GLM-5.3-Flash` is not priced
+// by a `glm-5.3-flash` key. The catalogue publishes both spellings for the same id, and the
+// collapse emits only the representative's, so the other spelling stays unpriced on machines whose
+// logs use it. Emit the same override under every spelling the catalogue publishes for that id.
+//
+// Aliases are only added for ids that already have an emitted override, so this cannot resurrect a
+// group the collapse dropped for disagreeing rows, and it never invents a spelling the catalogue
+// does not publish.
+function applyCaseVariantAliases(
+  models: readonly CollectorPricingModel[],
+  overrides: Record<string, CcusagePricingOverride>
+): void {
+  const spellings = new Map<string, Set<string>>()
+  for (const model of models) {
+    const key = model.modelId.trim().toLowerCase()
+    const set = spellings.get(key) ?? new Set<string>()
+    set.add(model.modelId)
+    spellings.set(key, set)
+  }
+  for (const [key, override] of Object.entries(overrides)) {
+    const set = spellings.get(key.trim().toLowerCase())
+    if (!set) continue
+    for (const spelling of set) {
+      if (!Object.hasOwn(overrides, spelling)) overrides[spelling] = override
+    }
+  }
+}
+
+// The bases ccusage may fold a key onto: drop `:tag` segments, drop the provider prefix, then
+// drop fine-tune variant suffixes. Kept deliberately narrow — only the folding cases observed
+// on real data — because over-folding would anchor ids ccusage never conflates.
+//
+// Both suffixes are tried and each is stripped once, matching the Go port: a catalogue id
+// ending `-abliterated-uncensored` folds to the same base on both sides. (A single non-global
+// replace would leave the Go side anchoring a base the TS side never sees.)
+const variantSuffixes = ['-uncensored', '-abliterated'] as const
+
+export function foldToBaseModelId(modelId: string): string {
+  const withoutTags = modelId
+    .trim()
+    .toLowerCase()
+    .replace(/:[^:/]*/g, '')
+  const segments = withoutTags.split('/')
+  let base = segments[segments.length - 1] ?? withoutTags
+  for (const suffix of variantSuffixes) {
+    if (base.endsWith(suffix)) base = base.slice(0, -suffix.length)
+  }
+  return base
+}
+
+function priceRowIsPositive(row: CollectorPricingModel) {
+  return row.inputCostPerMillion > 0 || row.outputCostPerMillion > 0
 }
 
 export function toCcusagePricingOverride(model: CollectorPricingModel): CcusagePricingOverride | null {
@@ -528,13 +651,28 @@ async function writePricingCache(path: string, catalogue: ModelPricingCatalogue)
 
 async function writeJsonAtomically(path: string, value: unknown, mode = 0o600) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const payload = `${JSON.stringify(value)}\n`
+  // The generated config is a pure function of the catalogue, so an unchanged catalogue
+  // produces byte-identical output. Rewriting it anyway costs a write plus a rename on
+  // every hook run (this file is ~450 KB) and makes the mtime useless as a "did the
+  // catalogue move" signal. Skip the write when the bytes already match.
+  if (await fileHasContent(path, payload)) return
   const tempPath = `${path}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`
   try {
-    await writeFile(tempPath, `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode })
+    await writeFile(tempPath, payload, { encoding: 'utf8', mode })
     await renameAtomic(tempPath, path)
   } catch (error) {
     await rm(tempPath, { force: true })
     throw error
+  }
+}
+
+/** True when `path` already holds exactly `payload`. A read error means "not equal". */
+async function fileHasContent(path: string, payload: string) {
+  try {
+    return (await readFile(path, 'utf8')) === payload
+  } catch {
+    return false
   }
 }
 

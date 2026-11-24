@@ -30,23 +30,3 @@ func TestReadBatchSizeReadsLikeNumber(t *testing.T) {
 		}
 	}
 }
-
-func TestPackageCommandRetriesReadLikeParseInt(t *testing.T) {
-	cases := []struct {
-		value string
-		want  int
-	}{
-		{"3", 3},
-		{"3abc", 3},
-		{" 3", 3},
-		{"0", 0},
-		{"-1", DefaultPackageCommandRetries},
-		{"abc", DefaultPackageCommandRetries},
-	}
-	for _, tc := range cases {
-		t.Setenv("TOKENBOARD_PACKAGE_COMMAND_RETRIES", tc.value)
-		if got := readPackageCommandRetries(); got != tc.want {
-			t.Errorf("readPackageCommandRetries(%q) = %d, want %d", tc.value, got, tc.want)
-		}
-	}
-}

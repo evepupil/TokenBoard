@@ -10,10 +10,19 @@ import {
   updateDailyReportShareSettings
 } from '../../features/notifications/service'
 import { ApiError } from '../../lib/errors'
+import { enforceRateLimit } from '../../lib/rate-limit'
 import { POST, notificationFormErrorMessage } from './notifications'
 
 vi.mock('../../features/auth/middleware', () => ({
   requireUser: vi.fn()
+}))
+
+// The form's `test` action sends an outbound webhook request and every action writes D1 rows,
+// so a per-user ceiling is applied before the action switch. Without it a signed-in user could
+// turn this page into a webhook-test amplifier.
+vi.mock('../../lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/rate-limit')>()),
+  enforceRateLimit: vi.fn()
 }))
 
 vi.mock('../../features/settings/service', () => ({
@@ -47,6 +56,7 @@ const mockedParseWebhookCreateForm = vi.mocked(parseWebhookCreateForm)
 const mockedRevokeDailyReportShare = vi.mocked(revokeDailyReportShare)
 const mockedSendWebhookTest = vi.mocked(sendWebhookTest)
 const mockedUpdateDailyReportShareSettings = vi.mocked(updateDailyReportShareSettings)
+const mockedEnforceRateLimit = vi.mocked(enforceRateLimit)
 
 describe('notifications POST route', () => {
   beforeEach(() => {
@@ -56,6 +66,22 @@ describe('notifications POST route', () => {
     mockedRevokeDailyReportShare.mockReset()
     mockedSendWebhookTest.mockReset()
     mockedUpdateDailyReportShareSettings.mockReset()
+    mockedEnforceRateLimit.mockReset()
+  })
+
+  test('rate-limits the form per user before any action runs', async () => {
+    const context = postContext({ action: 'test', subscriptionId: 'sub_1' })
+    mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
+    mockedEnforceRateLimit.mockRejectedValue(new ApiError('RATE_LIMITED', 'Too many requests', 429))
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(429)
+    expect(mockedSendWebhookTest).not.toHaveBeenCalled()
+    expect(mockedEnforceRateLimit).toHaveBeenCalledWith(context.env.DB, {
+      policy: expect.objectContaining({ id: 'notifications-form' }),
+      subject: { kind: 'user', value: 'user_1' }
+    })
   })
 
   test('does not redirect failed webhook tests as sent', async () => {

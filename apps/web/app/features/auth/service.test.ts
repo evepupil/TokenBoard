@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest'
-import { forwardGithubSignIn } from './service'
+import { forwardAuthSignOut, forwardGithubSignIn } from './service'
 
 // `postAuth` re-issues the request before handing it to Better Auth. Anything it fails to
 // copy is invisible to the auth handler, and the rate limiter reads the caller's address
@@ -11,15 +11,24 @@ vi.mock('./auth', () => ({
   createAuth: () => ({
     handler: async (request: Request) => {
       captured.push(request)
-      return new Response(JSON.stringify({ url: 'https://github.com/login/oauth/authorize' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      })
+      return nextAuthResponse()
     }
   })
 }))
 
 const captured: Request[] = []
+
+// The default is a successful sign-in handoff. Tests that need a failure (the sign-out
+// swallow below) swap it for one request.
+let authResponder = () =>
+  new Response(JSON.stringify({ url: 'https://github.com/login/oauth/authorize' }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  })
+
+function nextAuthResponse() {
+  return authResponder()
+}
 
 function contextWith(headers: Record<string, string>) {
   const url = 'https://example.test/auth/sign-in'
@@ -68,5 +77,40 @@ describe('forwardGithubSignIn', () => {
     expect(response.status).toBe(303)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('location')).toBe('https://github.com/login/oauth/authorize')
+  })
+})
+
+describe('forwardAuthSignOut', () => {
+  // A failed sign-out used to be rewritten into the same 303 a successful one returns, so the
+  // browser landed on `/dashboard` showing a signed-out face while the session cookie was still
+  // live — the user believes the session is gone and walks away from a machine that is still
+  // authenticated. Sign-in already passes a failure through; sign-out has to as well.
+  test.each([
+    [429, 'RATE_LIMITED'],
+    [401, 'UNAUTHORIZED'],
+    [500, 'INTERNAL_SERVER_ERROR']
+  ])('passes a failed sign-out through as %i instead of redirecting', async (status, code) => {
+    authResponder = () => new Response(JSON.stringify({ message: 'nope' }), { status })
+    captured.length = 0
+
+    const response = await forwardAuthSignOut(contextWith({ cookie: 'tb=abc' }) as never)
+    authResponder = () =>
+      new Response(JSON.stringify({ url: 'https://github.com/login/oauth/authorize' }), { status: 200 })
+
+    expect(response.status).toBe(status)
+    expect(response.headers.get('location')).toBeNull()
+    await expect(response.json()).resolves.toEqual({ error: { code, message: 'nope' } })
+  })
+
+  // The successful path still has to redirect, and still has to carry the cleared-session
+  // cookie plus `no-store` — a shared cache replaying that redirect would hand one visitor's
+  // post-sign-out state to the next.
+  test('redirects to the landing page after a successful sign-out', async () => {
+    captured.length = 0
+    const response = await forwardAuthSignOut(contextWith({ cookie: 'tb=abc' }) as never)
+
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe('/')
+    expect(response.headers.get('cache-control')).toBe('no-store')
   })
 })

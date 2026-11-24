@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/collect/collate"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/mtime"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 	"github.com/MisonL/TokenBoard/clients/go/internal/state"
 )
 
@@ -627,7 +629,7 @@ func writeSubagentUsageCache(
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := renameAttributionCacheAtomic(tempPath, cachePath); err != nil {
+	if err := renameatomic.Rename(tempPath, cachePath); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
@@ -677,7 +679,7 @@ func subagentNowMillis(updatedAt string) float64 {
 	if !ok {
 		return 0
 	}
-	return float64(parsed.Unix())*1e3 + float64(parsed.Nanosecond())/1e6
+	return mtime.Millis(parsed)
 }
 
 // decodeSubagentCacheJSON ports JSON.parse: numbers as float64 (overflow to

@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'vitest'
-import { filterChangedSnapshots, snapshotHash, uploadSnapshots } from './upload'
+import {
+  filterChangedSnapshots,
+  readUploadDelivered,
+  readUploadRejected,
+  snapshotHash,
+  uploadSnapshots
+} from './upload'
 import { changedSnapshot, unchangedSnapshot } from './upload-test-helpers'
 
 describe('filterChangedSnapshots', () => {
@@ -193,6 +199,92 @@ describe('uploadSnapshots', () => {
   test.each([405, 501])('falls back to full upload when the hash check endpoint returns %i', async (status) =>
     expectUnsupportedHashCheckFallback(status)
   )
+})
+
+describe('uploadSnapshots usageDate window', () => {
+  const config = {
+    endpoint: 'https://tokenboard.example.com/api/v1/ingest',
+    uploadToken: 'test-upload-token',
+    timezone: 'Asia/Shanghai'
+  }
+
+  test('leaves a rejected row out of the delivered set so its cursor is not acknowledged', async () => {
+    const requests: Array<{ url: string; body: unknown }> = []
+    const fetched = async (url: string, init: RequestInit) => {
+      requests.push({ url, body: init.body ? JSON.parse(String(init.body)) : null })
+      return {
+        ok: true,
+        async json() {
+          return url.endsWith('/api/v1/ingest/check') ? { existing: [] } : { upserted: 1 }
+        }
+      } as Response
+    }
+    const inWindow = { ...unchangedSnapshot, usageDate: '2026-05-01' }
+    const outOfWindow = { ...changedSnapshot, usageDate: '2026-05-09' }
+
+    const result = await uploadSnapshots(config, [inWindow, outOfWindow], fetched, {
+      now: new Date('2026-05-01T10:00:00.000Z')
+    })
+
+    expect(readUploadDelivered(result)).toEqual([inWindow])
+    expect(requests[1].body).toEqual({ snapshots: [inWindow] })
+  })
+
+  test('posts no batch and delivers nothing when every row falls outside the date window', async () => {
+    const requests: Array<{ url: string; body: unknown }> = []
+    const outOfWindow = { ...unchangedSnapshot, usageDate: '2026-05-09' }
+
+    const result = await uploadSnapshots(
+      config,
+      [outOfWindow],
+      async (url, init) => {
+        requests.push({ url, body: init.body ? JSON.parse(String(init.body)) : null })
+        return {
+          ok: true,
+          async json() {
+            return { upserted: 0 }
+          }
+        } as Response
+      },
+      { now: new Date('2026-05-01T10:00:00.000Z') }
+    )
+
+    expect(readUploadDelivered(result)).toEqual([])
+    expect(requests).toEqual([])
+  })
+
+  test('a plain result object carries no delivered set, so stubs keep acknowledging the whole collection', () => {
+    expect(readUploadDelivered({ upserted: 1 })).toBeUndefined()
+  })
+
+  test('reports each dropped row with its reason so the caller can tell retryable from permanent', async () => {
+    const inWindow = { ...unchangedSnapshot, usageDate: '2026-05-01' }
+    const invalid = { ...changedSnapshot, usageDate: 'not-a-date' }
+    const tooFarFuture = { ...changedSnapshot, usageDate: '2026-05-09' }
+
+    const result = await uploadSnapshots(
+      config,
+      [inWindow, invalid, tooFarFuture],
+      async (url) =>
+        ({
+          ok: true,
+          async json() {
+            return url.endsWith('/api/v1/ingest/check') ? { existing: [] } : { upserted: 1 }
+          }
+        }) as Response,
+      { now: new Date('2026-05-01T10:00:00.000Z') }
+    )
+
+    expect(readUploadDelivered(result)).toEqual([inWindow])
+    expect(readUploadRejected(result)).toEqual([
+      { snapshot: invalid, issue: 'invalid' },
+      { snapshot: tooFarFuture, issue: 'too-far-future' }
+    ])
+  })
+
+  test('a plain result object carries no rejected set either', () => {
+    expect(readUploadRejected({ upserted: 1 })).toBeUndefined()
+  })
 })
 
 async function expectUnsupportedHashCheckFallback(status: number) {

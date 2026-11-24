@@ -1,0 +1,25 @@
+bench-collect source=claude-code scenario=single window=20261109 timezone=Asia/Shanghai rounds=5
+ccusage bin=<HOME>/.tokenboard/bin/ccusage platform=darwin/amd64
+pricing config=/var/folders/hq/q19jry150l16mrrbkh7wm0_m0000gn/T/tokenboard-bench-2495665146/ccusage.bundled.json (static catalogue) ccusageNetwork=true
+ccusage: measured (rss=wait4-rusage)
+  round 1 wall=3m51.368s peak=2.83 GiB output=57.5 KiB bytesRead=0 (pending) calls=2
+  round 2 wall=3m43.806s peak=2.82 GiB output=57.5 KiB bytesRead=0 (pending) calls=2
+  round 3 wall=4m17.442s peak=2.77 GiB output=57.5 KiB bytesRead=0 (pending) calls=2
+  round 4 wall=3m27.598s peak=2.81 GiB output=57.5 KiB bytesRead=0 (pending) calls=2
+  round 5 wall=4m29.369s peak=2.69 GiB output=57.5 KiB bytesRead=0 (pending) calls=2
+  median wall=3m51.368s peak=2.81 GiB output=57.5 KiB
+  max    wall=4m29.369s peak=2.83 GiB output=57.5 KiB
+native: measured (rss=rusage-self)
+  round 1 wall=2m42.939s peak=1.63 GiB output=0 B bytesRead=0 (pending) calls=1
+  round 2 wall=2m23.369s peak=1.65 GiB output=0 B bytesRead=0 (pending) calls=1
+  round 3 wall=2m51.8s peak=1.74 GiB output=0 B bytesRead=0 (pending) calls=1
+  round 4 wall=2m51.283s peak=1.74 GiB output=0 B bytesRead=0 (pending) calls=1
+  round 5 wall=2m24.731s peak=1.75 GiB output=0 B bytesRead=0 (pending) calls=1
+  median wall=2m42.939s peak=1.74 GiB output=0 B
+  max    wall=2m51.8s peak=1.75 GiB output=0 B
+bytesRead: 0 (pending — the adapter read counter lands in S2)
+regression: none (native median wall 2m42.939s vs ccusage 3m51.368s)
+note: ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs
+note: both sides ran under the merged pricing config at /var/folders/hq/q19jry150l16mrrbkh7wm0_m0000gn/T/tokenboard-bench-2495665146/ccusage.bundled.json
+note: ccusage runs without --offline, exactly as production does, so its prices may include a live refresh while the native side bills from the frozen corpus; the flags, not the prices, are what this comparison holds constant
+note: bytesRead is pending until the S2 adapter read counter lands

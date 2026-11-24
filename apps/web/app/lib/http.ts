@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
 import { ApiError } from './errors'
+import { markRouteRenderedNotFound } from './not-found'
 
 // Every branch answers `no-store`, matching `publicApiErrorResponse` and
 // `modelPricingErrorResponse`: a cached 401 keeps showing a stale failure, and without a
@@ -36,6 +37,12 @@ export function unauthorizedHeaders(headers?: Record<string, string>): Record<st
 export function jsonError(c: Context, error: unknown) {
   if (error instanceof ApiError) {
     const headers = error.status === 401 ? unauthorizedHeaders(error.headers) : withNoStore(error.headers)
+    // HonoX installs the root `_404` handler as middleware over the whole app, so it rewrites the
+    // body of every 404 — including the specific one this route just built (a pairing code that
+    // expired, a device with no active installation). Both bodies are JSON, so only the message
+    // changed, which is exactly why it went unnoticed. Mark the response so the root handler keeps
+    // the route's own `{error:{code,message}}` instead of the generic `Route not found` shell.
+    if (error.status === 404) markRouteRenderedNotFound(c)
     return c.json({ error: { code: error.code, message: error.message } }, error.status, headers)
   }
 

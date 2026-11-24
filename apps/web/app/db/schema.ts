@@ -88,7 +88,10 @@ export const dailyUsageSummary = sqliteTable(
     primaryKey({
       columns: [table.userId, table.usageDate, table.source, table.model]
     }),
-    index('daily_usage_summary_date_user_idx').on(table.usageDate, table.userId)
+    index('daily_usage_summary_date_user_idx').on(table.usageDate, table.userId),
+    // Migration 0039; declared here so the schema stays an accurate mirror of
+    // the hand-maintained migration chain.
+    index('daily_usage_summary_user_updated_idx').on(table.userId, table.updatedAt)
   ]
 )
 

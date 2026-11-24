@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { lstat } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -135,16 +136,16 @@ export const codexContextPricingRules: readonly CodexContextPricingRule[] = [
     modelIds: ['gpt-5.6-sol', 'gpt-5.6'],
     threshold: 272_000,
     standard: {
-      input: 5 / 1_000_000,
-      output: 30 / 1_000_000,
-      cacheRead: 0.5 / 1_000_000,
-      cacheCreation: 6.25 / 1_000_000
+      input: 4 / 1_000_000,
+      output: 20 / 1_000_000,
+      cacheRead: 0.4 / 1_000_000,
+      cacheCreation: 5 / 1_000_000
     },
     longContext: {
-      input: 10 / 1_000_000,
-      output: 45 / 1_000_000,
-      cacheRead: 1 / 1_000_000,
-      cacheCreation: 12.5 / 1_000_000
+      input: 8 / 1_000_000,
+      output: 30 / 1_000_000,
+      cacheRead: 0.8 / 1_000_000,
+      cacheCreation: 10 / 1_000_000
     },
     fastMultiplier: 2
   },
@@ -326,6 +327,11 @@ export function buildCodexContextPricingRules(
     }
   }
 
+  // Skips are collected and reported once per reason class below: the
+  // catalogue gains and loses these models daily, and a line per model ran to
+  // hundreds per scan and buried real warnings in the sync log.
+  const multiTierSkipped: string[] = []
+  const cacheSkipped: { modelId: string; missing: string[] }[] = []
   for (const model of selectUnambiguousDynamicPricingModels(models)) {
     const normalizedModelId = normalizeModelIdWithBases(model.modelId, baseModelBases)
     if (excluded.has(model.modelId.trim().toLowerCase()) || excluded.has(normalizedModelId)) continue
@@ -337,9 +343,7 @@ export function buildCodexContextPricingRules(
       // static rule instead of silently repricing it with stale rates.
       if (hasChangingDynamicContextTiers(model.pricing)) {
         removeContextPricingRuleForModel(rules, ruleById, normalizedModelId, baseModelBases)
-        stderr?.(
-          `TokenBoard model pricing: skipping dynamic Codex context rule for ${model.modelId}; multiple changing context tiers cannot be represented by the request-level rule`
-        )
+        multiTierSkipped.push(model.modelId)
       }
       continue
     }
@@ -350,9 +354,7 @@ export function buildCodexContextPricingRules(
         standard?.cacheRead === undefined || longContext?.cacheRead === undefined ? 'cache-read' : null,
         standard?.cacheCreation === undefined || longContext?.cacheCreation === undefined ? 'cache-write' : null
       ].filter((value): value is string => value !== null)
-      stderr?.(
-        `TokenBoard model pricing: skipping dynamic Codex context rule for ${model.modelId}; cache pricing is incomplete (${missingCachePrices.join(', ')})`
-      )
+      cacheSkipped.push({ modelId: model.modelId, missing: missingCachePrices })
       continue
     }
     if (existing) removeContextPricingRuleForModel(rules, ruleById, normalizedModelId, baseModelBases)
@@ -367,7 +369,40 @@ export function buildCodexContextPricingRules(
     rules.push(dynamicRule)
     ruleById.set(normalizedModelId, dynamicRule)
   }
+  if (multiTierSkipped.length > 0) {
+    stderr?.(
+      skipSummaryLine(
+        'with multiple changing context tiers (cannot be represented by the request-level rule)',
+        multiTierSkipped
+      )
+    )
+  }
+  // One line per distinct missing-price set, so `cache-read` alone stays
+  // distinguishable from `cache-read, cache-write`.
+  const byMissing = new Map<string, string[]>()
+  for (const skip of cacheSkipped) {
+    const key = skip.missing.join(', ')
+    const ids = byMissing.get(key)
+    if (ids) ids.push(skip.modelId)
+    else byMissing.set(key, [skip.modelId])
+  }
+  for (const [key, modelIds] of byMissing) {
+    stderr?.(skipSummaryLine(`with incomplete cache pricing (${key})`, modelIds))
+  }
   return rules
+}
+
+// skipSummaryLine is the one-line form of a dynamic-context-rule skip:
+// "TokenBoard model pricing: skipping dynamic Codex context rule for N models
+// <reason>: <model ids>". A model id is catalogue data, but the line lands in
+// the sync log, so oneLineForLog keeps a crafted id from injecting line breaks.
+function skipSummaryLine(reason: string, modelIds: readonly string[]): string {
+  const plural = modelIds.length === 1 ? 'model' : 'models'
+  return `TokenBoard model pricing: skipping dynamic Codex context rule for ${modelIds.length} ${plural} ${reason}: ${modelIds.map(oneLineForLog).join(', ')}`
+}
+
+function oneLineForLog(value: string): string {
+  return value.replace(/[\r\n]/g, ' ')
 }
 
 function removeContextPricingRuleForModel(
@@ -464,16 +499,31 @@ function priceRowIsPositive(entry: CollectorPricingModelLike) {
 }
 
 function priceRowSignature(entry: CollectorPricingModelLike) {
+  // `pricing` is compared with its keys sorted, matching the Go port's json.Marshal.
+  // JSON.stringify preserves insertion order, so two rows carrying the same object in a
+  // different key order would look different here and identical there — the two clients
+  // would then disagree about whether an id is ambiguous. The catalogue is serialized by
+  // one process today so the orders happen to match, but nothing in the contract says so.
   return JSON.stringify([
     entry.inputCostPerMillion,
     entry.outputCostPerMillion,
     entry.cacheReadCostPerMillion,
     entry.cacheWriteCostPerMillion,
-    entry.pricing ?? null
+    sortJsonKeys(entry.pricing ?? null)
   ])
 }
 
-const officialVendorProviderIds = new Set([
+/** Recursively rebuilds a JSON value with object keys in code-point order. */
+function sortJsonKeys(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map(sortJsonKeys)
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0
+  )
+  return Object.fromEntries(entries.map(([key, entry]) => [key, sortJsonKeys(entry)]))
+}
+
+export const officialVendorProviderIds = new Set([
   'openai',
   'anthropic',
   'google',
@@ -489,9 +539,21 @@ const officialVendorProviderIds = new Set([
   'longcat'
 ])
 
+// Rows that agree on price can still disagree on context window, and the
+// representative carries its own into maxInputTokens. Picking the first match
+// would make that value depend on the order rows arrive in — and that order is
+// the catalogue's `ORDER BY`, not a property of this code. Prefer an official
+// vendor, then the alphabetically first provider, so the choice is reproducible.
 function pickCollapsedRepresentative<T extends CollectorPricingModelLike>(entries: readonly T[]): T {
-  const official = entries.find((entry) => officialVendorProviderIds.has((entry.provider ?? '').trim().toLowerCase()))
-  return official ?? entries[0]
+  return [...entries].sort((left, right) => {
+    const leftOfficial = officialVendorProviderIds.has((left.provider ?? '').trim().toLowerCase())
+    const rightOfficial = officialVendorProviderIds.has((right.provider ?? '').trim().toLowerCase())
+    if (leftOfficial !== rightOfficial) return leftOfficial ? -1 : 1
+    const leftProvider = (left.provider ?? '').trim().toLowerCase()
+    const rightProvider = (right.provider ?? '').trim().toLowerCase()
+    if (leftProvider !== rightProvider) return leftProvider < rightProvider ? -1 : 1
+    return left.modelId < right.modelId ? -1 : left.modelId > right.modelId ? 1 : 0
+  })[0]!
 }
 
 export function isCodexContextPricingModel(model: string) {
@@ -578,6 +640,14 @@ export async function collectCodexContextPricingUsagesFromFiles(input: {
     // bounded model scan. A session can switch models within one JSONL file,
     // so retain files that contain both model classes for event-level parsing.
     if (canonicalModel && !isCodexContextPricingModel(canonicalModel) && !allowMixedModelPricing) continue
+    // A file that vanished between discovery and this read (an archived
+    // session rotated away, a cleanup pass) is skipped rather than failing the
+    // source: its rows come from the next sync, which discovers the file where
+    // it lives then.
+    if (!existsSync(filePath)) {
+      input.stderr?.(`Skipped a Codex session file that vanished during the scan: ${basename(filePath)}`)
+      continue
+    }
     const relevant = await scanFile({
       ...input,
       filePath,
@@ -801,22 +871,27 @@ export function applyCodexContextPricingCosts<
     unresolvedSnapshots.push(...snapshotIndexes)
   }
 
+  // A raw cost with no daily snapshot cannot be applied, and a snapshot with
+  // no unambiguous raw cost cannot be split. Both are expected on a machine
+  // whose session history is incomplete — an archived file rotated away, a
+  // compaction pass trimmed a day, the inventory changed mid-scan and the
+  // file was skipped — so the row keeps the daily aggregate cost and the
+  // mismatch is reported instead of failing the whole source.
   for (const key of unmatchedCostKeys) {
     const cost = costsByKey.get(key)
     if (cost === undefined) throw new Error('Codex context pricing matching lost a raw cost')
     const [usageDate, model] = splitContextPricingKey(key)
-    stderr?.(`Codex context pricing found ${model} usage without a matching daily snapshot for ${usageDate}`)
-    throw new Error(`Codex context pricing cannot match daily snapshot for ${usageDate}/${model}`)
+    stderr?.(
+      `Codex context pricing found ${model} usage without a matching daily snapshot for ${usageDate}; leaving the day's aggregate cost as reported`
+    )
   }
 
-  const snapshotIndex = unresolvedSnapshots[0]
-  if (snapshotIndex !== undefined) {
+  for (const snapshotIndex of unresolvedSnapshots) {
     const snapshot = snapshots[snapshotIndex]
     if (!snapshot) throw new Error('Codex context pricing matching lost a daily snapshot')
     stderr?.(
-      `Codex context pricing found ${snapshot.model} daily usage without an unambiguous raw cost for ${snapshot.usageDate}`
+      `Codex context pricing found ${snapshot.model} daily usage without an unambiguous raw cost for ${snapshot.usageDate}; keeping the day's aggregate cost`
     )
-    throw new Error(`Codex context pricing cannot match raw cost for ${snapshot.usageDate}/${snapshot.model}`)
   }
 
   return snapshots.map((snapshot, index) => {
@@ -1224,20 +1299,16 @@ async function scanFile(input: {
   })) {
     if (record.type === 'session_meta') {
       const identity = readSessionIdentity(record)
-      if (identity && !sessionIdentity) {
+      // A forked Codex file opens with the child's session_meta and then
+      // replays the parent's own meta and history. Releases that predate
+      // session_id cannot be unified by it, so the two identities differ
+      // legitimately; the latest meta names the thread the records belong to,
+      // so adopt it instead of counting the replay against the child or
+      // dropping the rest of the file. Two files under one relative path that
+      // end up naming different threads are a real conflict, checked once the
+      // file is fully read.
+      if (identity && (!sessionIdentity || archiveAlias)) {
         sessionIdentity = scopedSessionIdentity(identity, input.identityPath)
-        if (archiveAlias) {
-          const previous = input.sessionIdentitiesByAlias.get(archiveAlias)
-          if (previous && previous !== sessionIdentity) {
-            throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
-          }
-          input.sessionIdentitiesByAlias.set(archiveAlias, sessionIdentity)
-        }
-      } else if (identity && sessionIdentity && archiveAlias) {
-        const observedIdentity = scopedSessionIdentity(identity, input.identityPath)
-        if (observedIdentity !== sessionIdentity) {
-          throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
-        }
       }
       const payload = readRecord(record.payload)
       const source = readRecord(payload?.source)
@@ -1381,6 +1452,18 @@ async function scanFile(input: {
         contextTier
       })
     }
+  }
+  // The active and archived copies of one session share a relative path, so
+  // they share an alias. When both declare an identity they must agree: two
+  // different threads under one alias are not copies, and deduplicating them
+  // would silently drop usage. A file without session_meta inherits the alias'
+  // identity and trivially agrees.
+  if (archiveAlias && sessionIdentity) {
+    const previous = input.sessionIdentitiesByAlias.get(archiveAlias)
+    if (previous && previous !== sessionIdentity) {
+      throw new Error(`Codex context pricing found conflicting session identities for ${archiveAlias}`)
+    }
+    input.sessionIdentitiesByAlias.set(archiveAlias, sessionIdentity)
   }
   return hasRelevantModel
 }

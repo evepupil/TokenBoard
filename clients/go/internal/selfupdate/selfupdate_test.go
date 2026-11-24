@@ -6,14 +6,17 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/release"
 )
@@ -98,17 +101,17 @@ func (f fakeRelease) server(t *testing.T) *httptest.Server {
 		sums = fmt.Sprintf("%s  %s\n", strings.Repeat("0", 64), archiveName)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/MisonL/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/MisonL/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
+	mux.HandleFunc("/evepupil/TokenBoard/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/"+f.tag, http.StatusFound)
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/evepupil/TokenBoard/releases/tag/"+f.tag, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("<html>release " + f.tag + "</html>"))
 	})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+archiveName,
 		func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(f.tarball)
 		})
-	mux.HandleFunc("/MisonL/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
+	mux.HandleFunc("/evepupil/TokenBoard/releases/download/"+f.tag+"/"+release.ChecksumsName(),
 		func(w http.ResponseWriter, r *http.Request) {
 			if f.omitChecksums {
 				http.NotFound(w, r)
@@ -171,12 +174,13 @@ func runAgainst(t *testing.T, server *httptest.Server, target, tag string) (Resu
 }
 
 // runAgainstWithConfigDir pins TOKENBOARD_CONFIG_DIR to a test directory. The
-// bundled ccusage install follows that variable, and without it the test would
-// write into the machine's real ~/.tokenboard/bin.
+// update probes that directory's bin for a ccusage copy left by an earlier
+// release, and without it the test would inspect the machine's real
+// ~/.tokenboard/bin.
 func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag, configDir string) (Result, error) {
 	t.Helper()
 	return Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Tag:        tag,
 		Target:     target,
 		Platform:   "darwin",
@@ -192,6 +196,70 @@ func runAgainstWithConfigDir(t *testing.T, server *httptest.Server, target, tag,
 			return ""
 		},
 		Stderr: func(string) {},
+	})
+}
+
+// A feed whose "latest" points below the installed version (a yanked release,
+// a tag rolled back) must not silently downgrade the machine. A downgrade
+// reintroduces whatever the newer version fixed, and the scheduled path would
+// do it on every run without anyone asking.
+func TestRunDoesNotDowngradeWhenTheFeedPointsBelowTheInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	installed := stubBinary("2.0.0")
+	if err := os.WriteFile(target, installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("2.0.0")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	var downloads int
+	fake := fakeRelease{tag: "v1.9.0", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.9.0"))}
+	server := fake.server(t)
+	server.Config.Handler = countingDownloads(server.Config.Handler, &downloads)
+
+	var lines []string
+	result, err := Run(Input{
+		Repo:       "evepupil/TokenBoard",
+		Target:     target,
+		Platform:   "darwin",
+		Arch:       "arm64",
+		HTTPClient: server.Client(),
+		Env: func(key string) string {
+			if key == "TOKENBOARD_RELEASE_BASE_URL" {
+				return server.URL
+			}
+			return ""
+		},
+		Stderr: func(line string) { lines = append(lines, line) },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Updated {
+		t.Fatal("a release older than the installed version must not be installed")
+	}
+	if result.Version != "2.0.0" {
+		t.Errorf("result.Version = %q, want the installed 2.0.0", result.Version)
+	}
+	if downloads != 0 {
+		t.Errorf("downloads = %d, want none: the archive must not even be fetched", downloads)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "newer") {
+		t.Errorf("stderr = %q, want a line saying the installed version is newer", strings.Join(lines, "\n"))
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, installed) {
+		t.Errorf("the installed binary was replaced: %q", got)
+	}
+}
+
+// countingDownloads wraps a release handler and counts archive downloads.
+func countingDownloads(next http.Handler, downloads *int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			*downloads++
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -415,9 +483,9 @@ func TestRunPrunesOldBackupsKeepingTheNewest(t *testing.T) {
 	}
 }
 
-// The glob pattern is escaped, so a binary living in a directory whose name
-// carries glob metacharacters prunes its own backups, not another binary's.
-func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
+// A binary living in a directory whose name carries glob metacharacters
+// prunes its own backups, not another binary's.
+func TestPruneBackupsStaysWithinItsOwnDirectory(t *testing.T) {
 	dir := t.TempDir()
 	// Two binaries in sibling directories whose names differ only by a glob
 	// character in one of them: pruning one must not match the other's files.
@@ -439,45 +507,76 @@ func TestPruneBackupsEscapesGlobMeta(t *testing.T) {
 	}
 }
 
-// Spec §4.1: the release tarball carries the platform's ccusage binary beside
-// the client. An update that installed only the client would leave a machine
-// whose ccusage version never follows the one the new client expects.
-func TestRunInstallsTheBundledCcusage(t *testing.T) {
+// A config directory whose name carries a glob metacharacter
+// (`~/.tokenboard[work]`, a Windows user folder, a caller-set
+// TOKENBOARD_CONFIG_DIR) must still have its own backups pruned, and must not
+// reach a sibling's: with a glob, the character class `[cfg]` in a directory
+// named `[cfg]` matched a sibling named `c`.
+func TestPruneBackupsHandlesAMetacharacterDirectory(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "tokenboard")
-	if err := os.WriteFile(target, stubBinary("0.0.1"), 0o755); err != nil {
+	metaDir := filepath.Join(dir, "[cfg]")
+	siblingDir := filepath.Join(dir, "c")
+	otherSubdir := filepath.Join(dir, "g")
+	for _, target := range []string{metaDir, siblingDir, otherSubdir} {
+		if err := os.MkdirAll(target, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ownOld := filepath.Join(metaDir, "tokenboard.backup-20260101T000000Z")
+	if err := os.WriteFile(ownOld, []byte("own old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	SetCurrentVersion("0.0.1")
-	t.Cleanup(func() { SetCurrentVersion("dev") })
+	// A sibling directory's backup: `[cfg]` as a character class matches `c` and
+	// `g`, so an unescaped pattern reaches it.
+	for _, sibling := range []string{siblingDir, otherSubdir} {
+		if err := os.WriteFile(filepath.Join(sibling, "tokenboard.backup-20260101T000000Z"), []byte("sibling"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	tarball := buildTarballWithFiles(t, map[string][]byte{
-		"tokenboard": stubBinary("1.2.3"),
-		"ccusage":    []byte("#!/bin/sh\necho 'ccusage 20.0.33'\n"),
-	})
-	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: tarball}
-	server := fake.server(t)
+	keep := filepath.Join(metaDir, "tokenboard.backup-20260102T000000Z")
+	pruneBackups(filepath.Join(metaDir, "tokenboard"), keep)
 
-	configDir := t.TempDir()
-	if _, err := runAgainstWithConfigDir(t, server, target, "", configDir); err != nil {
-		t.Fatalf("Run: %v", err)
+	// The directory's own old backup must be pruned.
+	if _, err := os.Stat(ownOld); !os.IsNotExist(err) {
+		t.Errorf("the directory's own old backup survived (glob did not reach it): %v", err)
 	}
-	// The bundled layer looks under the config directory (BundledBinDir), which
-	// is where the skill's bootstrap install puts it too.
-	bundled, err := os.ReadFile(filepath.Join(configDir, "bin", "ccusage"))
-	if err != nil {
-		t.Fatalf("the bundled ccusage was not installed: %v", err)
+	// The sibling's must not be touched.
+	for _, sibling := range []string{siblingDir, otherSubdir} {
+		path := filepath.Join(sibling, "tokenboard.backup-20260101T000000Z")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("a sibling directory's backup was removed: %s: %v", path, err)
+		}
 	}
-	if !bytes.Contains(bundled, []byte("ccusage 20.0.33")) {
-		t.Errorf("installed ccusage is not the bundled one: %q", bundled)
+}
+
+// Backup names must be unique even within one UTC second. The stamp alone is
+// second-precision, and `backupPath` is also the argument to a rename that
+// replaces its target: two swaps inside one second (two self-updates racing,
+// which nothing serializes) would otherwise overwrite each other's backup and
+// destroy the only rollback copy.
+func TestBackupPathIsUniqueWithinOneSecond(t *testing.T) {
+	fixed := func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	first := backupPath("/home/user/.tokenboard/bin/tokenboard", fixed)
+	second := backupPath("/home/user/.tokenboard/bin/tokenboard", fixed)
+
+	if first == second {
+		t.Fatalf("two backups in the same second share a name: %s", first)
 	}
-	info, err := os.Stat(filepath.Join(configDir, "bin", "ccusage"))
-	if err != nil {
-		t.Fatal(err)
+	// The timestamp must stay in the name: recoverOrphanedBinary picks the
+	// newest backup by sorting the names.
+	for _, path := range []string{first, second} {
+		if !strings.Contains(filepath.Base(path), "20260102T030405Z") {
+			t.Errorf("backup %s does not carry the UTC stamp", path)
+		}
 	}
-	// Windows has no execute bit; a file runs by extension there.
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("ccusage is not executable: %v", info.Mode())
+	// A later second still orders after an earlier one by name.
+	later := backupPath("/home/user/.tokenboard/bin/tokenboard",
+		func() time.Time { return time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC) })
+	names := []string{first, second, later}
+	sort.Strings(names)
+	if names[len(names)-1] != later {
+		t.Errorf("the newest backup does not sort last: %v", names)
 	}
 }
 
@@ -536,36 +635,8 @@ func buildTarballWithFiles(t *testing.T, files map[string][]byte) []byte {
 	return buffer.Bytes()
 }
 
-// A tarball whose ccusage entry is malformed must fail the update, not install
-// a client whose bundled layer then downloads a different version.
-func TestRunRefusesAMalformedCcusageEntry(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "tokenboard")
-	if err := os.WriteFile(target, stubBinary("0.0.1"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	SetCurrentVersion("0.0.1")
-	t.Cleanup(func() { SetCurrentVersion("dev") })
-
-	tarball := buildTarballWithFiles(t, map[string][]byte{
-		"tokenboard": stubBinary("1.2.3"),
-		"ccusage":    nil, // a present-but-empty entry is malformed
-	})
-	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: tarball}
-	server := fake.server(t)
-
-	configDir := t.TempDir()
-	if _, err := runAgainstWithConfigDir(t, server, target, "", configDir); err == nil {
-		t.Fatal("an empty ccusage entry must fail the update")
-	}
-	if _, err := os.Stat(target); err != nil {
-		t.Fatalf("the original binary must stay in place: %v", err)
-	}
-}
-
-// A release that carries no ccusage leaves the existing copy in place, and the
-// update must say so: that copy is now a version the new client was never
-// tested against, and a silent update would hide it.
+// A copy of ccusage left by an earlier release stays where it is, and the
+// update says so once: the client no longer installs, uses or removes it.
 func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "tokenboard")
@@ -580,7 +651,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	server := fake.server(t)
 
 	configDir := t.TempDir()
-	ccusagePath := filepath.Join(configDir, "bin", "ccusage")
+	ccusagePath := filepath.Join(configDir, "bin", ccusageBinaryName())
 	if err := os.MkdirAll(filepath.Dir(ccusagePath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +660,7 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	var lines []string
 	if _, err := Run(Input{
-		Repo:       "MisonL/TokenBoard",
+		Repo:       "evepupil/TokenBoard",
 		Target:     target,
 		Platform:   "darwin",
 		Arch:       "arm64",
@@ -609,11 +680,352 @@ func TestRunReportsTheCcusageItLeavesBehind(t *testing.T) {
 	}
 	found := false
 	for _, line := range lines {
-		if strings.Contains(line, "carries no ccusage") && strings.Contains(line, ccusagePath) {
+		if strings.Contains(line, "no longer bundles or uses ccusage") && strings.Contains(line, ccusagePath) {
 			found = true
 		}
 	}
 	if !found {
 		t.Errorf("stderr = %v, want a report of the ccusage left in place", lines)
+	}
+}
+
+// The staged binary is probed before it is trusted, so it must not see the upload token: a
+// tampered feed could answer `version` and read the credentials from its own environment. The
+// TS side scrubs this same probe (`client-binary.mjs` `runsVersion` → `scrubbedChildEnv`).
+func TestVerifyExecutableDoesNotHandCredentialsToTheStagedBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub is a shell script")
+	}
+	dir := t.TempDir()
+	envCapture := filepath.Join(dir, "staged-env")
+	staged := filepath.Join(dir, "tokenboard")
+	script := "#!/bin/sh\n" +
+		"printf '%s|%s|%s' \"$TOKENBOARD_UPLOAD_TOKEN\" \"$TOKENBOARD_PAIRING_CODE\" \"$TOKENBOARD_RELEASE_BASE_URL\" > '" + envCapture + "'\n" +
+		"echo \"tokenboard (go) 1.2.3\"\n"
+	if err := os.WriteFile(staged, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TOKENBOARD_UPLOAD_TOKEN", "tb_upload_secret")
+	t.Setenv("TOKENBOARD_PAIRING_CODE", "tb_pair_secret")
+	t.Setenv("TOKENBOARD_RELEASE_BASE_URL", "https://user:pw@feed.example")
+
+	if err := verifyExecutable(staged, "1.2.3"); err != nil {
+		t.Fatalf("verifyExecutable: %v", err)
+	}
+	captured, err := os.ReadFile(envCapture)
+	if err != nil {
+		t.Fatalf("the probe did not run: %v", err)
+	}
+	if string(captured) != "||" {
+		t.Errorf("staged binary saw credentials: %q, want all stripped", string(captured))
+	}
+}
+
+// A pinned tag that already matches the installed version is a no-op. The
+// equality short-circuit used to skip pinned runs so a downgrade stayed
+// possible, but the downgrade guard has its own branch: leaving `--tag` (or a
+// TOKENBOARD_RELEASE_TAG carried in the scheduler's environment) outside the
+// check meant every scheduled run re-downloaded and re-swapped the same 6MB.
+func TestRunIsANoopWhenAPinnedTagMatchesTheInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	installed := stubBinary("1.2.3")
+	if err := os.WriteFile(target, installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("1.2.3")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	var downloads int
+	fake := fakeRelease{tag: "v1.2.3", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.2.3"))}
+	server := fake.server(t)
+	server.Config.Handler = countingDownloads(server.Config.Handler, &downloads)
+
+	result, err := runAgainst(t, server, target, "v1.2.3")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Updated {
+		t.Error("a pinned tag matching the installed version must not reinstall it")
+	}
+	if downloads != 0 {
+		t.Errorf("downloads = %d, want none: the archive must not be fetched", downloads)
+	}
+	if got, err := os.ReadFile(target); err != nil || !bytes.Equal(got, installed) {
+		t.Error("the installed binary was replaced")
+	}
+}
+
+// A pinned downgrade is still allowed: the equality check is not what decides
+// it, the version comparison is.
+func TestRunStillInstallsAPinnedDowngrade(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tokenboard")
+	if err := os.WriteFile(target, stubBinary("2.0.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	SetCurrentVersion("2.0.0")
+	t.Cleanup(func() { SetCurrentVersion("dev") })
+
+	fake := fakeRelease{tag: "v1.9.0", platform: "darwin_arm64", tarball: buildTarball(t, "tokenboard", stubBinary("1.9.0"))}
+	server := fake.server(t)
+
+	result, err := runAgainst(t, server, target, "v1.9.0")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Updated || result.Version != "1.9.0" {
+		t.Errorf("result = %+v, want a pinned downgrade to 1.9.0", result)
+	}
+}
+
+// A tarball that does not carry the executable, or carries something that is
+// not a plain non-empty file under 128MiB, must be refused before anything is
+// staged: unpacking it "successfully" would install a directory entry or a
+// truncated binary over the client.
+func TestExtractBinaryRefusesMalformedTarballs(t *testing.T) {
+	cases := []struct {
+		name    string
+		build   func(t *testing.T) []byte
+		wantMsg string
+	}{
+		{
+			name: "missing the executable",
+			build: func(t *testing.T) []byte {
+				return buildTarball(t, "README.md", []byte("docs"))
+			},
+			wantMsg: "does not contain tokenboard",
+		},
+		{
+			name: "entry is a directory",
+			build: func(t *testing.T) []byte {
+				return buildTarballWithType(t, "tokenboard", tar.TypeDir, nil)
+			},
+			wantMsg: "is not a file",
+		},
+		{
+			name: "entry is empty",
+			build: func(t *testing.T) []byte {
+				return buildTarball(t, "tokenboard", nil)
+			},
+			wantMsg: "is empty",
+		},
+		{
+			name: "not a gzip stream",
+			build: func(t *testing.T) []byte {
+				return []byte("not a tarball at all")
+			},
+			wantMsg: "invalid TokenBoard release tarball",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := extractBinary(testCase.build(t), "tokenboard")
+			if err == nil {
+				t.Fatal("a malformed tarball must be refused")
+			}
+			if !strings.Contains(err.Error(), testCase.wantMsg) {
+				t.Errorf("err = %q, want it to mention %q", err, testCase.wantMsg)
+			}
+		})
+	}
+}
+
+// buildTarballWithType assembles a tarball whose single entry has the given
+// type flag, so a directory entry can be presented where a file is expected.
+func buildTarballWithType(t *testing.T, name string, typeflag byte, body []byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	archive := tar.NewWriter(writer)
+	if err := archive.WriteHeader(&tar.Header{
+		Name:     name,
+		Mode:     0o755,
+		Size:     int64(len(body)),
+		Typeflag: typeflag,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > 0 {
+		if _, err := archive.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+// Pruning lists the directory instead of globbing it, so it must not depend on
+// escaping at all: on Windows filepath.Glob disables escaping and treats `\`
+// as a path separator, which made an escaped `[cfg]` directory an invalid path
+// there. A directory whose name carries every glob metacharacter still has its
+// own backups pruned, and a sibling whose name resembles the pattern is left
+// alone.
+func TestPruneBackupsHandlesMetacharacterDirectoriesWithoutGlobbing(t *testing.T) {
+	root := t.TempDir()
+	oddDir := filepath.Join(root, "bin[1]")
+	sibling := filepath.Join(root, "bin1")
+	for _, dir := range []string{oddDir, sibling} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current := filepath.Join(oddDir, "tokenboard")
+	keep := current + ".backup-20260103T000000Z-000002"
+	stale := []string{
+		current + ".backup-20260101T000000Z-000001",
+		current + ".backup-20260102T000000Z-000001",
+	}
+	for _, path := range append(stale, keep) {
+		if err := os.WriteFile(path, []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	siblingBackup := filepath.Join(sibling, "tokenboard.backup-20260101T000000Z-000001")
+	if err := os.WriteFile(siblingBackup, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A directory named like a backup must never be removed as one.
+	fakeDir, _ := os.MkdirTemp(oddDir, "tokenboard.backup-")
+	if err := os.MkdirAll(fakeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneBackups(current, keep)
+
+	for _, path := range stale {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("stale backup survived: %s", path)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("the kept backup was removed: %v", err)
+	}
+	if _, err := os.Stat(siblingBackup); err != nil {
+		t.Errorf("a sibling directory's backup was removed: %v", err)
+	}
+	if info, err := os.Stat(fakeDir); err != nil || !info.IsDir() {
+		t.Errorf("a directory matching the backup prefix was removed: %v", err)
+	}
+}
+
+// The keep path is compared before removing. Windows compares case
+// -insensitively the way its filesystem does, because the same file can be
+// named with different case by different callers. On other platforms two names
+// that differ only in case are different files and must not be conflated.
+func TestSamePathMatchesThePlatformFilesystem(t *testing.T) {
+	same := samePath("/opt/bin/tokenboard", "/opt/bin/./tokenboard")
+	if !same {
+		t.Fatal("a cleaned path was not recognised as the same file")
+	}
+	folded := samePath(`C:\Bin\tokenboard`, `c:\bin\TokenBoard`)
+	if runtime.GOOS == "windows" {
+		if !folded {
+			t.Fatal("Windows did not compare a case-only difference as the same file")
+		}
+	} else if folded {
+		t.Fatal("a case-only difference was treated as the same file on a case-sensitive filesystem")
+	}
+}
+
+// The swap's rollback branches decide whether a machine that has a working
+// client still has one after a failed install. They only run when a rename
+// fails, which a test cannot provoke on a healthy filesystem, so the seam
+// supplies the failure.
+func TestSwapRestoresTheOriginalWhenTheInstallRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "tokenboard.new")
+	current := filepath.Join(dir, "tokenboard")
+	backup := filepath.Join(dir, "tokenboard.backup-20260101T000000Z-000001")
+	for path, body := range map[string]string{staged: "new", current: "old"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rename := func(from, to string) error {
+		if from == staged {
+			return errors.New("staged file is locked")
+		}
+		return os.Rename(from, to)
+	}
+
+	err := swapWith(staged, current, backup, rename)
+	if err == nil || !strings.Contains(err.Error(), "staged file is locked") {
+		t.Fatalf("err = %v, want the install failure", err)
+	}
+	restored, readErr := os.ReadFile(current)
+	if readErr != nil {
+		t.Fatalf("the client is gone after a failed install: %v", readErr)
+	}
+	if string(restored) != "old" {
+		t.Fatalf("current = %q, want the original restored", restored)
+	}
+	if _, statErr := os.Stat(backup); !os.IsNotExist(statErr) {
+		t.Errorf("the backup was not moved back: %v", statErr)
+	}
+}
+
+// When the restore fails too there is nothing left to do, but the error has to
+// name both failures and the backup's path: that file is the only working
+// client left, and the operator needs its name to put it back by hand.
+func TestSwapReportsBothFailuresAndTheBackupPath(t *testing.T) {
+	dir := t.TempDir()
+	staged := filepath.Join(dir, "tokenboard.new")
+	current := filepath.Join(dir, "tokenboard")
+	backup := filepath.Join(dir, "tokenboard.backup-20260101T000000Z-000001")
+	for path, body := range map[string]string{staged: "new", current: "old"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rename := func(from, to string) error {
+		if from == current {
+			return os.Rename(from, to)
+		}
+		return errors.New("locked")
+	}
+
+	err := swapWith(staged, current, backup, rename)
+	if err == nil {
+		t.Fatal("a swap that cannot install or restore must fail")
+	}
+	for _, want := range []string{"cannot install", "could not be restored", backup} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
+// A backup that is a symlink is removed as a link, never through it: pruning
+// must not delete whatever the link points at. The target here is another
+// binary's backup, which a follow-the-link remove would silently destroy.
+func TestPruneBackupsRemovesTheLinkNotItsTarget(t *testing.T) {
+	dir := t.TempDir()
+	current := filepath.Join(dir, "tokenboard")
+	keep := current + ".backup-20260103T000000Z-000002"
+	target := filepath.Join(dir, "elsewhere")
+	if err := os.WriteFile(target, []byte("do not delete"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := current + ".backup-20260101T000000Z-000001"
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable here: %v", err)
+	}
+	if err := os.WriteFile(keep, []byte("keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneBackups(current, keep)
+
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Errorf("the stale link survived: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "do not delete" {
+		t.Errorf("pruning reached through the link: %q, %v", data, err)
 	}
 }

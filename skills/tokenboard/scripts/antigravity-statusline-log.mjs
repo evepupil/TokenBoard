@@ -201,6 +201,7 @@ function readFileSize(filePath) {
 
 function acquireLock(lockPath) {
   const deadline = Date.now() + lockWaitTimeoutMs
+  let lastContention
   while (Date.now() < deadline) {
     const pendingPath = `${lockPath}.pending-${process.pid}-${randomBytes(8).toString('hex')}`
     try {
@@ -212,11 +213,18 @@ function acquireLock(lockPath) {
     } catch (error) {
       rmSync(pendingPath, { recursive: true, force: true })
       if (!isLockExistsError(error, lockPath)) throw error
+      lastContention = error
       recoverOrphanedLock(lockPath)
       sleep(lockRetryDelayMs)
     }
   }
-  throw new Error('Timed out waiting for Antigravity statusline log lock')
+  // The cause keeps the errno for a caller that inspects it. It is not folded into
+  // the message: a rename error carries absolute paths, and this message can reach
+  // the statusline error log, which must not record local paths.
+  throw new Error(
+    'Timed out waiting for Antigravity statusline log lock',
+    lastContention ? { cause: lastContention } : undefined
+  )
 }
 
 function releaseLock(lease) {
@@ -233,7 +241,16 @@ function releaseLock(lease) {
 function isLockExistsError(error, lockPath) {
   if (!error || typeof error !== 'object') return false
   if (error.code === 'EEXIST' || error.code === 'ENOTEMPTY') return true
-  return error.code === 'EPERM' && existsSync(lockPath)
+  if (error.code !== 'EPERM') return false
+  // Windows reports this rename onto an existing directory as EPERM rather than the
+  // POSIX ENOTEMPTY (measured on Windows 10 / Node 24), and the holder can release
+  // the lock between that failure and this check — re-testing the destination here
+  // would then turn a released race into a fatal error and drop the event. The
+  // pending directory was created in the same parent moments earlier, so write
+  // access to the parent is already proven; anything else a rename EPERM could mean
+  // keeps retrying until the deadline, which still fails closed with the errno kept
+  // as the timeout's cause.
+  return error.syscall === 'rename' || existsSync(lockPath)
 }
 
 function recoverOrphanedLock(lockPath) {

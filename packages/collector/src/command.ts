@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { childProcessEnv } from './child-env'
 import { errorMessage } from './error-message'
 import { isTransientNetworkError } from './transient-error'
 
@@ -32,7 +33,11 @@ export const runJsonCommand: CommandRunner = async (command, args, options = {})
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         maxBuffer: 128 * 1024 * 1024,
         timeout: timeoutMs,
-        env: options.env
+        // Every ccusage spawn goes through this runner, so stripping here is the
+        // one place that cannot be forgotten by a new provider: on a machine with
+        // no bundled binary the command is `npx`/`pnpm dlx`, which downloads and
+        // executes a third-party package with whatever env it is given.
+        env: childProcessEnv(options.env ?? process.env)
       })
 
       return JSON.parse(stdout)

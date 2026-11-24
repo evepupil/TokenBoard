@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +7,7 @@ import {
   createCcusagePricingOverrides,
   dynamicCcusageConfigPath,
   endpointOriginFromEndpoint,
+  foldToBaseModelId,
   fetchModelPricingCatalogue,
   loadModelPricingCatalogue,
   modelPricingUrl,
@@ -16,6 +17,7 @@ import {
   type CollectorPricingModel,
   type PricingFetcher
 } from './model-pricing'
+import { selectUnambiguousDynamicPricingModels } from './providers/codex-context-pricing'
 
 const tempDirectories: string[] = []
 
@@ -499,6 +501,133 @@ describe('model pricing catalogue client', () => {
     expect(result.configPath).toBe(dynamicCcusageConfigPath(stateDir))
   })
 
+  test('anchors a base model to its official price when only a variant key would price it', async () => {
+    // ccusage resolves an override key against the observed model name by folding provider
+    // prefixes and variant suffixes: with only `xiaomi/mimo-v2.6-flash-uncensored` present,
+    // a `mimo-v2.6-flash` day was billed at the uncensored fine-tune's rate — 3.6x the
+    // official price. An exact key always wins over a folding one, so emitting the official
+    // row as the base model's own key restores the right rate.
+    const overrides = createCcusagePricingOverrides([
+      model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+      model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 }),
+      model('xiaomi/mimo-v2.6-flash-uncensored', {
+        provider: 'xiaomi',
+        inputCostPerMillion: 0.5,
+        outputCostPerMillion: 1.5
+      })
+    ])
+
+    // The bare id stays unresolved on its own (the two rows disagree)...
+    expect(
+      selectUnambiguousDynamicPricingModels([
+        model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+        model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 })
+      ])
+    ).toHaveLength(0)
+    // ...but the official row anchors it so the variant key cannot price it.
+    expect(overrides['mimo-v2.6-flash']).toMatchObject({ inputCostPerToken: 0.14 / 1_000_000 })
+    expect(overrides['xiaomi/mimo-v2.6-flash-uncensored']).toBeDefined()
+  })
+
+  // ccusage matches an override key to the session's model name case-sensitively after
+  // folding a provider prefix and a variant suffix, so a key spelled `glm-5.3-flash` never
+  // reaches a session that reports `GLM-5.3-Flash` and the override silently loses to
+  // ccusage's builtin price. The catalogue itself publishes one id in several casings
+  // (different providers spell it differently), so every spelling an emitted key's id
+  // appears under is emitted too, carrying the price the collapse already decided.
+  test('emits an override under every catalogue spelling of the same model id', async () => {
+    const overrides = createCcusagePricingOverrides([
+      model('glm-5.3-flash', { provider: 'zai', inputCostPerMillion: 0.15, outputCostPerMillion: 0.5 }),
+      model('GLM-5.3-Flash', { provider: 'amd', inputCostPerMillion: 0, outputCostPerMillion: 0 })
+    ])
+
+    expect(overrides['glm-5.3-flash']).toMatchObject({ inputCostPerToken: 0.15 / 1_000_000 })
+    expect(overrides['GLM-5.3-Flash']).toEqual(overrides['glm-5.3-flash'])
+  })
+
+  test('does not invent a spelling the catalogue never publishes', async () => {
+    const overrides = createCcusagePricingOverrides([
+      model('gpt-6', { provider: 'openai', inputCostPerMillion: 1, outputCostPerMillion: 2 })
+    ])
+
+    expect(overrides['gpt-6']).toBeDefined()
+    expect(overrides['GPT-6']).toBeUndefined()
+  })
+
+  test('aliases an anchored base id to the other spellings the catalogue publishes', async () => {
+    // The anchor restores the official price for an unresolved base id; the alias is what
+    // makes it reach a session that spells the same id with different case.
+    const overrides = createCcusagePricingOverrides([
+      model('mimo-v2.6-flash', { provider: 'xiaomi', inputCostPerMillion: 0.14, outputCostPerMillion: 0.28 }),
+      model('mimo-v2.6-flash', { provider: 'reseller-a', inputCostPerMillion: 0.12, outputCostPerMillion: 0.25 }),
+      model('MiMo-V2.6-Flash', { provider: 'reseller-b', inputCostPerMillion: 0.2, outputCostPerMillion: 0.4 }),
+      model('xiaomi/mimo-v2.6-flash-uncensored', {
+        provider: 'xiaomi',
+        inputCostPerMillion: 0.5,
+        outputCostPerMillion: 1.5
+      })
+    ])
+
+    expect(overrides['mimo-v2.6-flash']).toMatchObject({ inputCostPerToken: 0.14 / 1_000_000 })
+    expect(overrides['MiMo-V2.6-Flash']).toEqual(overrides['mimo-v2.6-flash'])
+  })
+
+  test('anchors to the alphabetically first official provider regardless of catalogue order', async () => {
+    // Two official vendors price the same id differently (an international and a
+    // domestic endpoint). The anchor must not let the order the rows arrive in
+    // decide the price: catalogue order comes from the server's `ORDER BY`, and a
+    // change there would silently move what every machine is billed.
+    const overrides = createCcusagePricingOverrides([
+      model('glm-9-flash', { provider: 'zhipuai', inputCostPerMillion: 0.12, outputCostPerMillion: 0.42 }),
+      model('glm-9-flash', { provider: 'zai', inputCostPerMillion: 0.15, outputCostPerMillion: 0.5 }),
+      model('vendor/glm-9-flash-uncensored', { provider: 'vendor', inputCostPerMillion: 5, outputCostPerMillion: 10 })
+    ])
+
+    expect(overrides['glm-9-flash']).toMatchObject({ inputCostPerToken: 0.15 / 1_000_000 })
+  })
+
+  test('collapses to the same representative whatever order the rows arrive in', async () => {
+    // Rows that agree on price but disagree on contextWindow are still one model.
+    // The representative carries its context window into maxInputTokens, so an
+    // arbitrary pick makes the value depend on the catalogue's row order.
+    const rows = [
+      model('gpt-9-chat', {
+        provider: 'zeta',
+        inputCostPerMillion: 1,
+        outputCostPerMillion: 2,
+        contextWindow: 128_000
+      }),
+      model('gpt-9-chat', {
+        provider: 'alpha',
+        inputCostPerMillion: 1,
+        outputCostPerMillion: 2,
+        contextWindow: 400_000
+      })
+    ]
+
+    const forward = createCcusagePricingOverrides(rows)['gpt-9-chat']
+    const backward = createCcusagePricingOverrides([...rows].reverse())['gpt-9-chat']
+    expect(forward).toEqual(backward)
+    // No official row, so the alphabetically first provider is the tie-break.
+    expect(forward).toMatchObject({ maxInputTokens: 400_000 })
+  })
+
+  test('leaves a variant-only model alone when no official base row exists', async () => {
+    // Without an official row there is nothing to anchor to, and inventing a price from a
+    // reseller row would repeat the very ambiguity the unresolved id was protected from.
+    const overrides = createCcusagePricingOverrides([
+      model('deepseek-v4.1-flash', { provider: 'reseller-a', inputCostPerMillion: 0.03, outputCostPerMillion: 0.12 }),
+      model('deepseek-v4.1-flash', { provider: 'reseller-b', inputCostPerMillion: 0.672, outputCostPerMillion: 2.016 }),
+      model('deepseek/deepseek-v4.1-flash-uncensored', {
+        provider: 'deepseek',
+        inputCostPerMillion: 0.33,
+        outputCostPerMillion: 1.32
+      })
+    ])
+
+    expect(overrides['deepseek-v4.1-flash']).toBeUndefined()
+  })
+
   test('does not merge prices from different providers for the same model id', async () => {
     const stateDir = await tempDirectory()
     const sharedModel = (provider: string, inputCostPerMillion: number): CollectorPricingModel =>
@@ -794,5 +923,49 @@ describe('per-process pricing catalogue memo', () => {
     expect(fetched).toBe(1)
     expect(second.configPath).toBe(first.configPath)
     expect(second.coveredModelIds.has('gpt-6-astra')).toBe(true)
+  })
+})
+
+// The Go port strips each variant suffix once, in a fixed order, so a catalogue id carrying
+// both must fold to the same base on both sides. A single non-global replace left the Go
+// side anchoring a base the TS side never saw, which only showed up on ids shaped
+// `…-abliterated-uncensored` — none exist today, but the golden cannot catch what the two
+// implementations disagree about producing.
+describe('foldToBaseModelId', () => {
+  test.each([
+    ['foo-uncensored', 'foo'],
+    ['foo-abliterated', 'foo'],
+    ['provider/foo-uncensored', 'foo'],
+    ['foo-uncensored:tag', 'foo'],
+    ['foo-uncensored-abliterated', 'foo-uncensored'],
+    ['provider/foo-abliterated-uncensored', 'foo'],
+    ['foo', 'foo'],
+    ['foo-thinking', 'foo-thinking']
+  ])('%s folds to %s', (modelId, expected) => {
+    expect(foldToBaseModelId(modelId)).toBe(expected)
+  })
+})
+
+// The generated config is a pure function of the catalogue, so an unchanged catalogue
+// produces byte-identical output. Rewriting it anyway costs a write plus a rename on every
+// hook run and makes the mtime useless as a "did the catalogue move" signal.
+describe('dynamic ccusage config writes', () => {
+  test('leaves an unchanged config untouched on the next prepare', async () => {
+    const stateDir = await tempDirectory()
+    const fetcher: PricingFetcher = async () => jsonResponse({ models: [model('gpt-6-astra')], nextCursor: null })
+    const now = new Date('2026-09-10T00:00:00.000Z')
+
+    const first = await prepareDynamicCcusageConfig({ endpoint: 'https://tokenboard.example', stateDir, now, fetcher })
+    const before = await readFile(first.configPath!, 'utf8')
+    const beforeStat = await stat(first.configPath!)
+
+    // A second prepare with the same catalogue must not rewrite the file.
+    resetModelPricingMemo()
+    const second = await prepareDynamicCcusageConfig({ endpoint: 'https://tokenboard.example', stateDir, now, fetcher })
+    const afterStat = await stat(second.configPath!)
+
+    expect(second.configPath).toBe(first.configPath)
+    expect(await readFile(second.configPath!, 'utf8')).toBe(before)
+    expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs)
   })
 })

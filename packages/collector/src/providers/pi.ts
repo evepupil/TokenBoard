@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import { readSessionLines, scanSessionFiles } from './bounded-session-scan'
+import { readSessionLinesBounded, scanSessionFiles } from './bounded-session-scan'
 import { formatDate } from './session-jsonl-parser-utils'
 import {
   parseJsonLine,
@@ -54,7 +54,7 @@ export async function collectPiUsage(options: CollectPiUsageOptions = {}): Promi
     onSkipped: (path, reason) => options.stderr?.(`Skipping ${label} session path (${reason}): ${path}`)
   })) {
     scannedFiles += 1
-    for await (const event of readUsageEvents(file.path, seenEntryIds)) {
+    for await (const event of readUsageEvents(file.path, seenEntryIds, options.stderr)) {
       if (sinceDate && formatDate(event.occurredAt, timezone) < sinceDate) continue
       aggregate.add(event)
     }
@@ -78,11 +78,17 @@ export async function collectPiUsage(options: CollectPiUsageOptions = {}): Promi
  * A session file is a tree keyed by `id`/`parentId`, and a fork copies shared
  * history into the new file, so an entry id is only counted once per scan.
  */
-async function* readUsageEvents(filePath: string, seenEntryIds: Set<string>): AsyncGenerator<UsageEvent> {
+async function* readUsageEvents(
+  filePath: string,
+  seenEntryIds: Set<string>,
+  stderr?: (line: string) => void
+): AsyncGenerator<UsageEvent> {
   const sessionId = basename(filePath).replace(/\.jsonl$/, '')
   let sessionTimestamp: Date | null = null
 
-  for await (const line of readSessionLines(filePath)) {
+  for await (const line of readSessionLinesBounded(filePath, {
+    onSkippedLine: (bytes) => stderr?.(`Skipping an oversized line (${bytes} bytes) in Pi session ${filePath}`)
+  })) {
     const entry = parseJsonLine(line)
     if (!entry) continue
 

@@ -19,16 +19,23 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/antigravitymeta"
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
 )
 
 // The language server's fixed endpoints and timeouts, matching the TS client.
 const (
-	defaultLanguageServerPath = "/Applications/Antigravity.app/Contents/Resources/bin/language_server"
-	apiServerURL              = "https://generativelanguage.googleapis.com"
-	cloudCodeEndpoint         = "https://daily-cloudcode-pa.googleapis.com"
-	defaultReadyTimeout       = 30 * time.Second
-	requestTimeout            = 60 * time.Second
+	// The macOS app bundle the default language server lives in. It is checked
+	// on its own so "Antigravity is not installed here" can be told apart from
+	// a spawn failure, which strict mode reports because it also covers a spawn
+	// path the client mangled.
+	defaultLanguageServerAppBundle = "/Applications/Antigravity.app"
+	defaultLanguageServerPath      = defaultLanguageServerAppBundle + "/Contents/Resources/bin/language_server"
+	apiServerURL                   = "https://generativelanguage.googleapis.com"
+	cloudCodeEndpoint              = "https://daily-cloudcode-pa.googleapis.com"
+	defaultReadyTimeout            = 30 * time.Second
+	requestTimeout                 = 60 * time.Second
 	// A real metadata response can include a large but bounded trajectory.
 	maxMetadataResponseBytes = 32 * 1024 * 1024
 	readyProbeInterval       = 100 * time.Millisecond
@@ -107,6 +114,9 @@ func spawnLanguageServer(options Options, languageServerPath, overrideIdeVersion
 	if overrideIdeVersion == "" {
 		overrideIdeVersion = "0.0.0"
 	}
+	if missingDefaultLanguageServer(path, statDefaultAppBundle) {
+		return nil, &SpawnLanguageServerError{Message: antigravitymeta.LanguageServerNotInstalledPrefix + path}
+	}
 	subclientType := "hub"
 	if options.Source == "antigravity-ide" {
 		subclientType = "ide"
@@ -126,6 +136,10 @@ func spawnLanguageServer(options Options, languageServerPath, overrideIdeVersion
 		"--headless",
 	}
 	command := exec.Command(path, args...)
+	// The language server is a third-party binary, and exec.Cmd inherits the
+	// whole process environment when Env is nil — upload token included. Use
+	// the same scrubbed list every other third-party child gets.
+	command.Env = ccusage.ScrubCredentialEnv(nil)
 	// The server writes progress to stdout/stderr that nobody reads; discarding
 	// it keeps a chatty run from filling a pipe buffer and blocking the child.
 	command.Stdout = io.Discard
@@ -152,6 +166,27 @@ func spawnLanguageServer(options Options, languageServerPath, overrideIdeVersion
 		close(process.exited)
 	}()
 	return process, nil
+}
+
+// statDefaultAppBundle is the existence probe behind the not-installed check.
+// A variable so the absent branch is reachable on a machine that does have
+// Antigravity installed; production always stats with os.Stat.
+var statDefaultAppBundle = os.Stat
+
+// missingDefaultLanguageServer reports a default install whose app bundle is
+// absent. It is checked before the spawn so the message can say "not
+// installed" instead of the spawn ENOENT that strict mode treats as a
+// possible client bug; a path from the environment or an explicit option is
+// never reclassified, because there the operator named the path to try.
+//
+// stat is a parameter so the check is drivable on a machine that does have
+// Antigravity installed.
+func missingDefaultLanguageServer(path string, stat func(string) (os.FileInfo, error)) bool {
+	if path != defaultLanguageServerPath {
+		return false
+	}
+	_, err := stat(defaultLanguageServerAppBundle)
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 // probeFunc reports whether the server is answering yet.
@@ -182,8 +217,11 @@ func (p *languageServerProcess) waitForReady(port int, probe probeFunc) error {
 func readReadyTimeout() time.Duration {
 	// TS reads this with Number.parseInt(…, 10); Atoi would reject the
 	// trailing-suffix forms parseInt accepts and fall back to the default.
+	// The shared budget saturates a knob huge enough to overflow the
+	// millisecond-to-Duration multiply: a wrapped negative deadline would fail
+	// the readiness probe instantly on the machine that asked for more time.
 	if value, ok := contract.ParseInt(os.Getenv("TOKENBOARD_ANTIGRAVITY_READY_TIMEOUT_MS")); ok && value > 0 {
-		return time.Duration(value) * time.Millisecond
+		return ccusage.TimeoutBudget(value)
 	}
 	return defaultReadyTimeout
 }

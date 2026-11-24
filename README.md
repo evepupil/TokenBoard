@@ -1,17 +1,19 @@
 # TokenBoard
 
-TokenBoard is a hosted AI token usage dashboard for Claude Code, Codex, Antigravity, OpenCode, Pi,
-Grok Build and DeepSeek Harness. A local collector normalizes daily usage snapshots, uploads them to
-a Cloudflare Workers + D1 backend, and the web app serves private dashboards, leaderboards, public
-JSON, README SVG cards, and scheduled reports.
+TokenBoard is a hosted AI token usage dashboard for Claude Code, Codex, Antigravity CLI, Antigravity,
+Antigravity IDE, OpenCode, Pi, Grok Build, DeepSeek Harness, and the twelve `ccusage`-backed tools
+(amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode). A local
+collector normalizes daily usage snapshots, uploads them to a Cloudflare Workers + D1 backend, and the
+web app serves private dashboards, leaderboards, public JSON, README SVG cards, and scheduled reports.
 
 TokenBoard never uploads prompts, completions, raw conversation logs, local paths, or plaintext upload
 tokens.
 
 ## Highlights
 
-- Claude Code, Codex, Antigravity CLI, Antigravity, Antigravity IDE, OpenCode, Pi, Grok Build and
-  DeepSeek Harness collection through a local Node.js collector.
+- Claude Code, Codex, Antigravity CLI, Antigravity, Antigravity IDE, OpenCode, Pi, Grok Build,
+  DeepSeek Harness and twelve tool sources, collected by a local client (Node.js collector by
+  default, Go binary via `clientType: binary`).
 - Dashboard totals, detail drill-down, CSV export, public JSON, README SVG cards, and leaderboards.
 - Total tokens, tokens without cache reads, and cache-read rate across every reporting surface.
 - Device-aware upload tokens, device-link reconnect, and legacy collector compatibility.
@@ -134,10 +136,24 @@ Local usage sources:
 
 | Source | Reads |
 | --- | --- |
+| Claude Code | `~/.claude/projects/**/*.jsonl` session records (`CLAUDE_CONFIG_DIR`, `CLAUDE_HOME`) |
+| Codex | `~/.codex/{sessions,archived_sessions}/**/*.jsonl` session records (`CODEX_HOME`) |
+| Antigravity CLI | `~/.gemini/antigravity-cli/conversations/*.db` token metadata |
+| Antigravity | `~/.gemini/antigravity/conversations` token metadata |
+| Antigravity IDE | `~/.gemini/antigravity-ide/conversations` token metadata |
 | OpenCode | `~/.local/share/opencode/opencode.db` (`XDG_DATA_HOME` respected) |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`) |
 | Grok Build | `~/.grok/{sessions,archived_sessions}/**/updates.jsonl` (`GROK_HOME`) |
 | DeepSeek Harness | `~/.dsh/sessions/**/session.jsonl[.zstd]` (`DSH_HOME`, `DSH_SESSION_ROOT`) |
+| amp, droid, codebuff, hermes, goose, kilo, copilot, gemini-cli, kimi, qwen, openclaw, zcode | the tool's own store, read in process exactly as ccusage reads it |
+
+The Go client (`clientType: binary`) collects every source in process and never downloads or
+runs `ccusage`: Claude Code and Codex are read from their own session records, and the twelve
+tool sources reuse the same readers and pricing ccusage 20.0.33 implements, verified row by row
+against reports that binary produced for frozen fixture trees. The default `clientType: git`
+install runs the TypeScript collector from a checkout, which still calls `ccusage` for Claude
+Code and Codex. A tool that is not installed contributes nothing to the run — that is not an
+error. None of the tools installs a notifier hook, and none accepts a `--until` window.
 
 Only token counts, model ids and timestamps are read from these stores. For OpenCode the token fields
 are projected inside SQLite so the message blob, which also holds prompts and a local path, never
@@ -197,7 +213,7 @@ Rotated logs are capped at 1 MiB and kept for 7 days.
 
 ## Development
 
-Node.js 22.23.4+ or 24.22.1+ is required (the range is `^22.23.4 || ^24.22.1 || >=26.12.1`; older releases are missing security fixes for CVE-2026-111497 and the Node TLS hostname bypasses). `.npmrc` sets `engine-strict=true`, so an unsupported Node fails the install instead of warning.
+Node.js 22.23.4+ (22.x), 24.22.1+ (24.x) or 26.12.1+ (26.x) is required (the range is `^22.23.4 || ^24.22.1 || >=26.12.1`; older releases are missing security fixes for CVE-2026-111497 and the Node TLS hostname bypasses). `.npmrc` sets `engine-strict=true`, so an unsupported Node fails the install instead of warning.
 
 ```bash
 pnpm install
@@ -217,13 +233,12 @@ node skills/tokenboard/scripts/uninstall.mjs --remove-config
 node skills/tokenboard/scripts/uninstall.mjs --all
 ```
 
-Package manager overrides:
+Package manager override (the TypeScript checkout collector only — the Go binary installs and
+collects without a package manager):
 
 | Variable | Values |
 | --- | --- |
 | `TOKENBOARD_PACKAGE_MANAGER` | `pnpm`, `bun`, `npm` |
-| `TOKENBOARD_CCUSAGE_BIN` | custom `ccusage` path |
-| `TOKENBOARD_FORCE_PACKAGE_RUNNER` | `1` to force package-runner execution |
 
 ## Production Deploy
 
@@ -271,9 +286,12 @@ Deployment variables:
 | `TOKENBOARD_COLLECTOR_REPO_URL` | required | GitHub repository used in generated collector install prompts |
 | `TOKENBOARD_COLLECTOR_REF` | required | branch/ref used in generated collector install prompts |
 | `TOKENBOARD_WEBHOOK_LOG_RETENTION_DAYS` | `90` | `1` to `365` |
-| `TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE` | `5` | `1` to `5` due subscriptions per tick |
+| `TOKENBOARD_WEBHOOK_CRON_BATCH_SIZE` | `5` | `1` to `50` scheduled deliveries per tick |
 | `TOKENBOARD_USAGE_SUMMARY_BACKFILL_LIMIT` | `50` | `1` to `500` summary keys per cron tick |
 | `TOKENBOARD_USAGE_SUMMARY_STRICT` | `false` | set `true` only after summary backfill completes |
+| `TOKENBOARD_MODEL_PRICING_SYNC_ENABLED` | `true` | daily `models.dev` catalogue sync into D1 |
+| `TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS` | `24` | `1` to `168` hours between scheduled syncs |
+| `TOKENBOARD_MODEL_PRICING_SOURCE_URL` | `https://models.dev/api.json` | catalogue source; see `docs/model-pricing.md` |
 
 Set `TOKENBOARD_COLLECTOR_REPO_URL` and `TOKENBOARD_COLLECTOR_REF` explicitly when the deployed install
 prompt must use a different repository or ref.

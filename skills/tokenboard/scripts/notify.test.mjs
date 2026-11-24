@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,9 +11,13 @@ import {
   defaultNotifyCooldownMs,
   executeTokenBoardSync,
   readNotifyCooldownMs,
+  readNotifyWorkerErrors,
+  recordNotifyWorkerError,
   releaseDispatchLock,
   runNotify,
-  runNotifyCli
+  runNotifyCli,
+  scheduleTrailingNotify,
+  waitTrailingDelay
 } from './notify.mjs'
 import { memoryFileMap, memoryPathStartsWith, sameMemoryPath } from './coordinator-test-helpers.mjs'
 
@@ -110,17 +114,140 @@ test('notify leaves queued work intact when cooldown configuration is invalid', 
 })
 
 test('notify CLI reports an unrecovered coordinator error', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-'))
   const errors = []
-  const exitCode = await runNotifyCli({
-    env: { TOKENBOARD_CONFIG_DIR: '/state', TOKENBOARD_STATE_DIR: '/state' },
-    readConfig: () => ({ updatedAt: 'test-version' }),
-    configDir: () => '/state',
-    error: (message) => errors.push(message),
-    runNotify: () => ({ error: 'Invalid TokenBoard signal recovery journal', trailingScheduled: false })
-  })
+  try {
+    const exitCode = await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: (message) => errors.push(message),
+      runNotify: () => ({ error: 'Invalid TokenBoard signal recovery journal', trailingScheduled: false })
+    })
 
-  assert.equal(exitCode, 1)
-  assert.deepEqual(errors, ['Invalid TokenBoard signal recovery journal'])
+    assert.equal(exitCode, 1)
+    assert.deepEqual(errors, ['Invalid TokenBoard signal recovery journal'])
+    // The hook handler spawns this process with stdio ignored, so the fatal
+    // message also lands in the state directory where status.mjs can read it.
+    const recorded = readNotifyWorkerErrors(root)
+    assert.equal(recorded.length, 1)
+    assert.equal(recorded[0].message, 'Invalid TokenBoard signal recovery journal')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// A detached worker's failure must not write a credential-bearing URL or token
+// into a file that outlives the process.
+test('the worker error log redacts credentials', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-redact-'))
+  try {
+    await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: () => {},
+      runNotify: () => ({
+        error: 'POST https://user:tb_upload_secret@host.example/ingest failed',
+        trailingScheduled: false
+      })
+    })
+
+    const raw = await readFile(join(root, 'notify-worker-errors.log'), 'utf8')
+    assert.doesNotMatch(raw, /tb_upload_secret/)
+    assert.doesNotMatch(raw, /user:/)
+    assert.match(raw, /https:\/\/host\.example\/ingest/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// The endpoint survives (with credentials stripped) — that is what the
+// operator needs — but a filesystem path in the same message still names the
+// home directory, and this file is read back by status and pasted into issues.
+test('the worker error log redacts local paths but keeps the endpoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-redact-path-'))
+  try {
+    await runNotifyCli({
+      env: { TOKENBOARD_CONFIG_DIR: root, TOKENBOARD_STATE_DIR: root },
+      readConfig: () => ({ updatedAt: 'test-version' }),
+      configDir: () => root,
+      error: () => {},
+      runNotify: () => ({
+        error: 'POST https://host.example/ingest failed: EACCES reading /Users/Alice Bob/.tokenboard/state.json',
+        trailingScheduled: false
+      })
+    })
+
+    const raw = await readFile(join(root, 'notify-worker-errors.log'), 'utf8')
+    assert.doesNotMatch(raw, /Alice|Bob/)
+    assert.doesNotMatch(raw, /\.tokenboard[\\/]state\.json/)
+    assert.match(raw, /https:\/\/host\.example\/ingest/)
+    assert.match(raw, /<path>/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// The append has to be one `O_APPEND` write, not a read-modify-rewrite. Rewriting the whole file
+// truncates before it writes, so `status.mjs` (which reads this while a detached worker appends)
+// could see it empty and drop the earlier entries; temp-file-plus-rename fixed that reader but
+// silently dropped a *concurrent* appender's entry instead. Both halves are pinned here: a second
+// worker's line survives, and the bound still converges by trimming only once the file outgrows it.
+test('a concurrent worker entry survives the append', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-race-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    await writeFile(logPath, '{"message":"initial","at":null}\n')
+
+    // Worker B lands in the middle of worker A's append — between the point where the old
+    // implementation took its snapshot and where it rewrote the file. With an append-only write
+    // there is no snapshot to be stale, so both entries survive regardless of the interleaving.
+    let injected = false
+    recordNotifyWorkerError(logPath, 'worker-A', {
+      appendFile: (path, value, options) => {
+        if (!injected) {
+          injected = true
+          recordNotifyWorkerError(logPath, 'worker-B')
+        }
+        return appendFileSync(path, value, options)
+      }
+    })
+
+    const recorded = readNotifyWorkerErrors(root)
+    assert.deepEqual(recorded.map((entry) => entry.message).sort(), ['initial', 'worker-A', 'worker-B'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the worker error log is trimmed once it outgrows the bound', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-bound-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    // Already over the 64 KiB cap, so this write takes the trim branch. The earlier version of
+    // this test used a 60 KiB filler and never reached it — every assertion passed on the append
+    // path, so the trim could have been deleted without a failure.
+    const filler = `${JSON.stringify({ message: 'x'.repeat(70 * 1024), at: null })}\n`
+    await writeFile(logPath, filler)
+    const before = readFileSync(logPath, 'utf8').length
+    assert.ok(before > 64 * 1024, `fixture must start over the cap, was ${before} bytes`)
+
+    let rewrites = 0
+    recordNotifyWorkerError(logPath, 'after-trim', {
+      writeFile: (...args) => {
+        rewrites += 1
+        return writeFileSync(...args)
+      }
+    })
+
+    assert.equal(rewrites, 1, 'an over-cap log is rewritten, not appended to')
+    const after = readFileSync(logPath, 'utf8')
+    assert.ok(after.length <= 64 * 1024, `log is ${after.length} bytes, over the cap`)
+    assert.match(after, /after-trim/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('notify CLI preserves and reports a malformed recovery journal', async () => {
@@ -180,6 +307,26 @@ test('notify passes the coordinator lock token to its child sync', () => {
   assert.equal(invocation.options.env.TOKENBOARD_COORDINATOR_LOCK_HELD, '1')
   assert.equal(invocation.options.env.TOKENBOARD_COORDINATOR_LOCK_TOKEN, 'coordinator-token')
   assert.equal(invocation.options.env.TOKENBOARD_STATE_DIR, '/state')
+})
+
+// The hook child's whole stdout/stderr are captured to build the failure message, and Node's
+// default maxBuffer (1 MiB) is smaller than a diagnostic-heavy run prints. An ENOBUFS kill
+// mid-run would be indistinguishable from a real sync failure and would repeat deterministically
+// on every retry of the same hook event — so the capture needs the explicit headroom every
+// other spawn in the skill sets.
+test('notify bounds the hook child capture with an explicit maxBuffer', () => {
+  let options
+  executeTokenBoardSync('codex', {
+    syncScriptPath: '/repo/sync.mjs',
+    env: {},
+    lockToken: 'coordinator-token',
+    spawn: (command, args, opts) => {
+      options = opts
+      return { status: 0 }
+    }
+  })
+
+  assert.equal(options.maxBuffer, 64 * 1024 * 1024)
 })
 
 test('notify carries the sync phase timings back to the coordinator', () => {
@@ -1260,6 +1407,41 @@ test('reports a hook sync failure with no stderr without a dangling separator', 
   )
 })
 
+// Exit 75 is the collector saying "the lock was busy, retry later". The hook cannot retry inline,
+// so the error is still thrown — but it carries the marker the coordinator needs to schedule a
+// trailing retry instead of treating the source as lost until some later trigger covers it.
+test('marks a transient collector exit as retryable', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('codex', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({ status: 75, error: undefined, stderr: 'TokenBoard collector lock timed out' })
+      }),
+    (error) => {
+      assert.equal(error.transient, true)
+      assert.equal(error.exitCode, 75)
+      return true
+    }
+  )
+})
+
+// Every other exit code stays a plain failure: a broken provider would fail identically on a
+// retry, and marking it retryable would chain unattended background runs.
+test('leaves a non-transient failure unmarked', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('codex', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({ status: 1, error: undefined, stderr: 'codex transcript unreadable' })
+      }),
+    (error) => {
+      assert.equal(error.transient, undefined)
+      assert.equal(error.exitCode, undefined)
+      return true
+    }
+  )
+})
+
 // The terminal error must survive on its own in the thrown message and in run-log cycles;
 // expected diagnostics (pricing fallbacks, oversized-row skips) move to a separate
 // diagnostics field so a 25-minute failure is attributable without reading the noise.
@@ -1333,6 +1515,63 @@ test('a substantive Skipping warning reaches the terminal failure line instead o
   )
 })
 
+// The client-version probe only ever warns — sync.mjs catches its failure and returns null — and it
+// runs before the collector, so its line reaches stderr first and wins the terminal slot. A real
+// failure then appears only in diagnostics: on 2026-11-18 a vanished session file was reported to
+// the operator as "client version not recorded".
+test('a version-probe warning is noise, not the terminal failure reason', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('claude-code', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({
+          status: 1,
+          error: undefined,
+          stderr: [
+            'TokenBoard client version not recorded: /Users/example/.tokenboard/bin/tokenboard did not answer version',
+            'claude: open /Users/example/.claude/projects/p/s.jsonl: open /Users/example/.claude/projects/p/s.jsonl: no such file or directory'
+          ].join('\n')
+        })
+      }),
+    (error) => {
+      assert.match(error.message, /claude: open /)
+      assert.doesNotMatch(error.message, /client version not recorded/)
+      assert.match(error.diagnostics ?? '', /client version not recorded/)
+      return true
+    }
+  )
+})
+
+// Every warn() in sync.mjs's pre-collect phase is a caught diagnostic, and each runs before the
+// collector: a version change notice, and the binary-recovery skip (which hook runs reach, since
+// recovery sits before the upgrade gate). They must not describe a failure they did not cause.
+test('pre-collect warnings never own the terminal failure line', () => {
+  const warnings = [
+    'TokenBoard client version 0.3.0 (was 0.2.0)',
+    'TokenBoard binary recovery skipped: EBUSY',
+    'TokenBoard self-update skipped: fetch failed',
+    'TokenBoard upgrade skipped: Refusing to upgrade a collector checkout with uncommitted changes'
+  ]
+  for (const warning of warnings) {
+    assert.throws(
+      () =>
+        executeTokenBoardSync('codex', {
+          lockToken: 'a'.repeat(32),
+          spawn: () => ({
+            status: 1,
+            error: undefined,
+            stderr: `${warning}\nTokenBoard collector lock timed out`
+          })
+        }),
+      (error) => {
+        assert.equal(error.message, 'TokenBoard hook sync failed with exit code 1: TokenBoard collector lock timed out')
+        assert.match(error.diagnostics ?? '', new RegExp(warning.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+        return true
+      }
+    )
+  }
+})
+
 test('config notifyCooldownMs applies when env is unset', () => {
   assert.equal(readNotifyCooldownMs(undefined, {}, 1_800_000), 1_800_000)
 })
@@ -1372,4 +1611,207 @@ test('a pricing fallback diagnostic is noise in both its spellings', () => {
       return true
     }
   )
+})
+
+// The attempt number has to survive the hop from the coordinator into the spawned worker, or the
+// cap in coordinator.mjs never sees anything but 0 and the chain is unbounded again.
+test('the trailing spawn carries the transient attempt number', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-attempts-'))
+  const spawned = []
+  try {
+    scheduleTrailingNotify({ kind: 'notify', source: 'codex', transientAttempts: 2 }, 60_000, {
+      stateDir: root,
+      configDir: root,
+      env: { TOKENBOARD_STATE_DIR: root, TOKENBOARD_CONFIG_DIR: root },
+      spawnDetached: (command, args, options) => {
+        spawned.push(options.env)
+        return { pid: 4242, unref() {} }
+      }
+    })
+
+    assert.equal(spawned.length, 1)
+    assert.equal(spawned[0].TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS, '2')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a hook-triggered trailing spawn carries no attempt number', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-attempts-none-'))
+  const spawned = []
+  try {
+    scheduleTrailingNotify({ kind: 'notify', source: 'codex' }, 60_000, {
+      stateDir: root,
+      configDir: root,
+      env: { TOKENBOARD_STATE_DIR: root, TOKENBOARD_CONFIG_DIR: root },
+      spawnDetached: (command, args, options) => {
+        spawned.push(options.env)
+        return { pid: 4243, unref() {} }
+      }
+    })
+
+    assert.equal(spawned[0].TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+// The in-process continuation loop re-runs the coordinator with the same `env`, so a worker that
+// inherited attempt 1 kept computing 2 on every round: the coordinator's cap never bit and the
+// chain had no length. The attempt number has to advance here, per round.
+test('the trailing loop advances the transient attempt across its own rounds', async () => {
+  const stateDir = '/state'
+  const trailingLockPath = join(stateDir, 'trailing.lock')
+  const files = memoryFileMap([
+    [join(stateDir, 'last-success.json'), '2026-05-22T10:00:00.000Z'],
+    [trailingLockPath, JSON.stringify({ pid: 802, token: 'owner-a' })]
+  ])
+  const attempts = []
+  const runtime = {
+    stateDir,
+    configDir: stateDir,
+    now: () => Date.parse('2026-05-22T10:00:05.000Z'),
+    process: { pid: 802, kill: () => true },
+    ownerToken: 'owner-a',
+    readFile: memoryFileOps(files).readFile,
+    writeFile: (path, value) => files.set(path, String(value)),
+    unlink: (path) => files.delete(path),
+    rename: memoryFileOps(files).rename,
+    link: memoryFileOps(files).link
+  }
+
+  await runNotifyCli({
+    env: {
+      TOKENBOARD_CONFIG_DIR: stateDir,
+      TOKENBOARD_STATE_DIR: stateDir,
+      TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: trailingLockPath,
+      TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: 'owner-a',
+      TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: '0',
+      TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS: '1'
+    },
+    readConfig: () => ({ updatedAt: 'test-version' }),
+    configDir: () => stateDir,
+    trailingRuntime: runtime,
+    waitTrailingDelay: async () => {},
+    // Stands in for the coordinator: it reports the attempt it was handed and always asks for
+    // one more round, which is what makes the loop's own accounting observable.
+    runNotify: (options) => {
+      attempts.push(options.transientAttempts)
+      if (attempts.length >= 3) return { source: 'codex', exitCode: 0 }
+      return {
+        source: 'codex',
+        exitCode: 0,
+        transientAttempt: (options.transientAttempts || 0) + 1,
+        trailingScheduled: true,
+        trailingDelayMs: 1
+      }
+    }
+  })
+
+  assert.deepEqual(attempts, [1, 2, 3])
+})
+
+// A single `setTimeout(delayMs)` for a long trailing delay owns no absolute deadline: the
+// timer's clock is suspended while the host sleeps and is not re-anchored when it wakes or
+// when the wall clock is stepped, so a worker can sit past its wake time for hours with an
+// idle event loop (observed on a loaded macOS host: 34 minutes late with 0.23s of CPU). The
+// wait has to be sliced against a deadline taken from the wall clock, so each slice is short
+// enough to be re-evaluated and the total is bounded by real elapsed time, not by one timer.
+test('trailing wait slices a long delay so each sleep is bounded', async () => {
+  const sleeps = []
+  let nowMs = 0
+  await waitTrailingDelay(3 * 60 * 60 * 1000, {
+    now: () => nowMs,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      nowMs += ms
+    },
+    maxSliceMs: 60_000
+  })
+
+  assert.ok(sleeps.length >= 180, `expected the 3h wait to be sliced, got ${sleeps.length} sleeps`)
+  assert.ok(
+    sleeps.every((ms) => ms > 0 && ms <= 60_000),
+    `every slice must be positive and at most 60s, got ${JSON.stringify(sleeps.slice(0, 5))}`
+  )
+  assert.equal(
+    sleeps.reduce((sum, ms) => sum + ms, 0),
+    3 * 60 * 60 * 1000
+  )
+})
+
+test('trailing wait ends on the wall clock even when a slice overruns', async () => {
+  const sleeps = []
+  let nowMs = 0
+  // The first slice overruns its budget by an hour — the shape a suspended host produces.
+  const overruns = [0, 60 * 60 * 1000]
+  await waitTrailingDelay(90 * 60 * 1000, {
+    now: () => nowMs,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+      nowMs += ms + (overruns.shift() ?? 0)
+    },
+    maxSliceMs: 60_000
+  })
+
+  // The deadline is reached by elapsed wall time, so the overrun does not add another wake.
+  assert.equal(nowMs >= 90 * 60 * 1000, true)
+  assert.ok(nowMs < 90 * 60 * 1000 + 60 * 60 * 1000, `the wait must not sleep past its deadline, elapsed ${nowMs}`)
+})
+
+test('trailing wait returns immediately for a non-positive delay', async () => {
+  const sleeps = []
+  const sleep = async (ms) => sleeps.push(ms)
+  await waitTrailingDelay(0, { sleep })
+  await waitTrailingDelay(-5, { sleep })
+  await waitTrailingDelay(Number.NaN, { sleep })
+  assert.deepEqual(sleeps, [])
+})
+
+// The cap is a byte budget (`Buffer.byteLength` decides when to trim), but the trim itself
+// sliced the JS string — `slice(-64 * 1024)` counts UTF-16 code units, not bytes. With
+// multi-byte text every retained character costs 2–3 bytes, so a Chinese-language error log
+// landed at 167 KB against a 64 KiB cap and kept growing from there. The trim has to land on a
+// byte offset that is also a character boundary.
+test('the worker error log trim is bounded in bytes for multi-byte text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-multibyte-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    const line = `${JSON.stringify({ message: `采集失败：${'错误'.repeat(80)}`, at: '2026-11-16T00:00:00.000Z' })}\n`
+    await writeFile(logPath, line.repeat(400))
+    assert.ok(Buffer.byteLength(readFileSync(logPath, 'utf8')) > 64 * 1024)
+
+    recordNotifyWorkerError(logPath, '最终错误')
+
+    const after = readFileSync(logPath)
+    assert.ok(
+      after.length <= 64 * 1024,
+      `log is ${after.length} bytes, over the 64 KiB cap (multi-byte text must not multiply it)`
+    )
+    const text = after.toString('utf8')
+    assert.doesNotMatch(text, /�/, 'the trim must not split a multi-byte character')
+    assert.match(text, /最终错误/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the worker error log keeps whole lines after a multi-byte trim', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'tokenboard-notify-fatal-lines-'))
+  const logPath = join(root, 'notify-worker-errors.log')
+  try {
+    const line = `${JSON.stringify({ message: `失败：${'原因'.repeat(40)}`, at: '2026-11-16T00:00:00.000Z' })}\n`
+    await writeFile(logPath, line.repeat(600))
+
+    recordNotifyWorkerError(logPath, '最后一条')
+
+    const entries = readNotifyWorkerErrors(root)
+    assert.ok(entries.length > 0, 'the trimmed log must still parse')
+    assert.ok(
+      entries.some((entry) => String(entry.message).includes('最后一条')),
+      'the newest error must survive the trim'
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

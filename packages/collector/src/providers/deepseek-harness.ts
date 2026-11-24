@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type { UsageSnapshot } from '@tokenboard/usage-core'
-import { maxSessionFileBytes, readSessionLines, scanSessionFiles } from './bounded-session-scan'
+import { maxSessionFileBytes, readSessionLinesBounded, scanSessionFiles } from './bounded-session-scan'
 import { formatDate } from './session-jsonl-parser-utils'
 import {
   parseJsonLine,
@@ -83,7 +83,7 @@ export async function collectDeepSeekHarnessUsage(
       // A real read failure (corrupt frame, oversize log) fails the source, matching the Pi and
       // Grok Build providers; only a torn trailing frame from a session still being written is
       // tolerated inside the frame reader.
-      for await (const parsed of readUsageEvents(filePath)) {
+      for await (const parsed of readUsageEvents(filePath, options.stderr)) {
         if (parsed.seq !== undefined) {
           if (seenSeqs.has(parsed.seq)) continue
           seenSeqs.add(parsed.seq)
@@ -114,9 +114,12 @@ export async function collectDeepSeekHarnessUsage(
  * number are read. `seq` is `undefined` when the envelope does not carry a
  * usable one, which callers treat as "cannot be deduplicated".
  */
-async function* readUsageEvents(filePath: string): AsyncGenerator<{ event: UsageEvent; seq: number | undefined }> {
+async function* readUsageEvents(
+  filePath: string,
+  stderr?: (line: string) => void
+): AsyncGenerator<{ event: UsageEvent; seq: number | undefined }> {
   const sessionId = basename(dirname(filePath))
-  for await (const line of readLogLines(filePath)) {
+  for await (const line of readLogLines(filePath, stderr)) {
     const record = parseJsonLine(line)
     if (!record || record.type !== assistantMessageEvent) continue
 
@@ -158,9 +161,12 @@ function readEventSeq(value: unknown) {
  * batches, so the whole file has to be decoded before the lines are readable.
  * Plain logs stay streamed line by line.
  */
-async function* readLogLines(filePath: string): AsyncGenerator<string> {
+async function* readLogLines(filePath: string, stderr?: (line: string) => void): AsyncGenerator<string> {
   if (!filePath.endsWith('.zstd')) {
-    yield* readSessionLines(filePath)
+    yield* readSessionLinesBounded(filePath, {
+      onSkippedLine: (bytes) =>
+        stderr?.(`Skipping an oversized line (${bytes} bytes) in DeepSeek Harness session ${filePath}`)
+    })
     return
   }
   const fileStat = await stat(filePath)

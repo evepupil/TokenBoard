@@ -42,11 +42,26 @@ func (c provCall) hasArg(value string) bool {
 
 func (c provCall) envValue(key string) string { return c.env[key] }
 
+// provCalls is the recorded invocation list. Its String form names each call
+// without the environment: the child env carries the whole process
+// environment (credentials included), and a failing assertion that dumped it
+// wrote real secrets into the test log.
+type provCalls []provCall
+
+// summary renders the calls as label and arguments only.
+func (calls provCalls) summary() string {
+	lines := make([]string, 0, len(calls))
+	for _, call := range calls {
+		lines = append(lines, call.command+" "+strings.Join(call.args, " "))
+	}
+	return "[" + strings.Join(lines, "; ") + "]"
+}
+
 // provStubRunner is the fake ccusage runner: it records the invocation and
 // answers through the test's responder.
 type provStubRunner struct {
 	t       *testing.T
-	calls   []provCall
+	calls   provCalls
 	respond func(call provCall) (any, error)
 }
 
@@ -72,21 +87,10 @@ func (r *provStubRunner) run(
 }
 
 // callsWith returns the recorded calls whose args contain value.
-func (r *provStubRunner) callsWith(value string) []provCall {
-	out := []provCall{}
+func (r *provStubRunner) callsWith(value string) provCalls {
+	out := provCalls{}
 	for _, call := range r.calls {
 		if call.hasArg(value) {
-			out = append(out, call)
-		}
-	}
-	return out
-}
-
-// callsWithout returns the recorded calls whose args do not contain value.
-func (r *provStubRunner) callsWithout(value string) []provCall {
-	out := []provCall{}
-	for _, call := range r.calls {
-		if !call.hasArg(value) {
 			out = append(out, call)
 		}
 	}
@@ -120,11 +124,9 @@ func provEnv(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
 
-// provForceEnv is forceRunnerEnv plus the ts suite's usual blanks.
+// provForceEnv is the TS suite's env shaper, now only the blanks it sets.
 func provForceEnv(extra map[string]string) map[string]string {
-	values := map[string]string{
-		"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-	}
+	values := map[string]string{}
 	for key, value := range extra {
 		values[key] = value
 	}
@@ -250,6 +252,27 @@ func provTokenEventWithCost(timestamp string, inputTokens, outputTokens int, cos
 	}
 }
 
+// provHookEventWithoutModel is the shape real Codex writes: a token_count event
+// whose info carries only the usage, no model. The session parser then records
+// the turn under the `all` sentinel.
+func provHookEventWithoutModel(timestamp string, inputTokens, outputTokens int, costUsd float64) map[string]any {
+	return map[string]any{
+		"type":      "event_msg",
+		"timestamp": timestamp,
+		"payload": map[string]any{
+			"type": "token_count",
+			"info": map[string]any{
+				"last_token_usage": map[string]any{
+					"input_tokens":  inputTokens,
+					"output_tokens": outputTokens,
+					"total_tokens":  inputTokens + outputTokens,
+					"cost_usd":      costUsd,
+				},
+			},
+		},
+	}
+}
+
 // provTurnContext is a turn_context record naming the model of the turns that
 // follow it.
 func provTurnContext(model string) map[string]any {
@@ -354,7 +377,7 @@ func TestProviderRejectsRelativeExplicitCodexSymlinkRootsBeforeCollection(t *tes
 	}
 }
 
-func TestProviderRunsCodexCcusageDailyJSONAndNormalizesCacheInputAliases(t *testing.T) {
+func TestProviderNormalizesCacheInputAliasesFromTheDailyReport(t *testing.T) {
 	stateDir := t.TempDir()
 	codexHome := provEmptyCodexHome(t)
 	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
@@ -377,17 +400,17 @@ func TestProviderRunsCodexCcusageDailyJSONAndNormalizesCacheInputAliases(t *test
 	}
 
 	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--timezone", "Asia/Shanghai",
+		"codex", "daily", "--json", "--offline", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--timezone", "Asia/Shanghai",
+		"codex", "session", "--json", "--offline", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
-	if runner.calls[0].command != provPlatformCommand("npx") {
-		t.Errorf("command = %q", runner.calls[0].command)
+	if runner.calls[0].command != ccusage.ReportCommand {
+		t.Errorf("command = %q, want the report label", runner.calls[0].command)
 	}
 
 	if len(snapshots) != 1 {
@@ -410,8 +433,7 @@ func TestProviderPassesTheBundledPricingConfigWithoutAnEndpoint(t *testing.T) {
 		CodexHome: provHome(codexHome),
 		StateDir:  stateDir,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_ENDPOINT":             "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_ENDPOINT": "",
 		}),
 		Runner: runner.run,
 	})
@@ -419,7 +441,7 @@ func TestProviderPassesTheBundledPricingConfigWithoutAnEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configPath := provConfigArgs(stateDir)[1]
 	for _, call := range runner.calls {
@@ -492,7 +514,7 @@ func TestProviderKeepsContextPricingAttributionSeparateForDuplicateSessionPathsA
 	}
 
 	if len(runner.callsWith("session")) != 3 {
-		t.Fatalf("session calls = %v", runner.callsWith("session"))
+		t.Fatalf("session calls = %s", runner.callsWith("session").summary())
 	}
 	if len(snapshots) != 2 {
 		t.Fatalf("snapshots = %+v", snapshots)
@@ -554,7 +576,7 @@ func TestProviderPricesAnExplicitlyNamedContextRowWithoutATurnContextRecord(t *t
 	if canonical.Correction != contract.CorrectionCodexContextPricing {
 		t.Errorf("correction = %q", canonical.Correction)
 	}
-	assertCloseTo(t, canonical.CostUSD, 0.001-20*5.0/1_000_000, 12)
+	assertCloseTo(t, canonical.CostUSD, 0.001-20*4.0/1_000_000, 12)
 	if canonical.SessionCount != 1 {
 		t.Errorf("canonical session count = %d", canonical.SessionCount)
 	}
@@ -562,12 +584,14 @@ func TestProviderPricesAnExplicitlyNamedContextRowWithoutATurnContextRecord(t *t
 	if context.TotalTokens != 20 || context.SessionCount != 0 {
 		t.Errorf("context = %+v", context)
 	}
-	assertCloseTo(t, context.CostUSD, 20*5.0/1_000_000, 12)
+	assertCloseTo(t, context.CostUSD, 20*4.0/1_000_000, 12)
 }
 
-// The session file changes while ccusage is answering: the unbounded
-// collection must notice on its second inventory pass and retry once.
-func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconciliation(t *testing.T) {
+// The session file changes while ccusage is answering. On a machine that is in
+// use this is the normal case, so the collection reports the drift and keeps
+// the snapshot it read instead of failing the source and retrying the same
+// multi-minute scan into the same moving target.
+func TestProviderReportsASessionThatChangesDuringReconciliationInsteadOfRetrying(t *testing.T) {
 	codexHome := provEmptyCodexHome(t)
 	sessionPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "pricing.jsonl")
 	provWriteJSONL(t, sessionPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
@@ -589,9 +613,11 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 		return provJSON(t, `{"sessions":[]}`), nil
 	}}
 
+	var diagnostics []string
 	snapshots, err := provCollect(t, Options{
 		CodexHome: provHome(codexHome),
 		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
 		Runner:    runner.run,
 	}, map[string]string{
 		"TOKENBOARD_SINCE":         "",
@@ -601,11 +627,20 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.callsWith("daily")) != 2 {
-		t.Errorf("daily calls = %v", runner.callsWith("daily"))
+	if len(runner.callsWith("daily")) != 1 {
+		t.Errorf("daily calls = %s", runner.callsWith("daily").summary())
 	}
-	if len(runner.callsWith("session")) != 2 {
-		t.Errorf("session calls = %v", runner.callsWith("session"))
+	if len(runner.callsWith("session")) != 1 {
+		t.Errorf("session calls = %s", runner.callsWith("session").summary())
+	}
+	foundDrift := false
+	for _, line := range diagnostics {
+		if strings.Contains(line, "Codex session files changed during unbounded collection") {
+			foundDrift = true
+		}
+	}
+	if !foundDrift {
+		t.Errorf("diagnostics = %q", diagnostics)
 	}
 	if len(snapshots) != 1 {
 		t.Fatalf("snapshots = %+v", snapshots)
@@ -614,7 +649,108 @@ func TestProviderRetriesUnboundedContextPricingWhenASessionChangesDuringReconcil
 	if got.TotalTokens != 10 {
 		t.Errorf("snapshot = %+v", got)
 	}
-	assertCloseTo(t, got.CostUSD, 10*5.0/1_000_000, 12)
+	assertCloseTo(t, got.CostUSD, 10*4.0/1_000_000, 12)
+}
+
+// A session file that appears while the reports run is not read: it is not in
+// the inventory this pass committed to, and the next sync discovers it. The
+// source still succeeds and says what happened.
+func TestProviderReportsASessionThatAppearsDuringReconciliation(t *testing.T) {
+	codexHome := provEmptyCodexHome(t)
+	sessionPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "pricing.jsonl")
+	provWriteJSONL(t, sessionPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
+	latePath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "late.jsonl")
+
+	sessionCalls := 0
+	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
+		if call.hasArg("daily") {
+			return provJSON(t, `{"data":[{"date":"2026-05-01","models":["gpt-5.6-sol"],
+				"inputTokens":10,"outputTokens":0,"cacheCreationInputTokens":0,
+				"cacheReadInputTokens":0,"costUSD":0.01}]}`), nil
+		}
+		if !call.hasArg("session") {
+			return nil, fmt.Errorf("Unexpected ccusage command")
+		}
+		sessionCalls++
+		if sessionCalls == 1 {
+			provWriteJSONL(t, latePath, provTokenEvent("2026-05-01T00:05:00.000Z", 5, "gpt-5.6-sol"))
+		}
+		return provJSON(t, `{"sessions":[]}`), nil
+	}}
+
+	var diagnostics []string
+	snapshots, err := provCollect(t, Options{
+		CodexHome: provHome(codexHome),
+		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
+		Runner:    runner.run,
+	}, map[string]string{
+		"TOKENBOARD_SINCE":         "",
+		"TOKENBOARD_DEFAULT_SINCE": "",
+		"TOKENBOARD_UNTIL":         "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(diagnostics, "\n")
+	if !strings.Contains(joined, "Codex session files changed during unbounded collection") ||
+		!strings.Contains(joined, "added 1") {
+		t.Errorf("diagnostics = %q", diagnostics)
+	}
+	if len(snapshots) == 0 {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
+}
+
+// A session file that vanishes between discovery and the read is skipped with
+// a diagnostic instead of failing the source; its rows arrive on the next sync.
+func TestProviderSkipsASessionFileThatVanishesDuringTheScan(t *testing.T) {
+	codexHome := provEmptyCodexHome(t)
+	keptPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "kept.jsonl")
+	vanishingPath := filepath.Join(codexHome, "sessions", "2026", "05", "01", "vanishing.jsonl")
+	provWriteJSONL(t, keptPath, provTokenEvent("2026-05-01T00:00:00.000Z", 10, "gpt-5.6-sol"))
+	provWriteJSONL(t, vanishingPath, provTokenEvent("2026-05-01T00:01:00.000Z", 4, "gpt-5.6-sol"))
+
+	removed := false
+	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
+		if call.hasArg("daily") {
+			if !removed {
+				removed = true
+				if err := os.Remove(vanishingPath); err != nil {
+					t.Fatalf("remove: %v", err)
+				}
+			}
+			return provJSON(t, `{"data":[{"date":"2026-05-01","models":["gpt-5.6-sol"],
+				"inputTokens":10,"outputTokens":0,"cacheCreationInputTokens":0,
+				"cacheReadInputTokens":0,"costUSD":0.01}]}`), nil
+		}
+		if call.hasArg("session") {
+			return provJSON(t, `{"sessions":[]}`), nil
+		}
+		return nil, fmt.Errorf("Unexpected ccusage command")
+	}}
+
+	var diagnostics []string
+	snapshots, err := provCollect(t, Options{
+		CodexHome: provHome(codexHome),
+		Timezone:  "UTC",
+		Stderr:    func(line string) { diagnostics = append(diagnostics, line) },
+		Runner:    runner.run,
+	}, map[string]string{
+		"TOKENBOARD_SINCE":         "",
+		"TOKENBOARD_DEFAULT_SINCE": "",
+		"TOKENBOARD_UNTIL":         "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(diagnostics, "\n")
+	if !strings.Contains(joined, "Skipped a Codex session file that vanished during the scan") {
+		t.Errorf("diagnostics = %q", diagnostics)
+	}
+	if len(snapshots) == 0 {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
 }
 
 // The first daily report does not yet carry the canonical row the context
@@ -722,7 +858,7 @@ func TestProviderDoesNotUseASessionRowDirectoryThatEscapesItsSessionRoot(t *test
 	if got.TotalTokens != 10 {
 		t.Errorf("snapshot = %+v", got)
 	}
-	assertCloseTo(t, got.CostUSD, 10*5.0/1_000_000, 12)
+	assertCloseTo(t, got.CostUSD, 10*4.0/1_000_000, 12)
 }
 
 // The bounded report runs against a frozen copy, and its window comes from the
@@ -740,29 +876,27 @@ func TestProviderPassesTheConfiguredDefaultSinceWindowToFrozenBoundedReports(t *
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "",
-			"TOKENBOARD_DEFAULT_SINCE":        "20260501",
+			"TOKENBOARD_SINCE":         "",
+			"TOKENBOARD_DEFAULT_SINCE": "20260501",
 		}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 3 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260501",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260501",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 	}, configArgs...))
 }
 
@@ -784,28 +918,27 @@ func TestProviderPrefersAnExplicitSinceWindowOverTheProcessEnvironment(t *testin
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "20260501",
-			"TOKENBOARD_UNTIL":                "20260502",
+			"TOKENBOARD_SINCE": "20260501",
+			"TOKENBOARD_UNTIL": "20260502",
 		}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.calls) != 3 {
-		t.Fatalf("calls = %v", runner.calls)
+		t.Fatalf("calls = %s", runner.calls.summary())
 	}
 	configArgs := provConfigArgs(stateDir)
 	provAssertArgs(t, runner.calls[0].args, append([]string{
-		"ccusage@20.0.33", "codex", "daily", "--json", "--offline", "--single-thread",
+		"codex", "daily", "--json", "--offline", "--single-thread",
 		"--since", "20260708", "--until", "20260709", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[1].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--since", "20260708", "--until", "20260709", "--timezone", "Asia/Shanghai",
 	}, configArgs...))
 	provAssertArgs(t, runner.calls[2].args, append([]string{
-		"ccusage@20.0.33", "codex", "session", "--json", "--offline", "--single-thread",
+		"codex", "session", "--json", "--offline", "--single-thread",
 		"--timezone", "Asia/Shanghai",
 	}, configArgs...))
 }
@@ -864,10 +997,7 @@ func TestProviderPassesConfiguredCodexHomeToUnscopedCcusageCommands(t *testing.T
 		CodexHome: provHome(codexHome),
 		StateDir:  stateDir,
 		Runner:    runner.run,
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -899,10 +1029,7 @@ func TestProviderUsesAFrozenHomeForEveryBoundedReport(t *testing.T) {
 		Since:     "20260512",
 		StateDir:  stateDir,
 		Runner:    runner.run,
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1054,10 +1181,9 @@ func TestProviderUsesCanonicalSessionAttributionForAnUntilOnlyWindow(t *testing.
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_SINCE":                "",
-			"TOKENBOARD_DEFAULT_SINCE":        "",
-			"TOKENBOARD_UNTIL":                "20260521",
+			"TOKENBOARD_SINCE":         "",
+			"TOKENBOARD_DEFAULT_SINCE": "",
+			"TOKENBOARD_UNTIL":         "20260521",
 		}),
 	})
 	if err != nil {
@@ -1152,8 +1278,7 @@ func TestProviderUsesCanonicalSessionAttributionWhenAllHistoryIsBoundedByUntil(t
 		StateDir:  stateDir,
 		Runner:    runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-			"TOKENBOARD_UNTIL":                "20260521",
+			"TOKENBOARD_UNTIL": "20260521",
 		}),
 	})
 	if err != nil {
@@ -1678,10 +1803,7 @@ func TestProviderReportsPartialCollectionWhenSessionCountsFail(t *testing.T) {
 		StateDir:  t.TempDir(),
 		Runner:    runner.run,
 		Stderr:    func(line string) { errors = append(errors, line) },
-		Env: provEnv(map[string]string{
-			"TOKENBOARD_PACKAGE_MANAGER":      "",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
-		}),
+		Env:       provEnv(map[string]string{}),
 	})
 	if err != nil {
 		t.Fatal(err)

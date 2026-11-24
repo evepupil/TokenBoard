@@ -84,6 +84,67 @@ describe('Codex hook reusable pending snapshots', () => {
     }
   }, 30_000)
 
+  // Real Codex `token_count` events carry no `info.model`, so the session parser labels the
+  // turn `all`. ccusage reports the day under concrete model ids, and an exact group-key match
+  // would never fire for `all` — the cached copy would then be summed on top of a day that
+  // already contains it. Every codex hook sync would over-count by the pending file's share.
+  test('does not add a reused pending snapshot labelled "all" on top of the same day', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-pending-all-'))
+    const codexHome = join(root, 'codex')
+    const stateDir = join(root, 'state')
+    const fileA = join(codexHome, 'sessions', '2026', '05', '22', 'a.jsonl')
+    const fileB = join(codexHome, 'sessions', '2026', '05', '22', 'b.jsonl')
+
+    vi.stubEnv('TOKENBOARD_HOOK_MODE', '1')
+    vi.stubEnv('TOKENBOARD_FORCE_PACKAGE_RUNNER', '1')
+    correction.mockImplementation(async (input: { snapshots: unknown[] }) => input.snapshots)
+
+    let daily: unknown = { data: [] }
+    const runner = vi.fn(async (_command: string, args: string[]) => (args.includes('session') ? { data: [] } : daily))
+
+    try {
+      // A token_count event with no model, so the parser falls back to `all` and the pending
+      // snapshot carries that label.
+      await writeJsonl(fileA, [tokenCountEventWithoutModel()])
+      await expect(
+        collectCodexUsage({
+          codexHome,
+          stateDir,
+          timezone: 'Asia/Shanghai',
+          collectedAt: '2026-05-22T10:00:00.000Z',
+          runner
+        })
+      ).rejects.toThrow('Codex hook reconciliation returned no snapshots for parsed usage keys')
+
+      await writeJsonl(fileB, [tokenCountEventWithoutModel('2026-05-22T02:00:00.000Z', 10, 5, 0.03)])
+      daily = {
+        data: [
+          { date: '2026-05-22', model: 'gpt-5', inputTokens: 20, outputTokens: 10, totalTokens: 30, costUSD: 0.06 }
+        ]
+      }
+
+      const snapshots = await collectCodexUsage({
+        codexHome,
+        stateDir,
+        timezone: 'Asia/Shanghai',
+        collectedAt: '2026-05-22T11:00:00.000Z',
+        runner
+      })
+
+      // Only ccusage's figure, not the cached `all` copy summed on top of it.
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          source: 'codex',
+          usageDate: '2026-05-22',
+          model: 'gpt-5',
+          totalTokens: 30
+        })
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   // The reuse exists for the opposite case and must keep working: when ccusage has nothing for
   // the key, the cached snapshot is the only record of that usage.
   test('still reports a reused pending snapshot when ccusage has nothing for the day', async () => {
@@ -152,6 +213,31 @@ function tokenCountEvent(timestamp = '2026-05-22T01:00:00.000Z', inputTokens = 1
       type: 'token_count',
       info: {
         model: 'gpt-5',
+        last_token_usage: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+          cost_usd: costUsd
+        }
+      }
+    }
+  }
+}
+
+// The shape real Codex writes: a `token_count` event whose info carries only the usage, no
+// model. The session parser then records the turn under the `all` sentinel.
+function tokenCountEventWithoutModel(
+  timestamp = '2026-05-22T01:00:00.000Z',
+  inputTokens = 10,
+  outputTokens = 5,
+  costUsd = 0.03
+) {
+  return {
+    type: 'event_msg',
+    timestamp,
+    payload: {
+      type: 'token_count',
+      info: {
         last_token_usage: {
           input_tokens: inputTokens,
           output_tokens: outputTokens,

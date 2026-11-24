@@ -3,11 +3,13 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // platformSignalZero probes existence via tasklist: signal 0 is unreliable
@@ -24,12 +26,28 @@ func platformSignalZero(pid int) error {
 	return nil
 }
 
-// platformProcessStartIdentity degrades on Windows: the verbose CSV has no
-// creation-time column, so identity is unavailable and stale detection runs
-// on liveness alone (the TS side's documented degradation).
+// platformProcessStartIdentity is unavailable on Windows. The verbose CSV has no
+// creation-time column, and the TS side reads it by spawning PowerShell
+// (`cursor-process-liveness.ts` → `Get-Process … StartTime.ToUniversalTime().Ticks`),
+// which costs a process launch on every liveness probe. Go deliberately does not
+// pay that: a lock written here carries no identity, and the TS reader falls back
+// to liveness alone when a record has none (its documented degradation).
+//
+// The consequence is bounded, not a correctness hole: a lock written by TS carries
+// an identity Go cannot recompute, so Go treats it as indeterminate — i.e. alive —
+// and a Windows lock whose PID was reused is reclaimed by the lock's own timeout
+// rather than immediately. Erring toward "alive" can never steal a live lock.
 func platformProcessStartIdentity(int) (string, error) {
 	return "", errors.New("identity unsupported on windows")
 }
+
+// tasklistTimeout bounds the probe. Without it a `tasklist` that blocks — EDR
+// interference, a policy prompt, a loaded machine — hangs the caller forever,
+// and the caller is the stale-lock check: the lock's own timeout would stop
+// protecting anything because this path never returns. TS bounds the same probe
+// at 2 s; a timeout here means "liveness unknown", which the caller treats the
+// same way as an unanswered probe.
+const tasklistTimeout = 2 * time.Second
 
 func tasklistOutput(pid int) (string, error) {
 	systemRoot := "C:\\Windows"
@@ -37,22 +55,24 @@ func tasklistOutput(pid int) (string, error) {
 		systemRoot = root
 	}
 	tasklist := systemRoot + "\\System32\\tasklist.exe"
-	cmd := exec.Command(tasklist, "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	ctx, cancel := context.WithTimeout(context.Background(), tasklistTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tasklist, "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
 	cmd.SysProcAttr = hideWindow()
+	// A killed child leaves its pipes open until the OS reaps it; WaitDelay keeps
+	// Output from blocking on them after the deadline.
+	cmd.WaitDelay = tasklistTimeout
+	// Measured on Windows 10 22H2: tasklist exits 0 whether or not the filter
+	// matched, and a missing pid prints a localized "no tasks match" line to
+	// stdout instead. So a zero exit says nothing about existence — the CSV
+	// line is the only signal, and tasklistContainsPid is what decides. Only a
+	// non-zero exit (tasklist itself failed: missing binary, policy block) is
+	// returned as an error here, which the caller treats as unknown liveness.
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
 	return string(out), nil
-}
-
-func tasklistContainsPid(output string, pid int) bool {
-	for _, line := range strings.Split(output, "\r\n") {
-		if strings.Contains(line, fmt.Sprintf(`","%d"`, pid)) || strings.Contains(line, fmt.Sprintf(`","%d",`, pid)) {
-			return true
-		}
-	}
-	return false
 }
 
 func hideWindow() *syscall.SysProcAttr {

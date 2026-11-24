@@ -10,7 +10,14 @@ import { runInNewContext } from 'node:vm'
 import { buildNotifyHandler, notifyHandlerErrorLogMaxBytes } from './hooks.mjs'
 import { currentProcessStartIdentity } from './process-liveness.mjs'
 
-const backgroundResultTimeoutMs = 5_000
+// The handler holds the dispatch lock while it probes the recorded worker's
+// start identity, and that probe may retry once when the platform answer is
+// indeterminate (see probeProcessStartIdentity). Each attempt is bounded by the
+// handler's own 2s probe timeout, so the window a test can legitimately wait
+// out is two attempts plus process start-up — longer than the 5s the plain
+// background cases need. Every wait returns as soon as the condition holds, so
+// the larger ceiling only costs time on a genuine failure.
+const backgroundResultTimeoutMs = 15_000
 const backgroundResultRetryMs = 25
 const processIdentityAvailable = Boolean(currentProcessStartIdentity())
 
@@ -43,6 +50,54 @@ test('notify handler does not forward payload args to the TokenBoard background 
     source,
     /if \(currentIdentity\.status === "known"\) return currentIdentity\.value === worker\.processStartIdentity/
   )
+  // A single indeterminate probe must not suppress the dispatch until the next
+  // hook event: the probe retries once, and only the second answer is final.
+  // The behaviour itself is pinned in the test below; this only guards the
+  // generated source from dropping the retry silently.
+  assert.match(source, /if \(result\.status === "unknown"\) result = readPlatformIdentity\(\);/)
+})
+
+test('notify handler retries an indeterminate start-identity probe exactly once', () => {
+  const source = buildNotifyHandler({
+    stateDir: '/home/user/.tokenboard',
+    notifyScriptPath: '/repo/scripts/notify.mjs',
+    nodePath: '/usr/bin/node'
+  })
+  const helperStart = source.indexOf('function probeProcessStartIdentity')
+  const helperEnd = source.indexOf('function readCachedProcessStartIdentity', helperStart)
+  assert.ok(helperStart >= 0 && helperEnd > helperStart)
+
+  const run = (answers) =>
+    runInNewContext(
+      `
+      const PROCESS_START_IDENTITY_CACHE = new Map();
+      const readCachedProcessStartIdentity = () => null;
+      const writeCachedProcessStartIdentity = () => {};
+      const answers = ${JSON.stringify(answers)};
+      let calls = 0;
+      const readPlatformIdentityStub = () => answers[Math.min(calls++, answers.length - 1)];
+      const readLinuxProcessStartIdentity = readPlatformIdentityStub;
+      const readDarwinProcessStartIdentity = readPlatformIdentityStub;
+      const readWindowsProcessStartIdentity = readPlatformIdentityStub;
+      ${source.slice(helperStart, helperEnd)}
+      const result = probeProcessStartIdentity(4321, "windows:42");
+      JSON.stringify([calls, result.status, result.value === undefined ? null : result.value]);
+      `,
+      { process: { platform: 'win32', pid: 1 } }
+    )
+  const observe = (answers) => JSON.parse(run(answers))
+
+  // A slow probe that answers on the second attempt is used, not discarded.
+  assert.deepEqual(observe([{ status: 'unknown' }, { status: 'known', value: 'windows:42' }]), [
+    2,
+    'known',
+    'windows:42'
+  ])
+  // Two indeterminate answers stay indeterminate and stop after the retry.
+  assert.deepEqual(observe([{ status: 'unknown' }]), [2, 'unknown', null])
+  // A determinate answer is never re-probed.
+  assert.deepEqual(observe([{ status: 'known', value: 'windows:42' }]), [1, 'known', 'windows:42'])
+  assert.deepEqual(observe([{ status: 'dead' }]), [1, 'dead', null])
 })
 
 test('notify handler coalesces background workers while the current worker is alive', async () => {
@@ -340,7 +395,11 @@ test('notify handler leaves cooldown work to a live trailing process', async () 
       [
         'import { writeFileSync } from "node:fs"',
         `writeFileSync(${JSON.stringify(trailingLockPath)}, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))`,
-        'await new Promise((resolve) => setTimeout(resolve, 5000))'
+        // Outlive the whole test. Resolving a Windows start identity is a ~1.5s
+        // PowerShell spawn (2s cap), so under a loaded suite both the probe here
+        // and the handler's later read can need the child alive for many seconds;
+        // a 5s life let the fixture become a "dead" pid mid-test.
+        'await new Promise((resolve) => setTimeout(resolve, 120000))'
       ].join('\n')
     )
     await writeFile(
@@ -357,10 +416,18 @@ test('notify handler leaves cooldown work to a live trailing process', async () 
 
     await waitFor(() => existsSync(trailingLockPath))
     let processStartIdentity
-    await waitFor(() => {
-      processStartIdentity = currentProcessStartIdentity({ pid: trailingPid })
-      return Boolean(processStartIdentity)
-    })
+    // Each attempt spawns PowerShell with a 2s cap on Windows, so the default 5s
+    // budget affords barely two tries before the probe itself eats it — under a
+    // loaded suite that reads as "identity never resolved" while the child is
+    // alive. Give the probe room to retry a few times.
+    await waitFor(
+      () => {
+        processStartIdentity = currentProcessStartIdentity({ pid: trailingPid })
+        return Boolean(processStartIdentity)
+      },
+      undefined,
+      30_000
+    )
     assert.ok(processStartIdentity)
     await writeFile(
       trailingLockPath,
@@ -768,8 +835,8 @@ async function waitForText(path, expected, diagnostic) {
   }, diagnostic)
 }
 
-async function waitFor(condition, diagnostic) {
-  const deadline = Date.now() + backgroundResultTimeoutMs
+async function waitFor(condition, diagnostic, timeoutMs = backgroundResultTimeoutMs) {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (await condition()) return
     await new Promise((resolve) => setTimeout(resolve, backgroundResultRetryMs))

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, test } from 'vitest'
@@ -255,5 +255,52 @@ describe('querySqliteText', () => {
       runQuery: async () => 'injected\n'
     })
     expect(result).toBe('injected\n')
+  })
+})
+
+// The external sqlite binary is a third-party program, and execFile inherits
+// the whole process environment when `env` is omitted. The upload token lives
+// there, so a reader that leaked it would hand the credential to whatever
+// `sqlite3` the machine happens to have on PATH. A stand-in binary reports
+// whether it can see the variable.
+describe('the external sqlite binary never inherits credentials', () => {
+  test('both query paths scrub the environment first', async () => {
+    if (process.platform === 'win32') {
+      return // A POSIX shell script is how the stand-in reports what it saw.
+    }
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-sqlite-env-'))
+    try {
+      const standIn = join(root, 'sqlite3')
+      await writeFile(
+        standIn,
+        // The stand-in prints valid JSON either way, so each reader parses it;
+        // the payload is what reveals whether the variable reached it.
+        '#!/bin/sh\nif [ -n "$TOKENBOARD_UPLOAD_TOKEN" ]; then echo \'[{"token":"LEAKED"}]\'; else echo \'[{"token":"CLEAN"}]\'; fi\n',
+        { mode: 0o755 }
+      )
+      const previous = process.env.TOKENBOARD_UPLOAD_TOKEN
+      process.env.TOKENBOARD_UPLOAD_TOKEN = 'tb_probe_secret'
+      try {
+        const text = await querySqliteText(join(root, 'unused.db'), 'select 1', {
+          sqliteBin: standIn,
+          label: 'Antigravity',
+          forceExternalSqlite: true
+        })
+        const json = await querySqliteJsonRows(join(root, 'unused.db'), 'select 1', {
+          sqliteBin: standIn,
+          label: 'Antigravity',
+          forceExternalSqlite: true
+        })
+        expect(text).toContain('CLEAN')
+        expect(text).not.toContain('LEAKED')
+        expect(JSON.stringify(json)).toContain('CLEAN')
+        expect(JSON.stringify(json)).not.toContain('LEAKED')
+      } finally {
+        if (previous === undefined) delete process.env.TOKENBOARD_UPLOAD_TOKEN
+        else process.env.TOKENBOARD_UPLOAD_TOKEN = previous
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

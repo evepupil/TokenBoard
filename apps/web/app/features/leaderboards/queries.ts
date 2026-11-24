@@ -60,6 +60,14 @@ export async function listLeaderboard(db: D1Database, input: LeaderboardQuery): 
   // each. Selecting it through correlated subqueries instead would re-aggregate the window for
   // every candidate row the `ORDER BY` sorts, so a busy month would pay for the whole summary
   // table once per public user rather than once per request.
+  //
+  // Token totals use SQLite's `total()`, never `SUM()`. `SUM()` accumulates integers and throws
+  // "integer overflow" once a window exceeds int64; the per-row cap (1e12) makes that ~9.2M rows
+  // for one public account, which an uploader can create on purpose — and the failure would blank
+  // the board for every other viewer, not just the account that caused it. `total()` accumulates
+  // in floating point, the same precision the D1 driver hands back as a JS number anyway, so no
+  // displayed total loses information it would otherwise have kept. Costs stay on `SUM()`: the
+  // column is REAL, which never takes the integer path.
   const viewerUserId = input.viewerUserId ?? null
 
   const rows = await db
@@ -80,7 +88,7 @@ export async function listLeaderboard(db: D1Database, input: LeaderboardQuery): 
               model,
               ROW_NUMBER() OVER (
                 PARTITION BY user_id
-                ORDER BY COALESCE(SUM(total_tokens), 0) DESC, model ASC
+                ORDER BY COALESCE(total(total_tokens), 0) DESC, model ASC
               ) as primaryModelRank
             FROM effective_daily_usage_summary
             GROUP BY user_id, model
@@ -95,7 +103,7 @@ export async function listLeaderboard(db: D1Database, input: LeaderboardQuery): 
               'totalTokens', total_tokens
             )), '[]') as sourceTokens
           FROM (
-            SELECT user_id, source, COALESCE(SUM(total_tokens), 0) as total_tokens
+            SELECT user_id, source, COALESCE(total(total_tokens), 0) as total_tokens
             FROM effective_daily_usage_summary
             GROUP BY user_id, source
           )
@@ -104,8 +112,8 @@ export async function listLeaderboard(db: D1Database, input: LeaderboardQuery): 
         SELECT
           profiles.slug as slug,
           profiles.display_name as displayName,
-          COALESCE(SUM(effective_daily_usage_summary.total_tokens), 0) as totalTokens,
-          COALESCE(SUM(effective_daily_usage_summary.total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
+          COALESCE(total(effective_daily_usage_summary.total_tokens), 0) as totalTokens,
+          COALESCE(total(effective_daily_usage_summary.total_tokens_without_cache_read), 0) as totalTokensWithoutCacheRead,
           COALESCE(SUM(${billableCostSql({
             sourceColumn: 'effective_daily_usage_summary.source',
             costColumn: 'effective_daily_usage_summary.cost_usd'

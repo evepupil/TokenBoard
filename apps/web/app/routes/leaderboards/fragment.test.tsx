@@ -88,13 +88,23 @@ describe('leaderboard fragment route', () => {
 
     expect(mockedGetLeaderboard.mock.calls[0][1]).toMatchObject({ viewerUserId: null })
   })
+
+  // The fragment rebuilds the same board the page does, so it is the same anonymous read
+  // amplifier and must carry the same ceiling; without it the tab click is the way around the
+  // page's cap. The ceiling has to fire before the board is built.
+  test('rate-limits the leaderboard fragment', async () => {
+    const response = (await GET[0](context('', 121) as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(429)
+    expect(mockedGetLeaderboard).not.toHaveBeenCalled()
+  })
 })
 
-function context(cookie: string) {
+function context(cookie: string, rateLimitCount = 1) {
   const request = new Request('https://tokenboard.example/leaderboards/fragment?period=daily')
   const headers = new Headers()
   return {
-    env: { DB: {} },
+    env: { DB: createRateLimitDb(rateLimitCount) },
     req: {
       raw: request,
       url: request.url,
@@ -106,5 +116,19 @@ function context(cookie: string) {
     },
     html: (body: unknown, status = 200) => new Response(String(body), { status, headers }),
     json: (body: unknown, status = 200) => Response.json(body, { status })
+  }
+}
+
+// The route's read ceiling issues a `SELECT count` probe against `api_rate_limits`; reporting a
+// count at or above the ceiling drives a request past it without a real D1.
+function createRateLimitDb(rateLimitCount: number) {
+  return {
+    prepare: (sql: string) => ({
+      bind: () => ({
+        first: async () =>
+          sql.includes('api_rate_limits') ? { count: rateLimitCount, resetAt: '2099-01-01T00:00:00.000Z' } : null,
+        run: async () => ({ meta: { changes: 1 } })
+      })
+    })
   }
 }

@@ -3,10 +3,20 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { requireUser } from '../../features/auth/middleware'
 import { createPairingCode } from '../../features/device/service'
 import { getCanonicalPublicOrigin, getProfileTimezoneSettings } from '../../features/settings/service'
+import { ApiError } from '../../lib/errors'
+import { enforceRateLimit } from '../../lib/rate-limit'
 import { POST } from './install'
 
 vi.mock('../../features/auth/middleware', () => ({
   requireUser: vi.fn()
+}))
+
+// The settings form mints the same one-time pairing code as POST /api/v1/device/pairing-codes,
+// which is rate-limited per user. Without the same ceiling here the API limit is bypassable by
+// posting this form instead.
+vi.mock('../../lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/rate-limit')>()),
+  enforceRateLimit: vi.fn()
 }))
 
 vi.mock('../../features/device/repository', () => ({
@@ -33,6 +43,7 @@ const mockedRequireUser = vi.mocked(requireUser)
 const mockedCreatePairingCode = vi.mocked(createPairingCode)
 const mockedGetCanonicalPublicOrigin = vi.mocked(getCanonicalPublicOrigin)
 const mockedGetProfileTimezoneSettings = vi.mocked(getProfileTimezoneSettings)
+const mockedEnforceRateLimit = vi.mocked(enforceRateLimit)
 
 describe('install POST route', () => {
   beforeEach(() => {
@@ -40,6 +51,22 @@ describe('install POST route', () => {
     mockedCreatePairingCode.mockReset()
     mockedGetCanonicalPublicOrigin.mockClear()
     mockedGetProfileTimezoneSettings.mockReset()
+    mockedEnforceRateLimit.mockReset()
+  })
+
+  test('rate-limits pairing code creation per user', async () => {
+    const context = postContext({ timezone: 'Asia/Shanghai' })
+    mockedRequireUser.mockResolvedValue({ id: 'user_1', email: 'user@example.com' } as never)
+    mockedEnforceRateLimit.mockRejectedValue(new ApiError('RATE_LIMITED', 'Too many requests', 429))
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(429)
+    expect(mockedCreatePairingCode).not.toHaveBeenCalled()
+    expect(mockedEnforceRateLimit).toHaveBeenCalledWith(context.env.DB, {
+      policy: expect.objectContaining({ id: 'pairing-code' }),
+      subject: { kind: 'user', value: 'user_1' }
+    })
   })
 
   test('prevents caching one-time pairing code pages', async () => {

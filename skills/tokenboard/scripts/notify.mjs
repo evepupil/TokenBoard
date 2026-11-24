@@ -1,17 +1,36 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
-import { linkSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  appendFileSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
 import { redactUrlCredentials } from './redact-credentials.mjs'
+import { redactLocalPaths } from './redact-path.mjs'
 import { configDir, parseArgs, readConfig } from './config.mjs'
 import { parseScheduleTimes } from './schedule.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { coordinatedSync } from './coordinator.mjs'
 import { errorMessage } from './error-message.mjs'
+import { transientSyncExitCode } from './scheduled-retry.mjs'
 import { currentProcessStartIdentity, probeProcessLiveness, probeProcessStartIdentity } from './process-liveness.mjs'
+
+// The child's stdout/stderr are captured to build the failure message and the run log, so the
+// buffer needs the same headroom every other spawn in the skill gives it. Node's default is
+// 1 MiB; a diagnostic-heavy hook run (Codex session-level warnings on a large history) would
+// exceed it, kill the child with ENOBUFS, and make the same hook event fail deterministically
+// on every retry.
+const childOutputMaxBuffer = 64 * 1024 * 1024
 
 export const defaultNotifyCooldownMs = 15 * 60_000
 const minNotifyCooldownMs = 60_000
@@ -55,6 +74,12 @@ export function runNotify(options = {}) {
     nodeVersion: options.nodeVersion,
     runTasklist: options.runTasklist,
     trailingProcess: options.trailingProcess ?? hasTrailingDelay(env),
+    // The attempt number this worker inherited from the coordinator that spawned it; the
+    // coordinator caps the chain with it (see scheduleTransientRetries). `options.transientAttempts`
+    // is how runNotifyCli passes the advanced count for its own in-process continuations.
+    transientAttempts: Number.isSafeInteger(options.transientAttempts)
+      ? options.transientAttempts
+      : readTransientAttempts(env),
     scheduleTrailing:
       options.scheduleTrailing ||
       ((trigger, delayMs) => scheduleTrailingNotify(trigger, delayMs, { ...options, env, configDir: configDirectory })),
@@ -77,6 +102,7 @@ export function executeTokenBoardSync(source, options = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
       windowsHide: true,
+      maxBuffer: childOutputMaxBuffer,
       env: {
         ...(options.env || process.env),
         TOKENBOARD_COORDINATOR_LOCK_HELD: '1',
@@ -91,6 +117,14 @@ export function executeTokenBoardSync(source, options = {}) {
     const failure = formatSyncFailure(result)
     const error = new Error(failure.message)
     if (failure.diagnostics) error.diagnostics = failure.diagnostics
+    // 75 is the collector's internal "retry me later" (collector-run.lock held by a long scan).
+    // A hook never retries inline, so the sync wrapper turns it into a plain failure; without this
+    // marker the coordinator had no way to tell it from a broken provider and scheduled nothing,
+    // leaving the source queued until some later trigger happened to cover it.
+    if (result.status === transientSyncExitCode) {
+      error.exitCode = transientSyncExitCode
+      error.transient = true
+    }
     throw error
   }
   const timings = parseSyncTimings(result.stdout)
@@ -127,7 +161,7 @@ export function parseSyncTimings(stdout) {
   return Object.fromEntries(names.slice(0, maxSyncTimingPhases).map((name) => [name, timings[name]]))
 }
 
-function scheduleTrailingNotify(trigger, delayMs, options = {}) {
+export function scheduleTrailingNotify(trigger, delayMs, options = {}) {
   const runtime = trailingRuntime(options)
   const lockPath = join(runtime.stateDir, 'trailing.lock')
   const lock = acquireTrailingLock(lockPath, runtime)
@@ -149,6 +183,11 @@ function scheduleTrailingNotify(trigger, delayMs, options = {}) {
         TOKENBOARD_NOTIFY_TRAILING_DELAY_MS: String(delayMs),
         TOKENBOARD_NOTIFY_TRAILING_LOCK_PATH: lockPath,
         TOKENBOARD_NOTIFY_TRAILING_LOCK_TOKEN: lock.ownerToken,
+        // Carries the transient-retry attempt number into the worker the coordinator spawned, so
+        // the out-of-process retry chain has a length instead of pacing forever.
+        ...(Number.isSafeInteger(trigger.transientAttempts) && trigger.transientAttempts > 0
+          ? { TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS: String(trigger.transientAttempts) }
+          : {}),
         TOKENBOARD_NOTIFY_DISPATCH_LOCK_PATH: '',
         TOKENBOARD_NOTIFY_DISPATCH_LOCK_TOKEN: '',
         TOKENBOARD_NOTIFY_DISPATCH_WORKER_PATH: ''
@@ -248,6 +287,18 @@ export async function runNotifyCli(options = {}) {
   const notify = options.runNotify || runNotify
   const wait = options.waitTrailingDelay || waitTrailingDelay
   const reportError = options.error || console.error
+  // The hook handler spawns this process detached with stdio ignored, so a
+  // fatal error — a broken config, an unreadable state directory — went to a
+  // stream nobody reads and the hook simply stopped dispatching. Mirror the
+  // fatal diagnostics into the state directory; status.mjs reports the tail.
+  const stateDir = env.TOKENBOARD_STATE_DIR || readConfigDirectory()
+  const workerErrorLogPath = join(stateDir, notifyWorkerErrorLogName)
+  const reportFatalError =
+    options.reportFatalError ||
+    ((message) => {
+      reportError(message)
+      recordNotifyWorkerError(workerErrorLogPath, message)
+    })
   const runtime = options.trailingRuntime || trailingRuntime({ env })
   const claimDispatch = options.claimDispatchLock || claimDispatchLock
   const releaseDispatch = options.releaseDispatchLock || releaseDispatchLock
@@ -259,20 +310,29 @@ export async function runNotifyCli(options = {}) {
       const config = readCurrentConfig()
       const configuredDir = readConfigDirectory()
       let delayMs = trailingDelayMsFromEnvironment(env)
+      // The attempt number has to advance across this process's own continuations, not only
+      // across spawned workers. The loop below re-runs the coordinator in-process with the same
+      // `env`, so a worker that inherited attempt 1 kept computing 2 on every round and the cap
+      // in coordinator.mjs never bit. Tracked here and handed in per round.
+      let transientAttempts = readTransientAttempts(env)
       while (true) {
         await wait(delayMs)
         const result = notify({
           configDir: configuredDir,
-          stateDir: env.TOKENBOARD_STATE_DIR || configuredDir,
+          stateDir,
           env,
           configCooldownMs: config.notifyCooldownMs,
           configScheduleTimes: config.scheduleTimes,
           trailingProcess: Boolean(trailingLockPath) || delayMs > 0,
+          transientAttempts,
           version: config.updatedAt || config.createdAt || 'unknown'
         })
         if (result.error) {
           if (!result.trailingScheduled) throw new Error(result.error)
           reportError(`TokenBoard hook sync retry scheduled after error: ${result.error}`)
+        }
+        if (Number.isSafeInteger(result.transientAttempt) && result.transientAttempt > transientAttempts) {
+          transientAttempts = result.transientAttempt
         }
         const nextDelayMs = trailingContinuationDelay(result, trailingLockPath, runtime)
         if (nextDelayMs === null) break
@@ -280,25 +340,133 @@ export async function runNotifyCli(options = {}) {
       }
     }
   } catch (error) {
-    reportError(errorMessage(error))
+    reportFatalError(errorMessage(error))
     exitCode = 1
   } finally {
     try {
       releaseTrailingLock(trailingLockPath, runtime)
     } catch (cleanupError) {
-      reportError(`TokenBoard trailing lock cleanup failed: ${errorMessage(cleanupError)}`)
+      reportFatalError(`TokenBoard trailing lock cleanup failed: ${errorMessage(cleanupError)}`)
       exitCode = 1
     }
     if (dispatchClaimed) {
       try {
         releaseDispatch(dispatchLockPath, dispatchLockToken, { workerPath: dispatchWorkerPath })
       } catch (cleanupError) {
-        reportError(`TokenBoard dispatch lock cleanup failed: ${errorMessage(cleanupError)}`)
+        reportFatalError(`TokenBoard dispatch lock cleanup failed: ${errorMessage(cleanupError)}`)
         exitCode = 1
       }
     }
   }
   return exitCode
+}
+
+// notifyWorkerErrorLogName is where a detached notify worker's fatal
+// diagnostics land. It is separate from the generated hook handler's
+// notify-handler-errors.log: that file is written by the handler itself, this
+// one by the worker it spawned.
+export const notifyWorkerErrorLogName = 'notify-worker-errors.log'
+const notifyWorkerErrorLogMaxBytes = 64 * 1024
+
+// The bound is a byte budget, but `String.prototype.slice` counts UTF-16 code units: with
+// multi-byte text a `slice(-65536)` keeps up to three times the cap in bytes, and the file
+// then grows from there instead of converging. Cut on a byte offset and step back to a
+// character boundary so the retained text is still valid UTF-8 and still parses line by line.
+function trimLogToByteBudget(text, maxBytes) {
+  const buf = Buffer.from(text, 'utf8')
+  if (buf.length <= maxBytes) return text
+  let start = buf.length - maxBytes
+  // UTF-8 continuation bytes are 0b10xxxxxx; skipping them lands on the first byte of a
+  // character, so nothing is split. Bounded by at most three steps per trim.
+  while (start < buf.length && (buf[start] & 0xc0) === 0x80) start += 1
+  return buf.subarray(start).toString('utf8')
+}
+
+// recordNotifyWorkerError appends one already-redacted fatal message, bounded
+// so a repeating failure cannot grow the file without limit. Diagnostics must
+// never fail the run: the exit code already reports the failure, and a
+// logging error would replace the real message with an unrelated one.
+//
+// The append is a single `appendFileSync`, deliberately. An earlier version
+// rewrote the whole file (truncate-then-write), which could hand `status.mjs` an
+// empty file mid-write; replacing that with temp-file-plus-rename fixed the
+// reader but broke concurrent appenders instead — a second worker's entry was
+// silently dropped whenever it landed between the first worker's read and its
+// rename (reproduced: `["initial","worker-A"]`, worker-B gone). One `O_APPEND`
+// write is atomic for the common case and appends rather than replaces, so two
+// workers both land.
+//
+// The trim is the one remaining read-modify-write, and it can still lose a
+// concurrent entry that lands between its read and its write. That is accepted
+// rather than papered over: it only runs once the file is already over 64 KiB,
+// which takes hundreds of failures, and the file exists to show the *recent*
+// diagnostics (`readNotifyWorkerErrors` reports the last five). Trimming by
+// rotation would avoid the window but would leave a second file for the reader
+// and for anyone looking at the state directory.
+export function recordNotifyWorkerError(
+  logPath,
+  message,
+  { appendFile = appendFileSync, writeFile = writeFileSync, readFile = readFileSync, stat = statSync } = {}
+) {
+  try {
+    if (typeof logPath !== 'string' || !logPath) return
+    mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 })
+    // The same redaction every other output path uses: a config or endpoint
+    // error can echo `tb_upload_…` or `https://user:token@host/…`, and a file
+    // system error carries the absolute path, whose home-directory account name
+    // is not the reader's to see — this file outlives the process and is read
+    // back by status and pasted into issues.
+    const entry = `${JSON.stringify({ message: redactLocalPaths(String(message)), at: new Date().toISOString() })}\n`
+
+    // Trim only when the file has actually outgrown the bound. The check is a stat
+    // rather than a read so the common path stays one append and holds no stale
+    // snapshot that a concurrent append could be lost against.
+    let size = 0
+    try {
+      size = stat(logPath).size
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    if (size + Buffer.byteLength(entry) > notifyWorkerErrorLogMaxBytes) {
+      let existing = ''
+      try {
+        existing = readFile(logPath, 'utf8')
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+      const combined = `${existing}${entry}`
+      writeFile(logPath, trimLogToByteBudget(combined, notifyWorkerErrorLogMaxBytes), { encoding: 'utf8', mode: 0o600 })
+      return
+    }
+    appendFile(logPath, entry, { encoding: 'utf8', mode: 0o600 })
+  } catch {
+    // A state directory that cannot be written is exactly the failure being
+    // reported; the stderr line above already carries it.
+  }
+}
+
+// readNotifyWorkerErrors returns the recent fatal diagnostics for status.mjs.
+// Only the message and timestamp are exposed; the path itself is not.
+export function readNotifyWorkerErrors(stateDir, { readFile = (path) => readFileSync(path, 'utf8') } = {}) {
+  try {
+    const raw = readFile(join(stateDir, notifyWorkerErrorLogName))
+    const entries = []
+    for (const line of raw.split('\n')) {
+      if (!line.trim().startsWith('{')) continue
+      try {
+        const parsed = JSON.parse(line)
+        if (typeof parsed?.message === 'string') {
+          entries.push({ message: parsed.message, at: typeof parsed.at === 'string' ? parsed.at : null })
+        }
+      } catch {
+        // A torn line from an interrupted append is not an entry.
+      }
+    }
+    return entries.slice(-5)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
 }
 
 // Cooldown precedence: explicit (test injection) > env (hook hosts cannot set it reliably)
@@ -357,9 +525,36 @@ function parseCooldownMs(value, errorPrefix) {
   return cooldownMs
 }
 
-async function waitTrailingDelay(delayMs = trailingDelayMsFromEnvironment()) {
+// Default upper bound on one sleep inside a trailing wait. Long enough that a normal delay
+// still costs a single syscall-bounded timer, short enough that a wall-clock step or a host
+// that slept is noticed within a minute rather than never.
+const defaultTrailingWaitSliceMs = 60_000
+
+/**
+ * Waits `delayMs` against a wall-clock deadline, in slices of at most `maxSliceMs`.
+ *
+ * A single `setTimeout(delayMs)` holds no absolute deadline: its clock is suspended while the
+ * host sleeps and is not re-anchored on wake or on a wall-clock step. A worker that scheduled
+ * a two-hour trailing delay then sat for 34 minutes past its wake time on an idle event loop
+ * (0.23s CPU) — the timer simply had not fired. Slicing bounds each sleep's exposure and
+ * re-reads the clock between slices, so elapsed real time decides when the wait ends.
+ */
+export async function waitTrailingDelay(
+  delayMs = trailingDelayMsFromEnvironment(),
+  {
+    now = Date.now,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    maxSliceMs = defaultTrailingWaitSliceMs
+  } = {}
+) {
   if (!Number.isFinite(delayMs) || delayMs <= 0) return
-  await new Promise((resolve) => setTimeout(resolve, delayMs))
+  const sliceMs = Number.isFinite(maxSliceMs) && maxSliceMs > 0 ? maxSliceMs : defaultTrailingWaitSliceMs
+  const deadline = now() + delayMs
+  for (;;) {
+    const remaining = deadline - now()
+    if (remaining <= 0) return
+    await sleep(Math.min(remaining, sliceMs))
+  }
 }
 
 function hasTrailingDelay(env = process.env) {
@@ -369,6 +564,14 @@ function hasTrailingDelay(env = process.env) {
 
 function trailingDelayMsFromEnvironment(env = process.env) {
   return Number.parseInt(env.TOKENBOARD_NOTIFY_TRAILING_DELAY_MS || '', 10)
+}
+
+// How many transient retries this worker is: 0 for a hook-triggered run, N for a worker the
+// coordinator spawned to retry a busy collector lock. An unparsable value reads as 0, which is
+// the permissive direction (one more retry) rather than silently stopping the chain.
+function readTransientAttempts(env = process.env) {
+  const value = Number.parseInt(env.TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS || '', 10)
+  return Number.isSafeInteger(value) && value > 0 ? value : 0
 }
 
 function trailingContinuationDelay(result, lockPath, runtime = trailingRuntime({})) {
@@ -387,8 +590,16 @@ function trailingContinuationDelay(result, lockPath, runtime = trailingRuntime({
 // unavailability skips count as noise. The pricing prefix must cover both of the collector's
 // spellings: the fallback paths print `TokenBoard model pricing: ...` (colon) and the
 // unpriced-model summary prints `TokenBoard model pricing unavailable ...` (space).
+//
+// Every diagnostic sync.mjs emits before the collector is a caught warning, and all of them run
+// ahead of the output that actually failed the run. Without these entries the first warning takes
+// the terminal slot: on 2026-11-18 a vanished session file was reported to the operator as
+// "client version not recorded". Listing them by kind, not by message, keeps the rule honest —
+// a collector error that happens to start with "TokenBoard " still wins the slot.
 const expectedDiagnosticPrefixes = [
   /^TokenBoard model pricing[: ]/,
+  /^TokenBoard client version (?:not recorded: |\d)/,
+  /^TokenBoard (?:self-update|upgrade|binary recovery) skipped: /,
   /^Skipped \d+ /,
   /^Skipping (unavailable )?\S+ source: /
 ]
@@ -467,6 +678,8 @@ function acquireTrailingLock(lockPath, runtime) {
     runtime.ownerToken = ownerToken
     const startedAt = new Date(runtime.now()).toISOString()
     try {
+      // Mode is pinned: the lock carries the owner token, and the hook path
+      // runs from an interactive shell whose umask is normally 022.
       runtime.writeFile(
         lockPath,
         JSON.stringify({
@@ -474,7 +687,7 @@ function acquireTrailingLock(lockPath, runtime) {
           startedAt,
           token: ownerToken
         }),
-        { flag: 'wx' }
+        { flag: 'wx', mode: 0o600 }
       )
     } catch (error) {
       if (error.code !== 'EEXIST') throw error

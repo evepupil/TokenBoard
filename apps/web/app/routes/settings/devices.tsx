@@ -1203,7 +1203,17 @@ function DeviceRenameForm(props: { device: UserDevice; state: DevicesPageState }
       <input type="hidden" name="deviceId" value={props.device.id} />
       <input type="hidden" name="view" value={props.state.view} />
       <input type="hidden" name="query" value={props.state.query} />
-      <Input class="mt-0 h-11 py-2" name="name" value={props.device.name} autocomplete="off" required minLength={1} />
+      {/* The visible label is the form's surrounding context, not a <label> bound to this
+          field, so a screen reader announced a bare text box with no name. */}
+      <Input
+        class="mt-0 h-11 py-2"
+        name="name"
+        aria-label={`设备名称：${props.device.name}`}
+        value={props.device.name}
+        autocomplete="off"
+        required
+        minLength={1}
+      />
       <Button class="w-full sm:w-auto" type="submit" variant="secondary" size="sm" data-submitting-label="正在保存...">
         保存
       </Button>

@@ -85,6 +85,30 @@ func Lookup(source contract.Source) (Provider, bool) {
 	return provider, ok
 }
 
+// nativeRegistry maps a source to its native (in-process) provider used by
+// the parity harness (cmd/parity). It stays deliberately separate from
+// registry: before the S5 flip (2026-11-10) registry's providers shelled out
+// to ccusage, and a parity run that took its "native" side from registry would
+// have compared ccusage with itself. Provider packages still register the
+// native side from init(), and cmd/parity remains the one caller.
+var nativeRegistry = map[contract.Source]Provider{}
+
+// RegisterNative installs a native provider for a source, called from S2+
+// provider packages. Until a source is registered here, parity reports it as
+// "not implemented" on the native side rather than falling back to ccusage.
+func RegisterNative(source contract.Source, provider Provider) {
+	nativeRegistry[source] = provider
+}
+
+// LookupNative returns the native (in-process) provider for a source. A source
+// nothing registered yields (nil, false), so a caller comparing native against
+// ccusage must report it as "not implemented" instead of silently collecting it
+// with the ccusage-backed Lookup provider.
+func LookupNative(source contract.Source) (Provider, bool) {
+	provider, ok := nativeRegistry[source]
+	return provider, ok
+}
+
 // Unregister removes a source's provider and returns the restore function. It
 // exists so a test can exercise the "not implemented in this client yet" path:
 // every source in the contract has a provider, and a test that called the CLI
@@ -138,7 +162,14 @@ func IsOptionalSourceUnavailableIgnoringLanguageServer(
 		return strings.Contains(message, "No DeepSeek Harness sessions found") ||
 			strings.Contains(message, "This Node.js build lacks zstd support")
 	case contract.SourceAntigravityCLI, contract.SourceAntigravity, contract.SourceAntigravityIDE:
+		// A language server missing from the default install path means the
+		// Antigravity app itself is not installed, which no run can fix by
+		// retrying — so it stays "unavailable" even when the operator asked
+		// for a hard failure on every source error. The spawn-ENOENT shape
+		// stays inside the switch on purpose: it also matches a path the
+		// client mangled, which strict mode is there to surface.
 		return strings.Contains(message, "Antigravity SQLite reader unavailable") ||
+			antigravitymeta.IsLanguageServerNotInstalled(message) ||
 			(ignoreLanguageServerUnavailable &&
 				antigravitymeta.IsUnavailableLanguageServerError(errors.New(message))) ||
 			strings.Contains(message, "Antigravity conversations directory not found") ||

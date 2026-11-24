@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,8 +76,7 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		Stderr:      provReportDiagnostic(&diagnostics),
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(input SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -100,7 +100,7 @@ func TestCodexHookRerunsTheNarrowReconciliationOnceAfterAChildReaderRace(t *test
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	want := []string{"Codex child session changed; retrying hook reconciliation once"}
 	if len(diagnostics) != len(want) || diagnostics[0] != want[0] {
@@ -134,8 +134,7 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -149,7 +148,7 @@ func TestCodexHookLeavesTheParsedCursorPendingAfterASecondChildReaderRace(t *tes
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	if !provReadPendingUpload(t, stateDir, "2026/05/22/session.jsonl") {
 		t.Error("the session file must stay pending an upload")
@@ -182,8 +181,7 @@ func TestCodexHookRescansAllPendingRowsWhenARetryCrossesAUsageDate(t *testing.T)
 		CollectedAt: "2026-05-23T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(input SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -232,8 +230,7 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
 		}),
 		CorrectSubagentUsage: func(SubagentCorrectionInput) ([]contract.Snapshot, error) {
 			correctionCalls++
@@ -247,7 +244,7 @@ func TestCodexHookDoesNotRetryANonRaceCorrectionFailure(t *testing.T) {
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 2 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	if !provReadPendingUpload(t, stateDir, "2026/05/22/session.jsonl") {
 		t.Error("the session file must stay pending an upload")
@@ -304,7 +301,7 @@ func TestCodexHookRetriesAnUnboundedCollectionAfterOneChildReaderRace(t *testing
 		t.Errorf("correction calls = %d", correctionCalls)
 	}
 	if len(runner.calls) != 4 {
-		t.Errorf("runner calls = %d (%+v)", len(runner.calls), runner.calls)
+		t.Errorf("runner calls = %d (%s)", len(runner.calls), runner.calls.summary())
 	}
 	want := []string{"Codex session files changed during unbounded collection; retrying once"}
 	if len(diagnostics) != len(want) || diagnostics[0] != want[0] {
@@ -434,9 +431,8 @@ func TestCodexHookKeepsCompleteChangedDateAggregationWhileExcludingUnrelatedHist
 		CollectedAt: "2026-05-22T10:00:00.000Z",
 		Runner:      runner.run,
 		Env: provEnv(map[string]string{
-			"TOKENBOARD_HOOK_MODE":            "1",
-			"TOKENBOARD_STATE_DIR":            stateDir,
-			"TOKENBOARD_FORCE_PACKAGE_RUNNER": "1",
+			"TOKENBOARD_HOOK_MODE": "1",
+			"TOKENBOARD_STATE_DIR": stateDir,
 		}),
 	}
 	if _, err := Collect(context.Background(), options); err != nil {
@@ -488,4 +484,71 @@ func TestCodexHookKeepsCompleteChangedDateAggregationWhileExcludingUnrelatedHist
 		"codex", "daily", "--since", "20260522", "--until", "20260522"})
 	provAssertArgsContain(t, commandArgs[1], []string{
 		"codex", "session", "--since", "20260522", "--until", "20260522"})
+}
+
+// A reusable pending snapshot is dropped once ccusage reports its day, so it is
+// not summed on top of a figure that already contains it. Real Codex writes
+// `token_count` events with no `info.model`, so the parser labels the turn
+// `all`; ccusage reports the day under concrete model ids, and an exact
+// group-key match would never fire for `all`. The pending copy would then be
+// added to a day that already includes it, over-counting every hook sync.
+func TestCodexHookDoesNotAddAReusedPendingSnapshotLabelledAllOnTopOfTheSameDay(t *testing.T) {
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex")
+	stateDir := filepath.Join(root, "state")
+	fileA := filepath.Join(codexHome, "sessions", "2026", "05", "22", "a.jsonl")
+	fileB := filepath.Join(codexHome, "sessions", "2026", "05", "22", "b.jsonl")
+
+	// The first sync finds usage in A but ccusage reports nothing for the day,
+	// so the run fails closed and the cursor keeps A pending.
+	emptyDaily := provJSON(t, `{"data":[]}`)
+	daily := emptyDaily
+	runner := &provStubRunner{t: t, respond: func(call provCall) (any, error) {
+		if call.hasArg("session") {
+			return provJSON(t, `{"data":[]}`), nil
+		}
+		return daily, nil
+	}}
+	options := Options{
+		CodexHome:   provHome(codexHome),
+		StateDir:    stateDir,
+		Timezone:    "Asia/Shanghai",
+		CollectedAt: "2026-05-22T10:00:00.000Z",
+		Runner:      runner.run,
+		Env: provEnv(map[string]string{
+			"TOKENBOARD_HOOK_MODE": "1",
+		}),
+	}
+
+	provWriteJSONL(t, fileA, provHookEventWithoutModel("2026-05-22T01:00:00.000Z", 10, 5, 0.03))
+	if _, err := Collect(context.Background(), options); err == nil ||
+		!strings.Contains(err.Error(), "Codex hook reconciliation returned no snapshots for parsed usage keys") {
+		t.Fatalf("first collect err = %v", err)
+	}
+	if !provReadPendingUpload(t, stateDir, "2026/05/22/a.jsonl") {
+		t.Fatal("file A must stay pending after the failed reconciliation")
+	}
+
+	// A second file lands for the same day and ccusage now reports the whole day
+	// under the concrete model id: A's 15 plus B's 15.
+	provWriteJSONL(t, fileB, provHookEventWithoutModel("2026-05-22T02:00:00.000Z", 10, 5, 0.03))
+	daily = provJSON(t, `{"data":[{"date":"2026-05-22","model":"gpt-5",
+		"inputTokens":20,"outputTokens":10,"totalTokens":30,"costUSD":0.06}]}`)
+	options.CollectedAt = "2026-05-22T11:00:00.000Z"
+
+	snapshots, err := Collect(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only ccusage's figure, not the cached `all` copy summed on top of it.
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
+	got := provSnapshotFor(t, snapshots, "2026-05-22", "gpt-5")
+	if got.TotalTokens != 30 {
+		t.Errorf("total = %d, want 30 (the cached all copy must not be added)", got.TotalTokens)
+	}
+	if provHasSnapshot(snapshots, "2026-05-22", "all") {
+		t.Errorf("the reused pending all snapshot must not also upload: %+v", snapshots)
+	}
 }

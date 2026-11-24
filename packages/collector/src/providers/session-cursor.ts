@@ -85,7 +85,7 @@ export async function collectChangedSessionFiles(input: CollectInput) {
     files: {}
   }
   const scan = await scanSessionTree(input, current, next, scanSinceMs, maxLineBytes)
-  const missing = preserveMissingCursorEntries(current, next, scan.seen)
+  const missing = preserveMissingCursorEntries(current, next, scan.seen, scan.allRootsResolved)
   next.lastScanHighWaterMs = scan.highWaterMs
   const hasPendingUpload = Object.values(next.files).some((entry) => entry.pendingUpload)
 
@@ -131,6 +131,9 @@ async function scanSessionTree(
 ) {
   const result = emptyScanResult(current)
   const sessionDirs = input.sessionDirs?.length ? input.sessionDirs : [input.sessionsDir]
+  // A root that will not resolve leaves the tree unread rather than empty, so an entry
+  // missing from this scan proves nothing about whether its file still exists.
+  result.allRootsResolved = true
   for (const sessionsDir of sessionDirs) {
     const sessionFiles = await resolveSessionJsonlFiles(
       sessionsDir,
@@ -142,7 +145,10 @@ async function scanSessionTree(
           }
         : undefined
     )
-    if (!sessionFiles) continue
+    if (!sessionFiles) {
+      result.allRootsResolved = false
+      continue
+    }
     const resolvedInput = { ...input, sessionsDir: sessionFiles.rootDir }
     for await (const file of sessionFiles.files) {
       const logicalRelativePath = normalizeRelativePath(file)
@@ -163,7 +169,8 @@ function emptyScanResult(current: CursorState) {
     hasCursorMetadataUpdate: false,
     hasReadFailure: false,
     unreadChangedFiles: new Set<string>(),
-    reusablePendingFiles: [] as ReusablePendingSessionFile[]
+    reusablePendingFiles: [] as ReusablePendingSessionFile[],
+    allRootsResolved: false
   }
 }
 
@@ -375,7 +382,26 @@ function newCursorEntry(
   }
 }
 
-function preserveMissingCursorEntries(current: CursorState, next: CursorState, seen: Set<string>) {
+/**
+ * Carries forward the cursor entries this scan did not see.
+ *
+ * `allRootsResolved` is what makes reclaiming safe: when every configured root listed
+ * successfully, an entry the walk did not produce belongs to a file that no longer
+ * exists, and keeping it forever is how the cursor grew to 15 MB on this machine with
+ * 31% of its entries pointing at deleted files — each one copied back verbatim on every
+ * run. When a root failed to resolve, the tree was unread rather than empty, so every
+ * entry is preserved: dropping them would make the next run re-read and re-upload
+ * history the server already has.
+ *
+ * A pending entry is never reclaimed regardless: it carries snapshots that have not
+ * been uploaded yet, and the file may be the only place they can be reconstructed from.
+ */
+function preserveMissingCursorEntries(
+  current: CursorState,
+  next: CursorState,
+  seen: Set<string>,
+  allRootsResolved: boolean
+) {
   let hasCursorCleanup = false
   const missingPendingSnapshots: Array<{ relativePath: string; snapshots: CursorSnapshot[] }> = []
   const missingPendingSnapshotEntries: Array<{ relativePath: string; sha256: string; snapshots: CursorSnapshot[] }> = []
@@ -395,6 +421,10 @@ function preserveMissingCursorEntries(current: CursorState, next: CursorState, s
         sha256: entry.sha256,
         snapshots: entry.snapshots
       })
+    } else if (allRootsResolved) {
+      // The file is gone and nothing is waiting on it: let the entry go.
+      hasCursorCleanup = true
+      continue
     }
     next.files[relativePath] ??= entry
   }

@@ -179,8 +179,11 @@ func TestValidateFailClosedCases(t *testing.T) {
 			wantErr: "model",
 		},
 		{
+			// kimi joined the closed source set with the ccusage tool family,
+			// so the unknown-source fixture is a literal that can never be a
+			// real source name.
 			name:    "unknown source",
-			mutate:  func(s *Snapshot) { s.Source = Source("kimi") },
+			mutate:  func(s *Snapshot) { s.Source = Source("not-a-source") },
 			wantErr: "source",
 		},
 		{
@@ -262,7 +265,10 @@ func TestIsValidIsoDate(t *testing.T) {
 
 func TestIsValidTimezone(t *testing.T) {
 	valid := []string{"Asia/Shanghai", "UTC", "Etc/GMT+5", "America/New_York"}
-	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai "}
+	// `posixrules` is a real tzdata file that Go's loader resolves; Intl — and
+	// therefore the server's validation — has no such zone. Accepting it collects
+	// fine and then fails every upload, so it is rejected here like `local`.
+	invalid := []string{"Mars/Olympus", " Asia/Shanghai", "", "Asia/Shanghai ", "posixrules", "Local", "factory"}
 	for _, value := range valid {
 		if !IsValidTimezone(value) {
 			t.Errorf("%q should be valid", value)
@@ -378,6 +384,22 @@ func TestLengthBoundsCountUTF16Units(t *testing.T) {
 // with it — accepts offset time zone identifiers (±HH:MM, ±HHMM, hours
 // 00-23, minutes 00-59). LoadLocation has no such names, so the TS client
 // collects under "+08:00" while this one refused the run outright.
+// The cache must key on the exact input. LoadLocation is case-sensitive on a
+// case-sensitive filesystem while Intl is not, so a lowercase alias that fails
+// to load must not inherit a canonical-case hit: the result would otherwise
+// depend on which spelling happened to be validated first.
+func TestIsValidTimezoneCacheDoesNotLeakAcrossCaseVariants(t *testing.T) {
+	if !IsValidTimezone("Asia/Shanghai") {
+		t.Fatal("Asia/Shanghai should be valid")
+	}
+	timezoneMu.RLock()
+	_, leaked := timezoneValid["asia/shanghai"]
+	timezoneMu.RUnlock()
+	if leaked {
+		t.Fatal("cache entry keyed by a case variant: each spelling must be validated on its own")
+	}
+}
+
 func TestIsValidTimezoneAcceptsIntlOffsetZones(t *testing.T) {
 	valid := []string{
 		"+08:00", "-05:30", "+0800", "-0530", "+00:00", "-00:00", "+23:59", "-23:59",
@@ -411,5 +433,129 @@ func TestLoadLocationResolvesOffsetZones(t *testing.T) {
 	location, err := LoadLocation("Asia/Shanghai")
 	if err != nil || location.String() != "Asia/Shanghai" {
 		t.Errorf("LoadLocation(Asia/Shanghai) = %v, %v", location, err)
+	}
+}
+
+// usageCoreSources is the `usageSources` array from
+// packages/usage-core/src/schema.ts, in declaration order. It is copied rather
+// than generated so a change on either side has to be made deliberately; the
+// parity test below is what fails when the two drift.
+var usageCoreSources = []string{
+	"claude-code",
+	"codex",
+	"antigravity-cli",
+	"antigravity",
+	"antigravity-ide",
+	"opencode",
+	"pi",
+	"grok-build",
+	"deepseek-harness",
+	"amp",
+	"droid",
+	"codebuff",
+	"hermes",
+	"goose",
+	"kilo",
+	"copilot",
+	"gemini-cli",
+	"kimi",
+	"qwen",
+	"openclaw",
+	"zcode",
+}
+
+// The source list is a wire contract: usage-core's `usageSources` is what the
+// server accepts and what the TypeScript collector uploads. A source present
+// on one side and missing on the other does not fail loudly — the Go client
+// simply never collects it, so an `--source all` run silently under-reports.
+// The goldens cannot catch that (they cover the hash payload for one source),
+// so the parity is asserted here against the list usage-core exports.
+func TestUsageSourcesMatchUsageCore(t *testing.T) {
+	goSources := AllSources()
+	if len(goSources) != len(usageCoreSources) {
+		t.Fatalf("Go has %d sources, usage-core has %d: %v vs %v",
+			len(goSources), len(usageCoreSources), goSources, usageCoreSources)
+	}
+	for index, want := range usageCoreSources {
+		if string(goSources[index]) != want {
+			t.Errorf("source %d = %q, want %q (order is part of the contract)", index, goSources[index], want)
+		}
+	}
+	for _, source := range usageCoreSources {
+		if !IsValidSource(source) {
+			t.Errorf("IsValidSource(%q) = false", source)
+		}
+	}
+}
+
+// usageCoreCostUnavailableSources is the `costUnavailableSources` array from
+// packages/usage-core/src/schema.ts, copied for the same reason as the source
+// list: a divergence has to be deliberate, and the parity test below is what
+// fails when it is not.
+var usageCoreCostUnavailableSources = []string{
+	"antigravity-cli",
+	"antigravity",
+	"antigravity-ide",
+	"grok-build",
+	"deepseek-harness",
+}
+
+// The cost-unavailable set is a wire contract too: a source the Go client
+// thinks can report a cost, while usage-core forbids one above zero, would
+// upload a snapshot the server rejects — one rejected row fails the whole batch.
+// The table below asserts the behavior rather than the map, so it keeps working
+// if the set is ever restructured.
+func TestCostUnavailableSourcesMatchUsageCore(t *testing.T) {
+	blocked := map[string]bool{}
+	for _, source := range usageCoreCostUnavailableSources {
+		blocked[source] = true
+	}
+	for _, source := range usageCoreSources {
+		snapshot := goldenSnapshotByName(t, "base")
+		snapshot.Source = Source(source)
+		snapshot.CostUSD = 0.5
+		err := snapshot.Validate()
+		if blocked[source] {
+			if err == nil {
+				t.Errorf("%s must reject a non-zero cost", source)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s reports its own cost and must accept a non-zero one: %v", source, err)
+		}
+	}
+}
+
+// TestLoadLocationCachesResolvedZones pins the cache added for the hot date
+// formatter: the same name must return the same *time.Location, and a name that
+// fails must keep failing rather than being answered from a neighbouring hit.
+func TestLoadLocationCachesResolvedZones(t *testing.T) {
+	first, err := LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("LoadLocation(Asia/Shanghai): %v", err)
+	}
+	second, err := LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("second LoadLocation(Asia/Shanghai): %v", err)
+	}
+	if first != second {
+		t.Fatal("LoadLocation must return the cached *time.Location for a repeated name")
+	}
+	// The offset form goes through the cache too, and its label must survive.
+	offsetFirst, err := LoadLocation("+08:00")
+	if err != nil {
+		t.Fatalf("LoadLocation(+08:00): %v", err)
+	}
+	offsetSecond, err := LoadLocation("+08:00")
+	if err != nil || offsetFirst != offsetSecond {
+		t.Fatalf("offset zone not cached: %v, %v", offsetSecond, err)
+	}
+	// A rejected name is cached as an error, never as the previous hit.
+	if _, err := LoadLocation("+24:00"); err == nil {
+		t.Fatal("LoadLocation(+24:00) must fail")
+	}
+	if _, err := LoadLocation("+24:00"); err == nil {
+		t.Fatal("LoadLocation(+24:00) must keep failing on the cached path")
 	}
 }

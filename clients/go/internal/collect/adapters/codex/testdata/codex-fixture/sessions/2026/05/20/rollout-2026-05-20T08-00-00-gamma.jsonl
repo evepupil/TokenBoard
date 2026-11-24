@@ -1,0 +1,7 @@
+{"type":"session_meta","timestamp":"2026-05-20T08:00:00.000Z","payload":{"id":"gamma"}}
+{"type":"turn_context","payload":{"model":"gpt-5.1-codex"}}
+{"type":"token_usage_record","timestamp":"2026-05-20T08:01:00.000Z","payload":{"response_id":"rec-pending","usage":{"input_tokens":5,"output_tokens":2}}}
+{"type":"compacted","payload":{"compaction_response_id":"rec-pending"}}
+{"type":"compacted","payload":{"compaction_response_id":"rec-first"}}
+{"type":"token_usage_record","timestamp":"2026-05-20T08:02:00.000Z","payload":{"response_id":"rec-first","usage":{"input_tokens":7,"output_tokens":3}}}
+{"type":"token_usage_record","timestamp":"2026-05-20T08:03:00.000Z","payload":{"response_id":"rec-unmatched","usage":{"input_tokens":9,"output_tokens":4}}}

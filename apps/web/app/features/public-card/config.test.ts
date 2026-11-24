@@ -7,6 +7,35 @@ import {
 } from './config'
 
 describe('public card config', () => {
+  test('defaults the updated-at note to off', () => {
+    expect(defaultPublicCardConfig.showUpdatedAt).toBe(false)
+    expect(parsePublicCardConfig(null).showUpdatedAt).toBe(false)
+    // Stored configs written before the option existed must not inherit it on.
+    expect(parsePublicCardConfig(JSON.stringify({ language: 'en' })).showUpdatedAt).toBe(false)
+  })
+
+  test('reads the updated-at checkbox from the settings form', () => {
+    const form = {
+      cardLanguage: 'zh',
+      cardTheme: 'dark',
+      cardLayout: 'balanced',
+      cardTitle: '',
+      cardSubtitle: '',
+      cardShowPublicUrl: 'on',
+      cardGlowEnabled: 'on',
+      cardGlowIntensity: '0.28',
+      cardGlowPosition: 'top-right',
+      cardMetric1: 'totalTokens'
+    }
+    expect(parsePublicCardConfigForm(form)?.showUpdatedAt).toBe(false)
+    expect(parsePublicCardConfigForm({ ...form, cardShowUpdatedAt: 'on' })?.showUpdatedAt).toBe(true)
+    expect(stringifyPublicCardConfig({ ...defaultPublicCardConfig, showUpdatedAt: true })).toContain(
+      '"showUpdatedAt":true'
+    )
+  })
+})
+
+describe('public card config', () => {
   test('uses default config for empty stored values', () => {
     expect(parsePublicCardConfig(null)).toEqual(defaultPublicCardConfig)
     expect(parsePublicCardConfig('')).toEqual(defaultPublicCardConfig)
@@ -82,6 +111,7 @@ describe('public card config', () => {
       title: 'Usage',
       subtitle: 'Latest stats',
       showPublicUrl: true,
+      showUpdatedAt: false,
       glow: {
         enabled: true,
         intensity: 0.5,

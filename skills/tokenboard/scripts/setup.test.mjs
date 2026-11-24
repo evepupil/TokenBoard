@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -79,6 +79,40 @@ test('setup activates an existing server profile without pairing again', () => {
     assert.equal(config.endpoint, 'https://prod.example.com/api/v1/ingest')
     assert.equal(config.uploadToken, 'prod-token')
     assert.equal(config.servers['https://private.example.com'].uploadToken, 'private-token')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('setup refuses a plain-http base URL before any credential is sent', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tokenboard-setup-insecure-base-'))
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL('./setup.mjs', import.meta.url)),
+        '--base-url',
+        'http://tokenboard.example.com',
+        '--pairing-code',
+        'tb_pair_probe',
+        '--skip-collector',
+        '--skip-schedule',
+        '--skip-initial-sync',
+        '--skip-hook'
+      ],
+      {
+        encoding: 'utf8',
+        env: { TOKENBOARD_CONFIG_DIR: directory }
+      }
+    )
+
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /must use https/)
+    // A refused flag is an operator mistake, not a crash: the message must be
+    // the script's own one-liner, not an uncaught exception with a stack trace.
+    assert.doesNotMatch(result.stderr, /^\s+at /m, 'no stack trace expected')
+    // Nothing was written: the refusal happens before pairing.
+    assert.equal(existsSync(join(directory, 'config.json')), false, 'no config expected')
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

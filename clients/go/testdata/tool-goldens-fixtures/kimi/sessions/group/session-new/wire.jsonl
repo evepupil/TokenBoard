@@ -1,0 +1,2 @@
+{"type":"usage.record","usageScope":"turn","time":1777856400000,"model":"kimi-k2.5","usage":{"inputOther":1000,"output":200,"inputCacheCreation":50,"inputCacheRead":300}}
+{"type":"usage.record","usageScope":"session","time":1777856500000,"model":"kimi-k2.5","usage":{"inputOther":9999,"output":9999}}

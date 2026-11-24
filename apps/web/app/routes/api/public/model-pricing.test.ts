@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ApiError } from '../../../lib/errors'
 import { getModelPricing } from '../../../features/model-pricing/service'
+import { readRateLimitPolicies } from '../../../lib/rate-limit'
 import { GET } from './model-pricing'
 
 vi.mock('../../../features/model-pricing/service', () => ({
@@ -8,12 +9,24 @@ vi.mock('../../../features/model-pricing/service', () => ({
   maxModelPricingPageSize: 1_000
 }))
 
+// The route charges the per-IP ceiling before it reads the catalogue. These tests use a bare
+// `{ DB: {} }` stub to keep the parsing and response assertions independent of D1, so the
+// ceiling is replaced here; the pass-through of a 429 is covered separately below.
+const { mockedEnforceRateLimit } = vi.hoisted(() => ({ mockedEnforceRateLimit: vi.fn() }))
+
+vi.mock('../../../lib/rate-limit', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/rate-limit')>()
+  return { ...actual, enforceRateLimit: mockedEnforceRateLimit }
+})
+
 const mockedGetModelPricing = vi.mocked(getModelPricing)
 const originalCaches = globalThis.caches
 
 describe('public model pricing route', () => {
   beforeEach(() => {
     mockedGetModelPricing.mockReset()
+    mockedEnforceRateLimit.mockReset()
+    mockedEnforceRateLimit.mockResolvedValue({ count: 1, resetAt: '2099-01-01T00:00:00.000Z' })
   })
 
   afterEach(() => {
@@ -330,6 +343,38 @@ describe('public model pricing route', () => {
     expect(response.status).toBe(429)
     expect(response.headers.get('Retry-After')).toBe('30')
   })
+
+  // Hono percent-decodes the path before matching, so an encoded spelling of this path reaches
+  // this route after the entrypoint's exact-string comparison let it through. The ceiling has to
+  // exist here too, and it has to run before the catalogue is read — a rejected request must not
+  // reach D1 at all.
+  test('charges the public pricing ceiling before reading the catalogue', async () => {
+    mockedGetModelPricing.mockResolvedValue({ state: null, models: [], nextCursor: null })
+    const url = 'https://tokenboard.example/%61pi/public/model-pricing?limit=2'
+    const request = new Request(url)
+    const context = createContext(url, request)
+    const response = (await GET[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(200)
+    expect(mockedEnforceRateLimit).toHaveBeenCalledTimes(1)
+    expect(mockedEnforceRateLimit.mock.calls[0][1].policy).toEqual(readRateLimitPolicies.publicModelPricingRead)
+    expect(mockedEnforceRateLimit.mock.calls[0][1].subject).toEqual({ kind: 'ip', value: 'unknown' })
+    expect(mockedEnforceRateLimit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedGetModelPricing.mock.invocationCallOrder[0]
+    )
+  })
+
+  test('answers the ceiling rejection without reading the catalogue', async () => {
+    mockedEnforceRateLimit.mockRejectedValue(
+      new ApiError('RATE_LIMITED', 'Too many requests', 429, { 'Retry-After': '30' })
+    )
+    const url = 'https://tokenboard.example/api/public/model-pricing'
+    const response = (await GET[0](createContext(url, new Request(url)) as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('Retry-After')).toBe('30')
+    expect(mockedGetModelPricing).not.toHaveBeenCalled()
+  })
 })
 
 function createContext(url: string, request: Request) {
@@ -341,6 +386,10 @@ function createContext(url: string, request: Request) {
       query: (name: string) => new URL(url).searchParams.get(name)
     },
     header: vi.fn(),
-    json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    // `jsonError` passes the error's headers as the third argument (that is how a 429 keeps its
+    // `Retry-After`), so the stub has to forward them or an assertion on them tests nothing.
+    json: vi.fn((body: unknown, status = 200, headers?: Record<string, string>) =>
+      Response.json(body, { status, headers })
+    )
   }
 }

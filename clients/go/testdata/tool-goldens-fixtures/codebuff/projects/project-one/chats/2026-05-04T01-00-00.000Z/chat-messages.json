@@ -1,0 +1,6 @@
+[
+  {"role": "user", "text": "hello"},
+  {"id": "cb-msg-1", "role": "assistant", "timestamp": "2026-05-04T01:00:05.000Z", "credits": 1.25,
+   "metadata": {"model": "claude-sonnet-4-5",
+                "usage": {"inputTokens": 1000, "outputTokens": 500, "cacheCreationInputTokens": 100, "cacheReadInputTokens": 200}}}
+]

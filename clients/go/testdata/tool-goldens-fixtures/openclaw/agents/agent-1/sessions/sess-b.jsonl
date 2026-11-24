@@ -1,0 +1,2 @@
+{"type":"custom","customType":"model-snapshot","data":{"modelId":"gpt-5","provider":"openai"}}
+{"type":"message","id":"m2","message":{"role":"assistant","timestamp":"2026-05-05T01:00:00.000Z","usage":{"input":2000,"output":300}}}

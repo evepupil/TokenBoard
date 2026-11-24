@@ -188,6 +188,9 @@ func CollectChangedSessionFiles(input ScanInput) (*ScanResult, error) {
 	if len(sessionDirs) == 0 {
 		sessionDirs = []string{input.SessionsDir}
 	}
+	// A root that will not resolve leaves the tree unread rather than empty, so an entry
+	// missing from this scan proves nothing about whether its file still exists.
+	allRootsResolved := true
 	for _, sessionsDir := range sessionDirs {
 		options := sessionwalk.Options{}
 		if input.Source == contract.SourceCodex {
@@ -200,6 +203,7 @@ func CollectChangedSessionFiles(input ScanInput) (*ScanResult, error) {
 			return nil, err
 		}
 		if !ok {
+			allRootsResolved = false
 			continue
 		}
 		for _, file := range files.Paths {
@@ -212,7 +216,7 @@ func CollectChangedSessionFiles(input ScanInput) (*ScanResult, error) {
 			}
 		}
 	}
-	missing := preserveMissingCursorEntries(current, next, scanState.seen)
+	missing := preserveMissingCursorEntries(current, next, scanState.seen, allRootsResolved)
 	result.MissingPendingSnapshots = missing.missingPendingSnapshots
 	result.MissingPendingSnapshotEntries = missing.missingPendingSnapshotEntries
 	result.HasCursorCleanup = missing.hasCursorCleanup
@@ -468,7 +472,19 @@ type missingEntries struct {
 	missingPendingSnapshotEntries []PendingSnapshotEntry
 }
 
-func preserveMissingCursorEntries(current, next State, seen map[string]bool) missingEntries {
+// preserveMissingCursorEntries carries forward the entries this scan did not see.
+//
+// allRootsResolved is what makes reclaiming safe: when every configured root listed
+// successfully, an entry the walk did not produce belongs to a file that no longer
+// exists, and keeping it forever is how a cursor grows without bound — one machine
+// reached 15 MB with 31% of its entries pointing at deleted files, each copied back
+// verbatim on every run. When a root failed to resolve the tree was unread rather than
+// empty, so every entry is preserved: dropping them would make the next run re-read and
+// re-upload history the server already has.
+//
+// A pending entry is never reclaimed regardless: it carries snapshots that have not been
+// uploaded yet, and the file may be the only place they can be reconstructed from.
+func preserveMissingCursorEntries(current, next State, seen map[string]bool, allRootsResolved bool) missingEntries {
 	result := missingEntries{}
 	for _, relativePath := range sortedEntryKeys(current.Files) {
 		entry := current.Files[relativePath]
@@ -489,6 +505,10 @@ func preserveMissingCursorEntries(current, next State, seen map[string]bool) mis
 				SHA256:       entry.SHA256,
 				Snapshots:    entry.Snapshots,
 			})
+		} else if allRootsResolved {
+			// The file is gone and nothing is waiting on it: let the entry go.
+			result.hasCursorCleanup = true
+			continue
 		}
 		if _, ok := next.Files[relativePath]; !ok {
 			next.Files[relativePath] = entry

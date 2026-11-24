@@ -20,22 +20,37 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { isMainModule } from './is-main.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
-import { configDir, readConfig } from './config.mjs'
+import { configDir, parseArgs, readConfig } from './config.mjs'
 import { errorMessage } from './error-message.mjs'
 import { readSince } from './sync-options.mjs'
+import { redactUrlCredentials } from './redact-credentials.mjs'
+import { usageSources } from './usage-sources.mjs'
 
 // The sources `tokenboard shadow` can compare with data on a normal machine.
 // The two Antigravity GUI sources need a language server and are outside the
-// dual run for the same reason they are outside CI.
-export const dualRunSources = [
-  'claude-code',
-  'codex',
-  'grok-build',
-  'deepseek-harness',
-  'opencode',
-  'pi',
-  'antigravity-cli'
-]
+// dual run for the same reason they are outside CI. Everything else is derived
+// from the shared source set, so a source added there joins the comparison
+// instead of being quietly left out — the tool family was omitted that way
+// until the twelve tools were ported.
+//
+// Comparing a tool source is still worth the spawn when the tool is not
+// installed: both sides report empty, and a wrong tool name would fail the Go
+// source instead of looking like an uninstalled tool.
+const dualRunExcludedSources = new Set(['antigravity', 'antigravity-ide'])
+export const dualRunSources = usageSources.filter((source) => !dualRunExcludedSources.has(source))
+
+// validateDualRunFlags checks the flags that only two sources can honor. It
+// returns the diagnostic to print, or null when the invocation is valid.
+export function validateDualRunFlags({ source, until, hook }) {
+  if (typeof source !== 'string') return null
+  if (until && !hook && !untilSources.has(source)) {
+    return `--until is only supported for ${[...untilSources].join(' and ')}; ${source} has no date window`
+  }
+  if (hook && !untilSources.has(source)) {
+    return `--hook is only supported for ${[...untilSources].join(' and ')}; ${source} has no hook path`
+  }
+  return null
+}
 
 // defaultDualRunSince is sync's own default window, so a dual run compares
 // the dataset production collects rather than the collector's "everything"
@@ -45,14 +60,10 @@ export function defaultDualRunSince({ config = {}, env = {}, now = new Date() } 
   return readSince({ env, config, now })
 }
 
-// Sources whose collector shells out to ccusage. A comparison of these is only
-// meaningful when both sides run the same ccusage binary, so the harness pins
-// it the way CI does.
-const ccusageSources = new Set(['claude-code', 'codex'])
-
-// `--until` is only accepted for the two ccusage-backed sources; passing it to
-// any other one is a usage error on both clients, not a silently ignored flag.
-const untilSources = ccusageSources
+// `--until` is accepted only for the two sources with a date window. The tool
+// family takes no window on either side, so passing the flag there is a usage
+// error rather than a silently ignored one.
+const untilSources = new Set(['claude-code', 'codex'])
 
 export const usage = `Usage: shadow-dual-run.mjs [--client PATH] [--since YYYYMMDD] [--until YYYY-MM-DD] [--hook] [--log PATH] [--source NAME]
 
@@ -89,13 +100,6 @@ export function readDualRunConfig({ env = process.env, config = {}, homeDir = ho
     binary,
     collectorDir: config.collectorDir || env.TOKENBOARD_COLLECTOR_DIR || join(root, 'TokenBoard'),
     timezone: config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    // The ccusage copy a shipping install already has. Pinning it is what
-    // makes a claude-code or codex comparison apples to apples: both sides
-    // run this file rather than each resolving one their own way.
-    ccusageBin: firstExisting([
-      join(root, 'bin', process.platform === 'win32' ? 'ccusage.exe' : 'ccusage'),
-      join(root, 'TokenBoard', 'packages', 'collector', 'node_modules', '.bin', 'ccusage')
-    ]),
     logPath: dualRunLogPath({ env }),
     // The configured symlinked Codex roots, exactly as sync injects them: a
     // machine whose archived_sessions is a symlink refuses the scan without
@@ -103,13 +107,6 @@ export function readDualRunConfig({ env = process.env, config = {}, homeDir = ho
     codexSymlinkRoots: Array.isArray(config.codexSymlinkRoots) ? config.codexSymlinkRoots : undefined,
     homeDir
   }
-}
-
-function firstExisting(candidates) {
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate
-  }
-  return undefined
 }
 
 // buildShadowInvocation assembles one `tokenboard shadow` call. The
@@ -128,7 +125,7 @@ function firstExisting(candidates) {
 //
 // `--hook` wins over `--until`: both clients reject --until in hook mode
 // (the hook window comes from the changed cursor dates, not a flag), and
-// silently passing the pair would fail every ccusage source. The trade is
+// silently passing the pair would fail that source. The trade is
 // accepted — hook mode cannot exclude the actively-written current day, so
 // same-day rows carry the known live-write race and same-instant cost deltas.
 export function buildShadowInvocation({ config, source, since, until, hook = false, env = process.env }) {
@@ -142,9 +139,6 @@ export function buildShadowInvocation({ config, source, since, until, hook = fal
   }
   if (since) childEnv.TOKENBOARD_SINCE = since
   if (passUntil) childEnv.TOKENBOARD_UNTIL = until
-  if (config.ccusageBin && ccusageSources.has(source)) {
-    childEnv.TOKENBOARD_CCUSAGE_BIN = config.ccusageBin
-  }
   if (config.codexSymlinkRoots?.length) {
     childEnv.TOKENBOARD_CODEX_SYMLINK_ROOTS_JSON = JSON.stringify(config.codexSymlinkRoots)
   }
@@ -164,6 +158,9 @@ export function buildShadowInvocation({ config, source, since, until, hook = fal
 // difference exits 1 with a JSON report. Returning "not-installed" instead of
 // "diff" is what keeps a machine without Grok Build from logging a daily
 // false alarm.
+//
+// A collector lock timeout arrives as exit 75 (deferred) from a current
+// client and as 1 from an older one; both are classified from the message.
 export function classifyShadowRun({ source, status, stdout, stderr }) {
   const report = parseReport(stdout)
   const record = {
@@ -203,6 +200,20 @@ export function classifyShadowRun({ source, status, stdout, stderr }) {
       ...(report.onlyInGo ?? []),
       ...(report.differing ?? []).map((d) => d.key)
     ].slice(0, 20)
+    // The keys say where a difference is; the field names say what it is. A
+    // costUsd-only row is the documented pricing-basis split, while a token
+    // field is not, and without this list every diff in the log costs a full
+    // re-run to classify. Rows that exist on one side only carry no fields,
+    // so their absence must leave the list unset rather than empty.
+    const fieldNames = new Set()
+    for (const row of report.differing ?? []) {
+      for (const field of row?.fields ?? []) {
+        if (field?.field) fieldNames.add(field.field)
+      }
+    }
+    if (fieldNames.size > 0) {
+      record.fields = [...fieldNames].sort().slice(0, 12)
+    }
     return record
   }
   const message = String(stderr ?? '').trim()
@@ -212,11 +223,17 @@ export function classifyShadowRun({ source, status, stdout, stderr }) {
   }
   record.status = 'error'
   record.exitCode = status
-  record.message = lastLine(message)
+  // The message lands in the log and is echoed to the terminal by `--summary`. The Go client
+  // redacts its own output, but this harness is the point where both clients' stderr converges,
+  // and it must not depend on either side having done it — a provider error can echo
+  // `tb_upload_…` or `https://user:token@host/…`.
+  record.message = redactUrlCredentials(lastLine(message))
   // A run that could not take the collector lock was racing a sync on this
   // machine. The comparison is meaningless in that state — the async side may
   // be rewriting cursors while both scans read — and calling it a failure
-  // would train the operator to ignore the log.
+  // would train the operator to ignore the log. A current client defers on it
+  // (exit 75), so the status cannot key on the code alone; the message is
+  // what both clients print, whichever code accompanies it.
   if (/collector lock timed out|TokenBoard collector lock timed out/i.test(message)) {
     record.status = 'busy'
   }
@@ -343,27 +360,10 @@ export function readRecentRecords(logPath, limit = 50) {
   return records.slice(-limit)
 }
 
-function parseRunArgs(argv) {
-  const flags = {}
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index]
-    if (!arg.startsWith('--')) continue
-    const key = arg.slice(2)
-    const next = argv[index + 1]
-    if (next === undefined || next.startsWith('--')) {
-      flags[key] = true
-      continue
-    }
-    flags[key] = next
-    index += 1
-  }
-  return flags
-}
-
 function run() {
   const argv = process.argv.slice(2)
   if (printHelpIfRequested(argv, usage)) return 0
-  const flags = parseRunArgs(argv)
+  const flags = parseArgs(argv)
   const stored = readConfig()
   const config = readDualRunConfig({ config: stored })
   const logPath = typeof flags.log === 'string' ? flags.log : config.logPath
@@ -415,11 +415,37 @@ function run() {
     return 1
   }
   const sources = typeof flags.source === 'string' ? [flags.source] : dualRunSources
-  const since = typeof flags.since === 'string' ? flags.since : defaultDualRunSince({ config: stored })
+  const since =
+    typeof flags.since === 'string' ? flags.since : defaultDualRunSince({ config: stored, env: process.env })
   const until = typeof flags.until === 'string' ? flags.until : undefined
   const hook = flags.hook === true
 
+  // `--until` narrows a comparison to settled days, and only claude-code and codex accept
+  // it. Silently dropping it for the others would let an operator believe the window was
+  // narrowed when the comparison actually ran unbounded — the harness would then report a diff
+  // the caller thought it had excluded. A named source that cannot honor the flag is a usage
+  // error, the same contract both clients enforce.
+  //
+  // `--hook` narrows the comparison to the incremental path, which only the two hook-installed
+  // sources have. A named source without one used to fall back to a preview silently, so the
+  // operator read a full-scan comparison as evidence for the path production actually runs.
+  const flagError = validateDualRunFlags({ source: flags.source, until, hook })
+  if (flagError) {
+    console.error(flagError)
+    return 1
+  }
+
   const records = []
+  if (hook && typeof flags.source !== 'string') {
+    const skipped = dualRunSources.filter((source) => !untilSources.has(source))
+    console.log(`note: --hook applies only to ${[...untilSources].join(' and ')}; ${skipped.join(', ')} run a preview`)
+  }
+  if (until && !hook && typeof flags.source !== 'string') {
+    const skipped = dualRunSources.filter((source) => !untilSources.has(source))
+    console.log(
+      `note: --until applies only to ${[...untilSources].join(' and ')}; it is ignored for ${skipped.join(', ')}`
+    )
+  }
   for (const source of sources) {
     const invocation = buildShadowInvocation({ config, source, since, until, hook })
     const result = spawnSync(invocation.command, invocation.args, {
@@ -433,6 +459,10 @@ function run() {
       stdout: result.stdout,
       stderr: result.stderr ?? errorMessage(result.error)
     })
+    // Which code path this record covers. Without it a log mixing hook and
+    // preview runs cannot say whether the incremental path — the one
+    // production actually executes — was ever compared.
+    record.mode = hook && untilSources.has(source) ? 'hook' : 'preview'
     records.push(record)
     const detail =
       record.status === 'match' || record.status === 'empty' ? `${record.snapshots} snapshots` : (record.message ?? '')

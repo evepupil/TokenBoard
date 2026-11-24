@@ -11,8 +11,10 @@
 package release
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,9 +26,9 @@ import (
 )
 
 // DefaultRepo is the GitHub repository the client updates from. It is the
-// fork: that is where the releases are cut, and a check that cannot reach it
-// must not silently fall back to someone else's repository.
-const DefaultRepo = "MisonL/TokenBoard"
+// upstream repository: that is where the releases are cut, and a check that
+// cannot reach it must not silently fall back to someone else's repository.
+const DefaultRepo = "evepupil/TokenBoard"
 
 // DefaultBaseURL is github.com. Tests point it at a local server.
 const DefaultBaseURL = "https://github.com"
@@ -177,11 +179,34 @@ func (o Options) platform() (string, error) {
 	return platform, nil
 }
 
+// Timeouts are split by what the call has to move. `http.Client.Timeout`
+// covers the whole request — connect, redirects and body — so one value cannot
+// serve both ends of this package: a release lookup is a few hundred bytes of
+// headers and should fail fast, while a tarball is several megabytes and needs
+// room for a slow link. Sharing one value meant either a lookup that hangs for
+// the download budget or a download that fails on a link the lookup survived.
+const (
+	// downloadTimeout bounds one asset transfer.
+	downloadTimeout = 2 * time.Minute
+	// retryBudget bounds the retries a caller may make for one asset. The
+	// attempt count is small on purpose: the caller is a scheduled job that runs
+	// again later, and a machine behind a dead proxy should not spend minutes
+	// of its sync on this.
+	maxDownloadAttempts = 3
+)
+
+// lookupTimeout bounds one `/releases/latest` hop chain. Go's
+// http.Client.Timeout restarts for each client.Do, so latestTag carries a
+// deadline across its hops by hand; otherwise a chain of slow redirects
+// multiplies this budget. A var rather than a const so a test can compress it
+// and observe the shared deadline without waiting fifteen real seconds.
+var lookupTimeout = 15 * time.Second
+
 func (o Options) client() *http.Client {
 	if o.HTTPClient != nil {
 		return o.HTTPClient
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{Timeout: lookupTimeout}
 }
 
 // Resolve returns the release tag and the download URLs of its platform
@@ -231,8 +256,16 @@ func latestTag(options Options, repo string) (string, error) {
 		return http.ErrUseLastResponse
 	}
 	current := fmt.Sprintf("%s/%s/releases/latest", options.baseURL(), repo)
+	origin, err := url.Parse(current)
+	if err != nil {
+		return "", fmt.Errorf("TokenBoard release lookup URL is invalid: %w", err)
+	}
+	// One budget for the whole chain: http.Client.Timeout restarts on every
+	// client.Do, so a chain of slow redirects would otherwise multiply it.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(lookupTimeout))
+	defer cancel()
 	for hop := 0; hop <= maxRedirects; hop++ {
-		request, err := http.NewRequest(http.MethodGet, current, nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, current, nil)
 		if err != nil {
 			return "", err
 		}
@@ -244,7 +277,7 @@ func latestTag(options Options, repo string) (string, error) {
 		switch {
 		case response.StatusCode == http.StatusNotFound:
 			return "", fmt.Errorf("TokenBoard release lookup returned HTTP 404 for %s", repo)
-		case response.StatusCode >= 300 && response.StatusCode < 400:
+		case isFollowedRedirect(response.StatusCode):
 			location := response.Header.Get("Location")
 			if location == "" {
 				return "", fmt.Errorf("TokenBoard release lookup returned HTTP %d without a Location", response.StatusCode)
@@ -257,7 +290,16 @@ func latestTag(options Options, repo string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			current = currentURL.ResolveReference(resolved).String()
+			next := currentURL.ResolveReference(resolved)
+			// The lookup is the earlier request, but it carries no credential
+			// and the answer it wants is a tag page on the release host. A hop
+			// to anywhere else would put the download URLs' provenance in the
+			// hands of a server the release page never named — the asset hop
+			// already refuses this (Download's CheckRedirect).
+			if !sameRedirectHost(origin, next) {
+				return "", fmt.Errorf("TokenBoard release lookup redirected to %s, which is not the release host", next.Host)
+			}
+			current = next.String()
 			continue
 		case response.StatusCode == http.StatusOK:
 			return tagFromURL(current)
@@ -266,6 +308,18 @@ func latestTag(options Options, repo string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("TokenBoard release lookup redirected more than %d times", maxRedirects)
+}
+
+// isFollowedRedirect lists exactly the statuses net/http follows. Treating any
+// 3xx with a Location as a redirect would walk a 304 (a cache answer) to a
+// place the server never meant, and the TS client refuses the same ones.
+func isFollowedRedirect(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
 }
 
 // tagFromURL pulls the tag out of a `/releases/tag/<tag>` page URL.
@@ -290,25 +344,147 @@ func tagFromURL(pageURL string) (string, error) {
 	return decoded, nil
 }
 
+// releaseRedirectHosts are the hosts a GitHub release download may land on: the
+// origin itself and the asset CDN GitHub redirects to.
+//
+// The comparison keeps the port: hostname alone would treat two servers on the
+// same address (a proxy, a test server, a local mirror) as the same host. It
+// also refuses an https -> http hop: the checksums travel over the same
+// redirect, so a downgrade lets one intermediary replace both the binary and
+// the file that vouches for it. An http release base URL (a local mirror) may
+// still upgrade to https; only the reverse is forbidden.
+func sameRedirectHost(origin, target *url.URL) bool {
+	if origin.Scheme == "https" && target.Scheme != "https" {
+		return false
+	}
+	if strings.EqualFold(origin.Host, target.Host) {
+		return true
+	}
+	// The CDN is matched by hostname so an explicit :443 (or none) both work.
+	for _, allowed := range []string{"objects.githubusercontent.com", "release-assets.githubusercontent.com"} {
+		if strings.EqualFold(target.Hostname(), allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 // Download fetches an asset's bytes.
+//
+// Redirects are followed only to the same host. `latestTag` already refuses to
+// cross hosts when resolving the tag; letting the asset download follow an
+// arbitrary chain would reopen the hole it closes — and this is the hop that
+// carries the tarball and the checksums, which cannot vouch for each other if
+// both arrive from a host the release page never named. GitHub's asset redirect
+// is same-host (`github.com` → `objects.githubusercontent.com` is reached via
+// the tag-derived `releases/download` URL, which answers 302 to the CDN), so the
+// rule is: same host for the first hop, and the CDN host GitHub names, nothing
+// else.
 func Download(client *http.Client, asset Asset) ([]byte, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: downloadTimeout}
 	}
-	response, err := client.Get(asset.URL)
+	var lastErr error
+	for attempt := 1; attempt <= maxDownloadAttempts; attempt++ {
+		data, err := downloadOnce(client, asset)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if !isTransient(err) {
+			return nil, err
+		}
+		if attempt < maxDownloadAttempts {
+			time.Sleep(retryDelay(attempt))
+		}
+	}
+	return nil, fmt.Errorf("%w (after %d attempts)", lastErr, maxDownloadAttempts)
+}
+
+// retryDelay backs off between attempts. It stays short: the caller is a
+// scheduled job that will run again, so waiting longer spends the sync window
+// without improving the odds.
+func retryDelay(attempt int) time.Duration {
+	return time.Duration(attempt) * 2 * time.Second
+}
+
+// isRetryableStatus reports whether a non-200 status is worth another attempt.
+// 501 (not implemented) and 505 (HTTP version not supported) are permanent:
+// the server will answer the same way however many times it is asked.
+func isRetryableStatus(code int) bool {
+	if code == http.StatusTooManyRequests {
+		return true
+	}
+	return code >= 500 && code != http.StatusNotImplemented && code != http.StatusHTTPVersionNotSupported
+}
+
+// isTransient reports whether retrying the same request could plausibly
+// succeed. A dropped connection or a truncated body is a link problem; a 4xx
+// is the release not existing, and 501/505 mean the server will not answer
+// this request however many times it is asked.
+func isTransient(err error) bool {
+	var permanentErr *permanentDownloadError
+	if errors.As(err, &permanentErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		// The download budget ran out: another attempt has the same budget.
+		return false
+	}
+	return true
+}
+
+// permanentDownloadError marks a failure a retry cannot fix.
+type permanentDownloadError struct{ err error }
+
+func (e *permanentDownloadError) Error() string { return e.err.Error() }
+func (e *permanentDownloadError) Unwrap() error { return e.err }
+
+func downloadOnce(client *http.Client, asset Asset) ([]byte, error) {
+	origin, err := url.Parse(asset.URL)
+	if err != nil {
+		return nil, err
+	}
+	bounded := *client
+	previous := client.CheckRedirect
+	bounded.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		// via holds the requests already made, so its length is the redirect
+		// number this call is deciding: refusing at `> maxRedirects` follows
+		// exactly maxRedirects hops, matching latestTag's loop.
+		if len(via) > maxRedirects {
+			return &permanentDownloadError{err: fmt.Errorf("download %s redirected more than %d times", asset.Name, maxRedirects)}
+		}
+		if !sameRedirectHost(origin, request.URL) {
+			return &permanentDownloadError{err: fmt.Errorf("download %s redirected to %s, which is not the release host", asset.Name, request.URL.Host)}
+		}
+		if previous != nil {
+			return previous(request, via)
+		}
+		return nil
+	}
+	response, err := bounded.Get(asset.URL)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
+		err := fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
+		// A retry only helps when the server is saying "not now": 429 (rate
+		// limited) and 5xx except 501 and 505, which mean it will never answer
+		// this request. Everything else is the request itself being wrong.
+		if isRetryableStatus(response.StatusCode) {
+			return nil, err
+		}
+		return nil, &permanentDownloadError{err: err}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxDownloadBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > maxDownloadBytes {
-		return nil, fmt.Errorf("download %s exceeds %d bytes", asset.Name, maxDownloadBytes)
+		// The bound is the same on every attempt; a server sending more is not
+		// a link problem.
+		return nil, &permanentDownloadError{err: fmt.Errorf("download %s exceeds %d bytes", asset.Name, maxDownloadBytes)}
 	}
 	return data, nil
 }

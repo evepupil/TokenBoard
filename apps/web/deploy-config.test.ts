@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -161,6 +162,26 @@ describe('Wrangler deploy config', () => {
     expect(routeCheckScript).toContain('Cloudflare zone preflight')
     expect(routeCheckScript).toContain('oauth_token')
     expect(routeCheckScript).toContain('CLOUDFLARE_API_TOKEN')
+  })
+
+  // A declined "About to apply N migration(s)" prompt makes `migrations apply` exit 0 with
+  // nothing applied, and a pure-data migration leaves every schema gate green — so the deploy
+  // would publish a Worker against an unmigrated database. The re-list after apply is what
+  // closes that gap, and it must sit between the apply and the Worker publish.
+  test('manual production deploy re-lists migrations after applying and before publishing', () => {
+    const deployScript = readPackageFile('scripts/deploy.mjs')
+    // Whitespace-normalized: the listing call is a multi-line argument array, and the assertion
+    // is about which command runs and where, not how the line breaks.
+    const compactScript = deployScript.replace(/\s+/g, ' ')
+    const applyIndex = deployScript.indexOf("'d1', 'migrations', 'apply', 'DB', '--remote', '--config', configPath")
+    const verifyIndex = deployScript.indexOf('assertNoPendingMigrations(configPath)')
+    const publishIndex = deployScript.indexOf("runPnpm(['exec', 'wrangler', 'deploy', '--config', configPath])")
+
+    expect(applyIndex).toBeGreaterThan(-1)
+    expect(verifyIndex).toBeGreaterThan(applyIndex)
+    expect(publishIndex).toBeGreaterThan(verifyIndex)
+    expect(compactScript).toContain("'d1', 'migrations', 'list', 'DB', '--remote', '--config', configPath")
+    expect(deployScript).toContain('No migrations to apply')
   })
 
   test('critical production schema check covers device identity and legacy upload tokens', () => {
@@ -453,7 +474,8 @@ describe('Wrangler deploy config', () => {
 
   // The ordering test above anchors the foreign-key check relative to migrations and the live
   // deploy, but all the gates share one array literal: reordering inside it, or dropping
-  // `verify-critical-schema.sql` / `verify-rate-limit-index.sql` / `verify-retention-index.sql`
+  // `verify-critical-schema.sql` / `verify-rate-limit-index.sql` / `verify-retention-index.sql` /
+  // `verify-public-card-index.sql`
   // from it, moves no anchor and would leave that test green. Pin the array itself, in order, so
   // the deploy loop cannot drift from the gate set the rest of this file asserts the contents of.
   test('deploy runs every schema gate in the documented order', () => {
@@ -462,6 +484,7 @@ describe('Wrangler deploy config', () => {
       'db/verify-critical-schema.sql',
       'db/verify-rate-limit-index.sql',
       'db/verify-retention-index.sql',
+      'db/verify-public-card-index.sql',
       'db/verify-foreign-keys.sql'
     ]
     const positions = gates.map((gate) => deployScript.indexOf(`'${gate}'`))
@@ -517,6 +540,60 @@ describe('Wrangler deploy config', () => {
       rmSync(tempDir, { recursive: true, force: true })
     }
   }, 30_000)
+
+  // 0039's index is `CREATE INDEX IF NOT EXISTS`, so a same-name index over the wrong columns
+  // applies silently — SQLite skips it without comparing definitions and no gate noticed. This
+  // runs the real migrations, then proves both halves of the check: a missing index and a
+  // wrong-column index under the right name must fail, and the migrated index must pass.
+  test('the public-card index check accepts migrated data and rejects a wrong index', () => {
+    const schemaCheck = readPackageFile('db/verify-public-card-index.sql')
+    const migrationsDir = resolve(packageDir, 'db/migrations')
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-public-card-index-gate-'))
+    const dbPath = join(tempDir, 'public-card.db')
+
+    try {
+      for (const migration of readdirSync(migrationsDir)
+        .filter((name) => name.endsWith('.sql'))
+        .sort()) {
+        runSqlite(dbPath, readFileSync(join(migrationsDir, migration), 'utf8'))
+      }
+
+      const check = runSqlite(dbPath, schemaCheck, false)
+      expect(check.status).toBe(0)
+      expect(check.stderr).toBe('')
+
+      runSqlite(dbPath, 'DROP INDEX daily_usage_summary_user_updated_idx;')
+      const afterDrop = runSqlite(dbPath, schemaCheck, false)
+      expect(afterDrop.status).not.toBe(0)
+
+      // The name alone is not the contract: the rightmost column must be updated_at, or the
+      // MAX(updated_at) seek degrades back to a range scan.
+      runSqlite(
+        dbPath,
+        'CREATE INDEX daily_usage_summary_user_updated_idx ON daily_usage_summary(user_id, usage_date);'
+      )
+      const afterWrongColumns = runSqlite(dbPath, schemaCheck, false)
+      expect(afterWrongColumns.status).not.toBe(0)
+
+      runSqlite(
+        dbPath,
+        'DROP INDEX daily_usage_summary_user_updated_idx; CREATE INDEX daily_usage_summary_user_updated_idx ON daily_usage_summary(user_id, updated_at);'
+      )
+      const afterRestore = runSqlite(dbPath, schemaCheck, false)
+      expect(afterRestore.status).toBe(0)
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 30_000)
+
+  // The migration is hand-written and `drizzle-kit generate` is banned (AGENTS.md), so the
+  // Drizzle declaration can drift from the SQL without either side failing. Pin the name and
+  // columns in the schema so deleting the declaration is caught here.
+  test('the schema declares the public-card index from 0039', () => {
+    const schema = readDrizzleSchema()
+
+    expect(schema).toContain("index('daily_usage_summary_user_updated_idx').on(table.userId, table.updatedAt)")
+  })
 
   // The retention indexes from 0036 were built the same way the rate-limit index was, and
   // suffered the same gap: nothing in the deploy gate knew they existed, so `DROP INDEX` on
@@ -915,7 +992,8 @@ describe('Wrangler deploy config', () => {
     try {
       for (const [name, message] of [
         ['BETTER_AUTH_SECRET', 'vars.BETTER_AUTH_SECRET'],
-        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY']
+        ['WEBHOOK_ENCRYPTION_KEY', 'vars.WEBHOOK_ENCRYPTION_KEY'],
+        ['GITHUB_CLIENT_SECRET', 'vars.GITHUB_CLIENT_SECRET']
       ]) {
         const outputFile = join(tempDir, `wrangler.production.${name}.jsonc`)
         const content = filledProductionExample().replace(
@@ -963,7 +1041,17 @@ describe('Wrangler deploy config', () => {
         resolve(packageDir, 'wrangler.production.example.jsonc'),
         join(tempDir, 'wrangler.production.example.jsonc')
       )
-      writeFileSync(pnpmStub, 'process.exit(0)\n')
+      // The deploy re-lists migrations after applying them and treats an unreadable listing as
+      // pending (fail-closed), so the stub has to answer the `migrations list` call with the
+      // same clean-state line wrangler prints; every other command still exits 0 silently.
+      writeFileSync(
+        pnpmStub,
+        [
+          'const argv = process.argv.slice(2)',
+          "if (argv.includes('migrations') && argv.includes('list')) console.log('✅ No migrations to apply!')",
+          'process.exit(0)'
+        ].join('\n') + '\n'
+      )
 
       const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
         cwd: tempDir,
@@ -1006,6 +1094,59 @@ describe('Wrangler deploy config', () => {
       expect(generated).toContain('"TOKENBOARD_MODEL_PRICING_SYNC_INTERVAL_HOURS": "12"')
       expect(generated).toContain('"database_id": "11111111-1111-4111-8111-111111111111"')
       expect(result.stderr).toBe('')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  // pnpm's standalone install sets `npm_execpath` to an executable binary, not a JS file.
+  // Wrapping that in `node` dies on its first byte, which is what a real deploy hit. The
+  // distinction has to be by file type, so this stub is a shell script: an executable that
+  // Node cannot parse.
+  test('deploy spawns an executable npm_execpath directly instead of feeding it to Node', () => {
+    if (process.platform === 'win32') return
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-pnpm-bin-'))
+    const scriptDir = join(tempDir, 'scripts')
+
+    try {
+      mkdirSync(scriptDir)
+      copyFileSync(resolve(packageDir, 'scripts/deploy.mjs'), join(scriptDir, 'deploy.mjs'))
+      copyFileSync(
+        resolve(packageDir, 'scripts/write-production-config.mjs'),
+        join(scriptDir, 'write-production-config.mjs')
+      )
+      copyFileSync(
+        resolve(packageDir, 'wrangler.production.example.jsonc'),
+        join(tempDir, 'wrangler.production.example.jsonc')
+      )
+      writeFileSync(join(scriptDir, 'check-production-config.mjs'), 'process.exit(0)\n')
+      writeFileSync(join(scriptDir, 'check-production-route.mjs'), 'process.exit(0)\n')
+
+      const shellStub = join(tempDir, 'pnpm-executable')
+      writeFileSync(
+        shellStub,
+        ['#!/bin/sh', 'case "$*" in *"migrations list"*) echo "✅ No migrations to apply!" ;; esac', 'exit 0', ''].join(
+          '\n'
+        )
+      )
+      chmodSync(shellStub, 0o755)
+
+      const result = spawnSync(process.execPath, ['scripts/deploy.mjs'], {
+        cwd: tempDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TOKENBOARD_PNPM_CLI: shellStub,
+          TOKENBOARD_WORKER_ROUTE: 'tokenboard.example.com',
+          BETTER_AUTH_URL: 'https://tokenboard.example.com',
+          TOKENBOARD_COLLECTOR_REPO_URL: 'https://github.com/MisonL/TokenBoard.git',
+          TOKENBOARD_COLLECTOR_REF: 'master',
+          D1_DATABASE_ID: '11111111-1111-4111-8111-111111111111'
+        }
+      })
+
+      expect(result.status, result.stderr || result.stdout).toBe(0)
+      expect(result.stderr).not.toContain('SyntaxError')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
@@ -1324,13 +1465,84 @@ describe('Wrangler deploy config', () => {
 
       expect(result.status).toBe(1)
       expect(result.stderr).toContain('BETTER_AUTH_URL')
-      expect(result.stderr).toContain('routes[0].pattern')
+      expect(result.stderr).toContain('custom domain route')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
   })
 
-  test('production config checker rejects wildcard routes that wrangler custom domains do not accept', () => {
+  test('production config checker rejects a config whose D1 binding is not DB', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-d1-binding-renamed-'))
+    const outputFile = join(tempDir, 'wrangler.production.renamed-binding.jsonc')
+
+    try {
+      // The Worker and `wrangler d1 migrations` address the DB binding by name; a config
+      // that renames it fails later in the deploy with wrangler's own lookup error. The
+      // checker must not paper over that by validating whatever database happens to be first.
+      const content = filledProductionExample().replace('"binding": "DB"', '"binding": "PRIMARY"')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('bound as DB')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker validates the same custom domain route the deploy preflights', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-route-order-'))
+    const outputFile = join(tempDir, 'wrangler.production.route-order.jsonc')
+
+    try {
+      // check-production-route.mjs and wrangler both use the enabled custom domain, not the
+      // first array entry. With a zone route first, `routes[0]` validated one host while the
+      // OAuth origin check compared against the other.
+      const content = filledProductionExample().replace(
+        '"routes": [',
+        '"routes": [\n    {\n      "pattern": "tokenboard.example.com/*",\n      "zone_name": "example.com"\n    },'
+      )
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(0)
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker rejects a config with no enabled custom domain route', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-no-custom-domain-'))
+    const outputFile = join(tempDir, 'wrangler.production.no-custom-domain.jsonc')
+
+    try {
+      const content = filledProductionExample().replace('"custom_domain": true', '"custom_domain": false')
+      writeFileSync(outputFile, content)
+
+      const result = spawnSync(process.execPath, [resolve(packageDir, 'scripts/check-production-config.mjs')], {
+        cwd: packageDir,
+        encoding: 'utf8',
+        env: { ...process.env, TOKENBOARD_WRANGLER_CONFIG: outputFile }
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('custom domain route')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test('production config checker rejects a wildcard route that wrangler custom domains do not accept', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tokenboard-wildcard-route-'))
     const outputFile = join(tempDir, 'wrangler.production.wildcard.jsonc')
 

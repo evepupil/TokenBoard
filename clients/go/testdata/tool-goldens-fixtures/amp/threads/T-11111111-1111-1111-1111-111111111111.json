@@ -1,0 +1,9 @@
+{
+  "id": "thread-amp-1",
+  "messages": [
+    {"role": "user", "timestamp": "2026-05-04T01:00:00.000Z"},
+    {"role": "assistant", "timestamp": "2026-05-04T01:00:05.000Z", "model": "claude-opus-4-5",
+     "usage": {"inputTokens": 1000, "outputTokens": 500, "cacheCreationInputTokens": 100,
+               "cacheReadInputTokens": 200, "totalTokens": 1800, "timestamp": "2026-05-04T01:00:05.000Z"}}
+  ]
+}

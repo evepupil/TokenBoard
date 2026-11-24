@@ -1,13 +1,18 @@
 package release
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The latest release is found by following one redirect, not by calling the
@@ -15,11 +20,11 @@ import (
 // must not depend on an anonymous quota.
 func TestResolveFollowsTheReleasesLatestRedirect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/MisonL/TokenBoard/releases/latest" {
-			http.Redirect(w, r, "/MisonL/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
+		if r.URL.Path == "/evepupil/TokenBoard/releases/latest" {
+			http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
 			return
 		}
-		if r.URL.Path == "/MisonL/TokenBoard/releases/tag/v1.2.3" {
+		if r.URL.Path == "/evepupil/TokenBoard/releases/tag/v1.2.3" {
 			_, _ = w.Write([]byte("tag page"))
 			return
 		}
@@ -45,11 +50,64 @@ func TestResolveFollowsTheReleasesLatestRedirect(t *testing.T) {
 	}
 }
 
+// Only the statuses net/http follows are redirects. A 304 carrying a Location
+// is a cache answer, and walking it would take the lookup somewhere the server
+// never meant; the TS client refuses the same statuses.
+func TestLatestTagRefusesANonRedirect3xx(t *testing.T) {
+	for _, status := range []int{http.StatusMultipleChoices, http.StatusNotModified, http.StatusUseProxy} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "/evepupil/TokenBoard/releases/tag/v9.9.9")
+			w.WriteHeader(status)
+		}))
+		_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+		server.Close()
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("HTTP %d", status)) {
+			t.Errorf("status %d: err = %v, want it reported as an HTTP %d answer", status, err, status)
+		}
+	}
+}
+
+// The lookup follows the release host and the asset CDN, never anywhere else:
+// a tag page served from an unnamed host would supply the download URLs the
+// rest of the install trusts. The TS client pins the same hosts.
+func TestLatestTagRefusesARedirectToAnotherHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example/evepupil/TokenBoard/releases/tag/v9.9.9", http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	if err == nil || !strings.Contains(err.Error(), "is not the release host") {
+		t.Fatalf("err = %v, want a cross-host refusal", err)
+	}
+}
+
+// A relative Location keeps its meaning: it resolves against the hop that
+// answered, so a same-host chain still resolves normally.
+func TestLatestTagFollowsARelativeRedirectWithinTheHost(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/evepupil/TokenBoard/releases/latest" {
+			http.Redirect(w, r, "/evepupil/TokenBoard/releases/tag/v1.2.3", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("tag page"))
+	}))
+	defer server.Close()
+
+	tag, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	if err != nil {
+		t.Fatalf("latestTag: %v", err)
+	}
+	if tag != "v1.2.3" {
+		t.Errorf("tag = %q, want v1.2.3", tag)
+	}
+}
+
 // A chain longer than one hop is a loop, not a release: it is refused instead
 // of followed.
 func TestResolveRefusesARedirectLoop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/MisonL/TokenBoard/releases/latest", http.StatusFound)
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/latest", http.StatusFound)
 	}))
 	defer server.Close()
 
@@ -179,5 +237,245 @@ func TestRepoValidation(t *testing.T) {
 		if _, err := Repo(value); err == nil {
 			t.Errorf("Repo(%q) accepted", value)
 		}
+	}
+}
+
+// An https -> http hop is refused even when the host never changes: the
+// checksums travel over the same redirect, so one intermediary on the
+// downgraded link could replace both the tarball and the file that vouches for
+// it. An http -> https upgrade stays allowed (a local mirror configured over
+// plain HTTP). sameRedirectHost is called directly because the httptest
+// servers in this file all speak plain HTTP; reaching for real TLS would test
+// the transport, not the rule.
+func TestDownloadRedirectRefusesHTTPSDowngrade(t *testing.T) {
+	origin := &url.URL{Scheme: "https", Host: "github.com"}
+	sameHostOverHTTP := &url.URL{Scheme: "http", Host: "github.com"}
+	if sameRedirectHost(origin, sameHostOverHTTP) {
+		t.Fatal("sameRedirectHost accepted an https -> http downgrade on the same host")
+	}
+	sameHostOverHTTPS := &url.URL{Scheme: "https", Host: "github.com"}
+	if !sameRedirectHost(origin, sameHostOverHTTPS) {
+		t.Fatal("sameRedirectHost refused an https -> https hop")
+	}
+	mirror := &url.URL{Scheme: "http", Host: "tokens.internal:8080"}
+	upgrade := &url.URL{Scheme: "https", Host: "tokens.internal:8080"}
+	if !sameRedirectHost(mirror, upgrade) {
+		t.Fatal("sameRedirectHost refused an http -> https upgrade")
+	}
+}
+
+// The tag lookup refuses to cross hosts, and the asset download carries the
+// tarball and the checksums — the two things that vouch for each other. A
+// cross-host redirect there would let a host the release page never named
+// supply both, so it is refused the same way.
+func TestDownloadRefusesACrossHostRedirect(t *testing.T) {
+	var foreignHits int
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		foreignHits++
+		_, _ = w.Write([]byte("evil"))
+	}))
+	defer foreign.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, foreign.URL+"/payload", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	_, err := Download(nil, Asset{Name: "checksums.txt", URL: origin.URL + "/checksums.txt"})
+	if err == nil || !strings.Contains(err.Error(), "not the release host") {
+		t.Fatalf("err = %v, want a cross-host refusal", err)
+	}
+	if foreignHits != 0 {
+		t.Fatalf("the foreign host was contacted %d times", foreignHits)
+	}
+}
+
+// A chain of exactly maxRedirects hops is still followed: the bound counts
+// redirects, so refusing one hop early would make the documented budget a lie.
+func TestDownloadFollowsExactlyTheRedirectBudget(t *testing.T) {
+	hops := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hops < maxRedirects {
+			hops++
+			http.Redirect(w, r, fmt.Sprintf("/hop/%d", hops), http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("abc123  tokenboard_darwin_arm64.tar.gz\n"))
+	}))
+	defer server.Close()
+
+	data, err := Download(nil, Asset{Name: "checksums.txt", URL: server.URL + "/checksums.txt"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if !strings.Contains(string(data), "abc123") {
+		t.Fatalf("data = %q", data)
+	}
+	if hops != maxRedirects {
+		t.Errorf("hops = %d, want %d", hops, maxRedirects)
+	}
+}
+
+// A same-host redirect (the release page naming its own asset path) still works.
+func TestDownloadFollowsASameHostRedirect(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/checksums.txt" {
+			http.Redirect(w, r, "/actual-checksums.txt", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("abc123  tokenboard_darwin_arm64.tar.gz\n"))
+	}))
+	defer server.Close()
+
+	data, err := Download(nil, Asset{Name: "checksums.txt", URL: server.URL + "/checksums.txt"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if !strings.Contains(string(data), "abc123") {
+		t.Fatalf("data = %q", data)
+	}
+}
+
+// A link that drops the transfer once is not a reason to leave the machine a
+// release behind until the next scheduled run: the retry is bounded, and it
+// re-downloads the whole asset rather than resuming, because a partially read
+// body cannot be trusted for a checksum.
+func TestDownloadRetriesATransientFailure(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Content-Length", "1000")
+			_, _ = w.Write([]byte("short"))
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte("complete"))
+	}))
+	defer server.Close()
+
+	data, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if string(data) != "complete" {
+		t.Errorf("data = %q, want the complete body from the retry", data)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2 (one failure, one retry)", attempts)
+	}
+}
+
+// A 404 is not transient: retrying it would only delay the failure the
+// operator needs to see.
+func TestDownloadDoesNotRetryAPermanentFailure(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	if _, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"}); err == nil {
+		t.Fatal("a 404 must fail")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1: a 404 must not be retried", attempts)
+	}
+}
+
+// Retries stop: a dead proxy must not hold the caller forever. The bound is
+// what the scheduled sync relies on to finish its own run.
+func TestDownloadStopsAfterTheRetryBudget(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "boom", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	if _, err := Download(server.Client(), Asset{Name: "asset.tar.gz", URL: server.URL + "/asset.tar.gz"}); err == nil {
+		t.Fatal("a persistently failing server must fail")
+	}
+	if attempts != maxDownloadAttempts {
+		t.Errorf("attempts = %d, want the budget of %d", attempts, maxDownloadAttempts)
+	}
+}
+
+// The retry policy is "not now" versus "never". A 429 and a 5xx are worth
+// another attempt; 501 and 505 are not — the server will answer the same way.
+func TestDownloadRetryPolicyByStatus(t *testing.T) {
+	cases := []struct {
+		status    int
+		attempts  int
+		retryable bool
+	}{
+		{http.StatusTooManyRequests, maxDownloadAttempts, true},
+		{http.StatusInternalServerError, maxDownloadAttempts, true},
+		{http.StatusServiceUnavailable, maxDownloadAttempts, true},
+		{http.StatusNotImplemented, 1, false},
+		{http.StatusHTTPVersionNotSupported, 1, false},
+		{http.StatusForbidden, 1, false},
+	}
+	for _, testCase := range cases {
+		t.Run(http.StatusText(testCase.status), func(t *testing.T) {
+			var attempts int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				attempts++
+				http.Error(w, "x", testCase.status)
+			}))
+			defer server.Close()
+
+			if _, err := Download(server.Client(), Asset{Name: "a.tar.gz", URL: server.URL + "/a.tar.gz"}); err == nil {
+				t.Fatal("a non-200 must fail")
+			}
+			if attempts != testCase.attempts {
+				t.Errorf("attempts = %d, want %d", attempts, testCase.attempts)
+			}
+		})
+	}
+}
+
+// http.Client.Timeout restarts for every client.Do, so a chain of slow
+// redirects used to multiply the lookup budget by the hop count while holding
+// the sync lock. The budget is now carried across hops; this test compresses
+// it so the difference is measurable instead of waiting fifteen real seconds.
+func TestLatestTagSpendsOneBudgetAcrossItsHops(t *testing.T) {
+	const budget = 700 * time.Millisecond
+	const hopDelay = 300 * time.Millisecond
+	original := lookupTimeout
+	lookupTimeout = budget
+	t.Cleanup(func() { lookupTimeout = original })
+
+	// The server sleeps before answering, so a hop that starts with less than
+	// hopDelay left on the chain budget cannot be answered in time. Under a
+	// per-request budget every hop would get the full amount.
+	var responded atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(hopDelay)
+		responded.Add(1)
+		http.Redirect(w, r, "/evepupil/TokenBoard/releases/latest?next=1", http.StatusFound)
+	}))
+	defer server.Close()
+
+	started := time.Now()
+	_, err := latestTag(Options{Platform: "darwin", Arch: "arm64", BaseURL: server.URL}, "evepupil/TokenBoard")
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("a chain that never ends must fail")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the chain deadline to end it", err)
+	}
+	// A per-request budget answers all six hops; one shared budget allows two
+	// and cuts the third off mid-wait.
+	if got := responded.Load(); got > 2 {
+		t.Fatalf("%d hops were answered in %s under a %s budget", got, elapsed, budget)
 	}
 }

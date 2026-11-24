@@ -56,13 +56,23 @@ func guiSnapshot(source contract.Source) contract.Snapshot {
 // all-source run cannot read the developer machine's real sessions. Claude
 // Code has no local directory to point at — its provider shells out to
 // ccusage, which may probe PATH or download — so it is stubbed out instead.
-func emptyProviderHomes(t *testing.T) map[string]string {
+// stubCcusageBackedSources replaces every source whose scan belongs to
+// ccusage. Those providers have no local directory to point at, so leaving one
+// unstubbed runs a real scan over the machine's own stores — and the tool
+// family now includes widely used tools (amp, kimi, zcode) a developer machine
+// can genuinely have data for.
+func stubCcusageBackedSources(t *testing.T) {
 	t.Helper()
-	// The two ccusage-backed sources have no local directory to point at, and
-	// leaving them unstubbed would run a real scan over the machine's own
-	// sessions.
 	stubSource(t, contract.SourceClaudeCode, stubProvider{})
 	stubSource(t, contract.SourceCodex, stubProvider{})
+	for _, source := range contract.CcusageToolSources() {
+		stubSource(t, source, stubProvider{})
+	}
+}
+
+func emptyProviderHomes(t *testing.T) map[string]string {
+	t.Helper()
+	stubCcusageBackedSources(t)
 	return map[string]string{
 		"TOKENBOARD_TIMEZONE":     "UTC",
 		"TOKENBOARD_GROK_HOME":    t.TempDir(),
@@ -126,6 +136,31 @@ func TestPreviewConcreteSourcePartialFailureNeverPrintsTheRawMessage(t *testing.
 	}
 	if !strings.Contains(stderr, "Antigravity collection: source=antigravity status=failed category=") {
 		t.Fatalf("stderr = %q, want the diagnostic line", stderr)
+	}
+}
+
+func TestConcreteSourceFailureRedactsTheAccountDirectory(t *testing.T) {
+	// Every stderr line in the CLI passes through the redactor, not just the
+	// Antigravity categories: a provider error quotes the file it could not
+	// read, and the scheduled log must not name the machine's account.
+	// filepath.Join turns the prefix into backslashes on Windows; the redactor
+	// keeps whichever separator the path arrived with, so the assertions below
+	// only pin the account segment and the names below it.
+	path := filepath.Join("/Users/someone", "secret", "session.jsonl")
+	stubSource(t, contract.SourcePi, stubProvider{err: errors.New("Unable to read " + path)})
+
+	code, _, stderr := run(t, map[string]string{"TOKENBOARD_TIMEZONE": "UTC"},
+		"preview", "--source", "pi")
+	if code != ExitFailure {
+		t.Fatalf("code = %d, want failure", code)
+	}
+	if strings.Contains(stderr, "someone") {
+		t.Fatalf("stderr = %q, want the account name redacted", stderr)
+	}
+	for _, kept := range []string{"<redacted>", "secret", "session.jsonl"} {
+		if !strings.Contains(stderr, kept) {
+			t.Fatalf("stderr = %q, want %q kept for debugging", stderr, kept)
+		}
 	}
 }
 
@@ -202,6 +237,31 @@ func TestPreviewAllSourceSkipsAnUnavailableLanguageServerByDefault(t *testing.T)
 	}
 	if strings.Contains(stderr, "One or more sources failed") {
 		t.Fatalf("stderr = %q, want no failure report", stderr)
+	}
+}
+
+func TestPreviewAllSourceSkipsAnUninstalledAntigravityAppEvenUnderStrictMode(t *testing.T) {
+	// With the Antigravity app removed and its conversation history still on
+	// disk, the provider reports "not installed" rather than a spawn ENOENT —
+	// no retry installs an app, so the strict switch must not turn it into a
+	// failure. A spawn ENOENT stays a strict failure: that shape is also what a
+	// mangled spawn path produces (see the "path contains spaces" case).
+	env := emptyProviderHomes(t)
+	env["TOKENBOARD_FAIL_ON_SOURCE_ERROR"] = "1"
+	stubSource(t, contract.SourceAntigravity, stubProvider{
+		err: errors.New(
+			"Antigravity language server is not installed at /Applications/Antigravity.app/Contents/Resources/bin/language_server"),
+	})
+
+	code, _, stderr := run(t, env, "preview")
+	if code != ExitOK {
+		t.Fatalf("code = %d, want success; stderr=%q", code, stderr)
+	}
+	if strings.Contains(stderr, "One or more sources failed") {
+		t.Fatalf("stderr = %q, want no failure report", stderr)
+	}
+	if !strings.Contains(stderr, "status=unavailable category=language-server-unavailable") {
+		t.Fatalf("stderr = %q, want the unavailable diagnostic", stderr)
 	}
 }
 

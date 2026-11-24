@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -20,6 +21,13 @@ import { isWithinScheduleWindow } from './schedule.mjs'
 
 const defaultLockTimeoutMs = 60_000
 const defaultLockTimeoutRetryDelayMs = 60_000
+// A transient failure is retried out of process, and each retry is itself a hook-style run that
+// can fail the same way. A collector lock held by a long scan (a full claude scan runs 20-68s on
+// a large history) is released before the first retry lands, so one retry is the normal case;
+// this cap is for the pathological one — a live process that keeps the lock for far longer — so
+// the chain stops instead of pacing a failing sync every ~95s forever. The sources stay in the
+// signal queue and the scheduled sync covers them.
+const defaultMaxTransientRetries = 3
 const defaultMaxFollowUps = 0
 const defaultMaxRunLogs = 1_024
 
@@ -159,7 +167,7 @@ function runCoordinator(trigger, runtime, result) {
     }
     completedResult = completed
     writeSuccessfulSyncCheckpoint(completed, runtime)
-    return scheduleDeferredFollowUps(trigger, runtime, completed)
+    return scheduleTransientRetries(trigger, runtime, scheduleDeferredFollowUps(trigger, runtime, completed))
   } catch (error) {
     coordinatorError =
       completedResult && !(error instanceof SuccessfulSyncCheckpointError)
@@ -280,6 +288,12 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
   let hadFollowUp = false
   let error
   let deferredSources = []
+  // Sources whose sync ended in a transient state (the collector could not take
+  // `collector-run.lock` inside its window). They are failures for this run — nothing was
+  // collected — but they are retryable, so the source also goes here and the caller schedules a
+  // trailing retry instead of waiting for the next unrelated trigger to cover it. A provider that
+  // genuinely failed never lands here: re-running it would fail identically and chain retries.
+  const transientSources = new Set()
   const failedSources = new Set()
   let sources = initialSources.length > 0 ? initialSources : [trigger.source]
 
@@ -295,12 +309,16 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
           result: syncResult
         })
         failedSources.delete(source)
+        transientSources.delete(source)
       } catch (cause) {
         error ||= errorMessage(cause)
         failedSources.add(source)
+        const transient = cause?.transient === true
+        if (transient) transientSources.add(source)
         cycles.push({
           source,
           error: errorMessage(cause),
+          ...(transient ? { transient: true } : {}),
           ...(cause?.diagnostics ? { diagnostics: cause.diagnostics } : {})
         })
       }
@@ -323,12 +341,14 @@ function runLockedCycles(trigger, runtime, initialSources, lockToken) {
 
   restoreFailedSources(trigger, runtime, failedSources)
 
+  const transient = [...transientSources]
   return {
     hadFollowUp,
     followUpCount,
     skippedSync: false,
     cycles,
     ...(deferredSources.length > 0 ? { deferredSources } : {}),
+    ...(transient.length > 0 ? { transientSources: transient } : {}),
     ...(error ? { error } : {})
   }
 }
@@ -395,6 +415,8 @@ function buildRuntime(options = {}) {
     scheduleWindow: options.scheduleWindow,
     lockTimeoutMs: numberOrDefault(options.lockTimeoutMs, defaultLockTimeoutMs),
     maxFollowUps: numberOrDefault(options.maxFollowUps, defaultMaxFollowUps),
+    transientAttempts: numberOrDefault(options.transientAttempts, 0),
+    maxTransientRetries: numberOrDefault(options.maxTransientRetries, defaultMaxTransientRetries),
     maxRunLogs: positiveIntegerOrDefault(options.maxRunLogs, defaultMaxRunLogs),
     trailingProcess: options.trailingProcess === true,
     version: options.version || 'unknown',
@@ -423,6 +445,7 @@ function buildRuntime(options = {}) {
     mkdir: options.mkdir || mkdirSync,
     chmod: options.chmod || (hasCustomFileOps ? undefined : chmodSync),
     lstat: options.lstat || (hasCustomFileOps ? undefined : lstatSync),
+    stat: options.stat || (hasCustomFileOps ? undefined : statSync),
     readFile: options.readFile || ((path) => readFileSync(path, 'utf8')),
     writeFile: options.writeFile || writeFileSync,
     readdir: options.readdir || (hasCustomFileOps ? undefined : readdirSync),
@@ -574,6 +597,41 @@ function scheduleDeferredFollowUps(trigger, runtime, result) {
   }
 }
 
+// A transient cycle failure is retried outside this run: the hook loop cannot wait 35s for a lock
+// it just lost, and a full retry inside the hook would blow its window. The delay is the same one
+// the coordinator-lock timeout uses, because the cause is the same — the collector was busy.
+//
+// This runs even though the run is recorded as failed, deliberately: the failure is real (nothing
+// was collected), but it is also retryable, and the scheduling decision is independent of the
+// status the run reports. Scheduled after `scheduleDeferredFollowUps` so a successful run's own
+// deferral bookkeeping is not overwritten.
+function scheduleTransientRetries(trigger, runtime, result) {
+  if (!result.transientSources?.length) return result
+  const attempt = numberOrDefault(runtime.transientAttempts, 0) + 1
+  if (attempt > numberOrDefault(runtime.maxTransientRetries, defaultMaxTransientRetries)) {
+    // Out of attempts: report it as such rather than scheduling another link in the chain. The
+    // sources are already back in the signal queue (restoreFailedSources), so the next trigger
+    // — the scheduled sync at the latest — still covers them.
+    return { ...result, transientRetriesExhausted: true, transientSources: result.transientSources }
+  }
+  const delayMs = lockTimeoutRetryDelayMs(runtime)
+  // The attempt number rides on the trigger to the spawned worker (`scheduleTrailingNotify`
+  // turns it into TOKENBOARD_NOTIFY_TRANSIENT_ATTEMPTS), which is what gives the chain a length.
+  const trailingScheduled = scheduleTrailingSources(
+    { ...trigger, transientAttempts: attempt },
+    result.transientSources,
+    runtime,
+    delayMs
+  )
+  return {
+    ...result,
+    trailingScheduled: result.trailingScheduled === true || trailingScheduled,
+    ...(trailingScheduled && result.trailingDelayMs === undefined ? { trailingDelayMs: delayMs } : {}),
+    trailingSources: [...(result.trailingSources || []), ...result.transientSources],
+    transientAttempt: attempt
+  }
+}
+
 // Written atomically — to a temp file, then renamed into place — so a process that dies
 // mid-write cannot leave a truncated or empty checkpoint behind. This is defence in depth
 // rather than the only thing preventing a stuck coordinator: the reader tolerates a damaged
@@ -698,7 +756,11 @@ function pruneRunLogs(runsDir, runtime) {
 }
 
 function deriveStatus(result) {
-  if (result.error) return 'error'
+  // A lock timeout is contention, not failure: the trigger was deferred (and a
+  // retry scheduled), so the run record is "skipped" even though the reason
+  // travels in `error`. Counting it as an error made one long sync's own
+  // contention look like a burst of failed runs in status.mjs.
+  if (result.error) return result.skippedSync && result.skippedReason === 'lock-timeout' ? 'skipped' : 'error'
   if (result.skippedSync) return 'skipped'
   const hasCycleError = result.cycles.some((cycle) => cycle && cycle.error)
   return hasCycleError ? 'error' : 'success'

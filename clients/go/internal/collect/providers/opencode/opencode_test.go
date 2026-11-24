@@ -172,6 +172,26 @@ func TestSkipsRowsWithoutUsableTokenMetadata(t *testing.T) {
 	}
 }
 
+func TestSkipsTimestampsOutsideTheJSDateRange(t *testing.T) {
+	// TS built a Date from createdMs, and `new Date(x)` is invalid past
+	// ±8.64e15 ms; those rows were skipped. Here int64(createdMs) would wrap
+	// into a plausible-looking date, so the range must be checked first.
+	var skipped []string
+	snapshots := mustCollect(t, []map[string]any{
+		dbRow(map[string]any{"createdMs": 9.5e15}),
+		dbRow(map[string]any{"createdMs": 1e30}),
+	}, func(o *Options) {
+		o.Stderr = func(line string) { skipped = append(skipped, line) }
+	})
+
+	if len(snapshots) != 0 {
+		t.Errorf("snapshots = %+v, want none", snapshots)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "Skipped 2 OpenCode message rows") {
+		t.Errorf("skipped = %v", skipped)
+	}
+}
+
 func TestFallsBackToPlaceholderModelAndBoundsLongIds(t *testing.T) {
 	missing := mustCollect(t, []map[string]any{dbRow(map[string]any{"model": nil})}, nil)
 	if missing[0].Model != "unknown" {
@@ -407,5 +427,24 @@ func seedDatabase(t *testing.T, realDB string) {
 	}
 	if _, err := database.Exec(statements[2]); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TS's opencode `toSnapshot` ends in `usageSnapshotSchema.parse`, so a folded row
+// beyond the contract fails this one source. The Go aggregate is the only gate
+// between a corrupted message row and the upload batch: without it the server
+// rejects the whole request as a non-transient failure.
+func TestCollectFailsClosedWhenFoldedRowsExceedTheContract(t *testing.T) {
+	_, err := runCollect(t, []map[string]any{dbRow(map[string]any{"inputTokens": 1e30})}, nil)
+	if err == nil {
+		t.Fatal("Collect accepted rows the server would reject")
+	}
+}
+
+// An ordinary row still produces a snapshot; the gate is not over-eager.
+func TestCollectStillReturnsValidSnapshots(t *testing.T) {
+	snapshots := mustCollect(t, []map[string]any{dbRow(nil)}, nil)
+	if len(snapshots) != 1 {
+		t.Fatalf("got %d snapshots, want 1", len(snapshots))
 	}
 }

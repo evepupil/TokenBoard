@@ -169,6 +169,14 @@ function terminateWindowsCommandTree(child, signal, spawnTreeKiller, taskkillCom
     return
   }
   try {
+    // `taskkill /T` walks the tree downward from this pid, so it reaches
+    // grandchildren while the root is still alive (the normal case: the root
+    // ignored SIGTERM and is being force-killed). If the root already exited,
+    // taskkill fails and only the fallback kill runs; grandchildren that
+    // outlived their parent are not tracked anywhere Windows exposes, so they
+    // can survive. Bounded exposure — the status line is a short-lived
+    // command — and the alternative (a job object) is not available to a
+    // Node child_process without a native addon.
     const args = ['/PID', String(child.pid), '/T']
     if (signal === 'SIGKILL') args.push('/F')
     const treeKiller = spawnTreeKiller(taskkillCommand, args, {

@@ -602,4 +602,124 @@ describe('public card service', () => {
     expect(profile).not.toHaveProperty('userId')
     expect(JSON.stringify(profile)).not.toContain(internalUserId)
   })
+
+  // The freshness stamp's label must come from what the SQL actually read, not from
+  // the render clock: a README fetched in a Viewer cache can render minutes after the
+  // aggregates it shows were written. The totals SQL returns a data stamp (the cached
+  // rollup's own updated_at, or the newest summary row that overrode it); the service
+  // formats it in the owner's zone.
+  test('stamps the card with the aggregates’ own freshness in the owner’s zone', async () => {
+    const sqlStatements: string[] = []
+    const db = {
+      prepare(sql: string) {
+        sqlStatements.push(sql)
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes('FROM profiles')) {
+                  return {
+                    userId: 'user_1',
+                    slug: 'eve',
+                    displayName: 'Eve',
+                    timezone: 'Asia/Shanghai',
+                    // The stored config opts in; the render clock below is deliberately
+                    // a different instant to prove which one the card shows.
+                    publicCardConfig: JSON.stringify({ showUpdatedAt: true, metrics: ['totalTokens'] }),
+                    isPublic: 1
+                  }
+                }
+                return {
+                  totalTokens: 1200,
+                  totalTokensWithoutCacheRead: 900,
+                  totalCostUsd: 3.75,
+                  totalCostAvailable: 1,
+                  todayTokens: 100,
+                  todayTokensWithoutCacheRead: 70,
+                  todayCostUsd: 0.2,
+                  todayCostAvailable: 1,
+                  monthTokens: 500,
+                  monthTokensWithoutCacheRead: 380,
+                  monthCostUsd: 1.5,
+                  monthCostAvailable: 1,
+                  // SQLite's strftime form; 21:05Z is 11-24 05:05 in the owner's zone.
+                  dataUpdatedAt: '2026-11-23T21:05:00.000Z',
+                  sourceSplit: '[]',
+                  topModels: '[]'
+                }
+              },
+              async all() {
+                throw new Error('Public card should not query breakdown rows')
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const svg = await getPublicUsageCard(db, 'eve', new Date('2026-11-23T10:00:00.000Z'))
+
+    expect(svg).toContain('data-card-updated="true"')
+    expect(svg).toContain('数据更新：11-24 05:05')
+    // Not the render instant (10:00Z = 18:00 +08), not the raw UTC string.
+    expect(svg).not.toContain('11-23 18:00')
+    expect(svg).not.toContain('21:05')
+    expect(sqlStatements[1]).toContain('dataUpdatedAt')
+
+    // The JSON deliberately stays without the field (see UsageCardInput docs): its
+    // consumers read numbers, not labels.
+    const json = await getPublicUsageJson(db, 'eve', new Date('2026-11-23T10:00:00.000Z'))
+    expect(json).not.toHaveProperty('updatedAt')
+    expect(json).not.toHaveProperty('dataUpdatedAt')
+  })
+
+  // An account with no usage rows has no freshness to stamp: absent totals row means
+  // absent dataUpdatedAt, and the card must render without the note, not with a
+  // fabricated time.
+  test('no stamp when the account has no data behind the totals', async () => {
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() {
+            return {
+              async first() {
+                if (sql.includes('FROM profiles')) {
+                  return {
+                    userId: 'user_1',
+                    slug: 'eve',
+                    displayName: 'Eve',
+                    timezone: 'UTC',
+                    publicCardConfig: JSON.stringify({ showUpdatedAt: true, metrics: ['totalTokens'] }),
+                    isPublic: 1
+                  }
+                }
+                return {
+                  totalTokens: 0,
+                  totalTokensWithoutCacheRead: 0,
+                  totalCostUsd: 0,
+                  totalCostAvailable: 1,
+                  todayTokens: 0,
+                  todayTokensWithoutCacheRead: 0,
+                  todayCostUsd: 0,
+                  todayCostAvailable: 1,
+                  monthTokens: 0,
+                  monthTokensWithoutCacheRead: 0,
+                  monthCostUsd: 0,
+                  monthCostAvailable: 1,
+                  sourceSplit: '[]',
+                  topModels: '[]'
+                }
+              },
+              async all() {
+                throw new Error('Public card should not query breakdown rows')
+              }
+            }
+          }
+        }
+      }
+    } as unknown as D1Database
+
+    const svg = await getPublicUsageCard(db, 'eve', new Date('2026-11-23T10:00:00.000Z'))
+    expect(svg).not.toContain('data-card-updated')
+  })
 })

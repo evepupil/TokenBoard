@@ -1,0 +1,24 @@
+bench-collect source=codex scenario=30d window=20261011..20261109 timezone=Asia/Shanghai rounds=5
+ccusage bin=<HOME>/.tokenboard/bin/ccusage platform=darwin/amd64
+pricing config=/var/folders/hq/q19jry150l16mrrbkh7wm0_m0000gn/T/tokenboard-bench-2543649665/ccusage.bundled.json (static catalogue) ccusageNetwork=false
+ccusage: measured (rss=wait4-rusage)
+  round 1 wall=2m22.97s peak=190.1 MiB output=181.4 KiB bytesRead=0 (pending) calls=2
+  round 2 wall=1m54.812s peak=194.7 MiB output=181.4 KiB bytesRead=0 (pending) calls=2
+  round 3 wall=2m49.229s peak=188.5 MiB output=181.4 KiB bytesRead=0 (pending) calls=2
+  round 4 wall=2m3.886s peak=189.3 MiB output=181.4 KiB bytesRead=0 (pending) calls=2
+  round 5 wall=1m36.405s peak=183.6 MiB output=181.4 KiB bytesRead=0 (pending) calls=2
+  median wall=2m3.886s peak=189.3 MiB output=181.4 KiB
+  max    wall=2m49.229s peak=194.7 MiB output=181.4 KiB
+native: measured (rss=rusage-self)
+  round 1 wall=41.141s peak=40.2 MiB output=0 B bytesRead=0 (pending) calls=1
+  round 2 wall=33.315s peak=42.5 MiB output=0 B bytesRead=0 (pending) calls=1
+  round 3 wall=34.433s peak=52.3 MiB output=0 B bytesRead=0 (pending) calls=1
+  round 4 wall=33.784s peak=52.4 MiB output=0 B bytesRead=0 (pending) calls=1
+  round 5 wall=35.456s peak=54.1 MiB output=0 B bytesRead=0 (pending) calls=1
+  median wall=34.433s peak=52.3 MiB output=0 B
+  max    wall=41.141s peak=54.1 MiB output=0 B
+bytesRead: 0 (pending — the adapter read counter lands in S2)
+regression: none (native median wall 34.433s vs ccusage 2m3.886s)
+note: ccusage --since/--until filter the report's output, not its scan: a one-day window costs about what the full history costs
+note: both sides ran under the merged pricing config at /var/folders/hq/q19jry150l16mrrbkh7wm0_m0000gn/T/tokenboard-bench-2543649665/ccusage.bundled.json
+note: bytesRead is pending until the S2 adapter read counter lands

@@ -65,7 +65,17 @@ export function buildWindowsScheduleCleanupArgs() {
 function uninstallMac(runtime) {
   const plistPath = join(runtime.homeDir, 'Library', 'LaunchAgents', `${launchAgentLabel}.plist`)
   const userDomain = `gui/${runtime.getUid()}`
-  run(runtime, 'launchctl', ['bootout', userDomain, plistPath], { allowFailure: true })
+  const result = run(runtime, 'launchctl', ['bootout', userDomain, plistPath], { allowFailure: true })
+  // `launchctl bootout` exits 3 ("No such process") when the job is not loaded — there is
+  // nothing left to remove, so for an uninstall that is success, not a failure. A real
+  // permission or corruption error exits with another code and is still reported.
+  reportAllowedFailure(
+    runtime,
+    result,
+    `launchctl bootout ${userDomain}`,
+    'the LaunchAgent may still be running',
+    (status) => status === 3
+  )
   if (runtime.exists(plistPath)) {
     runtime.rm(plistPath, { force: true })
   }
@@ -77,15 +87,49 @@ function uninstallLinux(runtime) {
   const unitDir = join(runtime.homeDir, '.config', 'systemd', 'user')
   const timerPath = join(unitDir, timerName)
   const servicePath = join(unitDir, serviceName)
-  run(runtime, 'systemctl', ['--user', 'disable', '--now', timerName], { allowFailure: true })
+  const disabled = run(runtime, 'systemctl', ['--user', 'disable', '--now', timerName], { allowFailure: true })
+  // "There was nothing loaded to remove" is the only tolerated failure, and a
+  // missing unit *file* does not prove it: the files can be deleted while
+  // systemd still holds — and runs — the loaded unit, and a bus or permission
+  // failure says nothing about the timer's state either. Probe the timer
+  // itself; inactive (3) or unknown (4) means nothing is left running.
+  reportAllowedFailure(
+    runtime,
+    disabled,
+    `systemctl --user disable --now ${timerName}`,
+    'the timer may still be enabled',
+    (status) => {
+      if (status === 0) return true
+      const probe = run(runtime, 'systemctl', ['--user', 'is-active', timerName], { allowFailure: true })
+      return probe.status === 3 || probe.status === 4
+    }
+  )
   for (const file of [timerPath, servicePath]) {
     if (runtime.exists(file)) {
       runtime.rm(file, { force: true })
     }
   }
-  run(runtime, 'systemctl', ['--user', 'daemon-reload'], { allowFailure: true })
+  const reloaded = run(runtime, 'systemctl', ['--user', 'daemon-reload'], { allowFailure: true })
+  reportAllowedFailure(runtime, reloaded, 'systemctl --user daemon-reload', 'systemd may keep the stale unit loaded')
   runtime.log('TokenBoard timer removed.')
   return { platform: 'linux', unitDir }
+}
+
+// `allowFailure` keeps a non-zero exit from aborting the uninstall, but it must not be
+// silent on any platform: uninstall reports the schedule as removed either way, so a
+// swallowed failure would leave the timer registered (or systemd holding a stale unit)
+// with no trace. A missing command (ENOENT) stays quiet: a host without the platform's
+// scheduler has no schedule to remove. `tolerated(status)` lets a platform name the exit
+// codes that mean "there was nothing loaded to remove" (launchctl's 3, or an is-active
+// answer of 3/4), which an uninstall must treat as success rather than as a failure that
+// contradicts the "removed" line.
+function reportAllowedFailure(runtime, result, commandLine, consequence, tolerated = () => false) {
+  if (result.error?.code === 'ENOENT') return
+  if (result.status === 0) return
+  if (tolerated(result.status)) return
+  runtime.error(
+    `TokenBoard schedule cleanup (${commandLine}) failed with exit code ${result.status ?? 1}; ${consequence}.`
+  )
 }
 
 function readOptionalConfig(readConfig, runtime) {

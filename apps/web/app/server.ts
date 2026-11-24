@@ -16,7 +16,13 @@ import { assertPublicUsageVisible } from './features/public-card/service'
 import { pruneDeviceRetention } from './features/device/retention'
 import { usageSummaryStrictMode } from './features/usage/deduped-daily-usage'
 import type { Bindings } from './lib/db'
-import { pruneExpiredRateLimits } from './lib/rate-limit'
+import { ApiError } from './lib/errors'
+import {
+  clientIpRateLimitSubject,
+  enforceRateLimit,
+  pruneExpiredRateLimits,
+  readRateLimitPolicies
+} from './lib/rate-limit'
 import { securityHeaders } from './lib/security-headers'
 
 const app = createApp()
@@ -30,7 +36,12 @@ export default {
     if (redirect) return withSecurityHeaders(redirect, headers)
 
     const publicResponse = await handlePublicApiRequest(request, env, ctx)
-    if (publicResponse) return withResponsePolicies(withSecurityHeaders(publicResponse, headers), request)
+    if (publicResponse) {
+      const response = withResponsePolicies(withSecurityHeaders(publicResponse, headers), request)
+      // A HEAD answer carries the same status and headers as its GET but no body. The
+      // entrypoint now serves HEAD so the ceilings apply; the body has to be dropped here.
+      return request.method === 'HEAD' ? new Response(null, response) : response
+    }
 
     const response = await app.fetch(request, env, ctx)
     if (response.status === 404 && shouldFetchStaticAsset(request)) {
@@ -55,11 +66,23 @@ export default {
 } satisfies ExportedHandler<Bindings>
 
 async function handlePublicApiRequest(request: Request, env: Bindings, ctx: ExecutionContext) {
-  if (request.method !== 'GET') return null
+  // Hono answers a HEAD by dispatching the route's GET and dropping the body (hono-base.js:
+  // `if (method === "HEAD") ... #dispatch(..., "GET")`), so a HEAD reaches the same D1 reads a
+  // GET does. Letting only GET through here left HEAD as an uncapped door past the ceilings
+  // below; the body is stripped after the policies are applied so the answer stays bodyless.
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null
 
   try {
     const url = new URL(request.url)
     if (url.pathname === '/api/public/model-pricing') {
+      // The Worker cache only stores 200s, so a request that misses it — a novel
+      // `?cursor=`, a rejected limit — reaches D1 every time. Without a ceiling that
+      // is an unbounded anonymous read path; `/api/v1/model-pricing` and the public
+      // card route both cap at 120/60s, and this is the same shape of endpoint.
+      await enforceRateLimit(env.DB, {
+        policy: readRateLimitPolicies.publicModelPricingRead,
+        subject: clientIpRateLimitSubject(request.headers)
+      })
       return createCachedModelPricingResponse({
         db: env.DB,
         url,
@@ -67,17 +90,51 @@ async function handlePublicApiRequest(request: Request, env: Bindings, ctx: Exec
         waitUntil: ctx.waitUntil.bind(ctx)
       })
     }
+    // Paths that fail to parse (a bad extension, malformed encoding) throw before any D1 read,
+    // so they stay free; the ceiling belongs exactly where the slug lookup starts reading.
     const route = parsePublicUsagePath(url.pathname)
     if (!route) return null
 
     const summaryStrict = usageSummaryStrictMode(env)
     const cache = publicApiCache()
-    const subject = await assertPublicUsageVisible(env.DB, route.slug)
-    const cacheKey = cache && subject ? await publicApiCacheKey(url, route, subject, summaryStrict) : null
+    let subject: PublicApiSubject
+    try {
+      subject = await assertPublicUsageVisible(env.DB, route.slug)
+    } catch (error) {
+      // A slug that does not exist (or is private) throws before the cache is even keyed, and
+      // its answer is `no-store` so it is never cached. Charge that guess before rethrowing:
+      // an unauthenticated scanner walking slugs must still spend the ceiling.
+      if (error instanceof ApiError && error.status === 404) {
+        await enforceRateLimit(env.DB, {
+          policy: readRateLimitPolicies.publicCardRead,
+          subject: clientIpRateLimitSubject(request.headers)
+        })
+      }
+      throw error
+    }
+    const cacheKey = cache ? await publicApiCacheKey(url, route, subject, summaryStrict) : null
     if (cache && cacheKey) {
       const cached = await cache.match(cacheKey)
+      // A cache hit is answered before the ceiling on purpose. README cards are fetched
+      // through proxies such as GitHub's camo, whose readers share one egress IP: charging
+      // hits meant a popular card turned into images broken by a 429 body at exactly the
+      // traffic the cache exists for. A hit costs the single slug-visibility read above and
+      // no counter write; misses below still pay the ceiling before the aggregate reads it
+      // exists to bound. That visibility read is a constant-cost MAX via
+      // daily_usage_summary_user_updated_idx (migration 0039), so exempting hits does not
+      // open an unbounded per-user scan.
       if (cached) return publicApiClientCacheResponse(cached)
     }
+
+    // This entrypoint answers before the HonoX route does, so the ceiling has to live here as
+    // well; capping only the route would guard a path the worker never reaches. Charging only
+    // the miss keeps the counter honest: it counts requests that reach the aggregate reads,
+    // and past the ceiling the counter read is the only *additional* D1 work a request does
+    // (the slug-visibility lookup that keys the cache already ran above).
+    await enforceRateLimit(env.DB, {
+      policy: readRateLimitPolicies.publicCardRead,
+      subject: clientIpRateLimitSubject(request.headers)
+    })
 
     const response = await createPublicUsageResponse({
       db: env.DB,

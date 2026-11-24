@@ -1,4 +1,4 @@
-import { appendFile, lstat, mkdir, mkdtemp, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises'
+import { appendFile, lstat, mkdir, mkdtemp, rename, rm, symlink, truncate, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -121,6 +121,13 @@ describe('Codex JSONL reader', () => {
         value: { type: 'session_meta', id: 'a' }
       })
       await writeFile(filePath, replacement)
+      // An in-place rewrite leaves dev/ino/size untouched, so the fingerprint can
+      // only differ through a timestamp. Push mtime forward explicitly: on a
+      // filesystem with a coarse clock (ext4 under some mounts: 1 ms) an immediate
+      // rewrite can land on the same mtimeMs, which made this test depend on the
+      // host's clock granularity rather than on the detection it pins.
+      const forward = new Date(Date.now() + 2_000)
+      await utimes(filePath, forward, forward)
 
       const stop = iterator.return
       if (!stop) throw new Error('Codex JSONL iterator does not support early return')

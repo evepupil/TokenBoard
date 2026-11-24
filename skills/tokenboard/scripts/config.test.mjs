@@ -8,6 +8,7 @@ import {
   mergeConfig,
   normalizeActiveServerConfig,
   packageManagerCommand,
+  parseArgs,
   readClientType,
   readPerSource,
   resolveClientForSource,
@@ -18,6 +19,32 @@ import {
   writeConfig
 } from './config.mjs'
 import { credentialsLockPath, withCredentialsLock } from './credentials-lock.mjs'
+
+test('parseArgs accepts the --key=value spelling the project writes into hooks', () => {
+  // The hook installers write `--source=codex` into every Codex config, so that
+  // exact spelling has to work when a user copies it into sync.mjs. Read as a
+  // bare key it would become a flag named `source=codex` no reader consults,
+  // silently downgrading `--mode=preview` to a real upload.
+  assert.deepEqual(parseArgs(['--mode=preview']), { mode: 'preview' })
+  assert.deepEqual(parseArgs(['--source=codex']), { source: 'codex' })
+  // A value containing `=` keeps everything after the first separator.
+  assert.deepEqual(parseArgs(['--until=2026-10-01T00:00:00Z']), { until: '2026-10-01T00:00:00Z' })
+  assert.deepEqual(parseArgs(['--endpoint=https://h/p?a=b']), { endpoint: 'https://h/p?a=b' })
+  // An empty inline value is present-but-empty, not absent.
+  assert.deepEqual(parseArgs(['--source=']), { source: '' })
+})
+
+test('parseArgs keeps the space-separated and boolean forms', () => {
+  assert.deepEqual(parseArgs(['--source', 'codex']), { source: 'codex' })
+  assert.deepEqual(parseArgs(['--scheduled']), { scheduled: true })
+  assert.deepEqual(parseArgs(['--mode=preview', '--source', 'codex', '--scheduled']), {
+    mode: 'preview',
+    source: 'codex',
+    scheduled: true
+  })
+  // A bare positional is not a flag.
+  assert.deepEqual(parseArgs(['preview']), {})
+})
 
 test('readClientType defaults to git so an existing install is untouched', () => {
   assert.equal(readClientType({ flags: {}, env: {}, config: {} }), 'git')
@@ -729,6 +756,10 @@ test('readPerSource fails closed on a malformed map', () => {
   assert.throws(() => readPerSource({ perSource: [] }), /perSource/)
   assert.throws(() => readPerSource({ perSource: { pi: 1 } }), /pi/)
   assert.throws(() => readPerSource({ perSource: { pi: 'python' } }), /pi/)
+  // A misspelled source never matches a run, so accepting it would leave the
+  // operator believing a migration is staged while every run stays on the
+  // machine-wide client.
+  assert.throws(() => readPerSource({ perSource: { py: 'go' } }), /unknown usage source/)
 })
 
 test('resolveClientForSource lets a named source follow its map entry', () => {

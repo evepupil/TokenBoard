@@ -71,3 +71,20 @@ export function timezoneOffsetLabel(timezone: string, date = new Date()) {
   const [, sign, hours, minutes] = match
   return `UTC${sign}${Number(hours)}${minutes && minutes !== '00' ? `:${minutes}` : ''}`
 }
+
+/**
+ * A compact `MM-DD HH:mm` label of `isoInstant` in `timezone`, for surfaces that
+ * show a freshness stamp without room for a full timestamp.
+ *
+ * The caller supplies the zone deliberately: a card read from a README has to
+ * stamp in the *owner's* clock, not the viewer's or the Worker's. Invalid inputs
+ * yield null rather than a fabricated time — an unparseable stored stamp means
+ * there is no honest instant to show.
+ */
+export function localShortDateTime(isoInstant: string | null | undefined, timezone: string): string | null {
+  if (!isoInstant) return null
+  const date = new Date(isoInstant)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = localDateTimeParts(date, timezone)
+  return `${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`
+}

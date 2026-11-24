@@ -1,0 +1,7 @@
+{"timestamp":"2026-03-10T07:00:00.000Z","version":"1.0.0","sessionId":"session-gamma","requestId":"req-bad1","message":{"id":"msg_bad1","model":"claude-sonnet-4-20250514","usage": {"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:01.000Z","version":"v1.2.3","sessionId":"session-gamma","requestId":"req-bad2","message":{"id":"msg_bad2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:02.000Z","version":"1.0.0","sessionId":"","requestId":"req-bad3","message":{"id":"msg_bad3","model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:03.000Z","version":"1.0.0","sessionId":"session-gamma","requestId":"req-bad4","message":{"id":null,"model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:04.000Z","version":"1.0.0","sessionId":"session-gamma","requestId":"req-bad5","dup":1,"dup":2,"message":{"id":"msg_bad5","model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:00.0Z","version":"1.0.0","sessionId":"session-gamma","requestId":"req-bad6","message":{"id":"msg_bad6","model":"claude-sonnet-4-20250514","usage":{"input_tokens":1,"output_tokens":1}}}
+{"timestamp":"2026-03-10T07:00:00.000Z","version":"1.0.0","sessionId":"session-gamma","requestId":"req-gamma","message":{"id":"msg_gamma","model":"claude-sonnet-4-20250514","usage":{"input_tokens":9,"output_tokens":1}}}

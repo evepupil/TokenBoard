@@ -23,6 +23,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
+	"github.com/MisonL/TokenBoard/clients/go/internal/urlorigin"
 )
 
 // CacheSchemaVersion is the model pricing cache format version.
@@ -117,15 +120,12 @@ type LoadInput struct {
 }
 
 // EndpointOriginFromEndpoint mirrors endpointOriginFromEndpoint: the URL
-// origin, or "" when the endpoint is absent or not http(s).
+// origin, or "" when the endpoint is absent, not http(s), or has a host the
+// TS URL parser would reject.
 //
 // The origin is the pricing cache's identity, and both clients share one
-// state directory, so it must match the TS `new URL(endpoint).origin` exactly:
-// lowercase host, the scheme's default port dropped, IPv6 hosts kept in
-// brackets. Keeping parsed.Host verbatim would make an endpoint spelled with
-// a capital letter or an explicit :443 invalidate a cache the other client
-// wrote. The same normalization lives in cli.cursorScopeFromEndpoint for the
-// cursor scope; the two are kept deliberately identical.
+// state directory, so it must match the TS `new URL(endpoint).origin` exactly;
+// urlorigin.Origin holds that normalization for this and the cursor scope.
 func EndpointOriginFromEndpoint(endpoint string) string {
 	if strings.TrimSpace(endpoint) == "" {
 		return ""
@@ -134,25 +134,11 @@ func EndpointOriginFromEndpoint(endpoint string) string {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ""
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]" // url.Hostname strips IPv6 brackets
-	}
-	if port := parsed.Port(); port != "" && !isDefaultPort(parsed.Scheme, port) {
-		host = host + ":" + port
-	}
-	return parsed.Scheme + "://" + host
-}
-
-// isDefaultPort normalizes before comparing so a leading-zero port
-// ("https://h:0443") is recognized as default and dropped, the way the TS
-// URL parser canonicalizes it.
-func isDefaultPort(scheme, port string) bool {
-	normalized, err := strconv.Atoi(port)
+	origin, err := urlorigin.Origin(parsed)
 	if err != nil {
-		return false
+		return ""
 	}
-	return (scheme == "https" && normalized == 443) || (scheme == "http" && normalized == 80)
+	return origin
 }
 
 // ModelPricingURL builds one catalogue page URL.
@@ -728,11 +714,18 @@ func writeJSONAtomically(path string, value any, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	// The generated config is a pure function of the catalogue, so an unchanged
+	// catalogue produces byte-identical output. Rewriting it anyway costs a write plus
+	// a rename on every hook run (this file is ~450 KB) and makes the mtime useless as
+	// a "did the catalogue move" signal. Skip the write when the bytes already match.
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, append(payload, '\n')) {
+		return nil
+	}
 	tmp := fmt.Sprintf("%s.tmp-%d-%s", path, os.Getpid(), randomSuffix())
 	if err := os.WriteFile(tmp, append(payload, '\n'), mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameatomic.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

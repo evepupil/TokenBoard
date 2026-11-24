@@ -11,6 +11,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -363,7 +364,12 @@ test('refreshes installed notifier handlers from the upgraded collector checkout
       'repo-ref': 'feature/reliability',
       'skill-dir': `${collectorDir}/skills/tokenboard`
     },
-    env: { TOKENBOARD_CONFIG_DIR: configDirectory },
+    env: {
+      TOKENBOARD_CONFIG_DIR: configDirectory,
+      PATH: '/usr/bin:/bin',
+      TOKENBOARD_UPLOAD_TOKEN: 'tb_upload_secret',
+      TOKENBOARD_PAIRING_CODE: 'tb_pair_secret'
+    },
     readConfigFile: () => ({
       collectorDir,
       repoUrl: 'https://github.com/example/TokenBoard.git',
@@ -394,6 +400,11 @@ test('refreshes installed notifier handlers from the upgraded collector checkout
   assert.ok(refreshIndex > installIndex)
   assert.deepEqual(calls[refreshIndex].args, [`${collectorDir}/skills/tokenboard/scripts/refresh-notify-handler.mjs`])
   assert.equal(calls[refreshIndex].options.env.TOKENBOARD_CONFIG_DIR, configDirectory)
+  // The refresh runs code from the freshly fetched checkout; it must not carry
+  // this device's credentials either.
+  assert.equal(calls[refreshIndex].options.env.TOKENBOARD_UPLOAD_TOKEN, undefined)
+  assert.equal(calls[refreshIndex].options.env.TOKENBOARD_PAIRING_CODE, undefined)
+  assert.equal(calls[refreshIndex].options.env.PATH, '/usr/bin:/bin')
 })
 
 test('fails visibly when the upgraded notifier handler refresh fails', () => {
@@ -1458,7 +1469,9 @@ test('preserves relative dependency symlinks when moving across filesystems', ()
     const copiedSymlinkPath = join(destination, 'node_modules', '.bin', 'tsx')
     assert.equal(existsSync(source), false)
     assert.equal(lstatSync(copiedSymlinkPath).isSymbolicLink(), true)
-    assert.equal(readlinkSync(copiedSymlinkPath), target)
+    // What matters is that the link stayed relative and still resolves; the separator
+    // style is the host's (Windows stores a relative link with backslashes).
+    assert.equal(readlinkSync(copiedSymlinkPath).replaceAll('\\', '/'), target)
     assert.equal(existsSync(copiedSymlinkPath), true)
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -1883,6 +1896,13 @@ test('archive fallback recovers the newest orphaned backup and retains older cop
     mkdirSync(newerBackupDir, { recursive: true })
     writeFileSync(join(olderBackupDir, 'sentinel.txt'), 'older collector')
     writeFileSync(join(newerBackupDir, 'sentinel.txt'), 'newer collector')
+    // Name order and mtime order disagree on purpose: the backup whose name sorts
+    // first must still lose to the one that is actually newer. The mtimes are set
+    // explicitly because two directories created back to back share a timestamp on
+    // filesystems with coarse mtime granularity (Windows), which would leave the
+    // tie-break — the name — deciding and silently inverting the assertion.
+    utimesSync(olderBackupDir, new Date('2026-10-01T00:00:00Z'), new Date('2026-10-01T00:00:00Z'))
+    utimesSync(newerBackupDir, new Date('2026-10-02T00:00:00Z'), new Date('2026-10-02T00:00:00Z'))
 
     assert.throws(
       () =>

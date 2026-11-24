@@ -17,8 +17,6 @@ const (
 	// a full session scan is much larger than the shared command default.
 	DefaultDailyTimeoutMs   = 900_000
 	DefaultSessionTimeoutMs = 900_000
-	// DefaultPackageCommandRetries matches the TS retry default.
-	DefaultPackageCommandRetries = 2
 )
 
 // CommandArgs builds `codex <report> --json --offline …`.
@@ -34,15 +32,9 @@ func CommandArgs(report string, rangeArgs []string, singleThread bool, timezone 
 	return args
 }
 
-// PackageCommandOptions builds the command options for one ccusage run.
-func PackageCommandOptions(env []string, timeoutMs int, stderr func(string)) ccusage.CommandOptions {
-	return ccusage.CommandOptions{
-		Env:        env,
-		TimeoutMs:  timeoutMs,
-		Retries:    readPackageCommandRetries(),
-		RetryDelay: 0,
-		OnRetry:    stderr,
-	}
+// PackageCommandOptions builds the command options for one report call.
+func PackageCommandOptions(env []string, timeoutMs int) ccusage.CommandOptions {
+	return ccusage.CommandOptions{Env: env, TimeoutMs: timeoutMs}
 }
 
 // ReadDailyTimeoutMs ports readDailyTimeoutMs.
@@ -53,15 +45,6 @@ func ReadDailyTimeoutMs(env func(string) string) int {
 // ReadSessionTimeoutMs ports readSessionTimeoutMs.
 func ReadSessionTimeoutMs(env func(string) string) int {
 	return positiveIntEnv(env, "TOKENBOARD_CODEX_SESSION_TIMEOUT_MS", DefaultSessionTimeoutMs)
-}
-
-func readPackageCommandRetries() int {
-	// TS reads this with Number.parseInt(…, 10); Atoi would reject the
-	// trailing-suffix forms parseInt accepts.
-	if value, ok := contract.ParseInt(os.Getenv("TOKENBOARD_PACKAGE_COMMAND_RETRIES")); ok && value >= 0 {
-		return value
-	}
-	return DefaultPackageCommandRetries
 }
 
 // positiveIntEnv reads a positive integer override, falling back when the

@@ -6,6 +6,7 @@ package upload
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/renameatomic"
 )
 
 const (
@@ -45,6 +47,9 @@ type Config struct {
 	RequestTimeoutMs int
 	// Client nil means http.DefaultClient.
 	Client *http.Client
+	// Now overrides the clock used for the upload-date window. Zero means the
+	// wall clock; tests set it so a fixture date stays inside the window.
+	Now time.Time
 }
 
 // ExistingSnapshotHash is one row of the /check response.
@@ -59,6 +64,24 @@ type ExistingSnapshotHash struct {
 type Result struct {
 	Upserted int
 	Skipped  int
+	// RejectedUsageDates counts snapshots dropped before upload because their
+	// usageDate falls outside the server's accepted window.
+	RejectedUsageDates int
+	// Rejected names the dropped snapshots so the CLI can report which rows
+	// went missing, the way the TS uploader does.
+	Rejected []RejectedSnapshot
+	// Delivered is the set the server accepted or already held (the uploadable
+	// rows, minus nothing). The cursor acknowledgement must use this list, not
+	// the collection: a row dropped here never reached the server, and
+	// acknowledging it would clear its pending entry so it is never retried.
+	Delivered []contract.Snapshot
+}
+
+// RejectedSnapshot is one snapshot the upload path dropped because the server
+// would reject any batch containing it.
+type RejectedSnapshot struct {
+	Snapshot contract.Snapshot
+	Issue    string
 }
 
 // SnapshotHash is the dedup identity the server stores and compares:
@@ -88,9 +111,46 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 		return Result{Upserted: upserted}, nil
 	}
 
+	// The server rejects a whole batch when any snapshot's usageDate falls outside
+	// [MinUploadIsoDate, today+1], and the client cannot retry its way out of that: the
+	// date is a property of the row, not of the request. Left in, one such row fails the
+	// batch it lands in on every run, and five consecutive non-transient failures pause
+	// uploads for 24 hours — a single bad date taking the whole machine offline.
+	//
+	// Dropping it here is not a silent downgrade: the count comes back on Result, and a
+	// snapshot the server can never accept is not data this run could have delivered.
+	now := config.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	uploadable := make([]contract.Snapshot, 0, len(snapshots))
+	rejected := 0
+	rejectedDetails := make([]RejectedSnapshot, 0)
+	for _, snapshot := range snapshots {
+		if issue := contract.UploadIsoDateIssue(snapshot.UsageDate, now); issue != "" {
+			rejected++
+			rejectedDetails = append(rejectedDetails, RejectedSnapshot{Snapshot: snapshot, Issue: issue})
+			continue
+		}
+		uploadable = append(uploadable, snapshot)
+	}
+
 	var result Result
+	result.RejectedUsageDates = rejected
+	result.Rejected = rejectedDetails
+	// Every uploadable row is either posted or already present server-side (the
+	// /check skip path compares identical snapshot hashes), so all of them are
+	// safe to acknowledge. Rows dropped above are not.
+	result.Delivered = uploadable
+	if len(uploadable) == 0 {
+		// Nothing left to send. The empty batch is not posted: unlike the no-snapshots
+		// case above, this run did have rows and the server has nothing to say about
+		// them that the count does not already.
+		return result, nil
+	}
+
 	uploaded := false
-	for _, batch := range chunk(snapshots, snapshotBatchSize) {
+	for _, batch := range chunk(uploadable, snapshotBatchSize) {
 		checked, err := filterChanged(ctx, config, batch, client)
 		if err != nil {
 			return Result{}, err
@@ -199,6 +259,26 @@ type parsedResponse struct {
 
 type responseParser func(*http.Response) (parsedResponse, error)
 
+// decodeExactlyOne decodes a single JSON value and requires the body to end
+// there. json.Decoder.Decode stops after the first value and reports success
+// with anything trailing it, so `{"upserted":1}garbage` would pass here while
+// the TS side's JSON.parse rejects it — a body the server never produced, or a
+// proxy injecting one, would be booked as a successful upload. The token after
+// the value must be io.EOF for the body to count as one document.
+func decodeExactlyOne(decoder *json.Decoder, payload any) error {
+	if err := decoder.Decode(payload); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing content after the JSON response")
+		}
+		return err
+	}
+	return nil
+}
+
 func parseCheckResponse(response *http.Response) (parsedResponse, error) {
 	if response.StatusCode == 404 || response.StatusCode == 405 || response.StatusCode == 501 {
 		return parsedResponse{unsupported: true}, nil
@@ -209,7 +289,7 @@ func parseCheckResponse(response *http.Response) (parsedResponse, error) {
 	var payload struct {
 		Existing []ExistingSnapshotHash `json:"existing"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	if err := decodeExactlyOne(json.NewDecoder(response.Body), &payload); err != nil {
 		// The cause is preserved (%w): a body read the per-attempt deadline
 		// cut short must stay recognizable as a timeout so it classifies as
 		// transient instead of masquerading as a contract breakage.
@@ -241,7 +321,7 @@ func parseUploadResponse(response *http.Response) (parsedResponse, error) {
 	var payload struct {
 		Upserted *int `json:"upserted"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	if err := decodeExactlyOne(json.NewDecoder(response.Body), &payload); err != nil {
 		return parsedResponse{}, fmt.Errorf("Upload returned invalid response: %w", err)
 	}
 	if payload.Upserted == nil || *payload.Upserted < 0 {
@@ -334,7 +414,16 @@ func postOnce(ctx context.Context, config Config, url string, body []byte, clien
 	}
 	request.Header.Set("authorization", "Bearer "+config.UploadToken)
 	request.Header.Set("content-type", "application/json")
-	response, err := client.Do(request)
+	// The upload carries the bearer token, and Go's redirect policy only drops the
+	// Authorization header when the *host* changes — a same-host redirect to another port
+	// keeps it, which hands the credential to whatever is listening there. The pricing
+	// fetcher already refuses redirects outright; upload does the same. The client is
+	// cloned so a caller's own transport and settings survive.
+	redirectClient := *client
+	redirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	response, err := redirectClient.Do(request)
 	if err != nil {
 		cancel()
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
@@ -394,7 +483,16 @@ func retryDelay(response *http.Response, attempt, configuredMs int) time.Duratio
 			// falls back to Date.parse, so an unusual date the server sends
 			// fails here and drops to the default backoff instead.
 			if seconds, err := strconv.ParseFloat(strings.TrimSpace(header), 64); err == nil && seconds >= 0 && !math.IsInf(seconds, 0) {
-				return min(time.Duration(seconds*float64(time.Second)), maxRetryDelayMs*time.Millisecond)
+				// Clamp the seconds before converting: `seconds * 1e9` as a
+				// float past ~9.2e9 seconds overflows time.Duration's int64 and
+				// wraps negative, and the min() below would then sleep for an
+				// already-negative duration — an immediate retry on the one
+				// header value that asked for the longest wait. The cap is 5s,
+				// so anything at or past it takes the cap verbatim.
+				if maxSeconds := float64(maxRetryDelayMs) / 1000; seconds >= maxSeconds {
+					return maxRetryDelayMs * time.Millisecond
+				}
+				return time.Duration(seconds * float64(time.Second))
 			}
 			if until, err := http.ParseTime(header); err == nil {
 				delay := time.Until(until)
@@ -482,8 +580,19 @@ func LoadBackoff(stateDir string) *BackoffState {
 	if json.Unmarshal(data, &raw) != nil || raw.ConsecutiveFailures == nil || raw.LastErrorSummary == nil {
 		return nil
 	}
+	// Clamp before converting: int(1e30) is implementation-defined and wraps to
+	// a negative on amd64/arm64, which would silently stop the pause from ever
+	// engaging again. Every value at or past the threshold pauses alike, so the
+	// exact count beyond it does not matter.
+	failures := *raw.ConsecutiveFailures
+	if failures < 0 || math.IsNaN(failures) {
+		failures = 0
+	}
+	if failures > uploadFailurePauseThreshold {
+		failures = uploadFailurePauseThreshold
+	}
 	return &BackoffState{
-		ConsecutiveFailures: int(*raw.ConsecutiveFailures),
+		ConsecutiveFailures: int(failures),
 		LastErrorSummary:    *raw.LastErrorSummary,
 		PausedUntil:         raw.PausedUntil,
 	}
@@ -535,15 +644,25 @@ func writeBackoff(stateDir string, state BackoffState) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d", backoffFileName, os.Getpid()))
+	tmp := filepath.Join(stateDir, fmt.Sprintf("%s.tmp-go-%d-%s", backoffFileName, os.Getpid(), randomHexSuffix()))
 	if err := os.WriteFile(tmp, payload, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
+	if err := renameatomic.Rename(tmp, filepath.Join(stateDir, backoffFileName)); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// randomHexSuffix keeps two writers' temp files apart even when a pid is
+// recycled, matching the TS backoff writer's `${pid}-${hex}` temp name.
+func randomHexSuffix() string {
+	var buf [4]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
 }
 
 // Summarize truncates an error message to 200 characters with an ellipsis,

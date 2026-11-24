@@ -80,14 +80,13 @@ func RecordWith(row any, key string, value any) (any, bool) {
 }
 
 // DecodeOrderedJSON decodes JSON with the runner's conventions: objects keep
-// their document order and numbers are json.Number. A caller holding raw JSON
-// (a cached response, a fixture) needs it to hand a provider the same shape
-// RunJSON produces.
+// their document order and numbers are json.Number. It is what the exec
+// package's subprocess decoder calls, so a report from the runner and a
+// cached or fixture document have the same shape.
 func DecodeOrderedJSON(data []byte) (any, error) {
 	return decodeOrdered(data)
 }
 
-// decodeOrdered decodes JSON with json.Number numbers and ordered objects.
 func decodeOrdered(data []byte) (any, error) {
 	decoder := json.NewDecoder(newByteReader(data))
 	decoder.UseNumber()

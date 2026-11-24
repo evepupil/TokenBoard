@@ -12,7 +12,7 @@ import {
   collectAntigravityUsage,
   isAntigravityPartialUsageError
 } from './providers/antigravity-gui'
-import { isUnavailableLanguageServerError } from './providers/antigravity-gui-environment'
+import { isLanguageServerNotInstalled, isUnavailableLanguageServerError } from './providers/antigravity-gui-environment'
 import { collectClaudeCodeUsage } from './providers/claude-code'
 import { collectCodexUsage } from './providers/codex'
 import { collectCcusageToolUsage } from './providers/ccusage-tools'
@@ -26,8 +26,9 @@ import { normalizeCodexSymlinkRoots } from './providers/codex-symlink-policy'
 import { clearPendingUploadCursors, cursorSnapshotGroupKey, warmHookCursorHighWater } from './providers/session-cursor'
 import { withCursorLock } from './providers/session-cursor-store'
 import { isTransientNetworkError } from './transient-error'
+import { assertSecureEndpoint } from './endpoint'
 import { isUploadPaused, recordUploadFailure, recordUploadSuccess, summarize } from './upload-backoff'
-import { uploadSnapshots } from './upload'
+import { readUploadDelivered, readUploadRejected, uploadSnapshots, type RejectedUploadSnapshot } from './upload'
 import { assertValidTimeZone } from './timezone'
 import { isAllDateFilter } from './iso-calendar-date'
 
@@ -107,9 +108,10 @@ const defaultDeps: CliDeps = {
 // upload failure (DNS, TLS, reset connection, 5xx from the edge) is not a
 // collector defect: the snapshots are still pending in the cursor and the next
 // attempt can succeed, so the run reports itself as deferrable rather than
-// failed. Only the scheduled runner defers, and it never runs in hook mode, so
-// hook syncs keep reporting a plain failure. The skill scripts mirror this
-// literal; keep them in sync.
+// failed. A hook sync reports it only for a paused upload: a plain hook
+// failure is never retried, but a pause is the collector saying "not now",
+// and reporting success there would clear the source's queued signal. The
+// skill scripts mirror this literal; keep them in sync.
 export const transientSyncExitCode = 75
 
 export async function runCollectorCli(
@@ -144,6 +146,14 @@ export async function runCollectorCli(
       ].filter((value): value is string => Boolean(value))
       if (missing.length > 0) {
         deps.stderr(`Missing required config for sync: ${missing.join(', ')}`)
+        return 1
+      }
+      // The token travels on every request; a plain-http endpoint leaks it and the
+      // usage data. Loopback stays allowed for the local dev server.
+      try {
+        assertSecureEndpoint(options.endpoint)
+      } catch (error) {
+        deps.stderr(errorMessage(error))
         return 1
       }
     }
@@ -184,11 +194,18 @@ export async function runCollectorCli(
       collectorDeps.stderr(
         `TokenBoard upload paused until ${paused.pausedUntil} after repeated non-transient failures; collected snapshots remain queued in the cursor`
       )
-      return collectionFailed ? 1 : 0
+      // A hook run's 0 means "this source is covered", and the coordinator
+      // clears its queued signal on that. Nothing was uploaded, so the
+      // transient code is the honest answer: defer and leave the snapshots
+      // queued. A scheduled run keeps 0 — its runner owns the retry schedule.
+      if (collectionFailed) return 1
+      return env.TOKENBOARD_HOOK_MODE === '1' ? transientSyncExitCode : 0
     }
 
     let uploadSucceeded = false
     let uploadError: unknown
+    let delivered = collection.snapshots
+    let rejected: RejectedUploadSnapshot[] | undefined
     let result: unknown
     try {
       result = await timePhase(timings, 'upload', () =>
@@ -198,9 +215,13 @@ export async function runCollectorCli(
             uploadToken: options.uploadToken,
             timezone: options.timezone
           },
-          collection.snapshots
+          collection.snapshots,
+          undefined,
+          { stderr: collectorDeps.stderr }
         )
       )
+      delivered = readUploadDelivered(result) ?? collection.snapshots
+      rejected = readUploadRejected(result)
       uploadSucceeded = true
     } catch (error) {
       uploadError = error
@@ -222,12 +243,25 @@ export async function runCollectorCli(
     }
     if (uploadSucceeded) await recordUploadSuccess(uploadStateDir)
 
+    // Rows we may acknowledge away: the delivered set plus any row dropped for a
+    // reason that can never change (an invalid or before-window usageDate). Those
+    // can never upload, so leaving them pending would rescan them forever. A row
+    // dropped only for `too-far-future` stays out of this set: it becomes uploadable
+    // once the clock catches up, so its pending entry must survive to retry it.
+    const ackSnapshots =
+      rejected === undefined
+        ? delivered
+        : [...delivered, ...rejected.filter((entry) => entry.issue !== 'too-far-future').map((entry) => entry.snapshot)]
+    const codexFutureRejected =
+      rejected !== undefined &&
+      rejected.some((entry) => entry.snapshot.source === 'codex' && entry.issue === 'too-far-future')
     await timePhase(timings, 'cursorAck', () =>
       ackUploadCursors({
         collectedSources: collection.collectedSources,
         cursorScope,
         since: options.since,
-        snapshots: collection.snapshots,
+        snapshots: ackSnapshots,
+        codexFutureRejected,
         timezone: options.timezone,
         deps,
         env
@@ -248,8 +282,8 @@ export async function runCollectorCli(
     return 0
   } catch (error) {
     collectorDeps.stderr(errorMessage(error))
-    // Only a non-hook sync run can be deferred: preview and warm-hooks report a
-    // plain failure, and hook syncs are never retried by the scheduler.
+    // Only a non-hook sync run can be deferred here: preview and warm-hooks
+    // report a plain failure, and this error path is not the upload pause.
     if (command === 'sync' && env.TOKENBOARD_HOOK_MODE !== '1' && isTransientNetworkError(error)) {
       return transientSyncExitCode
     }
@@ -313,6 +347,7 @@ function parseArgs(args: string[], env: CliEnv) {
     until: untilFlag ?? '',
     hookMode
   })
+  assertWarmHooksNotInHookMode({ command, hookMode })
   const until = untilFlag ?? (supportsUntil({ command, source, hookMode }) ? (env.TOKENBOARD_UNTIL ?? '') : '')
   const timezone = assertValidTimeZone(
     flags.timezone ?? env.TOKENBOARD_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -341,6 +376,18 @@ function assertSupportedUntil(input: { command: CliCommand; source: CliSource; u
   if (!supportsUntil(input)) {
     throw new Error('--until is only supported for Claude Code and Codex sources')
   }
+}
+
+// warmHookCursors returns immediately for a hook run (advancing the high-water mark from inside a
+// hook would move the cursor past the files that hook is about to read). Applying that guard to
+// the `warm-hooks` command itself turned the command into a silent no-op that still printed
+// `{"warmed":[...]}` and exited 0, indistinguishable from a real warm. The combination cannot do
+// what the command promises, so it is refused — the same stance `--until` takes above.
+function assertWarmHooksNotInHookMode(input: { command: CliCommand; hookMode: boolean }) {
+  if (input.command !== 'warm-hooks' || !input.hookMode) return
+  throw new Error(
+    'warm-hooks is not supported in hook mode; a hook run consumes the hook cursors instead of advancing them'
+  )
 }
 
 function supportsUntil(input: { command: CliCommand; source: CliSource; hookMode: boolean }) {
@@ -617,6 +664,11 @@ async function ackUploadCursors(input: {
   cursorScope?: string
   since: string
   snapshots: UsageSnapshot[]
+  // True when a Codex row was dropped only for being too far in the future. The
+  // per-file acknowledgement cannot tell which file that row came from, so it is
+  // skipped entirely this run and the (per-snapshot) group rule withholds the
+  // files that still hold the future row, keeping it queued for a later retry.
+  codexFutureRejected?: boolean
   timezone: string
   deps: CliDeps
   env: CliEnv
@@ -628,7 +680,8 @@ async function ackUploadCursors(input: {
     if (!shouldAckCursor(source, input.env)) continue
     try {
       const cursorScopes = source === 'codex' ? await codexCursorScopes(input.env, stateDir) : [undefined]
-      const codexAcknowledgement = source === 'codex' ? readCodexHookAcknowledgement(input.snapshots) : undefined
+      const codexAcknowledgement =
+        source === 'codex' && !input.codexFutureRejected ? readCodexHookAcknowledgement(input.snapshots) : undefined
       for (const cursorScope of cursorScopes) {
         const acknowledgedFiles = codexAcknowledgement?.find((entry) => entry.cursorScope === cursorScope)?.files
         await input.deps.clearPendingUploadCursors?.({
@@ -785,6 +838,11 @@ function isOptionalSourceUnavailable(
   if (!source.startsWith('antigravity')) return false
   return (
     message.includes('Antigravity SQLite reader unavailable') ||
+    // Not gated on ignoreLanguageServerUnavailable: the app being absent is
+    // the same class as a missing OpenCode database, and the strict switch is
+    // for a source that is installed and misbehaving. The spawn-ENOENT shape
+    // below stays gated because it also matches a mangled spawn path.
+    isLanguageServerNotInstalled(message) ||
     (ignoreLanguageServerUnavailable && isUnavailableLanguageServerError(new Error(message))) ||
     message.includes('Antigravity conversations directory not found') ||
     message.includes('No Antigravity conversations found')

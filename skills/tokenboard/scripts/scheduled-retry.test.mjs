@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -707,6 +707,35 @@ test('scheduled retries prevent all-source execution from racing with a source r
   assert.equal(fs.files.has(scheduledRetryTransitionLockPath(stateDir)), false)
 })
 
+// The guard list used to be a hand-written copy of the five sources that
+// existed when it was introduced, so every source added later could collect
+// concurrently with an all-source retry. One source per family is enough to
+// pin the derivation: the lock is the source name, so a complete list means
+// every name in it is guarded.
+for (const source of ['zcode', 'pi', 'deepseek-harness', 'antigravity-ide']) {
+  test(`an all-source retry is skipped while a ${source} retry holds its lock`, async () => {
+    const fs = memoryRuntime()
+    const stateDir = `/state/scheduled-retry-all-race-${source}`
+    const held = acquireLock(scheduledRetryLockPath(stateDir, source), fs.runtime)
+    assert.ok(held, 'the fixture must own the per-source lock')
+
+    let collected = false
+    const result = await runScheduledRetry({
+      stateDir,
+      source: 'all',
+      runtime: fs.runtime,
+      runAttempt: () => {
+        collected = true
+        return 0
+      }
+    })
+
+    assert.deepEqual(result, { exitCode: 0, skipped: true, skippedReason: 'active-retry', attempts: 0 })
+    assert.equal(collected, false)
+    assert.equal(releaseLock(scheduledRetryLockPath(stateDir, source), fs.runtime, held), true)
+  })
+}
+
 test('scheduled retry surfaces retry-state write failures and releases its retry lock', async () => {
   const fs = memoryRuntime()
   const writeFile = fs.runtime.writeFile
@@ -831,7 +860,11 @@ test('scheduled retry reports exhaustion after the transient budget is spent', a
     runAttempt: () => transientSyncExitCode
   })
 
-  assert.deepEqual(result, { exitCode: 1, skipped: false, attempts: 2, exhausted: true })
+  // The transient code survives to the caller, which normalizes it: "the
+  // collector was busy and the snapshots are still queued" has to stay
+  // distinguishable from a real failure, but 75 is an internal contract and
+  // must never reach the state file. See the sync.mjs test that pins that half.
+  assert.deepEqual(result, { exitCode: transientSyncExitCode, skipped: false, attempts: 2, exhausted: true })
   assert.deepEqual(fs.sleeps, [10])
   const state = JSON.parse(fs.files.get(scheduledRetryStatePath('/state')))
   assert.equal(state.status, 'exhausted')
@@ -896,12 +929,24 @@ test('sync invocation reports a plain failure when an unscheduled run exits tran
   }
 })
 
-test('sync invocation never defers a transient exit code for hook or non-sync runs', async () => {
-  for (const flags of [
-    { mode: 'sync', scheduled: true, hook: true },
-    { mode: 'preview', scheduled: true },
-    { mode: 'sync' }
-  ]) {
+// A hook run never enters the scheduled retry loop, but its caller (notify.mjs) does act on
+// the code: it marks the failure transient and the coordinator schedules one trailing retry.
+// The code therefore has to survive this layer. Preview and unscheduled syncs have no such
+// caller, so for them the internal deferral code is still normalized to a plain failure.
+test('sync invocation surfaces a transient exit code for a hook run but not for other unscheduled runs', async () => {
+  const hookExit = await runSyncInvocation({
+    flags: { mode: 'sync', scheduled: true, hook: true },
+    invocation: { source: 'all', env: {} },
+    stateDir: '/state',
+    writeState: () => {},
+    runWithLock: () => transientSyncExitCode,
+    runRetry: () => {
+      throw new Error('a hook must not enter scheduled retry')
+    }
+  })
+  assert.equal(hookExit, transientSyncExitCode)
+
+  for (const flags of [{ mode: 'preview', scheduled: true }, { mode: 'sync' }]) {
     const exitCode = await runSyncInvocation({
       flags,
       invocation: { source: 'all', env: {} },
@@ -912,9 +957,6 @@ test('sync invocation never defers a transient exit code for hook or non-sync ru
         throw new Error('this invocation must not enter scheduled retry')
       }
     })
-
-    // These runs are never retried, so the internal deferral code is normalized
-    // to a plain failure instead of leaking to the caller.
     assert.equal(exitCode, 1)
   }
 })
@@ -1036,3 +1078,31 @@ function codeError(code, path) {
   error.code = code
   return error
 }
+
+// Same wiring requirement as the coordinator: a runtime without a stat cannot
+// tell a freshly created record from a dead one, so a retry would run while
+// another process is still writing its lock.
+test('scheduled retry gives its lock runtime a usable stat', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-retry-stat-'))
+  try {
+    writeFileSync(scheduledRetryTransitionLockPath(dir), '', { mode: 0o600, flag: 'wx' })
+    let calls = 0
+
+    const result = await runScheduledRetry({
+      stateDir: dir,
+      source: 'all',
+      maxAttempts: 1,
+      delayMs: 0,
+      runAttempt: () => {
+        calls += 1
+        return 0
+      }
+    })
+
+    assert.equal(calls, 0, 'a fresh empty transition lock must block the retry')
+    assert.equal(result.skipped, true)
+    assert.equal(result.skippedReason, 'active-retry')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -1,0 +1,183 @@
+// Package ccusagetool ports providers/ccusage-tools.ts: the twelve tools that
+// ccusage answers with an identical report shape, so one parameterised
+// provider serves all of them.
+//
+// Each tool runs `<tool> daily --json` for totals and `<tool> session --json`
+// for session counts. ccusage exits 0 with an empty daily report for a tool
+// that is not installed, so an empty report ends the collection without the
+// second spawn: most machines have none of these tools.
+//
+// Unlike the claude-code and codex providers this one never prepares a
+// dynamic pricing catalogue. The TS side does not either: the tool reports
+// carry their own cost figures, so a config produced here would only change
+// arguments the tools do not read. An ambient TOKENBOARD_CCUSAGE_CONFIG still
+// reaches ccusage through the package runner, exactly as it does in TS.
+package ccusagetool
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/MisonL/TokenBoard/clients/go/internal/ccusage"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect"
+	"github.com/MisonL/TokenBoard/clients/go/internal/collect/sessionusage"
+	"github.com/MisonL/TokenBoard/clients/go/internal/contract"
+	"github.com/MisonL/TokenBoard/clients/go/internal/pricing"
+)
+
+// DefaultCcusageTimeoutMs matches the claude-code budget: ccusage walks the
+// tool's whole session tree to build one day's totals.
+const DefaultCcusageTimeoutMs = 900_000
+
+// Options configures one collection. Zero values fall back to the environment
+// and the clock, like the TS provider's optional arguments.
+type Options struct {
+	Timezone    string
+	CollectedAt string
+	Since       string
+	Until       string
+	StateDir    string
+	HomeDir     string
+	Stderr      func(line string)
+	// Env resolves configuration; nil means the process environment.
+	Env func(string) string
+	// Runner answers one report call; nil means the in-process adapter for the
+	// source. Tests inject a stub.
+	Runner ccusage.CommandRunner
+}
+
+// Collect gathers one ccusage-tool source's usage.
+func Collect(ctx context.Context, source contract.Source, options Options) ([]contract.Snapshot, error) {
+	command, ok := contract.CcusageToolCommand(source)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a ccusage tool source", source)
+	}
+	env := options.Env
+	if env == nil {
+		env = os.Getenv
+	}
+	stderr := options.Stderr
+	if stderr == nil {
+		stderr = func(string) {}
+	}
+	timezone := strings.TrimSpace(options.Timezone)
+	if timezone == "" {
+		timezone = sessionusage.LocalTimezone()
+	}
+	collectedAt := options.CollectedAt
+	if collectedAt == "" {
+		collectedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+
+	rangeArgs, err := buildRangeArgs(options.Since, options.Until)
+	if err != nil {
+		return nil, err
+	}
+	prepared, err := pricing.Prepare(pricing.PrepareInput{
+		StateDir:       options.StateDir,
+		ExplicitConfig: env("TOKENBOARD_CCUSAGE_CONFIG"),
+		Stderr:         stderr,
+	})
+	if err != nil {
+		return nil, err
+	}
+	runner := options.Runner
+	if runner == nil {
+		runner = newNativeToolRunner(prepared, options.HomeDir, env, stderr).Run
+	}
+	// The budget the subprocess path applied to every call is still applied to
+	// the in-process one: the native runner turns TimeoutMs into a context
+	// deadline, and without it a hung tool store has nothing to stop it. The
+	// value is read unconditionally rather than only for an injected runner so
+	// TOKENBOARD_CCUSAGE_TIMEOUT_MS keeps meaning what it meant before S5.
+	commandOptions := ccusage.CommandOptions{
+		TimeoutMs: readCcusageTimeoutMs(env),
+	}
+
+	dailyArgs, err := ccusage.WithConfigArgs(append(
+		[]string{command, "daily", "--json"}, append(rangeArgs, "--timezone", timezone)...), env, nil)
+	if err != nil {
+		return nil, err
+	}
+	daily, err := runner(ctx, ccusage.ReportCommand, dailyArgs, commandOptions)
+	if err != nil {
+		return nil, err
+	}
+	// ccusage exits 0 with an empty report for a tool that is not installed, so
+	// most machines would pay the second spawn for nothing. Session counts only
+	// matter when there is usage to attribute.
+	if !ccusage.HasDailyRows(daily) {
+		return []contract.Snapshot{}, nil
+	}
+
+	sessionArgs, err := ccusage.WithConfigArgs(append(
+		[]string{command, "session", "--json"}, append(rangeArgs, "--timezone", timezone)...), env, nil)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := runner(ctx, ccusage.ReportCommand, sessionArgs, commandOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	return ccusage.NormalizeCcusageDailyJSON(daily, ccusage.NormalizeOptions{
+		Source:      source,
+		Timezone:    timezone,
+		CollectedAt: collectedAt,
+		Sessions:    sessions,
+		HasSessions: true,
+	})
+}
+
+// buildRangeArgs ports the TS buildRangeArgs. The tools read the window the
+// CLI already resolved, so this provider deliberately has no
+// TOKENBOARD_SINCE/TOKENBOARD_UNTIL fallback of its own: the TS provider
+// receives the CLI-resolved values and would apply such a variable twice.
+func buildRangeArgs(since, until string) ([]string, error) {
+	normalizedSince, normalizedUntil, err := sessionusage.AssertValidDateFilterRange(
+		since, until, "ccusage tool since date", "ccusage tool until date")
+	if err != nil {
+		return nil, err
+	}
+	args := []string{}
+	if normalizedSince != "" {
+		args = append(args, "--since", normalizedSince)
+	}
+	if normalizedUntil != "" {
+		args = append(args, "--until", normalizedUntil)
+	}
+	return args, nil
+}
+
+func readCcusageTimeoutMs(env func(string) string) int {
+	// parseInt semantics: TS reads this with Number.parseInt(…, 10), so a
+	// trailing suffix ("1200abc", "1200.9") still yields a usable number.
+	if value, ok := contract.ParseInt(env("TOKENBOARD_CCUSAGE_TIMEOUT_MS")); ok && value > 0 {
+		return value
+	}
+	return DefaultCcusageTimeoutMs
+}
+
+func init() {
+	for _, source := range contract.CcusageToolSources() {
+		collect.Register(source, provider{source: source})
+	}
+}
+
+// provider adapts Collect to collect.Provider per source.
+type provider struct{ source contract.Source }
+
+func (p provider) Collect(ctx context.Context, options collect.Options) ([]contract.Snapshot, error) {
+	return Collect(ctx, p.source, Options{
+		Timezone: options.Timezone,
+		Since:    options.Since,
+		Until:    options.Until,
+		StateDir: options.StateDir,
+		HomeDir:  options.HomeDir,
+		Stderr:   options.Stderr,
+		Env:      options.EnvValue,
+	})
+}

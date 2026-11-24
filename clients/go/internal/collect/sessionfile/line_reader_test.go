@@ -574,3 +574,24 @@ func TestReadSessionJSONLVerifiesAWholeFileDigestFromAMidFileOffset(t *testing.T
 		t.Fatalf("lines = %+v, want only the tail row", lines)
 	}
 }
+
+// The TS side decodes each line with `new TextDecoder('utf-8', {fatal: true})`, which drops a
+// leading BOM. A session file stamped by an editor or a PowerShell `>` redirect therefore parses
+// there; without the same strip the first line fails the JSON decode here and is silently counted
+// as a malformed row.
+func TestReadSessionJSONLDropsALeadingBOM(t *testing.T) {
+	line := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{"type":"session_meta"}`)...)
+	line = append(line, '\n')
+	path := writeSessionJSONL(t, "bom.jsonl", line)
+
+	lines, err := collectLines(t, ReadInput{FilePath: path, MaxLineBytes: 1024})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1: %#v", len(lines), lines)
+	}
+	if lines[0].Skipped || lines[0].Text != `{"type":"session_meta"}` {
+		t.Fatalf("line = %#v, want the BOM-stripped text", lines[0])
+	}
+}

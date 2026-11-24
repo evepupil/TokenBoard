@@ -2,10 +2,15 @@ import { describe, expect, test } from 'vitest'
 import type { Context } from 'hono'
 import { jsonError } from './http'
 import { ApiError } from './errors'
+import { isRouteRenderedNotFound } from './not-found'
 import { ZodError } from 'zod'
 
 function fakeContext() {
   const captured: { status?: number; body?: unknown; headers?: Record<string, string> } = {}
+  // jsonError now records that a 404 body belongs to the route, so the stub needs the state
+  // store a real context has; without it the mark is silently skipped and a test of the marking
+  // would pass for the wrong reason.
+  const state = new Map<string, unknown>()
   const c = {
     json(body: unknown, status = 200, headers?: Record<string, string>) {
       captured.body = body
@@ -18,6 +23,12 @@ function fakeContext() {
       })
       captured.headers = record
       return new Response(JSON.stringify(body), { status })
+    },
+    set(key: string, value: unknown) {
+      state.set(key, value)
+    },
+    get(key: string) {
+      return state.get(key)
     }
   } as unknown as Context
   return { c, captured }
@@ -94,5 +105,36 @@ describe('jsonError', () => {
     const { c, captured } = fakeContext()
     jsonError(c, new ApiError('UNAUTHORIZED', 'Missing upload token', 401))
     expect(captured.headers).toEqual({ 'www-authenticate': 'Bearer', 'cache-control': 'no-store' })
+  })
+
+  // HonoX installs the root `_404` handler as a middleware over the whole app, and it rewrites
+  // the body of every 404 the app returns — including the specific one this route just built.
+  // Both bodies are JSON, so only the message changed: a device's "no active installation"
+  // answer reached the collector as the generic `Route not found`. Marking the response keeps
+  // the route's own body, exactly as the page routes do for their HTML not-found pages.
+  test('marks a 404 response as route-rendered so the root handler keeps its body', () => {
+    const { c, captured } = fakeContext()
+    jsonError(c, new ApiError('NOT_FOUND', 'Device has no active installation', 404))
+    expect(captured.status).toBe(404)
+    expect(captured.body).toEqual({
+      error: { code: 'NOT_FOUND', message: 'Device has no active installation' }
+    })
+    expect(isRouteRenderedNotFound(c)).toBe(true)
+  })
+
+  // Only a 404 is rewritten by the root handler, so only a 404 may claim to have rendered its
+  // own body. Marking anything else would let a later change to the root handler believe an
+  // error branch already produced a page.
+  test.each([
+    ['a 400 ApiError', new ApiError('BAD_REQUEST', 'Invalid request', 400)],
+    ['a 401 ApiError', new ApiError('UNAUTHORIZED', 'Missing upload token', 401)],
+    ['a 429 ApiError', new ApiError('RATE_LIMITED', 'Too many requests', 429)],
+    ['a 500 ApiError', new ApiError('INTERNAL_SERVER_ERROR', 'boom', 500)],
+    ['a ZodError', new ZodError([])],
+    ['an unexpected error', new Error('database is on fire')]
+  ])('leaves %s unmarked', (_label, error) => {
+    const { c } = fakeContext()
+    jsonError(c, error)
+    expect(isRouteRenderedNotFound(c)).toBe(false)
   })
 })

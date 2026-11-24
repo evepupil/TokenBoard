@@ -5,7 +5,7 @@ import { homedir, platform, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isMainModule } from './is-main.mjs'
-import { configDir, parseArgs, readConfig } from './config.mjs'
+import { configDir, mergeConfig, parseArgs, readConfig } from './config.mjs'
 import { printHelpIfRequested } from './cli-help.mjs'
 import { errorMessage } from './error-message.mjs'
 import {
@@ -43,6 +43,10 @@ export function installSchedule(options = {}) {
       options.getUid ||
       (() => Number.parseInt(env.TOKENBOARD_INSTALL_SCHEDULE_TEST_UID || process.getuid?.() || 0, 10)),
     readConfig: options.readConfig || readConfig,
+    // The installed schedule is what status.mjs compares against
+    // config.scheduleTimes, so a manual re-install with different times must
+    // record them; otherwise status reports a schedule the machine does not run.
+    mergeConfig: options.mergeConfig || mergeConfig,
     mkdir: options.mkdir || mkdirSync,
     writeFile: options.writeFile || writeFileSync,
     exists: options.exists || existsSync,
@@ -50,17 +54,18 @@ export function installSchedule(options = {}) {
     error: options.error || console.error
   }
 
+  let result
   if (runtime.platform === 'win32') {
-    return installWindows(runtime, scheduleTimes)
+    result = installWindows(runtime, scheduleTimes)
+  } else if (runtime.platform === 'darwin') {
+    result = installMac(runtime, scheduleTimes)
+  } else if (runtime.platform === 'linux') {
+    result = installLinux(runtime, scheduleTimes)
+  } else {
+    throw new Error(`Automatic schedule install is not supported on ${runtime.platform}.`)
   }
-  if (runtime.platform === 'darwin') {
-    return installMac(runtime, scheduleTimes)
-  }
-  if (runtime.platform === 'linux') {
-    return installLinux(runtime, scheduleTimes)
-  }
-
-  throw new Error(`Automatic schedule install is not supported on ${runtime.platform}.`)
+  runtime.mergeConfig({ scheduleTimes, updatedAt: new Date().toISOString() })
+  return result
 }
 
 function installWindows(runtime, scheduleTimes) {

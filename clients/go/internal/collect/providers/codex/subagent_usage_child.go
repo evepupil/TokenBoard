@@ -94,17 +94,6 @@ func datedUsageOf(usageDate string, usage TotalUsage) DatedUsage {
 	}
 }
 
-// totalUsageOf drops the date from a dated usage.
-func totalUsageOf(usage DatedUsage) TotalUsage {
-	return TotalUsage{
-		InputTokens:         usage.InputTokens,
-		OutputTokens:        usage.OutputTokens,
-		CacheCreationTokens: usage.CacheCreationTokens,
-		CacheReadTokens:     usage.CacheReadTokens,
-		TotalTokens:         usage.TotalTokens,
-	}
-}
-
 // ChildUsageEvent is one deduplicated per-request child usage event.
 type ChildUsageEvent struct {
 	EventKey string

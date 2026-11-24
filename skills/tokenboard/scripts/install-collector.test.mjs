@@ -1,7 +1,52 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildBinaryInstallConfig, buildInstallCollectorPlan } from './install-collector.mjs'
+import { buildBinaryInstallConfig, buildInstallCollectorPlan, resolveGitInstallOptions } from './install-collector.mjs'
 import { defaultReleaseRepo } from './client-binary.mjs'
+
+// A bare re-run is the recovery path sync.mjs names ("run install-collector.mjs
+// again"), so it must not reset a configured mirror, ref or package manager to
+// the project defaults and quietly move the machine off them.
+test('a bare re-run keeps the repo, ref and package manager the config records', () => {
+  assert.deepEqual(
+    resolveGitInstallOptions({
+      flags: {},
+      env: {},
+      saved: {
+        repoUrl: 'https://gitea.example/mirror/TokenBoard.git',
+        repoRef: 'release',
+        packageManager: 'bun'
+      }
+    }),
+    {
+      repoUrl: 'https://gitea.example/mirror/TokenBoard.git',
+      repoRef: 'release',
+      packageManager: 'bun'
+    }
+  )
+})
+
+test('explicit flags still outrank the saved config', () => {
+  assert.deepEqual(
+    resolveGitInstallOptions({
+      flags: { 'repo-url': 'https://github.com/example/TokenBoard.git', 'repo-ref': 'main', 'package-manager': 'npm' },
+      env: {},
+      saved: { repoUrl: 'https://gitea.example/mirror/TokenBoard.git', repoRef: 'release', packageManager: 'bun' }
+    }),
+    {
+      repoUrl: 'https://github.com/example/TokenBoard.git',
+      repoRef: 'main',
+      packageManager: 'npm'
+    }
+  )
+})
+
+test('a first install still falls back to the project defaults', () => {
+  assert.deepEqual(resolveGitInstallOptions({ flags: {}, env: {}, saved: {} }), {
+    repoUrl: 'https://github.com/evepupil/TokenBoard.git',
+    repoRef: null,
+    packageManager: 'pnpm'
+  })
+})
 
 test('clones the configured collector repo before installing dependencies', () => {
   assert.deepEqual(

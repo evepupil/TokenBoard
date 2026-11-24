@@ -60,13 +60,6 @@ type Options struct {
 	HomeDir string
 }
 
-// getenv resolves through the process environment. Options.Env threads the
-// collection context's env in the TS side; the GUI provider reads only its own
-// overrides, so the plain environment matches for now.
-func getenv(key string) string {
-	return os.Getenv(key)
-}
-
 // defaultConversationDir mirrors the TS default: ~/.gemini/<source>/conversations.
 func defaultConversationDir(options Options) string {
 	home := options.HomeDir

@@ -246,4 +246,65 @@ describe('public card timezone caption', () => {
     // already-encoded title, and confirms `&` itself is encoded rather than passed through.
     expect(svg).toContain('A &amp; B')
   })
+
+  // The README card looked frozen for weeks (a user could not tell "quiet day" from
+  // "stale cache"), so the totals' read instant can be stamped on it. Off by default;
+  // only the service knows the real instant and the user's zone, so it hands the
+  // renderer a display label — the same supply split as `timezoneLabel`.
+  test('stamps the read instant when the option is on', () => {
+    const withStamp = renderUsageCardSvg(
+      { ...input, updatedAtLabel: '11-23 05:00' },
+      { showUpdatedAt: true, metrics: ['totalTokens'] }
+    )
+    expect(withStamp).toContain('data-card-updated="true"')
+    expect(withStamp).toContain('数据更新：11-23 05:00')
+
+    // The default stays quiet even with the instant known: the option being off is
+    // the stored-config default, so an existing user's card changes only when they
+    // opt in.
+    const without = renderUsageCardSvg({ ...input, updatedAtLabel: '11-23 05:00' }, { metrics: ['totalTokens'] })
+    expect(without).not.toContain('数据更新：')
+    expect(without).not.toContain('data-card-updated')
+
+    // English cards get English copy.
+    const english = renderUsageCardSvg(
+      { ...input, updatedAtLabel: '11-23 05:00' },
+      { language: 'en', showUpdatedAt: true, metrics: ['totalTokens'] }
+    )
+    expect(english).toContain('Updated: 11-23 05:00')
+
+    // The option is on but nothing supplied the instant: render nothing rather than
+    // a clock pretending to be data (older inputs and preview fixtures carry none).
+    const missing = renderUsageCardSvg(input, { showUpdatedAt: true, metrics: ['totalTokens'] })
+    expect(missing).not.toContain('数据更新：')
+    expect(missing).not.toContain('data-card-updated')
+  })
+
+  // The stamp shares the bottom-right footline with the timezone note. Two
+  // right-aligned notes on the same line would overlap, and there is no second
+  // line to give — the fixed `width="520" height="220"` is the embed contract. The
+  // two notes join into one line when both are on; the cost note keeps its own
+  // left end.
+  test('the stamp shares the bottom line with the timezone note and the cost note', () => {
+    const svg = renderUsageCardSvg(
+      { ...input, updatedAtLabel: '11-23 05:00', timezoneLabel: 'UTC+8', todayCostAvailable: false },
+      { language: 'en', showUpdatedAt: true, metrics: ['todayCost'] }
+    )
+    expect(svg).toContain('width="520" height="220"')
+    expect(svg).toContain('Today: UTC+8 · Updated: 11-23 05:00')
+    expect(svg).toContain('data-card-timezone="true"')
+    expect(svg).toContain('data-card-updated="true"')
+    expect(svg).toContain('* Some sources report no cost')
+    // Exactly two footline texts: the left cost note and the right combined line.
+    expect(svg.match(/y="211"/g)?.length).toBe(2)
+  })
+
+  // Without the stamp the timezone keeps its lone bottom-right line — the join is
+  // only paid for when both notes are on.
+  test('the timezone note keeps its lone bottom-right line when no stamp is shown', () => {
+    const svg = renderUsageCardSvg({ ...input, timezoneLabel: 'UTC+8' }, { language: 'en', metrics: ['todayTokens'] })
+    expect(svg).toContain('data-card-timezone="true"')
+    expect(svg).toContain('Today: UTC+8')
+    expect(svg).not.toContain('· Updated')
+  })
 })

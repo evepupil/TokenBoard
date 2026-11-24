@@ -2,15 +2,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtemp } from 'node:fs/promises'
 import {
   archiveName,
   binaryFileName,
   clientBinaryPath,
+  extractBinary,
   installClientBinary,
   latestTag,
   readChecksums,
@@ -30,8 +32,43 @@ function stubBinary(version) {
   return `#!/bin/sh\nif [ "$1" = version ]; then echo "tokenboard (go) ${version}"; exit 0; fi\nexit 0\n`
 }
 
+// A test cannot ship a compiled binary, so the stub above is a POSIX shell
+// script. Windows refuses to execute one — spawn fails with EFTYPE before any
+// version check runs — so there the version probes are answered here while
+// `tar` still runs for real. Extraction is the step that actually differs
+// between platforms (GNU tar vs bsdtar, path shapes), so it stays genuine on
+// every OS. On POSIX this returns undefined and every caller keeps spawnSync.
+//
+// A path that does not exist still fails, so a probe of a missing file keeps
+// answering null instead of inventing a version.
+function fixtureSpawn({ tokenboard = '1.2.3', ccusage = '20.0.20' } = {}) {
+  if (process.platform !== 'win32') return undefined
+  return (command, args, options) => {
+    if (command === 'tar') return spawnSync(command, args, options)
+    const path = String(command)
+    if (!existsSync(path)) {
+      const error = new Error(`spawnSync ${command} ENOENT`)
+      error.code = 'ENOENT'
+      return { error, status: null, stdout: '', stderr: '' }
+    }
+    if (basename(path).startsWith('ccusage')) {
+      return { status: 0, stdout: `ccusage ${ccusage}\n`, stderr: '' }
+    }
+    // A script fixture cannot run on Windows, so the version the probe reads
+    // comes from the file itself: read the stub's `echo "tokenboard (go) X"`
+    // line. One fixed value for every path would make any recovery test that
+    // compares two candidates see them as equal.
+    const printed = readFileSync(path, 'utf8').match(/tokenboard \(go\) ([0-9][0-9.]*)/)
+    const version = printed ? printed[1] : tokenboard
+    return { status: 0, stdout: `tokenboard (go) ${version}\n`, stderr: '' }
+  }
+}
+
 // buildTarball assembles a release tarball holding one executable. The real
-// extraction shells out to `tar`, so the fixture is built the same way.
+// extraction shells out to `tar`, so the fixture is built the same way — and
+// with the same shape extractBinary uses (relative archive name, cwd at the
+// archive's directory): an absolute `C:\...` archive argument reads as a
+// remote host to GNU tar, which is what Git for Windows puts first on PATH.
 function buildTarball(dir, name, body, extraFiles = {}) {
   const staging = join(dir, 'staging')
   mkdirSync(staging, { recursive: true })
@@ -44,7 +81,10 @@ function buildTarball(dir, name, body, extraFiles = {}) {
     members.push(extraName)
   }
   const archivePath = join(dir, `${name}.tar.gz`)
-  const result = spawnSync('tar', ['-czf', archivePath, '-C', staging, ...members], { encoding: 'utf8' })
+  const result = spawnSync('tar', ['-czf', `${name}.tar.gz`, '-C', 'staging', ...members], {
+    encoding: 'utf8',
+    cwd: dir
+  })
   assert.equal(result.status, 0, `tar failed: ${result.stderr}`)
   return readFileSync(archivePath)
 }
@@ -60,7 +100,7 @@ function serveRelease({
   tarball,
   omitChecksums = false,
   badChecksum = false,
-  repo = 'MisonL/TokenBoard'
+  repo = 'evepupil/TokenBoard'
 }) {
   const archive = archiveName(platform)
   const manifest = badChecksum ? `${'0'.repeat(64)}  ${archive}\n` : `${sha256(tarball)}  ${archive}\n`
@@ -131,9 +171,40 @@ test('verifyExecutable requires the version as a whole token', () => {
   verifyExecutable('/staged/tokenboard', '1.2.3', { spawn: exact })
 })
 
+test('version probes are bounded so a wedged binary cannot hold the sync lock', async (t) => {
+  // recoverOrphanedBinary runs inside runWithSyncLock: a staged binary that never
+  // answers `version` would hold sync.lock until the process is killed. Go's
+  // selfupdate bounds the same probe at 10s; the git path had no bound at all.
+  const dir = await mkdtemp(join(tmpdir(), 'tokenboard-probe-timeout-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const binaryPath = join(dir, 'tokenboard')
+  // A staged copy must exist for recoverOrphanedBinary to probe it at all.
+  writeFileSync(`${binaryPath}.new`, 'staged', { mode: 0o755 })
+
+  const seen = []
+  const spawn = (path, args, options) => {
+    seen.push({ path, args, timeout: options?.timeout })
+    return { status: 0, stdout: 'tokenboard (go) 1.2.3\n', stderr: '' }
+  }
+
+  verifyExecutable('/staged/tokenboard', '1.2.3', { spawn })
+  recoverOrphanedBinary({
+    binaryPath,
+    readDir: () => [],
+    rename: () => {},
+    remove: () => {},
+    spawn
+  })
+
+  assert.equal(seen.length, 2, 'both probes must run')
+  for (const call of seen) {
+    assert.equal(call.timeout, 10_000, `${call.path} probe must carry the 10s bound`)
+  }
+})
+
 test('resolveRelease refuses a redirect loop rather than walking it', async (t) => {
   const server = createServer((request, response) => {
-    response.writeHead(302, { location: '/MisonL/TokenBoard/releases/latest' })
+    response.writeHead(302, { location: '/evepupil/TokenBoard/releases/latest' })
     response.end()
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -206,6 +277,40 @@ test('verifyChecksum refuses a missing entry and a mismatch', () => {
   assert.throws(() => verifyChecksum(data, 'absent.tar.gz', manifest), /no entry/)
 })
 
+test('extractBinary never hands tar an absolute path', () => {
+  // An absolute `C:\...` argument reads as a remote host to GNU tar (first on
+  // PATH with Git for Windows): every Windows binary install failed with
+  // "Cannot connect to C: resolve failed". The archive must be named
+  // relatively from its own directory; the destination must be forward-slash.
+  const calls = []
+  const extractDir = join(tmpdir(), 'tokenboard-extract-shape', 'out')
+  const archivePath = join(tmpdir(), 'tokenboard-extract-shape', 'tokenboard_windows_amd64.tar.gz')
+  try {
+    extractBinary({
+      archivePath,
+      extractDir,
+      name: binaryFileName('win32'),
+      platform: 'win32',
+      spawn: (command, args, options) => {
+        calls.push({ command, args, options })
+        writeFileSync(join(extractDir, binaryFileName('win32')), 'stub')
+        return { status: 0, stdout: '', stderr: '' }
+      }
+    })
+  } finally {
+    rmSync(join(tmpdir(), 'tokenboard-extract-shape'), { recursive: true, force: true })
+  }
+  assert.equal(calls.length, 1)
+  const { command, args, options } = calls[0]
+  assert.equal(command, 'tar')
+  assert.equal(args[0], '-xzf')
+  assert.equal(args[1], 'tokenboard_windows_amd64.tar.gz', 'the archive must be a bare file name')
+  assert.equal(options.cwd, join(tmpdir(), 'tokenboard-extract-shape'), 'tar must run from the archive directory')
+  const destination = args[args.indexOf('-C') + 1]
+  assert.doesNotMatch(destination, /\\/, 'the -C destination must not contain backslashes')
+  assert.doesNotMatch(args[1], /^[A-Za-z]:|^\//, 'no tar argument may be an absolute path')
+})
+
 test('installClientBinary installs a verified binary and leaves no staged file', async (t) => {
   const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
   const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
@@ -214,6 +319,7 @@ test('installClientBinary installs a verified binary and leaves no staged file',
     configDir,
     platform: 'darwin',
     arch: 'x64',
+    spawn: fixtureSpawn(),
     log: () => {}
   })
   assert.equal(result.version, '1.2.3')
@@ -221,6 +327,36 @@ test('installClientBinary installs a verified binary and leaves no staged file',
   assert.match(readFileSync(result.path, 'utf8'), /tokenboard \(go\) 1\.2\.3/)
   assert.equal(existsSync(`${result.path}.new`), false)
   assert.equal(existsSync(join(configDir, 'client-install')), false)
+})
+
+// A running collector can hold the target on Windows for a moment, and
+// MoveFileEx then answers EPERM. Recovery and the Go swap retry that; the
+// bootstrap used to give up on the first one, so the very first install on a
+// busy machine failed where a retry moments later would have worked.
+test('installClientBinary retries a transient busy rename onto the target', async (t) => {
+  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
+  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
+  let attempts = 0
+  const result = await installClientBinary({
+    baseUrl,
+    configDir,
+    platform: 'darwin',
+    arch: 'x64',
+    spawn: fixtureSpawn(),
+    rename: (from, to) => {
+      attempts += 1
+      if (attempts === 1) {
+        const error = new Error('EPERM: operation not permitted')
+        error.code = 'EPERM'
+        throw error
+      }
+      renameSync(from, to)
+    },
+    log: () => {}
+  })
+
+  assert.equal(attempts, 2, 'the busy rename must be retried once')
+  assert.match(readFileSync(result.path, 'utf8'), /tokenboard \(go\) 1\.2\.3/)
 })
 
 test('installClientBinary refuses a checksum mismatch and installs nothing', async (t) => {
@@ -247,7 +383,17 @@ test('installClientBinary refuses a binary that does not answer version', async 
   const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '9.9.9' })
   const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
   await assert.rejects(
-    () => installClientBinary({ baseUrl, configDir, platform: 'darwin', arch: 'x64', log: () => {} }),
+    () =>
+      installClientBinary({
+        baseUrl,
+        configDir,
+        platform: 'darwin',
+        arch: 'x64',
+        // The stub answers 9.9.9 while the release tag says 1.2.3, so the
+        // mismatch — not an unrunnable fixture — is what must reject.
+        spawn: fixtureSpawn({ tokenboard: '9.9.9' }),
+        log: () => {}
+      }),
     /does not run/
   )
   assert.equal(existsSync(clientBinaryPath({ configDir, platform: 'darwin' })), false)
@@ -282,6 +428,64 @@ test('recovery follows the configured file name, not the platform default', () =
   assert.equal(existsSync(binaryPath), true)
 })
 
+// Windows names its files case-insensitively, and the Go side names its
+// backup after the path it was handed. A backup written as
+// "TokenBoard.exe.backup-…" is a backup of this target on Windows; on a
+// case-sensitive filesystem it is a different file and must be left alone.
+test('recovery matches a backup prefix case-insensitively only on Windows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-'))
+  const binaryPath = join(dir, 'tokenboard.exe')
+  writeFileSync(join(dir, 'TokenBoard.exe.backup-20260101T000000Z'), 'previous', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'win32' })
+
+  assert.equal(restored, join(dir, 'TokenBoard.exe.backup-20260101T000000Z'))
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'previous')
+})
+
+// Matching case-insensitively means two backups of the same target can carry
+// prefixes that differ in case. The newest is decided by the timestamp, not by
+// the byte order of the whole name, or the older "t..." name would sort after
+// the newer "T..." one and be restored instead.
+test('recovery picks the newest backup across differently cased prefixes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-newest-'))
+  const binaryPath = join(dir, 'tokenboard.exe')
+  writeFileSync(join(dir, 'TokenBoard.exe.backup-20260102T000000Z'), 'newer', { mode: 0o755 })
+  writeFileSync(join(dir, 'tokenboard.exe.backup-20260101T000000Z'), 'older', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'win32' })
+
+  assert.equal(restored, join(dir, 'TokenBoard.exe.backup-20260102T000000Z'))
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer')
+})
+
+// A Unicode prefix can lower-case to a different number of code points
+// (`İ` becomes `i` plus a combining dot), so a matched prefix is not
+// always as long as this target's own spelling. The stamp has to be found by
+// its shape, or the sort keys come out misaligned and the older backup wins.
+test('recovery orders backups whose prefix changes length when folded', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-fold-'))
+  const binaryPath = join(dir, 'İ.exe')
+  writeFileSync(join(dir, 'i̇.exe.backup-20260102T000000Z'), 'newer', { mode: 0o755 })
+  writeFileSync(join(dir, 'İ.exe.backup-20260101T000000Z'), 'older', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'win32' })
+
+  assert.equal(restored, join(dir, 'i̇.exe.backup-20260102T000000Z'))
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer')
+})
+
+test('recovery ignores a differently cased backup on other platforms', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-case-posix-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(join(dir, 'TokenBoard.backup-20260101T000000Z'), 'previous', { mode: 0o755 })
+
+  const restored = recoverOrphanedBinary({ binaryPath, platform: 'linux' })
+
+  assert.equal(restored, null)
+  assert.equal(existsSync(binaryPath), false)
+})
+
 test('a healthy binary is never replaced by a backup', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenboard-healthy-'))
   const binaryPath = join(dir, binaryFileName('darwin'))
@@ -299,8 +503,24 @@ test('runSelfUpdate forwards --scheduled and reports a non-zero exit', () => {
   writeFileSync(binaryPath, '#!/bin/sh\necho "$@"\nexit 3\n', { mode: 0o755 })
   chmodSync(binaryPath, 0o755)
   const lines = []
-  assert.throws(() => runSelfUpdate({ binaryPath, scheduled: true, log: (line) => lines.push(line) }), /exit code 3/)
+  // POSIX runs the stub and reads what it echoed; Windows cannot execute it,
+  // so the recorder answers instead — the argv and exit code are the subject.
+  const calls = []
+  const recorder =
+    fixtureSpawn() === undefined
+      ? undefined
+      : (command, args) => {
+          calls.push({ command, args })
+          return { status: 3, stdout: `${args.join(' ')}\n`, stderr: '' }
+        }
+  assert.throws(
+    () => runSelfUpdate({ binaryPath, scheduled: true, spawn: recorder, log: (line) => lines.push(line) }),
+    /exit code 3/
+  )
   assert.deepEqual(lines, ['self-update --scheduled'])
+  if (recorder !== undefined) {
+    assert.deepEqual(calls, [{ command: binaryPath, args: ['self-update', '--scheduled'] }])
+  }
 })
 
 test('downloadBytes enforces the size bound while streaming, not only after the read', async () => {
@@ -329,6 +549,174 @@ test('downloadBytes enforces the size bound while streaming, not only after the 
   )
 })
 
+// The asset download is the hop that carries the tarball and its checksums.
+// Letting fetch follow redirects to any host would let a redirect chain serve
+// both from somewhere the release page never named; the Go client pins the
+// same way (release.sameRedirectHost).
+test('downloadBytes refuses a redirect that leaves the release host', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url, options) => {
+    seen.push({ url, redirect: options?.redirect })
+    return {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://evil.example/tokenboard.tar.gz' },
+      body: null
+    }
+  }
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher
+      }),
+    /not the release host/
+  )
+  // The redirect is inspected by hand, never followed implicitly.
+  assert.equal(seen[0].redirect, 'manual')
+  assert.equal(seen.length, 1)
+})
+
+// An https -> http hop is refused even when the host never changes: the
+// checksums travel over the same redirect, so one intermediary on the
+// downgraded link could replace both the tarball and the file that vouches for
+// it. An http -> https upgrade stays allowed.
+test('downloadBytes refuses an HTTPS downgrade to the same host', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const fetcher = () => ({
+    ok: false,
+    status: 307,
+    headers: { get: () => 'http://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz' },
+    body: null
+  })
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher
+      }),
+    /not the release host/
+  )
+})
+
+test('downloadBytes follows an HTTP->HTTPS upgrade for a local mirror', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const body = (async function* generate() {
+    yield Buffer.from('tarball')
+  })()
+  const responses = [
+    {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://mirror.internal:8080/assets/x' },
+      body: null
+    },
+    { ok: true, status: 200, headers: { get: () => null }, body }
+  ]
+  let calls = 0
+  const data = await downloadBytes({
+    url: 'http://mirror.internal:8080/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher: () => responses[calls++]
+  })
+  assert.equal(data.toString(), 'tarball')
+  assert.equal(calls, 2)
+})
+
+test('downloadBytes follows a redirect to the GitHub asset CDN', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const body = (async function* generate() {
+    yield Buffer.from('tarball')
+  })()
+  const responses = [
+    {
+      ok: false,
+      status: 302,
+      headers: { get: () => 'https://objects.githubusercontent.com/assets/x' },
+      body: null
+    },
+    { ok: true, status: 200, headers: { get: () => null }, body }
+  ]
+  let calls = 0
+  const data = await downloadBytes({
+    url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher: () => responses[calls++]
+  })
+  assert.equal(data.toString(), 'tarball')
+  assert.equal(calls, 2)
+})
+
+// Retry classification is a cross-language contract: Go's
+// release.isRetryableStatus retries 429 and every 5xx except 501 and 505, and
+// treats the rest as the release not existing. One side retrying what the
+// other gives up on would show up as installs that work on one client and not
+// the other against the same server.
+for (const [status, attempts] of [
+  [429, 3],
+  [500, 3],
+  [503, 3],
+  [501, 1],
+  [505, 1],
+  [404, 1],
+  [403, 1]
+]) {
+  test(`downloadBytes retries based on HTTP ${status} exactly like the Go client`, async () => {
+    const { downloadBytes } = await import('./client-binary.mjs')
+    let calls = 0
+    const fetcher = () => {
+      calls += 1
+      return Promise.resolve({ ok: false, status, headers: { get: () => null }, body: null })
+    }
+
+    await assert.rejects(
+      () =>
+        downloadBytes({
+          url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+          name: 'tokenboard.tar.gz',
+          fetcher,
+          retryDelayMs: 1
+        }),
+      new RegExp(`returned HTTP ${status}`)
+    )
+    assert.equal(calls, attempts)
+  })
+}
+
+// A 304 is a cache answer, not a redirection, even when it carries a Location.
+// Go's net/http only follows 301/302/303/307/308; following this one here would
+// let the two clients disagree about what the same server answer means.
+test('downloadBytes does not treat a non-redirect 3xx as a redirect', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return {
+      ok: false,
+      status: 304,
+      headers: { get: () => 'https://github.com/MisonL/TokenBoard/releases/tag/v1' },
+      body: null
+    }
+  }
+
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        maxAttempts: 1
+      }),
+    /returned HTTP 304/
+  )
+  assert.equal(seen.length, 1)
+})
+
 // A swap killed between the two renames can leave the *staged* binary behind
 // as well as the backup. The staged one is newer, but a kill during its write
 // leaves a truncated file, so it is restored only after it answers `version`;
@@ -340,7 +728,7 @@ test('recovery prefers a staged binary that still answers version', () => {
   writeFileSync(`${binaryPath}.new`, staged, { mode: 0o755 })
   writeFileSync(`${binaryPath}.backup-20260101T000000Z`, 'old', { mode: 0o755 })
 
-  recoverOrphanedBinary({ binaryPath })
+  recoverOrphanedBinary({ binaryPath, spawn: fixtureSpawn({ tokenboard: '2.0.0' }) })
 
   assert.equal(readFileSync(binaryPath, 'utf8'), staged)
   assert.equal(existsSync(`${binaryPath}.new`), false, 'the staged copy must be moved, not copied')
@@ -358,10 +746,31 @@ test('recovery ignores a staged binary that does not run', () => {
   assert.equal(readFileSync(binaryPath, 'utf8'), 'previous')
 })
 
-// Spec §4.1: the release tarball carries the platform's ccusage beside the
-// client. A fresh install must place it where the bundled layer looks, or the
-// first run falls back to a download the offline hook path cannot perform.
-test('installClientBinary installs the bundled ccusage beside the client', async (t) => {
+// Backups written by the current release carry a sequence suffix
+// (`<stamp>-000001`) so two swaps in the same second cannot collide. The newer
+// stamp is still the one restored: the suffix only breaks ties inside a second.
+test('recovery picks the newest backup across both name shapes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-shapes-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20251231T235959Z`, 'legacy old', { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'newer first', { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000002`, 'newer second', { mode: 0o755 })
+
+  recoverOrphanedBinary({ binaryPath })
+
+  assert.equal(readFileSync(binaryPath, 'utf8'), 'newer second')
+})
+
+// An earlier binary written by a release that knew no sequence still sorts
+// before this release's name for the same second.
+test('the sequence suffix sorts after a plain backup of the same second', () => {
+  const sorted = ['tokenboard.backup-20260101T000000Z', 'tokenboard.backup-20260101T000000Z-000001'].sort()
+  assert.equal(sorted.at(-1), 'tokenboard.backup-20260101T000000Z-000001')
+})
+
+// A release archive that happens to carry a ccusage member no longer has it
+// installed: the client collects in process since S5 and would never read it.
+test('installClientBinary ignores a ccusage member in the archive', async (t) => {
   const { baseUrl } = await withServer(t, {
     platform: 'darwin_amd64',
     version: '1.2.3',
@@ -373,65 +782,526 @@ test('installClientBinary installs the bundled ccusage beside the client', async
     configDir,
     platform: 'darwin',
     arch: 'x64',
-    log: () => {}
-  })
-  const bundled = join(configDir, 'bin', 'ccusage')
-  assert.equal(existsSync(bundled), true, 'the bundled ccusage must be installed')
-  assert.match(readFileSync(bundled, 'utf8'), /ccusage 20\.0\.33/)
-  assert.equal(existsSync(join(configDir, 'client-install')), false)
-})
-
-// A malformed bundled ccusage must fail the install before the client is
-// swapped in. Failing afterwards would leave a client whose install reported
-// an error but which is already live — the next sync would run against a
-// half-installed tree with no bundled ccusage.
-test('installClientBinary refuses a malformed ccusage without installing the client', async (t) => {
-  const { baseUrl } = await withServer(t, {
-    platform: 'darwin_amd64',
-    version: '1.2.3',
-    extraFiles: { ccusage: '' }
-  })
-  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
-  await assert.rejects(
-    installClientBinary({ baseUrl, configDir, platform: 'darwin', arch: 'x64', log: () => {} }),
-    /ccusage is empty|does not contain ccusage/
-  )
-  assert.equal(existsSync(join(configDir, 'bin', 'tokenboard')), false, 'the client must not be installed')
-})
-
-// An older release without ccusage still installs the client; the three-layer
-// acquisition covers the machine afterwards.
-test('installClientBinary accepts a release without ccusage', async (t) => {
-  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
-  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
-  const result = await installClientBinary({
-    baseUrl,
-    configDir,
-    platform: 'darwin',
-    arch: 'x64',
+    spawn: fixtureSpawn(),
     log: () => {}
   })
   assert.equal(result.version, '1.2.3')
-  assert.equal(existsSync(join(configDir, 'bin', 'ccusage')), false)
+  assert.equal(existsSync(join(configDir, 'bin', 'ccusage')), false, 'the archive member must not be installed')
+  assert.equal(existsSync(join(configDir, 'bin', 'tokenboard')), true)
 })
 
-// An older release without a bundled ccusage leaves the previous one in
-// place. That copy is now a version the new client was never tested against,
-// so the install must say so rather than report a clean install.
-test('installClientBinary warns when it leaves a stale bundled ccusage behind', async (t) => {
+// A ccusage copy an earlier release installed is left in place untouched and
+// the install says so once, with the same wording the Go self-update uses.
+test('installClientBinary reports the ccusage an earlier release left behind', async (t) => {
   const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
   const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-'))
   mkdirSync(join(configDir, 'bin'), { recursive: true })
-  writeFileSync(join(configDir, 'bin', 'ccusage'), '#!/bin/sh\necho "ccusage 20.0.20"\n', { mode: 0o755 })
+  const stalePath = join(configDir, 'bin', 'ccusage')
+  writeFileSync(stalePath, '#!/bin/sh\necho "ccusage 20.0.20"\n', { mode: 0o755 })
   const lines = []
   await installClientBinary({
     baseUrl,
     configDir,
     platform: 'darwin',
     arch: 'x64',
+    spawn: fixtureSpawn(),
     log: (line) => lines.push(line)
   })
-  const stale = lines.find((line) => line.includes('carries no ccusage'))
-  assert.ok(stale, `a stale bundled ccusage must be reported, got ${JSON.stringify(lines)}`)
-  assert.match(stale, /20\.0\.20/)
+  const stale = lines.find((line) => line.includes('no longer bundles or uses ccusage'))
+  assert.ok(stale, `a left-behind ccusage must be reported, got ${JSON.stringify(lines)}`)
+  assert.ok(stale.includes(stalePath), `the report must name ${stalePath}, got ${stale}`)
+  // Left in place means untouched, and never executed by the install.
+  assert.match(readFileSync(stalePath, 'utf8'), /ccusage 20\.0\.20/)
+})
+
+// The bootstrap installer stages the same `<binary>.new` Go's `self-update`
+// does, so it takes the same lock file in the state directory. A self-update
+// holding it means an install would race the swap: the install yields with a
+// clear error instead of deleting the other run's staged file.
+test('installClientBinary yields while a self-update holds its lock', async (t) => {
+  const { baseUrl } = await withServer(t, { platform: 'darwin_amd64', version: '1.2.3' })
+  const configDir = mkdtempSync(join(tmpdir(), 'tokenboard-config-locked-'))
+  t.after(() => rmSync(configDir, { recursive: true, force: true }))
+  // A lock owned by this process looks live; it is released in the cleanup.
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const runtime = stateLockRuntime({ lockTimeoutMs: 50 })
+  const owner = acquireLock(join(configDir, 'self-update.lock'), runtime)
+  t.after(() => releaseLock(join(configDir, 'self-update.lock'), runtime, owner))
+
+  await assert.rejects(
+    () =>
+      installClientBinary({
+        baseUrl,
+        configDir,
+        platform: 'darwin',
+        arch: 'x64',
+        spawn: fixtureSpawn(),
+        log: () => {}
+      }),
+    /self-update/
+  )
+  assert.equal(
+    existsSync(join(configDir, 'bin', 'tokenboard')),
+    false,
+    'nothing may be installed while the lock is held'
+  )
+})
+
+// A stalled transfer must fail, not hang the install forever. The installer
+// now holds self-update.lock while it downloads, so an unbounded fetch would
+// also block every scheduled self-update behind it.
+test('downloadBytes aborts a transfer that stalls past its budget', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let activeSignal
+  // A body that never produces a chunk unless the signal fires: an unbounded
+  // read would hang the test forever, which is precisely the bug.
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return new Promise((resolve, reject) => {
+            activeSignal.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+              {
+                once: true
+              }
+            )
+          })
+        }
+      }
+    }
+  }
+  const fetcher = (url, options) => {
+    activeSignal = options?.signal
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        timeoutMs: 50,
+        maxAttempts: 1
+      }),
+    /timed out|abort/i
+  )
+  assert.ok(activeSignal, 'the request must carry an abort signal')
+})
+
+// A transient failure (dropped connection) is retried; the install is a
+// one-off, and a single blip should not send the operator back to square one.
+test('downloadBytes retries a transient failure', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  const fetcher = () => {
+    calls += 1
+    if (calls === 1) return Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))
+    const body = (async function* generate() {
+      yield Buffer.from('complete')
+    })()
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  const data = await downloadBytes({
+    url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+    name: 'tokenboard.tar.gz',
+    fetcher,
+    retryDelayMs: 1
+  })
+  assert.equal(data.toString(), 'complete')
+  assert.equal(calls, 2)
+})
+
+// A 404 is the release not existing; retrying it only delays the failure.
+test('downloadBytes does not retry a permanent failure', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  const fetcher = () => {
+    calls += 1
+    return Promise.resolve({ ok: false, status: 404, headers: { get: () => null }, body: null })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        retryDelayMs: 1
+      }),
+    /HTTP 404/
+  )
+  assert.equal(calls, 1)
+})
+
+// A timeout is not retried. The installer holds self-update.lock while it
+// downloads, so retrying a stalled transfer multiplies the time it blocks
+// every scheduled self-update: three 120s budgets beat a fast, honest failure.
+test('downloadBytes does not retry a timeout', async () => {
+  const { downloadBytes } = await import('./client-binary.mjs')
+  let calls = 0
+  let activeSignal
+  const body = {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return new Promise((resolve, reject) => {
+            activeSignal.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+              {
+                once: true
+              }
+            )
+          })
+        }
+      }
+    }
+  }
+  const fetcher = (url, options) => {
+    calls += 1
+    activeSignal = options?.signal
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body })
+  }
+  await assert.rejects(
+    () =>
+      downloadBytes({
+        url: 'https://github.com/MisonL/TokenBoard/releases/download/v1/tokenboard.tar.gz',
+        name: 'tokenboard.tar.gz',
+        fetcher,
+        timeoutMs: 30,
+        retryDelayMs: 1
+      }),
+    /timed out/i
+  )
+  assert.equal(calls, 1, 'a timeout must fail on the first attempt')
+})
+
+// A `.new` left by a failed *older* download runs fine, so "answers version"
+// alone would restore it over a newer backup and roll the client back. The
+// staged copy is taken only when it is at least as new as the backup.
+test('recovery prefers a newer backup over a runnable but older staged binary', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-stale-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.1.9'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+  const lines = []
+
+  recoverOrphanedBinary({
+    binaryPath,
+    spawn: fixtureSpawn({ tokenboard: '0.2.0' }),
+    log: (line) => lines.push(line)
+  })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.2\.0/, 'the newer backup must be restored')
+  assert.equal(existsSync(`${binaryPath}.new`), false, 'the stale staged copy must be dropped')
+})
+
+// The staged copy an interrupted update was installing is newer than the
+// backup beside it, and it still wins.
+test('recovery still prefers a staged binary newer than the backup', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-newer-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.3.0'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+
+  recoverOrphanedBinary({ binaryPath, spawn: fixtureSpawn({ tokenboard: '0.3.0' }) })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.3\.0/, 'the staged copy must be restored')
+  assert.equal(existsSync(`${binaryPath}.backup-20260101T000000Z-000001`), true, 'the backup is left alone')
+})
+
+// The installer holds self-update.lock while it resolves the tag, so a
+// lookup that never answers must fail on its own budget rather than block
+// every scheduled self-update behind it.
+test('latestTag fails on its own budget when the lookup hangs', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = (url, options) =>
+    new Promise((resolve, reject) => {
+      options?.signal?.addEventListener(
+        'abort',
+        () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+        {
+          once: true
+        }
+      )
+      void resolve
+    })
+  await assert.rejects(
+    () => latestTag({ repo: 'owner/repo', baseUrl: 'https://github.com', fetcher, lookupTimeoutMs: 30 }),
+    /lookup timed out/
+  )
+})
+
+// A lookup that answers normally is unaffected by the budget.
+// The lookup hop already refuses an absolute redirect away from the release
+// host in the Go client (release.latestTag walks any absolute Location), and
+// here a cross-host hop would send the anonymous lookup to a server the
+// release page never named. A relative Location keeps resolving as before.
+test('latestTag refuses an absolute redirect that leaves the release host', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return Promise.resolve({
+      status: 302,
+      headers: new Map([['location', 'https://evil.example/owner/repo/releases/tag/v9']])
+    })
+  }
+
+  await assert.rejects(
+    () => latestTag({ repo: 'owner/repo', baseUrl: 'https://github.com', fetcher, lookupTimeoutMs: 1000 }),
+    /not the release host/
+  )
+  assert.equal(seen.length, 1, 'the lookup must not follow the hop')
+})
+
+test('latestTag follows the redirect when the lookup answers', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const responses = [
+    { status: 302, headers: new Map([['location', 'https://github.com/owner/repo/releases/tag/v1.2.3']]) },
+    { status: 200, headers: new Map() }
+  ]
+  let calls = 0
+  const tag = await latestTag({
+    repo: 'owner/repo',
+    baseUrl: 'https://github.com',
+    fetcher: () => Promise.resolve(responses[calls++]),
+    lookupTimeoutMs: 1000
+  })
+  assert.equal(tag, 'v1.2.3')
+})
+
+// runSelfUpdate is a second recovery entry, reached from the upgrade path of a
+// process whose hook run does not hold sync.lock. It must not recover while a
+// Go swap holds self-update.lock, or it could move that swap's backup away.
+test('runSelfUpdate does not recover while a self-update holds the lock', async () => {
+  const { runSelfUpdate } = await import('./client-binary.mjs')
+  const { acquireLock, releaseLock } = await import('./coordinator-lock.mjs')
+  const { selfUpdateLockFileName, stateLockRuntime } = await import('./state-lock-runtime.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-runselfupdate-lock-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'previous', { mode: 0o755 })
+  const runtime = stateLockRuntime({ lockTimeoutMs: 0 })
+  const owner = acquireLock(join(dir, selfUpdateLockFileName), runtime)
+  const lines = []
+
+  assert.throws(
+    () =>
+      runSelfUpdate({
+        binaryPath,
+        env: { TOKENBOARD_STATE_DIR: dir },
+        log: (l) => lines.push(l),
+        spawn: () => ({ status: 0 })
+      }),
+    /not installed/
+  )
+  releaseLock(join(dir, selfUpdateLockFileName), runtime, owner)
+
+  assert.equal(existsSync(binaryPath), false, 'recovery must not have run while the lock was held')
+  assert.match(lines.join('\n'), /self-update holds/)
+})
+
+// With the lock free, runSelfUpdate still recovers a missing binary.
+test('runSelfUpdate recovers a missing binary when no update holds the lock', async () => {
+  const { runSelfUpdate } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-runselfupdate-free-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+
+  runSelfUpdate({
+    binaryPath,
+    env: { TOKENBOARD_STATE_DIR: dir },
+    log: () => {},
+    spawn: () => ({ status: 0, stdout: '', stderr: '' })
+  })
+
+  assert.equal(existsSync(binaryPath), true, 'the backup must have been restored')
+})
+
+// A staged copy whose version cannot be read is not proof it is current. The
+// known backup wins: restoring an unidentifiable file could roll the client
+// back with no way to tell.
+test('recovery keeps the backup when the staged version cannot be read', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-unreadable-staged-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('9.9.9'), { mode: 0o755 })
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, stubBinary('0.2.0'), { mode: 0o755 })
+  // The staged probe answers success but prints no parseable version.
+  const spawn = (command) => {
+    const text = readFileSync(String(command), 'utf8')
+    if (String(command).endsWith('.new')) return { status: 0, stdout: 'no version here\n', stderr: '' }
+    return { status: 0, stdout: text.includes('0.2.0') ? 'tokenboard (go) 0.2.0\n' : 'no version here\n', stderr: '' }
+  }
+
+  recoverOrphanedBinary({ binaryPath, spawn, log: () => {} })
+
+  assert.match(readFileSync(binaryPath, 'utf8'), /0\.2\.0/, 'the known backup must be restored')
+})
+
+// A recovery that cannot rename (a read-only directory) must not throw past
+// runSelfUpdate: the caller needs "not installed", the actionable fact, and the
+// next run retries. The failure is reported, not swallowed.
+test('runSelfUpdate reports a failed recovery instead of throwing it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-recovery-eacces-'))
+  const binaryPath = join(dir, 'tokenboard')
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, 'prev', { mode: 0o755 })
+  const lines = []
+
+  assert.throws(
+    () =>
+      runSelfUpdate({
+        binaryPath,
+        env: { TOKENBOARD_STATE_DIR: dir },
+        log: (l) => lines.push(l),
+        // A rename that fails the way a read-only directory does.
+        rename: () => {
+          const error = new Error('EACCES: permission denied')
+          error.code = 'EACCES'
+          throw error
+        },
+        spawn: () => ({ status: 0, stdout: '', stderr: '' })
+      }),
+    /not installed/,
+    'the run must report the missing binary, not the recovery error'
+  )
+  assert.equal(
+    lines.some((l) => /recovery failed/.test(l)),
+    true,
+    'the recovery failure must be logged'
+  )
+})
+
+// The installer extracts with the platform's tar, so the refusals Go's
+// extractBinary makes by hand have to be made here too: an archive that does
+// not carry the executable, or whose entry is not a non-empty file, must not
+// produce a staged binary.
+test('the installer refuses an archive without the executable', async () => {
+  const { extractBinary } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-nobin-'))
+  const archive = join(dir, 'release.tar.gz')
+  writeFileSync(archive, buildTarball(dir, 'README.md', 'docs'))
+  assert.throws(
+    () => extractBinary({ archivePath: archive, extractDir: join(dir, 'x'), name: 'tokenboard', log: () => {} }),
+    /does not contain tokenboard/
+  )
+})
+
+test('the installer refuses an empty executable entry', async () => {
+  const { extractBinary } = await import('./client-binary.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-emptybin-'))
+  const archive = join(dir, 'release.tar.gz')
+  writeFileSync(archive, buildTarball(dir, 'tokenboard', ''))
+  assert.throws(
+    () => extractBinary({ archivePath: archive, extractDir: join(dir, 'x'), name: 'tokenboard', log: () => {} }),
+    /is empty/
+  )
+})
+
+test('latestTag does not treat a non-redirect 3xx as a redirect', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const seen = []
+  const fetcher = (url) => {
+    seen.push(url)
+    return Promise.resolve({
+      status: 304,
+      headers: new Map([['location', 'https://github.com/o/r/releases/tag/v1']])
+    })
+  }
+
+  await assert.rejects(() => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }), /returned HTTP 304/)
+  assert.equal(seen.length, 1)
+})
+
+// A 3xx without a Location, and a redirect that lands on a page that is not a
+// release tag, must both be refused: following either leaves the installer with
+// no tag to download from. Go's latestTag draws the same lines.
+test('latestTag refuses a redirect without a Location', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = () => Promise.resolve({ status: 302, headers: new Map() })
+  await assert.rejects(() => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }), /without a Location/)
+})
+
+test('latestTag refuses a page that is not a release tag', async () => {
+  const { latestTag } = await import('./client-binary.mjs')
+  const fetcher = () => Promise.resolve({ status: 200, headers: new Map() })
+  await assert.rejects(
+    () => latestTag({ repo: 'o/r', baseUrl: 'https://github.com', fetcher }),
+    /did not land on a tag page/
+  )
+})
+
+// On Windows a scanner holds a freshly written file long enough for rename to
+// answer EPERM. Recovery must retry that, the same way the state writes do
+// through rename-atomic.ts, or an update that was about to succeed fails.
+test('recovery retries a transiently busy rename', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-busy-rename-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', {
+    mode: 0o755
+  })
+  let attempts = 0
+  const rename = (from, to) => {
+    attempts += 1
+    if (attempts === 1) {
+      const error = new Error('EBUSY: resource busy or locked')
+      error.code = 'EBUSY'
+      throw error
+    }
+    renameSync(from, to)
+  }
+
+  recoverOrphanedBinary({ binaryPath, spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n' }), rename })
+
+  assert.equal(attempts, 2, 'the busy rename is retried once')
+  assert.equal(existsSync(binaryPath), true, 'the binary is back in place')
+})
+
+// A permanent rename error (a read-only directory) is not retried: retrying
+// cannot clear it, and each attempt costs the caller a delay.
+test('recovery does not retry a permanent rename failure', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-eacces-rename-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.backup-20260101T000000Z-000001`, '#!/bin/sh\necho "tokenboard (go) 0.2.0"\n', {
+    mode: 0o755
+  })
+  let attempts = 0
+  const rename = () => {
+    attempts += 1
+    const error = new Error('EACCES: permission denied')
+    error.code = 'EACCES'
+    throw error
+  }
+
+  assert.throws(
+    () =>
+      recoverOrphanedBinary({ binaryPath, spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.2.0\n' }), rename }),
+    /EACCES/
+  )
+  assert.equal(attempts, 1, 'a permanent failure is not retried')
+})
+
+// A directory that cannot be listed is not a directory with no backups. If
+// recovery answered "none" here, a runnable but older `.new` would win over a
+// newer backup it could not see — the rollback this comparison exists to stop.
+test('recovery does not treat an unlistable directory as having no backups', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tokenboard-unlistable-'))
+  const binaryPath = join(dir, binaryFileName('darwin'))
+  writeFileSync(`${binaryPath}.new`, stubBinary('0.1.9'), { mode: 0o755 })
+  const error = new Error('EACCES: permission denied')
+  error.code = 'EACCES'
+
+  assert.throws(
+    () =>
+      recoverOrphanedBinary({
+        binaryPath,
+        spawn: () => ({ status: 0, stdout: 'tokenboard (go) 0.1.9\n' }),
+        readDir: () => {
+          throw error
+        }
+      }),
+    /EACCES/
+  )
+  assert.equal(existsSync(binaryPath), false, 'nothing may be restored from an unknown directory')
 })

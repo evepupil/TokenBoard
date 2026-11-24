@@ -1,0 +1,84 @@
+=== 2026-11-04 19:42:09 +0800 PRE-RUN environment ===
+19:42  up 9 days,  5:25, 7 users, load averages: 5.75 5.36 5.51
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                   878854.
+Pages active:                                6859740.
+Pages inactive:                              6793463.
+Pages speculative:                             65342.
+Pages throttled:                                   0.
+Pages wired down:                            1850878.
+Pages purgeable:                               44813.
+free+inactive GB: 29.26 (free 3.35)
+ccusage: ccusage 20.0.33
+ccusage processes: 0
+go: go version go1.27.3 darwin/amd64
+=== 2026-11-04 19:42:09 +0800 BEFORE single ===
+19:42  up 9 days,  5:25, 7 users, load averages: 5.75 5.36 5.51
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                   877940.
+Pages active:                                6860140.
+Pages inactive:                              6793909.
+Pages speculative:                             65468.
+Pages throttled:                                   0.
+Pages wired down:                            1850829.
+Pages purgeable:                               44831.
+free+inactive GB: 29.26 (free 3.35)
+=== 2026-11-04 19:50:52 +0800 AFTER single (exit=0, wall=523s) ===
+19:50  up 9 days,  5:33, 15 users, load averages: 5.44 6.69 6.29
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                   758280.
+Pages active:                                6718032.
+Pages inactive:                              6684308.
+Pages speculative:                             34945.
+Pages throttled:                                   0.
+Pages wired down:                            1828120.
+Pages purgeable:                               12869.
+free+inactive GB: 28.39 (free 2.89)
+--- stderr single ---
+=== 2026-11-04 19:50:53 +0800 BEFORE 30d ===
+19:50  up 9 days,  5:33, 15 users, load averages: 5.44 6.69 6.29
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                   758638.
+Pages active:                                6717789.
+Pages inactive:                              6684264.
+Pages speculative:                             34944.
+Pages throttled:                                   0.
+Pages wired down:                            1828004.
+Pages purgeable:                               12869.
+free+inactive GB: 28.39 (free 2.89)
+=== 2026-11-04 20:07:30 +0800 AFTER 30d (exit=0, wall=997s) ===
+20:07  up 9 days,  5:50, 27 users, load averages: 13.25 15.37 12.39
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                  1113501.
+Pages active:                                5879908.
+Pages inactive:                              6223644.
+Pages speculative:                             37510.
+Pages throttled:                                   0.
+Pages wired down:                            1896726.
+Pages purgeable:                                5997.
+free+inactive GB: 28.02 (free 4.27)
+--- stderr 30d ---
+=== 2026-11-04 20:07:30 +0800 BEFORE full ===
+20:07  up 9 days,  5:50, 27 users, load averages: 13.25 15.37 12.39
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                  1116850.
+Pages active:                                5871589.
+Pages inactive:                              6228602.
+Pages speculative:                             37944.
+Pages throttled:                                   0.
+Pages wired down:                            1896574.
+Pages purgeable:                                5998.
+free+inactive GB: 28.02 (free 4.25)
+=== 2026-11-04 20:30:37 +0800 AFTER full (exit=0, wall=1387s) ===
+20:30  up 9 days,  6:13, 29 users, load averages: 153.82 158.57 100.18
+Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free:                                  1222839.
+Pages active:                                5912903.
+Pages inactive:                              5907342.
+Pages speculative:                              4590.
+Pages throttled:                                   0.
+Pages wired down:                            1926376.
+Pages purgeable:                               33596.
+free+inactive GB: 27.19 (free 4.65)
+--- stderr full ---
+=== 2026-11-04 20:30:37 +0800 ALL DONE ===

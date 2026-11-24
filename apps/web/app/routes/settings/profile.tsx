@@ -16,7 +16,10 @@ import {
   type ProfileSettings
 } from '../../features/settings/service'
 import { jsonError } from '../../lib/http'
-import { listActiveUsageTimezones } from '../../features/usage/queries/usage-timezone-scope'
+import {
+  findMismatchedUsageTimezones,
+  listActiveUsageTimezones
+} from '../../features/usage/queries/usage-timezone-scope'
 
 export const GET = createRoute(async (c) => {
   const user = await requireUser(c)
@@ -121,7 +124,16 @@ function ProfileSettingsFields(props: { profile: ProfileSettings; collectorTimez
     <div class="space-y-4">
       <Label>
         显示名称
-        <Input name="displayName" value={props.profile.displayName} autocomplete="name" required />
+        <Input
+          name="displayName"
+          value={props.profile.displayName}
+          autocomplete="name"
+          required
+          // Same bound as the profile schema (max(80)) and the preview request: without
+          // it an 81-character name saved fine but froze the README preview, which
+          // silently refused the oversized payload.
+          maxLength={80}
+        />
       </Label>
       <ProfileSlugInput profile={props.profile} />
       <Label>
@@ -179,7 +191,10 @@ function CollectorTimezoneNotice(props: { timezone: string; collectorTimezones?:
   // No collectors means nothing is stamping dates yet, so there is nothing to warn about.
   if (collectorTimezones.length === 0) return null
 
-  const stale = collectorTimezones.filter((timezone) => timezone !== props.timezone)
+  // Same canonical comparison the dashboard warning uses: "UTC" vs "Etc/UTC" is
+  // one calendar, and a raw string compare here would tell the user to
+  // reinstall a collector that already stamps the right day.
+  const stale = findMismatchedUsageTimezones(props.timezone, collectorTimezones)
 
   return (
     <p

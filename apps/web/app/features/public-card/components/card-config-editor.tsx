@@ -83,6 +83,13 @@ export function PublicCardConfigEditor(props: {
           data-public-card-public-url={props.preview.publicUrl}
         />
       </div>
+      {/* The live preview is a POST to /api/v1/public-card/preview. A rejected body or a
+          dropped connection used to leave the image frozen at its last good render with no
+          sign anything was wrong; this line is where the client reports that. It starts
+          hidden so a working preview adds no visual noise — the `hidden` attribute only, not
+          the `hidden` utility class: the client toggles the attribute, so a class would keep
+          display:none after the attribute came off and the error would never appear. */}
+      <p class="app-flash-error rounded-lg p-3 text-sm" role="status" data-public-card-preview-status="true" hidden />
 
       <div class="grid gap-3 sm:grid-cols-2">
         <SelectField
@@ -128,8 +135,9 @@ export function PublicCardConfigEditor(props: {
         </Label>
       </div>
 
-      <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <ToggleField name="cardShowPublicUrl" checked={props.config.showPublicUrl} title="显示公开链接" />
+        <ToggleField name="cardShowUpdatedAt" checked={props.config.showUpdatedAt} title="显示数据更新时间" />
         <ToggleField name="cardGlowEnabled" checked={props.config.glow.enabled} title="背景炫光" />
       </div>
 

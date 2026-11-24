@@ -50,7 +50,13 @@ try {
 
 const flags = parseArgs(process.argv.slice(2))
 let pairingCode = flags['pairing-code'] || process.env.TOKENBOARD_PAIRING_CODE
-const baseUrl = readSetupBaseUrl({ flags })
+let baseUrl
+try {
+  baseUrl = readSetupBaseUrl({ flags })
+} catch (error) {
+  console.error(errorMessage(error))
+  process.exit(1)
+}
 const timezone = flags.timezone || process.env.TOKENBOARD_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone
 const deviceName = flags['device-name'] || `${hostname()} ${platform()}`
 
@@ -126,6 +132,9 @@ if (!pairingCode && !useDeviceLink && savedProfile) {
   const response = await fetch(`${baseUrl}/api/v1/device/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    // The body carries the pairing code and the install claim; following a
+    // redirect would hand them to whatever host the answer names.
+    redirect: 'manual',
     body: JSON.stringify({
       pairingCode,
       deviceName,

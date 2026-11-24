@@ -40,9 +40,9 @@ describe('Codex context pricing', () => {
   })
 
   test.each([
-    [271_999, 5 / 1_000_000],
-    [272_000, 5 / 1_000_000],
-    [272_001, 10 / 1_000_000]
+    [271_999, 4 / 1_000_000],
+    [272_000, 4 / 1_000_000],
+    [272_001, 8 / 1_000_000]
   ])('uses the GPT-5.6 request tier at %d input tokens', (inputTokens, inputRate) => {
     expect(
       priceCodexRequest({
@@ -64,7 +64,7 @@ describe('Codex context pricing', () => {
       cacheCreationTokens: 1
     })
 
-    expect(cost).toBeCloseTo((272_000 * 10 + 12.5) / 1_000_000, 12)
+    expect(cost).toBeCloseTo((272_000 * 8 + 10) / 1_000_000, 12)
   })
 
   test.each([
@@ -111,7 +111,7 @@ describe('Codex context pricing', () => {
       cacheCreationTokens: 1
     })
 
-    expect(cost).toBeCloseTo((272_000 * 10 + 1 + 12.5 + 45) / 1_000_000, 12)
+    expect(cost).toBeCloseTo((272_000 * 8 + 0.8 + 10 + 30) / 1_000_000, 12)
   })
 
   test('prices additive cached input separately from uncached input', () => {
@@ -124,7 +124,7 @@ describe('Codex context pricing', () => {
       cacheCreationTokens: 0
     })
 
-    expect(cost).toBeCloseTo((50 * 5 + 150 * 0.5 + 20 * 30) / 1_000_000, 12)
+    expect(cost).toBeCloseTo((50 * 4 + 150 * 0.4 + 20 * 20) / 1_000_000, 12)
   })
 
   test('applies the fast and priority multiplier and normalizes dated model ids', () => {
@@ -258,7 +258,7 @@ describe('Codex context pricing', () => {
       }
     ])
     expect(diagnostics).toEqual([
-      'TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-multi-tier; multiple changing context tiers cannot be represented by the request-level rule'
+      'TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with multiple changing context tiers (cannot be represented by the request-level rule): gpt-6-multi-tier'
     ])
 
     return withCodexContextPricingRules(rules, async () => {
@@ -439,7 +439,7 @@ describe('Codex context pricing', () => {
 
     expect(rules).toEqual([])
     expect(diagnostics).toEqual([
-      'TokenBoard model pricing: skipping dynamic Codex context rule for gpt-6-cache-unknown; cache pricing is incomplete (cache-read, cache-write)'
+      'TokenBoard model pricing: skipping dynamic Codex context rule for 1 model with incomplete cache pricing (cache-read, cache-write): gpt-6-cache-unknown'
     ])
   })
 
@@ -535,7 +535,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((271_999 * 5 + 30) / 1_000_000 + 2 * ((272_001 * 10 + 45) / 1_000_000), 12)
+          costUsd: expect.closeTo((271_999 * 4 + 20) / 1_000_000 + 2 * ((272_001 * 8 + 30) / 1_000_000), 12)
         }
       ])
     } finally {
@@ -559,7 +559,7 @@ describe('Codex context pricing', () => {
           filePaths: [first, second],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (20 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 20 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -586,7 +586,7 @@ describe('Codex context pricing', () => {
           filePaths: [file],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -631,7 +631,7 @@ describe('Codex context pricing', () => {
           filePaths: [active, archived],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -652,7 +652,7 @@ describe('Codex context pricing', () => {
           codexHomes: [root],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -671,7 +671,7 @@ describe('Codex context pricing', () => {
           filePaths: [active, archived],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -690,7 +690,7 @@ describe('Codex context pricing', () => {
           filePaths: [archived, active],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -709,7 +709,60 @@ describe('Codex context pricing', () => {
           filePaths: [active, archived],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('attributes a legacy fork to the latest session_meta and counts it once', async () => {
+    // Releases before Codex wrote session_id produce a forked file whose first
+    // session_meta names the child and whose second replays the parent, with
+    // no field to unify them. The file's records are the parent's, so adopting
+    // the latest meta must both stop the source from failing and keep the
+    // replay deduplicated against the parent's own file.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-context-legacy-fork-'))
+    const parent = join(root, 'sessions', '2026', '05', '20', 'parent.jsonl')
+    const forked = join(root, 'sessions', '2026', '05', '21', 'forked.jsonl')
+    try {
+      const row = tokenCount('2026-05-01T00:00:00.000Z', { last_token_usage: usage(10) })
+      await Promise.all([
+        writeJsonl(parent, [sessionMeta('parent-session'), row]),
+        writeJsonl(forked, [sessionMeta('child-session'), sessionMeta('parent-session'), row])
+      ])
+
+      await expect(
+        collectCodexContextPricingCostsFromFiles({
+          filePaths: [parent, forked],
+          timezone: 'UTC'
+        })
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects two files claiming one alias with different identities', async () => {
+    // The active copy and the archived copy share a relative path, so they
+    // share an alias. Two different session identities under it mean the files
+    // are not the same session, and deduplicating them would silently drop
+    // usage.
+    const root = await mkdtemp(join(tmpdir(), 'tokenboard-codex-context-alias-conflict-'))
+    const active = join(root, 'sessions', '2026', '05', '20', 'same-file.jsonl')
+    const archived = join(root, 'archived_sessions', '2026', '05', '20', 'same-file.jsonl')
+    try {
+      const row = tokenCount('2026-05-01T00:00:00.000Z', { last_token_usage: usage(10) })
+      await Promise.all([
+        writeJsonl(active, [sessionMeta('first-session'), row]),
+        writeJsonl(archived, [sessionMeta('second-session'), row])
+      ])
+
+      await expect(
+        collectCodexContextPricingCostsFromFiles({
+          filePaths: [active, archived],
+          timezone: 'UTC'
+        })
+      ).rejects.toThrow(/conflicting session identities/)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -732,7 +785,7 @@ describe('Codex context pricing', () => {
           codexHomes: [firstHome, secondHome],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (20 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 20 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -758,7 +811,7 @@ describe('Codex context pricing', () => {
           codexHomes: [firstHome, secondHome],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (20 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 20 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -784,7 +837,7 @@ describe('Codex context pricing', () => {
           timezone: 'UTC',
           codexSymlinkRoots: [archive]
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -810,7 +863,7 @@ describe('Codex context pricing', () => {
       })
       expect(costs).toHaveLength(2)
       expect(costs[0]).toMatchObject({ usageDate: '2026-05-01', model: 'gpt-5.6-sol' })
-      expect(costs[0]?.costUsd).toBeCloseTo((15 * 5) / 1_000_000, 14)
+      expect(costs[0]?.costUsd).toBeCloseTo((15 * 4) / 1_000_000, 14)
       expect(costs[1]).toMatchObject({ usageDate: '2026-05-01', model: 'gpt-5.6-terra' })
       expect(costs[1]?.costUsd).toBeCloseTo((5 * 2) / 1_000_000, 14)
     } finally {
@@ -836,8 +889,8 @@ describe('Codex context pricing', () => {
           timezone: 'UTC'
         })
       ).resolves.toEqual([
-        { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: (10 * 5) / 1_000_000 },
-        { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (5 * 5) / 1_000_000 }
+        { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: 10 * (4 / 1_000_000) },
+        { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 5 * (4 / 1_000_000) }
       ])
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -930,7 +983,7 @@ describe('Codex context pricing', () => {
           timezone: 'UTC',
           stderr: (line) => diagnostics.push(line)
         })
-      ).resolves.toEqual([{ usageDate: '2026-08-12', model: 'gpt-5.6-sol', costUsd: (20 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-08-12', model: 'gpt-5.6-sol', costUsd: 20 * (4 / 1_000_000) }])
       expect(diagnostics).toEqual([
         `Skipped 2 oversized Codex context pricing JSONL rows without usage or subagent metadata across 2 scans (largest ${Buffer.byteLength(JSON.stringify(oversized))} bytes)`
       ])
@@ -986,7 +1039,7 @@ describe('Codex context pricing', () => {
           filePaths: [file],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-08-12', model: 'gpt-5.6-sol', costUsd: (10 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-08-12', model: 'gpt-5.6-sol', costUsd: 10 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1080,7 +1133,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((10 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((10 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1110,7 +1163,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1140,7 +1193,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1199,7 +1252,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1226,7 +1279,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1260,7 +1313,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-07-18',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((20 * 5) / 1_000_000, 14)
+          costUsd: expect.closeTo((20 * 4) / 1_000_000, 14)
         }
       ])
     } finally {
@@ -1500,7 +1553,7 @@ describe('Codex context pricing', () => {
           filePaths: [file],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (50 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 50 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1525,7 +1578,7 @@ describe('Codex context pricing', () => {
           filePaths: [file],
           timezone: 'UTC'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: (50 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 50 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1548,28 +1601,38 @@ describe('Codex context pricing', () => {
           since: '20260502',
           until: '20260502'
         })
-      ).resolves.toEqual([{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: (20 * 5) / 1_000_000 }])
+      ).resolves.toEqual([{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: 20 * (4 / 1_000_000) }])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  test('fails when a collected raw cost has no matching daily snapshot', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 0, totalTokens: 10 }],
-        [{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: 1 }]
-      )
-    ).toThrow('Codex context pricing cannot match daily snapshot')
+  test('reports a collected raw cost with no matching daily snapshot', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
+      [{ usageDate: '2026-05-02', model: 'gpt-5.6-sol', costUsd: 1 }],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }])
+    expect(diagnostics).toEqual([
+      "Codex context pricing found gpt-5.6-sol usage without a matching daily snapshot for 2026-05-02; leaving the day's aggregate cost as reported",
+      "Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
+    ])
   })
 
-  test('fails when raw context pricing attributes a date to a different model', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 0, totalTokens: 10 }],
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 1 }]
-      )
-    ).toThrow('Codex context pricing cannot match daily snapshot')
+  test('reports raw context pricing that attributes a date to a different model', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 3, totalTokens: 10 }],
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 1 }],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-terra', costUsd: 3, totalTokens: 10 }])
+    expect(diagnostics).toEqual([
+      "Codex context pricing found gpt-5.6-sol usage without a matching daily snapshot for 2026-05-01; leaving the day's aggregate cost as reported",
+      "Codex context pricing found gpt-5.6-terra daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
+    ])
   })
 
   test('matches ccusage aliases to the canonical context-pricing model', () => {
@@ -1631,16 +1694,22 @@ describe('Codex context pricing', () => {
     expect(result.map((snapshot) => snapshot.costUsd)).toEqual([1, 2])
   })
 
-  test('fails instead of assigning one alias raw cost to multiple same-day snapshots', () => {
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [
-          { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: 0, totalTokens: 10 },
-          { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 0, totalTokens: 20 }
-        ],
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 2 }]
-      )
-    ).toThrow('Codex context pricing cannot match raw cost')
+  test('reports one alias raw cost that would fit multiple same-day snapshots', () => {
+    const diagnostics: string[] = []
+    const result = applyCodexContextPricingCosts(
+      [
+        { usageDate: '2026-05-01', model: 'gpt-5.6', costUsd: 5, totalTokens: 10 },
+        { usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 6, totalTokens: 20 }
+      ],
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 2 }],
+      (line) => diagnostics.push(line)
+    )
+    // The exact key still matches its own snapshot; only the alias is left
+    // without an unambiguous raw cost, and it keeps the aggregate value.
+    expect(result.map((snapshot) => snapshot.costUsd)).toEqual([5, 2])
+    expect(diagnostics).toEqual([
+      "Codex context pricing found gpt-5.6 daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
+    ])
   })
 
   test('fails instead of assigning one exact raw cost to duplicate snapshots', () => {
@@ -1655,17 +1724,16 @@ describe('Codex context pricing', () => {
     ).toThrow('Codex context pricing cannot match duplicate daily snapshots')
   })
 
-  test('fails when a priced daily snapshot has no raw context-pricing cost', () => {
+  test('keeps the aggregate cost when a priced daily snapshot has no raw context-pricing cost', () => {
     const diagnostics: string[] = []
-    expect(() =>
-      applyCodexContextPricingCosts(
-        [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
-        [],
-        (line) => diagnostics.push(line)
-      )
-    ).toThrow('Codex context pricing cannot match raw cost')
+    const result = applyCodexContextPricingCosts(
+      [{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }],
+      [],
+      (line) => diagnostics.push(line)
+    )
+    expect(result).toEqual([{ usageDate: '2026-05-01', model: 'gpt-5.6-sol', costUsd: 7, totalTokens: 10 }])
     expect(diagnostics).toEqual([
-      'Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01'
+      "Codex context pricing found gpt-5.6-sol daily usage without an unambiguous raw cost for 2026-05-01; keeping the day's aggregate cost"
     ])
   })
 
@@ -1796,7 +1864,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((200_000 * 10 + 100_000 * 1 + 1 * 45) / 1_000_000, 12)
+          costUsd: expect.closeTo((200_000 * 8 + 100_000 * 0.8 + 1 * 30) / 1_000_000, 12)
         }
       ])
     } finally {
@@ -1828,7 +1896,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((272_000 * 10 + 12.5) / 1_000_000, 12)
+          costUsd: expect.closeTo((272_000 * 8 + 10) / 1_000_000, 12)
         }
       ])
     } finally {
@@ -1861,7 +1929,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((10 * 5 + 4 * 0.5 + 3 * 6.25 + 2 * 30) / 1_000_000, 12)
+          costUsd: expect.closeTo((10 * 4 + 4 * 0.4 + 3 * 5 + 2 * 20) / 1_000_000, 12)
         }
       ])
     } finally {
@@ -1921,7 +1989,7 @@ describe('Codex context pricing', () => {
         {
           usageDate: '2026-05-01',
           model: 'gpt-5.6-sol',
-          costUsd: expect.closeTo((60 * 5 + 40 * 0.5 + 1 * 30) / 1_000_000, 12)
+          costUsd: expect.closeTo((60 * 4 + 40 * 0.4 + 1 * 20) / 1_000_000, 12)
         }
       ])
     } finally {
@@ -1984,7 +2052,7 @@ describe('Codex context pricing', () => {
           model: 'gpt-5.6-sol',
           // Additive: 100k uncached + 200k cache read = 300k context, past the 272k
           // threshold, so the long tier prices all three buckets.
-          costUsd: expect.closeTo((100_000 * 10 + 200_000 * 1 + 1 * 45) / 1_000_000, 12)
+          costUsd: expect.closeTo((100_000 * 8 + 200_000 * 0.8 + 1 * 30) / 1_000_000, 12)
         }
       ])
     } finally {

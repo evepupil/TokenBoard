@@ -1,0 +1,656 @@
+{
+  "ccusageVersion": "20.0.33",
+  "since": "20260101",
+  "until": "20260228",
+  "timezone": "UTC",
+  "commands": [
+    {
+      "id": "daily/auto",
+      "argv": [
+        "ccusage",
+        "copilot",
+        "daily",
+        "--json",
+        "--mode",
+        "auto",
+        "--offline",
+        "--single-thread",
+        "--timezone",
+        "UTC",
+        "--since",
+        "20260101",
+        "--until",
+        "20260228"
+      ],
+      "copilotHome": "<fixture-tree>/copilot"
+    },
+    {
+      "id": "session/auto",
+      "argv": [
+        "ccusage",
+        "copilot",
+        "session",
+        "--json",
+        "--mode",
+        "auto",
+        "--offline",
+        "--single-thread",
+        "--timezone",
+        "UTC",
+        "--since",
+        "20260101",
+        "--until",
+        "20260228"
+      ],
+      "copilotHome": "<fixture-tree>/copilot"
+    },
+    {
+      "id": "daily/calculate",
+      "argv": [
+        "ccusage",
+        "copilot",
+        "daily",
+        "--json",
+        "--mode",
+        "calculate",
+        "--offline",
+        "--single-thread",
+        "--timezone",
+        "UTC",
+        "--since",
+        "20260101",
+        "--until",
+        "20260228"
+      ],
+      "copilotHome": "<fixture-tree>/copilot"
+    },
+    {
+      "id": "session/calculate",
+      "argv": [
+        "ccusage",
+        "copilot",
+        "session",
+        "--json",
+        "--mode",
+        "calculate",
+        "--offline",
+        "--single-thread",
+        "--timezone",
+        "UTC",
+        "--since",
+        "20260101",
+        "--until",
+        "20260228"
+      ],
+      "copilotHome": "<fixture-tree>/copilot"
+    }
+  ],
+  "crossCheckedSnapshots": [
+    "copilot_cli__focused_daily_json.snap",
+    "copilot_cli__focused_monthly_and_session_json.snap"
+  ],
+  "reports": {
+    "daily/auto": {
+      "daily": [
+        {
+          "cacheCreationTokens": 20,
+          "cacheReadTokens": 10,
+          "date": "2026-01-02",
+          "inputTokens": 70,
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 20,
+              "cacheReadTokens": 10,
+              "cost": 0.00173,
+              "inputTokens": 70,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 50
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 50,
+          "totalCost": 0.00173,
+          "totalTokens": 150
+        },
+        {
+          "cacheCreationTokens": 10,
+          "cacheReadTokens": 10,
+          "date": "2026-01-03",
+          "inputTokens": 93,
+          "messageCount": 3,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 10,
+              "cacheReadTokens": 10,
+              "cost": 0.0016325,
+              "inputTokens": 93,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 44
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 44,
+          "totalCost": 0.0016325,
+          "totalTokens": 157
+        },
+        {
+          "cacheCreationTokens": 15,
+          "cacheReadTokens": 10,
+          "date": "2026-02-01",
+          "inputTokens": 65,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 15,
+              "cacheReadTokens": 10,
+              "cost": 0.000661875,
+              "inputTokens": 65,
+              "modelName": "gpt-5.4",
+              "outputTokens": 30
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 30,
+          "totalCost": 0.000661875,
+          "totalTokens": 120
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-02",
+          "inputTokens": 7,
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.0001375,
+              "inputTokens": 7,
+              "modelName": "gpt-5.4",
+              "outputTokens": 8
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 8,
+          "totalCost": 0.0001375,
+          "totalTokens": 15
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-03",
+          "inputTokens": 40,
+          "messageCount": 2,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.06,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            },
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.00025,
+              "inputTokens": 40,
+              "modelName": "gpt-5.4",
+              "outputTokens": 10
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4",
+            "unknown"
+          ],
+          "outputTokens": 10,
+          "totalCost": 0.06025,
+          "totalTokens": 50
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-04",
+          "inputTokens": 0,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.02,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            }
+          ],
+          "modelsUsed": [
+            "unknown"
+          ],
+          "outputTokens": 0,
+          "totalCost": 0.02,
+          "totalTokens": 0
+        }
+      ],
+      "totals": {
+        "cacheCreationTokens": 45,
+        "cacheReadTokens": 30,
+        "inputTokens": 275,
+        "outputTokens": 142,
+        "totalCost": 0.084411875,
+        "totalTokens": 492
+      }
+    },
+    "session/auto": {
+      "sessions": [
+        {
+          "cacheCreationTokens": 30,
+          "cacheReadTokens": 20,
+          "firstActivity": "2026-01-02T01:20:00.000Z",
+          "inputTokens": 163,
+          "lastActivity": "2026-01-03T02:20:00.000Z",
+          "messageCount": 4,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 30,
+              "cacheReadTokens": 20,
+              "cost": 0.0033625,
+              "inputTokens": 163,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 94
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 94,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-a",
+          "totalCost": 0.0033625,
+          "totalTokens": 307
+        },
+        {
+          "cacheCreationTokens": 15,
+          "cacheReadTokens": 10,
+          "firstActivity": "2026-02-01T01:20:00.000Z",
+          "inputTokens": 65,
+          "lastActivity": "2026-02-01T01:20:00.000Z",
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 15,
+              "cacheReadTokens": 10,
+              "cost": 0.000661875,
+              "inputTokens": 65,
+              "modelName": "gpt-5.4",
+              "outputTokens": 30
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 30,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-b",
+          "totalCost": 0.000661875,
+          "totalTokens": 120
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "firstActivity": "2026-02-02T01:20:00.000Z",
+          "inputTokens": 7,
+          "lastActivity": "2026-02-02T01:20:00.000Z",
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.0001375,
+              "inputTokens": 7,
+              "modelName": "gpt-5.4",
+              "outputTokens": 8
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 8,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-c",
+          "totalCost": 0.0001375,
+          "totalTokens": 15
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "firstActivity": "2026-02-03T02:00:00.000Z",
+          "inputTokens": 40,
+          "lastActivity": "2026-02-04T01:00:00.000Z",
+          "messageCount": 2,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.08,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            },
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.00025,
+              "inputTokens": 40,
+              "modelName": "gpt-5.4",
+              "outputTokens": 10
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4",
+            "unknown"
+          ],
+          "outputTokens": 10,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-credits",
+          "totalCost": 0.08025,
+          "totalTokens": 50
+        }
+      ],
+      "totals": {
+        "cacheCreationTokens": 45,
+        "cacheReadTokens": 30,
+        "inputTokens": 275,
+        "outputTokens": 142,
+        "totalCost": 0.084411875,
+        "totalTokens": 492
+      }
+    },
+    "daily/calculate": {
+      "daily": [
+        {
+          "cacheCreationTokens": 20,
+          "cacheReadTokens": 10,
+          "date": "2026-01-02",
+          "inputTokens": 70,
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 20,
+              "cacheReadTokens": 10,
+              "cost": 0.00173,
+              "inputTokens": 70,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 50
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 50,
+          "totalCost": 0.00173,
+          "totalTokens": 150
+        },
+        {
+          "cacheCreationTokens": 10,
+          "cacheReadTokens": 10,
+          "date": "2026-01-03",
+          "inputTokens": 93,
+          "messageCount": 3,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 10,
+              "cacheReadTokens": 10,
+              "cost": 0.0016325,
+              "inputTokens": 93,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 44
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 44,
+          "totalCost": 0.0016325,
+          "totalTokens": 157
+        },
+        {
+          "cacheCreationTokens": 15,
+          "cacheReadTokens": 10,
+          "date": "2026-02-01",
+          "inputTokens": 65,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 15,
+              "cacheReadTokens": 10,
+              "cost": 0.000661875,
+              "inputTokens": 65,
+              "modelName": "gpt-5.4",
+              "outputTokens": 30
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 30,
+          "totalCost": 0.000661875,
+          "totalTokens": 120
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-02",
+          "inputTokens": 7,
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.0001375,
+              "inputTokens": 7,
+              "modelName": "gpt-5.4",
+              "outputTokens": 8
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 8,
+          "totalCost": 0.0001375,
+          "totalTokens": 15
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-03",
+          "inputTokens": 40,
+          "messageCount": 2,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.00025,
+              "inputTokens": 40,
+              "modelName": "gpt-5.4",
+              "outputTokens": 10
+            },
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4",
+            "unknown"
+          ],
+          "outputTokens": 10,
+          "totalCost": 0.00025,
+          "totalTokens": 50
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "date": "2026-02-04",
+          "inputTokens": 0,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            }
+          ],
+          "modelsUsed": [
+            "unknown"
+          ],
+          "outputTokens": 0,
+          "totalCost": 0,
+          "totalTokens": 0
+        }
+      ],
+      "totals": {
+        "cacheCreationTokens": 45,
+        "cacheReadTokens": 30,
+        "inputTokens": 275,
+        "outputTokens": 142,
+        "totalCost": 0.004411875,
+        "totalTokens": 492
+      }
+    },
+    "session/calculate": {
+      "sessions": [
+        {
+          "cacheCreationTokens": 30,
+          "cacheReadTokens": 20,
+          "firstActivity": "2026-01-02T01:20:00.000Z",
+          "inputTokens": 163,
+          "lastActivity": "2026-01-03T02:20:00.000Z",
+          "messageCount": 4,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 30,
+              "cacheReadTokens": 20,
+              "cost": 0.0033625,
+              "inputTokens": 163,
+              "modelName": "claude-opus-4.6",
+              "outputTokens": 94
+            }
+          ],
+          "modelsUsed": [
+            "claude-opus-4.6"
+          ],
+          "outputTokens": 94,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-a",
+          "totalCost": 0.0033625,
+          "totalTokens": 307
+        },
+        {
+          "cacheCreationTokens": 15,
+          "cacheReadTokens": 10,
+          "firstActivity": "2026-02-01T01:20:00.000Z",
+          "inputTokens": 65,
+          "lastActivity": "2026-02-01T01:20:00.000Z",
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 15,
+              "cacheReadTokens": 10,
+              "cost": 0.000661875,
+              "inputTokens": 65,
+              "modelName": "gpt-5.4",
+              "outputTokens": 30
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 30,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-b",
+          "totalCost": 0.000661875,
+          "totalTokens": 120
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "firstActivity": "2026-02-02T01:20:00.000Z",
+          "inputTokens": 7,
+          "lastActivity": "2026-02-02T01:20:00.000Z",
+          "messageCount": 1,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.0001375,
+              "inputTokens": 7,
+              "modelName": "gpt-5.4",
+              "outputTokens": 8
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4"
+          ],
+          "outputTokens": 8,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-c",
+          "totalCost": 0.0001375,
+          "totalTokens": 15
+        },
+        {
+          "cacheCreationTokens": 0,
+          "cacheReadTokens": 0,
+          "firstActivity": "2026-02-03T02:00:00.000Z",
+          "inputTokens": 40,
+          "lastActivity": "2026-02-04T01:00:00.000Z",
+          "messageCount": 2,
+          "modelBreakdowns": [
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0.00025,
+              "inputTokens": 40,
+              "modelName": "gpt-5.4",
+              "outputTokens": 10
+            },
+            {
+              "cacheCreationTokens": 0,
+              "cacheReadTokens": 0,
+              "cost": 0,
+              "inputTokens": 0,
+              "modelName": "unknown",
+              "outputTokens": 0
+            }
+          ],
+          "modelsUsed": [
+            "gpt-5.4",
+            "unknown"
+          ],
+          "outputTokens": 10,
+          "projectPath": "GitHub Copilot CLI",
+          "sessionId": "session-credits",
+          "totalCost": 0.00025,
+          "totalTokens": 50
+        }
+      ],
+      "totals": {
+        "cacheCreationTokens": 45,
+        "cacheReadTokens": 30,
+        "inputTokens": 275,
+        "outputTokens": 142,
+        "totalCost": 0.004411875,
+        "totalTokens": 492
+      }
+    }
+  }
+}

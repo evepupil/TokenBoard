@@ -94,6 +94,22 @@ describe('notification queries', () => {
     expect(due[1].scheduleTimesLocal).toEqual(['18:00'])
   })
 
+  // The same hazard exists for weekdays, and the times test above cannot see it: `normalizeScheduleTimes`
+  // is wrapped, but the weekday parser is called directly, so one row with `schedule_weekdays = '8'`
+  // throws out of the same `listDueWebhookSubscriptions` map and stops every user's delivery.
+  test('degrades a corrupt stored weekday instead of failing the whole cron batch', async () => {
+    const db = allRowsDb([
+      webhookRow({ id: 'sub_ok', scheduleWeekdays: '1,3' }),
+      webhookRow({ id: 'sub_bad', scheduleWeekdays: '8' })
+    ])
+
+    const due = await listDueWebhookSubscriptions(db, '2026-04-29T01:31:00.000Z', 50)
+
+    expect(due.map((subscription) => subscription.id)).toEqual(['sub_ok', 'sub_bad'])
+    expect(due[0].scheduleWeekdays).toEqual([1, 3])
+    expect(due[1].scheduleWeekdays).toEqual([0, 1, 2, 3, 4, 5, 6])
+  })
+
   test('claims only due enabled subscriptions with an expired lock', async () => {
     const statements: string[] = []
     const bindings: unknown[][] = []

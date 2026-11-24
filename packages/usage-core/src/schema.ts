@@ -94,22 +94,26 @@ export const usageTimezoneSchema = z
 export const usageModelSchema = z.string().min(1).max(maxUsageModelNameLength)
 
 /**
- * Ceiling for a single snapshot's `costUsd`. Cost is the one field the aggregation layer
- * sums across rows, so an extreme value would overflow that sum to `Infinity`, which then
- * serialises to `null` in the public JSON. Six orders of magnitude above the largest
- * per-snapshot cost seen in production, so it bounds the arithmetic without constraining
- * real usage.
+ * Ceiling for a single snapshot's `costUsd`. Cost is summed by the aggregation
+ * layer alongside the token fields (each of which carries its own ceiling
+ * below); an extreme per-row value would drive that sum to `Infinity`, which
+ * then serialises to `null` in the public JSON. Six orders of magnitude above
+ * the largest per-snapshot cost seen in production, so it bounds the
+ * arithmetic without constraining real usage.
  */
 export const maxSnapshotCostUsd = 1_000_000_000
 
 /**
  * Ceiling for a single snapshot's token counts. These fields are summed by the aggregation
- * layer (`SUM(total_tokens)` and friends), and SQLite evaluates `SUM` over int64: a sum that
- * leaves that range raises `integer overflow` and aborts the entire statement. In the
- * leaderboard query one such row therefore fails the endpoint for every tenant, not only the
- * one whose rows overflowed. Cost already carried a ceiling for the same reason; these fields
- * did not. The value is far above any real single-day usage — a trillion tokens per row —
- * while keeping the worst-case sum inside int64 for any plausible number of rows.
+ * layer, and SQLite evaluates `SUM` over int64: a sum that leaves that range raises `integer
+ * overflow` and aborts the entire statement. In a cross-tenant query one such row therefore
+ * fails the endpoint for every reader, not only the account whose rows overflowed. Cost already
+ * carried a ceiling for the same reason; these fields did not. The value is far above any real
+ * single-day usage — a trillion tokens per row. It bounds one row, not a window: the 5-tuple
+ * ingest key includes `device_id`, so an account can still create arbitrarily many capped rows,
+ * and ~9.2M of them reach the int64 sum. The public read paths (leaderboard, README card)
+ * therefore aggregate with `total()`, which accumulates in floating point and cannot overflow;
+ * this ceiling keeps any single value in that float faithful to whole tokens below 2^53.
  */
 export const maxSnapshotTokens = 1_000_000_000_000
 
