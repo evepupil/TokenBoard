@@ -224,8 +224,8 @@ a[data-link-button='true'] {
     filter 160ms ease;
 }
 
-button:hover:not(:disabled):not([aria-disabled='true']),
-a[data-link-button='true']:hover {
+button:hover:not(:active):not(:disabled):not([aria-disabled='true']),
+a[data-link-button='true']:hover:not(:active) {
   transform: translateY(-1px);
   filter: brightness(1.03);
 }

@@ -20,6 +20,16 @@ describe('press feedback', () => {
     expect(rule?.[1]).toContain('scale(0.96)')
   })
 
+  // A mouse press is always also a hover, and `button:hover:not(:disabled):not([aria-disabled])`
+  // is specificity (0,3,1) against `button:active`'s (0,1,1). Without `:not(:active)` on the
+  // hover rule the lift wins the cascade for the whole press and the press state never shows.
+  test('the hover lift yields to the press while the pointer is down', () => {
+    const css = styleSource()
+    const hover = css.match(/button:hover[^{]*\{[^}]*\}/)
+    expect(hover).not.toBeNull()
+    expect(hover?.[0]).toContain(':not(:active)')
+  })
+
   test('buttons do not stack a second press scale on top', async () => {
     const html = await renderToString(<Button>保存</Button>)
     const link = await renderToString(<LinkButton href="/dashboard">返回</LinkButton>)
