@@ -1,4 +1,6 @@
-import { isValidTimezone as isUsageTimezone } from '@tokenboard/usage-core'
+// The `./timezone` subpath, not the barrel: the barrel pulls in zod, whose JIT validators
+// probe `Function("")` at import time and trip the CSP (no `unsafe-eval`, on purpose).
+import { isValidTimezone as isUsageTimezone } from '@tokenboard/usage-core/timezone'
 
 export { isUsageTimezone as isValidTimezone }
 
