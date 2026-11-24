@@ -1,4 +1,5 @@
 import { Check, ChevronDown } from 'lucide'
+import { cn } from '../../lib/cn'
 import { LucideIcon } from './icon'
 
 export type CustomSelectOption = {
@@ -6,109 +7,99 @@ export type CustomSelectOption = {
   label: string
 }
 
-export function CustomSelect(props: {
+type CustomSelectProps = {
   label?: string
   name: string
   value: string
   options: CustomSelectOption[]
-  buttonClass?: string
-  wrapperClass?: string
-  optionClass?: string
-  inputAttrs?: Record<string, string>
   disabled?: boolean
-}) {
+  wrapperClass?: string
+  inputAttrs?: Record<string, string>
+}
+
+export function customSelectOptions<T extends string>(options: readonly T[], labels: Record<T, string>): CustomSelectOption[] {
+  return options.map((value) => ({ value, label: labels[value] }))
+}
+
+export function CustomSelect(props: CustomSelectProps) {
   const selected = props.options.find((option) => option.value === props.value) ?? props.options[0]
+
   const buttonId = `${props.name}-menu-button`
   const menuId = `${props.name}-menu`
-  const select = (
-    <div class={`relative ${props.wrapperClass ?? ''}`} data-custom-select="true">
+
+  const control = (
+    <div class={cn('relative', props.wrapperClass)} data-custom-select="true">
       <input
         type="hidden"
         name={props.name}
-        value={selected?.value ?? ''}
-        data-custom-select-value="true"
+        value={selected?.value ?? props.value}
         disabled={props.disabled}
+        data-custom-select-value="true"
         {...props.inputAttrs}
       />
       <button
         id={buttonId}
         type="button"
-        class={props.buttonClass ?? customSelectButtonClass}
-        // The label renders as a sibling <span>, not a <label for>, so the button needs a
-        // name of its own. An `aria-label` would replace the button's content in the
-        // accessible name, dropping the current selection; a visually hidden prefix
-        // (plus the visible value span, which stays the name's tail) announces
-        // "来源: 全部" the way a native select does.
+        disabled={props.disabled}
+        class={selectButtonClass}
+        data-custom-select-button="true"
         aria-haspopup="listbox"
         aria-expanded="false"
         aria-controls={menuId}
-        data-custom-select-button="true"
-        disabled={props.disabled}
       >
-        {props.label ? <span class="sr-only">{`${props.label}: `}</span> : null}
-        <span data-custom-select-label="true">{selected?.label ?? ''}</span>
-        <LucideIcon icon={ChevronDown} class="text-[var(--app-muted)]" size={16} />
+        <span class="min-w-0 truncate">
+          {props.label ? <span class="sr-only">{props.label}: </span> : null}
+          <span data-custom-select-label="true">{selected?.label ?? props.value}</span>
+        </span>
+        <span class="shrink-0 text-[var(--app-muted)]">
+          <LucideIcon icon={ChevronDown} size={15} />
+        </span>
       </button>
-      <div
-        id={menuId}
-        class="app-surface-floating invisible absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-1 opacity-0 transition"
-        role="listbox"
-        aria-labelledby={buttonId}
-        data-custom-select-menu="true"
-      >
+      <div id={menuId} role="listbox" class={selectMenuClass} data-custom-select-menu="true">
         {props.options.map((option) => (
-          <CustomSelectOptionButton
-            label={option.label}
-            selected={option.value === selected?.value}
-            value={option.value}
-            class={props.optionClass}
-            disabled={props.disabled}
+          <CustomSelectOptionItem
+            key={option.value}
+            option={option}
+            selected={option.value === (selected?.value ?? props.value)}
           />
         ))}
       </div>
     </div>
   )
 
-  if (!props.label) return select
+  if (!props.label) return control
 
   return (
-    <div class="block text-sm font-bold text-[var(--app-muted)]">
-      <span>{props.label}</span>
-      {select}
+    <div class="block">
+      <span class="block font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+        {props.label}
+      </span>
+      {control}
     </div>
   )
 }
 
-export function customSelectOptions<T extends string>(options: readonly T[], labels: Record<T, string>) {
-  return options.map((value) => ({ value, label: labels[value] }))
-}
-
-function CustomSelectOptionButton(props: {
-  class?: string
-  label: string
-  selected: boolean
-  value: string
-  disabled?: boolean
-}) {
+function CustomSelectOptionItem(props: { option: CustomSelectOption; selected: boolean }) {
   return (
     <button
       type="button"
-      class={props.class ?? customSelectOptionClass}
       role="option"
       aria-selected={props.selected ? 'true' : 'false'}
       data-custom-select-option="true"
-      data-value={props.value}
-      data-label={props.label}
-      disabled={props.disabled}
+      data-value={props.option.value}
+      data-label={props.option.label}
+      class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold text-[var(--app-text)] transition hover:bg-[var(--app-hover)]"
     >
-      <span>{props.label}</span>
-      <LucideIcon icon={Check} class={props.selected ? 'app-accent-text' : 'text-transparent'} size={16} />
+      <span class="min-w-0 truncate">{props.option.label}</span>
+      <span class={cn('shrink-0', props.selected ? 'app-accent-text' : 'text-transparent')}>
+        <LucideIcon icon={Check} size={14} />
+      </span>
     </button>
   )
 }
 
-export const customSelectButtonClass =
-  'flex h-11 w-full items-center justify-between gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-black text-[var(--app-text)] outline-none transition hover:bg-[var(--app-hover)] focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20'
+const selectButtonClass =
+  'flex h-11 w-full items-center justify-between gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)] outline-none transition hover:border-[var(--app-border-strong)] focus:border-[var(--app-accent-bar)] focus:ring-1 focus:ring-[var(--app-accent-bar)] disabled:opacity-60'
 
-const customSelectOptionClass =
-  'flex min-h-10 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm font-black text-[var(--app-text)] transition hover:bg-[var(--app-hover)] focus:bg-[var(--app-hover)] focus:outline-none'
+const selectMenuClass =
+  'app-surface-floating invisible absolute left-0 right-0 top-full z-40 mt-1 max-h-64 overflow-y-auto border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] p-1 opacity-0 transition'

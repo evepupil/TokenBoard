@@ -29,12 +29,53 @@ export default jsxRenderer(({ children }) => {
           跳到主要内容
         </a>
         {children}
-        {/* A quiet version line at the bottom of every page: "is the deployment behind
-            this URL the one I think it is" was otherwise only answerable by comparing
-            static-asset hashes. The two numbers come from `../lib/version` and are
-            versioned independently — see the comment there. */}
-        <footer class="px-4 pb-5 text-center text-xs text-[var(--app-muted)]" data-app-version="true">
-          TokenBoard · 服务端 v{serverVersion} · 客户端 v{clientVersion}
+        {/* Editorial 4-column Colophon Footer matching Folio publication structure */}
+        <footer
+          class="border-t border-[var(--app-border-strong)] bg-[var(--app-bg)] px-4 py-10 text-[var(--app-text)] sm:px-8"
+          data-app-version="true"
+        >
+          <div class="app-folio-container">
+            <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p class="text-sm font-extrabold tracking-tight text-[var(--app-text)]">TokenBoard</p>
+                <p class="mt-2 text-xs leading-6 text-[var(--app-muted)]">
+                  面向多用户的 AI Token 算力用量统计与研究型遥测归档平台。
+                </p>
+              </div>
+              <div>
+                <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">本地采集隐私原则</p>
+                <p class="mt-2 text-xs leading-6 text-[var(--app-muted)]">
+                  本机采集器仅投影 Token、模型、日期与会话汇总快照；不读取、不留存、不上传任何对话正文或代码路径。
+                </p>
+              </div>
+              <div>
+                <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">21 源统一计量</p>
+                <p class="mt-2 text-xs leading-6 text-[var(--app-muted)]">
+                  原生覆盖 Claude Code、Codex、Antigravity、OpenCode、Pi、Grok Build、DeepSeek Harness 等 21 个工具来源。
+                </p>
+              </div>
+              <div>
+                <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">版本与开源</p>
+                <p class="mt-2 font-mono text-xs leading-6 text-[var(--app-muted)]">
+                  TokenBoard · 服务端 v{serverVersion} · 客户端 v{clientVersion}
+                </p>
+                <p class="mt-1 font-mono text-[11px] text-[var(--app-subtle)]">
+                  <a class="underline underline-offset-4 hover:text-[var(--app-text)]" href="/leaderboards">
+                    公开排行榜
+                  </a>
+                  {' · '}
+                  <a
+                    class="underline underline-offset-4 hover:text-[var(--app-text)]"
+                    href="https://github.com/evepupil/TokenBoard"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    GitHub 仓库
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
         </footer>
       </body>
     </html>

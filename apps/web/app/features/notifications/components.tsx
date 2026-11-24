@@ -22,11 +22,11 @@ export function NotificationsPage(props: {
   encryptionConfigured: boolean
 }) {
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>通知 Webhook - TokenBoard</title>
       <AppNav active="notifications" email={props.email} />
 
-      <section class="mx-auto flex max-w-6xl flex-col gap-5">
+      <section class="app-folio-container flex flex-col gap-10 pb-14">
         <NotificationsHeader />
         <NotificationFlash
           saved={props.saved}
@@ -35,9 +35,13 @@ export function NotificationsPage(props: {
           formErrorMessage={props.formErrorMessage}
           encryptionConfigured={props.encryptionConfigured}
         />
-        <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.75fr)]">
-          <SubscriptionsCard subscriptions={props.subscriptions} />
-          <CreateSubscriptionCard timezone={props.timezone} disabled={!props.encryptionConfigured} />
+        <div class="app-folio-spread items-start">
+          <div class="app-folio-spread-left min-w-0">
+            <SubscriptionsCard subscriptions={props.subscriptions} />
+          </div>
+          <div class="app-folio-spread-right min-w-0">
+            <CreateSubscriptionCard timezone={props.timezone} disabled={!props.encryptionConfigured} />
+          </div>
         </div>
         <DailyReportHistoryCard
           reportHistory={props.reportHistory}
@@ -51,10 +55,10 @@ export function NotificationsPage(props: {
 
 function NotificationsHeader() {
   return (
-    <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
-      <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Notifications</p>
-      <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl">通知 Webhook</h1>
-      <p class="mt-2 text-sm text-[var(--app-muted)]">
+    <header class="border-b border-[var(--app-border-strong)] pb-6">
+      <p class="app-folio-kicker">06 — 每日日报推送 · WEBHOOK DISPATCH</p>
+      <h1 class="app-folio-h2 mt-2">通知 Webhook</h1>
+      <p class="mt-2 max-w-2xl text-sm text-[var(--app-muted)]">
         按本地时间推送当日 token 日报，可用于企微、钉钉、飞书和 Lark 群机器人。
       </p>
     </header>
@@ -98,7 +102,7 @@ function SubscriptionsCard(props: { subscriptions: WebhookSubscriptionSummary[] 
         {props.subscriptions.length > 0 ? (
           props.subscriptions.map((subscription) => <SubscriptionItem subscription={subscription} />)
         ) : (
-          <p class="app-surface-subtle rounded-lg border border-dashed border-[var(--app-border)] p-4 text-sm text-[var(--app-muted)]">
+          <p class="border border-dashed border-[var(--app-border)] bg-[var(--app-bg-soft)] p-5 text-sm text-[var(--app-muted)]">
             还没有通知 webhook。
           </p>
         )}
@@ -109,14 +113,14 @@ function SubscriptionsCard(props: { subscriptions: WebhookSubscriptionSummary[] 
 
 function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
   return (
-    <article class="app-surface-raised rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-4">
+    <article class="border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
-          <p class="text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">
+          <p class="font-mono text-xs font-bold uppercase tracking-wide text-[var(--app-muted)]">
             {providerLabel(props.subscription.provider)}
           </p>
-          <h2 class="mt-1 break-words text-lg font-black">{props.subscription.name}</h2>
-          <p class="mt-1 break-all text-sm text-[var(--app-muted)]">{props.subscription.webhookUrlMasked}</p>
+          <h2 class="mt-1 break-words text-lg font-extrabold">{props.subscription.name}</h2>
+          <p class="mt-1 break-all font-mono text-xs text-[var(--app-muted)]">{props.subscription.webhookUrlMasked}</p>
         </div>
         <span
           class={
@@ -129,7 +133,7 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
         </span>
       </div>
       {props.subscription.needsRepair ? (
-        <p class="app-danger-notice app-surface-subtle mt-3 rounded-lg border p-3 text-xs font-bold">
+        <p class="app-danger-notice mt-3 border p-3 text-xs font-bold">
           这个 Webhook 有旧格式字段，请检查后保存一次。
         </p>
       ) : null}
@@ -162,12 +166,12 @@ function SubscriptionForm(props: { subscription: WebhookSubscriptionSummary }) {
 function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary }) {
   return (
     <>
-      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
-        <input type="checkbox" name="sendEmptyReport" checked={props.subscription.sendEmptyReport} />
+      <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
+        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="sendEmptyReport" checked={props.subscription.sendEmptyReport} />
         空日报也发送
       </label>
-      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)] md:col-span-2">
-        <input type="checkbox" name="enabled" checked={props.subscription.enabled} />
+      <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)] md:col-span-2">
+        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="enabled" checked={props.subscription.enabled} />
         启用定时推送
       </label>
     </>
@@ -176,7 +180,7 @@ function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary })
 
 function SubscriptionMeta(props: { subscription: WebhookSubscriptionSummary }) {
   return (
-    <dl class="grid gap-2 text-xs text-[var(--app-muted)] md:col-span-2 sm:grid-cols-2">
+    <dl class="grid gap-2 border-t border-[var(--app-border)] pt-3 text-xs text-[var(--app-muted)] md:col-span-2 sm:grid-cols-2">
       <Meta label="推送规则" value={scheduleRuleLabel(props.subscription)} />
       <Meta label="下次推送" value={props.subscription.nextRunAt} />
       <Meta label="最近成功" value={props.subscription.lastSuccessAt ?? '无'} />
@@ -189,8 +193,8 @@ function SubscriptionMeta(props: { subscription: WebhookSubscriptionSummary }) {
 function Meta(props: { label: string; value: string }) {
   return (
     <div>
-      <dt class="font-bold uppercase tracking-wide">{props.label}</dt>
-      <dd class="mt-1 break-all text-[var(--app-text)]">{props.value}</dd>
+      <dt class="font-mono font-bold uppercase tracking-wide">{props.label}</dt>
+      <dd class="mt-1 break-all font-mono text-[var(--app-text)]">{props.value}</dd>
     </div>
   )
 }
@@ -231,10 +235,10 @@ function SubscriptionAction(props: {
 }) {
   return (
     <button
-      class={`min-h-11 rounded-xl border px-4 py-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${
+      class={`min-h-11 border px-4 py-2.5 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent-bar)] ${
         props.variant === 'danger'
           ? 'app-danger-action'
-          : 'border-[var(--app-border)] text-[var(--app-text)] hover:border-lime-300'
+          : 'border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:bg-[var(--app-text)] hover:text-[var(--app-bg)]'
       }`}
       type="submit"
       name="action"

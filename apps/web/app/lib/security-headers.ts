@@ -60,25 +60,39 @@ function cachedThemeScriptHash() {
   return scriptHashPromise
 }
 
-export async function securityHeaders(): Promise<Record<string, string>> {
+const viteDevClientScriptHash = "'sha256-skbsb8aC0J3t64Itv3lSwl9/M7LOJglCR99BjSMntzI='"
+
+export async function securityHeaders(options?: { allowDevIframe?: boolean }): Promise<Record<string, string>> {
   const scriptHash = await cachedThemeScriptHash()
-  return {
-    'Content-Security-Policy': [
-      "default-src 'self'",
-      `script-src 'self' ${scriptHash} ${cloudflareAnalyticsScriptOrigin}`,
-      "style-src 'self'",
-      "img-src 'self' data:",
-      "font-src 'self'",
-      `connect-src 'self' ${cloudflareAnalyticsConnectOrigin}`,
-      `form-action 'self' ${githubOAuthOrigin}`,
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'"
-    ].join('; '),
+  const allowDevIframe = options?.allowDevIframe === true
+  const scriptSources = allowDevIframe
+    ? `'self' ${scriptHash} ${viteDevClientScriptHash} ${cloudflareAnalyticsScriptOrigin}`
+    : `'self' ${scriptHash} ${cloudflareAnalyticsScriptOrigin}`
+
+  const cspDirectives = [
+    "default-src 'self'",
+    `script-src ${scriptSources}`,
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    `connect-src 'self' ${cloudflareAnalyticsConnectOrigin}`,
+    `form-action 'self' ${githubOAuthOrigin}`,
+    "base-uri 'self'",
+    "object-src 'none'"
+  ]
+  if (!allowDevIframe) {
+    cspDirectives.push("frame-ancestors 'none'")
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Security-Policy': cspDirectives.join('; '),
     'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()'
   }
+  if (!allowDevIframe) {
+    headers['X-Frame-Options'] = 'DENY'
+  }
+  return headers
 }

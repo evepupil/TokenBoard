@@ -44,7 +44,17 @@ export const POST = createRoute(async (c) => {
         monthCostUsd: 6.78,
         todayTokens: 1200,
         todayTokensWithoutCacheRead: 860,
-        todayCostUsd: 0.2
+        todayCostUsd: 0.2,
+        models: [
+          { model: 'claude-sonnet-4-6', totalTokens: 460_000 },
+          { model: 'gemini-4-hydrogen', totalTokens: 320_000 },
+          { model: 'gpt-5.4-codex', totalTokens: 256_000 },
+          { model: 'gemini-2.5-pro', totalTokens: 86_000 },
+          { model: 'claude-opus-4-6', totalTokens: 54_000 },
+          { model: 'deepseek-r1', totalTokens: 36_000 },
+          { model: 'o3-mini', totalTokens: 22_567 }
+        ],
+        totalModelCount: 7
       },
       config
     )

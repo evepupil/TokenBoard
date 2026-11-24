@@ -70,6 +70,7 @@ export type TotalsRow = {
   dataUpdatedAt: string | null
   sourceSplit: unknown
   topModels: unknown
+  modelCount?: number | null
 }
 
 export type PublicUsageProfileCore = Omit<PublicUsageProfile, 'sourceSplit' | 'topModels'>

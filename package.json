@@ -6,35 +6,33 @@
   "engines": {
     "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
-  "packageManager": "pnpm@10.21.0",
   "scripts": {
-    "dev": "pnpm --filter @tokenboard/web dev",
-    "build": "pnpm --filter @tokenboard/web build",
-    "preview": "pnpm --filter @tokenboard/web preview",
-    "deploy": "pnpm --filter @tokenboard/web run deploy",
+    "dev": "npm run dev --workspace=@tokenboard/web",
+    "build": "npm run build --workspace=@tokenboard/web",
+    "preview": "npm run preview --workspace=@tokenboard/web",
+    "lint": "npm run typecheck --workspace=@tokenboard/web",
     "format": "prettier --write '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
     "format:check": "prettier --check '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r --workspace-concurrency=1 test"
+    "typecheck": "npm run typecheck --workspace=@tokenboard/web",
+    "test": "npm run test --workspace=@tokenboard/web"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
     "prettier": "^3.6.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   },
-  "pnpm": {
-    "overrides": {
-      "undici@>=7.0.0 <7.29.1": "7.29.1",
-      "sharp@<0.35.5": "0.35.5",
-      "brace-expansion@>=4.0.0 <5.0.12": "5.0.12",
-      "source-map-js@<1.2.2": "1.2.2",
-      "esbuild@<=0.24.2": "0.25.12",
-      "esbuild@>=0.27.3 <0.28.1": "0.28.1"
-    }
+  "overrides": {
+    "undici@>=7.0.0 <7.29.1": "7.29.1",
+    "sharp@<0.35.5": "0.35.5",
+    "brace-expansion@>=4.0.0 <5.0.12": "5.0.12",
+    "source-map-js@<1.2.2": "1.2.2",
+    "esbuild@<=0.24.2": "0.25.12",
+    "esbuild@>=0.27.3 <0.28.1": "0.28.1"
   },
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/web",
+    "packages/usage-core"
   ]
 }

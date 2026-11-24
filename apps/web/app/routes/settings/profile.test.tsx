@@ -26,8 +26,7 @@ describe('ProfilePage layout', () => {
       />
     )
 
-    expect(html).toContain('lg:grid-cols-[minmax(22rem,0.8fr)_minmax(0,1.2fr)]')
-    expect(html).toContain('items-start')
+    expect(html).toContain('app-folio-spread')
     expect(html).toContain('data-public-card-form="true"')
     expect(html).toContain('data-submit-feedback="true"')
     expect(html).toContain('data-submitting-label="正在保存..."')
@@ -37,7 +36,7 @@ describe('ProfilePage layout', () => {
     expect(html).toContain('data-link-button="true"')
     expect(html).toContain('min-w-0 self-start')
     expect(html).toContain('grid-cols-[minmax(0,1fr)_auto]')
-    expect(html).toContain('app-surface-subtle grid min-w-0')
+    expect(html).toContain('grid min-w-0')
     expect(html.match(/class="[^"]*whitespace-pre-wrap[^"]*break-all[^"]*"/g)).toHaveLength(3)
     expect(html).toContain('data-timezone-input="true"')
     expect(html).toContain('data-timezone-default="UTC"')
@@ -47,7 +46,7 @@ describe('ProfilePage layout', () => {
     expect(html).toContain('name="slug"')
     expect(html).toContain('autocomplete="off"')
     expect(html).toContain('README SVG 预览')
-    expect(html).toContain('app-surface-subtle overflow-hidden rounded-lg')
+    expect(html).toContain('overflow-hidden border')
     expect(html).toContain('data-public-card-preview="true"')
     expect(html).toContain(
       'data-public-card-public-url="https://tokenboard.example/api/public/example-long-public-slug.svg"'

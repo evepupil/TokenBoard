@@ -1,0 +1,5 @@
+{
+  "name": "TokenBoard",
+  "description": "AI token usage analytics dashboard, leaderboards, and shareable usage cards.",
+  "requestFramePermissions": []
+}

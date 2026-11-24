@@ -1,23 +1,24 @@
-import { cva, type VariantProps } from 'class-variance-authority'
 import type { Child } from 'hono/jsx'
+import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '../../lib/cn'
 
-const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 disabled:opacity-50',
+export const buttonVariants = cva(
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent-bar)] focus-visible:ring-offset-1 disabled:opacity-50',
   {
     variants: {
       variant: {
-        default: 'bg-lime-300 text-stone-950 hover:bg-lime-200',
+        default:
+          'border border-[var(--app-border-strong)] bg-[var(--app-text)] text-[var(--app-bg)] hover:border-[var(--app-accent-bar)] hover:bg-[var(--app-accent-bar)] hover:text-white',
         secondary:
-          'border border-[var(--app-border)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:border-lime-300 hover:text-[var(--app-text)]',
-        ghost: 'text-[var(--app-muted)] hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
-        destructive: 'app-danger-button'
+          'border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:bg-[var(--app-text)] hover:text-[var(--app-bg)]',
+        ghost: 'border border-transparent text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
+        destructive:
+          'border border-[var(--app-danger-border)] bg-[var(--app-danger-bg)] text-[var(--app-danger-text)] hover:border-[var(--app-danger-text)] hover:bg-[var(--app-danger-text)] hover:text-white'
       },
       size: {
-        default: 'h-11 px-4 py-2',
-        sm: 'h-11 px-3 text-xs',
-        lg: 'h-12 px-5 text-base',
-        icon: 'h-11 w-11'
+        default: 'min-h-11 px-4 py-2.5',
+        sm: 'min-h-9 px-3 py-1.5 text-xs',
+        lg: 'min-h-11 px-5 py-3'
       }
     },
     defaultVariants: {
@@ -33,29 +34,37 @@ type ButtonProps = VariantProps<typeof buttonVariants> & {
   name?: string
   value?: string
   disabled?: boolean
-  'data-confirm'?: string
-  'data-login-primary'?: string
+  children?: Child
   'data-submitting-label'?: string
   'data-submitting-tone'?: string
-  children?: Child
-}
-
-export function Button(props: ButtonProps) {
-  const { variant, size, class: className, ...rest } = props
-  return <button class={cn(buttonVariants({ variant, size }), className)} {...rest} />
+  'data-confirm'?: string
 }
 
 type LinkButtonProps = VariantProps<typeof buttonVariants> & {
   class?: string
   href: string
+  download?: string
   children?: Child
-  // A download link is not an in-app navigation, and `client-navigation.ts` tells the two
-  // apart by exactly this attribute. Without it the guard cancels the browser's download
-  // and fetches the file into `document.body`.
-  download?: string | boolean
+}
+
+export function Button(props: ButtonProps) {
+  const { class: className, variant, size, children, ...rest } = props
+  return (
+    <button class={cn(buttonVariants({ variant, size }), className)} {...rest}>
+      {children}
+    </button>
+  )
 }
 
 export function LinkButton(props: LinkButtonProps) {
-  const { variant, size, class: className, ...rest } = props
-  return <a class={cn(buttonVariants({ variant, size }), className)} data-link-button="true" {...rest} />
+  return (
+    <a
+      class={cn(buttonVariants({ variant: props.variant, size: props.size }), props.class)}
+      data-link-button="true"
+      href={props.href}
+      download={props.download}
+    >
+      {props.children}
+    </a>
+  )
 }

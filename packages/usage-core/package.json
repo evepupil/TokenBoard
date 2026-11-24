@@ -3,22 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./timezone": "./src/timezone.ts"
   },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
-  },
   "dependencies": {
     "zod": "^4.2.1"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
   }
 }

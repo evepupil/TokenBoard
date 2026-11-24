@@ -1,15 +1,14 @@
 import type { Child } from 'hono/jsx'
 import { cn } from '../../lib/cn'
 
-export function Badge(props: { class?: string; variant?: 'default' | 'secondary' | 'outline'; children?: Child }) {
+export function Badge(props: { class?: string; variant?: 'default' | 'outline'; children?: Child }) {
   const variant = props.variant ?? 'default'
   return (
     <span
       class={cn(
-        'inline-flex min-h-11 items-center rounded-full px-4 py-2 text-xs font-black uppercase tracking-wide',
-        variant === 'default' && 'bg-lime-300 text-stone-950',
-        variant === 'secondary' && 'bg-[var(--app-bg-soft)] text-[var(--app-text)]',
-        variant === 'outline' && 'border border-[var(--app-border)] text-[var(--app-muted)]',
+        'inline-flex min-h-8 items-center border px-2.5 py-1 font-mono text-xs font-bold uppercase tracking-wider',
+        variant === 'default' && 'border-[var(--app-border-strong)] bg-[var(--app-text)] text-[var(--app-bg)]',
+        variant === 'outline' && 'border-[var(--app-border)] bg-[var(--app-panel-strong)] text-[var(--app-muted)]',
         props.class
       )}
     >

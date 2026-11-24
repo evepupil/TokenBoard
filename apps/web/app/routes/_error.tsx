@@ -19,16 +19,15 @@ const handler: ErrorHandler = (e, c) => {
     for (const [name, value] of Object.entries(e.headers ?? {})) c.header(name, value)
     c.status(e.status)
     return c.render(
-      <>
+      <main class="min-h-[70vh] bg-[var(--app-bg)] px-4 py-16 text-[var(--app-text)] sm:px-8">
         <SkipLinkTarget />
-        {e.message}
-      </>
+        <section class="app-folio-container max-w-3xl border-t border-[var(--app-border-strong)] pt-8">
+          <p class="app-folio-kicker">HTTP {e.status} · {e.code}</p>
+          <h1 class="app-folio-h2 mt-3">{e.message}</h1>
+        </section>
+      </main>
     )
   }
-  // An unhandled error on an `/api/*` path must still answer in the `{ error: { code, message } }`
-  // shape the rest of the API uses — a route that forgot its own try/catch (for example the
-  // auth passthrough) would otherwise return an HTML body to a JSON client. `no-store` matches
-  // every other error branch.
   if (expectsJson(c)) {
     console.error(e.message)
     return c.json({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' } }, 500, {
@@ -38,10 +37,13 @@ const handler: ErrorHandler = (e, c) => {
   console.error(e.message)
   c.status(500)
   return c.render(
-    <>
+    <main class="min-h-[70vh] bg-[var(--app-bg)] px-4 py-16 text-[var(--app-text)] sm:px-8">
       <SkipLinkTarget />
-      Internal Server Error
-    </>
+      <section class="app-folio-container max-w-3xl border-t border-[var(--app-border-strong)] pt-8">
+        <p class="app-folio-kicker">HTTP 500 · SYSTEM FAULT</p>
+        <h1 class="app-folio-h2 mt-3">Internal Server Error</h1>
+      </section>
+    </main>
   )
 }
 

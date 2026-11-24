@@ -81,7 +81,7 @@ function DeviceDetailsError(props: { message: string }) {
         </div>
         <button
           type="button"
-          class="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]"
+          class="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-[var(--app-muted)] transition hover:bg-[var(--app-text)] hover:text-[var(--app-bg)]"
           data-device-details-close="true"
           aria-label="关闭详情"
         >
@@ -97,15 +97,15 @@ function DeviceDetailsError(props: { message: string }) {
 
 function DeviceDetailsPageError(props: { email: string; message: string; state: DevicesPageState }) {
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>设备详情 - TokenBoard</title>
       <AppNav active="devices" email={props.email} />
 
-      <section class="mx-auto flex max-w-6xl flex-col gap-5">
-        <article class="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)]">
+      <section class="app-folio-container flex flex-col gap-5">
+        <article class="overflow-hidden border border-[var(--app-border-strong)] bg-[var(--app-panel)]">
           <header class="flex items-start justify-between gap-3 border-b border-[var(--app-border)] bg-[var(--app-panel)] p-4">
             <div class="min-w-0">
-              <p class="text-base font-black text-[var(--app-text)]">设备详情</p>
+              <p class="text-base font-extrabold text-[var(--app-text)]">设备详情</p>
               <p class="mt-1 text-sm font-bold text-[var(--app-muted)]">{props.message}</p>
             </div>
             <LinkButton class="shrink-0" variant="secondary" size="sm" href={buildDevicesPageHref(props.state)}>

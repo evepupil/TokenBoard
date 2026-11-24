@@ -154,11 +154,11 @@ export function DevicesPage(props: {
   const summary = summarizeDevices(filteredDevices)
   const pageState: DevicesPageState = { view, query }
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-text)] sm:px-8 sm:py-8">
       <title>设备管理 - TokenBoard</title>
       <AppNav active="devices" email={props.email} />
 
-      <section class="mx-auto flex max-w-6xl flex-col gap-5">
+      <section class="app-folio-container flex flex-col gap-8">
         <DevicesHeader />
         <DevicePageFlash saved={props.saved} revoked={props.revoked} formError={props.formError} />
         <RotatedTokenFlash credentials={rotatedCredentials} serverOrigin={props.serverOrigin ?? null} />
@@ -242,13 +242,13 @@ function credentialsFromLegacyToken(uploadToken?: string | null): RotatedCredent
 
 function DevicesHeader() {
   return (
-    <header class="app-surface-raised rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-5">
-      <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <header class="border-b border-[var(--app-border-strong)] pb-6">
+      <div class="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div class="max-w-2xl">
-          <p class="app-accent-text text-sm font-black uppercase tracking-[0.24em]">Devices</p>
-          <h1 class="mt-3 text-3xl font-black tracking-tight text-balance sm:text-4xl">设备管理</h1>
-          <p class="mt-2 text-sm leading-6 text-pretty text-[var(--app-muted)]">
-            查看设备、同步、安装和上传凭证。列表看全局，卡片逐台处理。
+          <p class="app-folio-kicker">05 — 设备名录 · Devices</p>
+          <h1 class="app-folio-h2 mt-3 text-balance">设备与凭证管理</h1>
+          <p class="mt-3 text-sm leading-6 text-pretty text-[var(--app-muted)]">
+            查看设备、同步状态、安装实例与上传凭证。列表模式审阅全局，卡片模式逐台操作。
           </p>
         </div>
         <LinkButton class="w-full md:w-auto" href="/settings/install">
@@ -263,20 +263,17 @@ type DevicesSummary = ReturnType<typeof summarizeDevices>
 
 function DevicesOverview(props: { summary: DevicesSummary; visible: number; total: number }) {
   return (
-    <section
-      class="app-surface-subtle grid gap-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4"
-      data-devices-overview="true"
-    >
+    <section class="grid gap-4" data-devices-overview="true">
       <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p class="app-accent-text text-xs font-black uppercase tracking-[0.24em]">Overview</p>
-          <h2 class="mt-2 text-xl font-black tracking-tight">设备概览</h2>
+          <p class="app-folio-kicker">Overview · 节点概览</p>
+          <h2 class="mt-1.5 text-xl font-bold tracking-tight">设备概览</h2>
         </div>
-        <p class="text-xs font-bold text-[var(--app-muted)]">
+        <p class="font-mono text-xs font-semibold tabular-nums text-[var(--app-muted)]">
           显示 {props.visible} / {props.total}
         </p>
       </div>
-      <dl class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <dl class="grid gap-px border-y border-[var(--app-border-strong)] bg-[var(--app-border)] sm:grid-cols-2 xl:grid-cols-4">
         <SummaryStat label="设备" value={String(props.summary.deviceCount)} hint="已连接" />
         <SummaryStat label="安装记录" value={String(props.summary.installationCount)} hint="已登记安装" />
         <SummaryStat label="可用凭证" value={String(props.summary.activeTokenCount)} hint="当前可用" />
@@ -288,10 +285,12 @@ function DevicesOverview(props: { summary: DevicesSummary; visible: number; tota
 
 function SummaryStat(props: { label: string; value: string; hint: string }) {
   return (
-    <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
-      <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">{props.label}</p>
-      <p class="mt-2 text-2xl font-black tabular-nums text-[var(--app-text)]">{props.value}</p>
-      <p class="mt-1 text-xs font-bold leading-5 text-[var(--app-muted)]">{props.hint}</p>
+    <div class="bg-[var(--app-bg)] px-4 py-4 sm:px-5">
+      <dt class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">{props.label}</dt>
+      <dd class="mt-2 font-mono text-3xl font-bold tabular-nums leading-none tracking-[-0.03em] text-[var(--app-text)]">
+        {props.value}
+      </dd>
+      <p class="mt-2 text-xs text-[var(--app-subtle)]">{props.hint}</p>
     </div>
   )
 }
@@ -343,10 +342,10 @@ function DevicesToolbar(props: { view: 'list' | 'cards'; query: string; total: n
   const listActive = props.view === 'list'
   const cardsActive = props.view === 'cards'
   return (
-    <section class="app-surface-subtle flex flex-col gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 lg:flex-row lg:items-center lg:justify-between">
+    <section class="flex flex-col gap-3 border border-[var(--app-border)] bg-[var(--app-panel)] p-4 lg:flex-row lg:items-center lg:justify-between">
       <form method="get" class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-        <label class="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm text-[var(--app-text)]">
-          <LucideIcon icon={Search} class="text-[var(--app-muted)]" size={16} />
+        <label class="flex min-h-10 flex-1 items-center gap-2 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm text-[var(--app-text)] focus-within:border-[var(--app-border-strong)]">
+          <LucideIcon icon={Search} class="text-[var(--app-muted)]" size={15} />
           <input
             type="search"
             name="query"
@@ -361,12 +360,14 @@ function DevicesToolbar(props: { view: 'list' | 'cards'; query: string; total: n
           搜索
         </Button>
       </form>
-      <div class="flex flex-wrap items-center gap-2 lg:justify-end">
-        <span class="tabular-nums text-xs font-bold text-[var(--app-muted)]">
+      <div class="flex flex-wrap items-center gap-3 lg:justify-end">
+        <span class="font-mono text-xs font-semibold tabular-nums text-[var(--app-muted)]">
           {props.visible} / {props.total}
         </span>
-        <ViewToggleButton active={listActive} view="list" label="列表" icon={List} query={props.query} />
-        <ViewToggleButton active={cardsActive} view="cards" label="卡片" icon={LayoutGrid} query={props.query} />
+        <div class="app-segmented">
+          <ViewToggleButton active={listActive} view="list" label="列表" icon={List} query={props.query} />
+          <ViewToggleButton active={cardsActive} view="cards" label="卡片" icon={LayoutGrid} query={props.query} />
+        </div>
       </div>
     </section>
   )
@@ -383,14 +384,15 @@ function ViewToggleButton(props: {
     <a
       data-device-view-toggle={props.view}
       href={buildViewHref(props.view, props.query)}
-      class={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 py-3 text-sm font-black transition ${
+      class={cn(
+        'inline-flex min-h-10 items-center gap-2 border-r border-[var(--app-border-strong)] px-4 py-2 text-xs font-bold transition last:border-r-0',
         props.active
-          ? 'border-lime-300 bg-lime-300 text-stone-950'
-          : 'border-[var(--app-border)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:border-lime-300'
-      }`}
+          ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
+          : 'bg-[var(--app-panel)] text-[var(--app-text)] hover:bg-[var(--app-hover)]'
+      )}
       aria-current={props.active ? 'page' : undefined}
     >
-      <LucideIcon icon={props.icon} size={16} />
+      <LucideIcon icon={props.icon} size={15} />
       <span>{props.label}</span>
     </a>
   )
@@ -440,11 +442,11 @@ function RotatedTokenFlash(props: { credentials: RotatedCredentials | null; serv
     <section class="app-flash-success grid gap-4 p-4 text-sm sm:p-5">
       <div role="status">
         <header class="flex items-start gap-3">
-          <span class="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-lime-700/20 bg-lime-300/30 text-lime-950">
+          <span class="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center border border-[var(--app-border-strong)] bg-[var(--app-panel)] text-[var(--app-accent-text)]">
             <LucideIcon icon={KeyRound} size={18} />
           </span>
           <div class="min-w-0">
-            <p class="font-black text-[var(--app-text)]">新的上传凭证只显示一次</p>
+            <p class="font-bold text-[var(--app-text)]">新的上传凭证只显示一次</p>
             <p class="mt-1 text-xs leading-5 text-[var(--app-muted)]">
               立即复制并更新对应 client。轮换后旧 upload token 和 install claim 已失效。
             </p>
@@ -556,8 +558,8 @@ function DevicesList(props: { devices: DeviceViewModel[]; state: DevicesPageStat
       </CardHeader>
       <CardContent class="p-4 pt-0">
         {props.devices.length > 0 ? (
-          <div class="overflow-hidden rounded-xl border border-[var(--app-border)]" data-devices-list="true">
-            <div class="app-device-list-grid bg-[var(--app-bg-soft)] px-4 py-2 text-xs font-black text-[var(--app-muted)]">
+          <div class="overflow-hidden border border-[var(--app-border)]" data-devices-list="true">
+            <div class="app-device-list-grid border-b border-[var(--app-border-strong)] bg-[var(--app-bg-soft)] px-4 py-2.5 font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--app-muted)]">
               <span>设备</span>
               <span>最近同步</span>
               <span>安装 / 可用凭证</span>
@@ -726,12 +728,12 @@ function DeviceListDetailsButton(props: { dialogId: string; deviceId: string; st
     <div class="flex items-center justify-start md:justify-end">
       <a
         href={buildDeviceDetailsHref(props.deviceId, props.state)}
-        class="inline-flex min-h-9 min-w-16 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-3 py-2 text-xs font-black text-[var(--app-text)] transition hover:border-lime-300 hover:bg-[var(--app-hover)]"
+        class="inline-flex min-h-9 min-w-16 items-center justify-center gap-2 whitespace-nowrap border border-[var(--app-border-strong)] bg-[var(--app-panel)] px-3 py-1.5 text-xs font-bold text-[var(--app-text)] transition hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-fg)]"
         data-device-details-open={props.dialogId}
         aria-haspopup="dialog"
         aria-controls={props.dialogId}
       >
-        <LucideIcon icon={Info} size={15} />
+        <LucideIcon icon={Info} size={14} />
         <span>详情</span>
       </a>
     </div>
@@ -768,7 +770,7 @@ export function DeviceDetailsDialogContent(props: {
         {showCloseButton ? (
           <button
             type="button"
-            class="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-soft)] text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]"
+            class="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center border border-[var(--app-border-strong)] bg-[var(--app-bg-soft)] text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]"
             data-device-details-close="true"
             aria-label="关闭详情"
           >
@@ -797,11 +799,11 @@ export function DeviceDetailsPage(props: {
   state: DevicesPageState
 }) {
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-text)] sm:px-8 sm:py-8">
       <title>设备详情 - TokenBoard</title>
       <AppNav active="devices" email={props.email} />
 
-      <section class="mx-auto flex max-w-6xl flex-col gap-5">
+      <section class="app-folio-container flex flex-col gap-6">
         <DeviceDetailsSurface>
           <DeviceDetailsDialogContent
             device={props.device}
@@ -817,7 +819,7 @@ export function DeviceDetailsPage(props: {
 
 function DeviceDetailsSurface(props: { children: Child }) {
   return (
-    <article class="overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)]">
+    <article class="overflow-hidden border border-[var(--app-border-strong)] bg-[var(--app-panel)]">
       {props.children}
     </article>
   )
@@ -842,16 +844,18 @@ function DeviceDetailControlPanel(props: { device: DeviceViewModel; state: Devic
     return <DeviceDerivedGroupNote />
   }
   return (
-    <section class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
+    <section class="border border-[var(--app-border)] bg-[var(--app-panel)] p-3.5">
       <div class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem] xl:items-end">
         <div class="min-w-0">
-          <p class="mb-2 text-xs font-black text-[var(--app-muted)]">设备名称</p>
+          <p class="mb-2 font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--app-muted)]">
+            设备名称
+          </p>
           <DeviceRenameForm device={props.device} state={props.state} />
         </div>
         <div class="min-w-0">
           <div class="mb-2 flex items-center justify-between gap-3">
-            <p class="text-xs font-black text-[var(--app-muted)]">主要操作</p>
-            <span class="text-xs font-bold tabular-nums text-[var(--app-subtle)]">2 项</span>
+            <p class="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--app-muted)]">主要操作</p>
+            <span class="font-mono text-xs font-semibold tabular-nums text-[var(--app-subtle)]">2 项</span>
           </div>
           <DeviceActionForms device={props.device} state={props.state} compact inline />
         </div>
@@ -862,7 +866,7 @@ function DeviceDetailControlPanel(props: { device: DeviceViewModel; state: Devic
 
 function DeviceCredentialDensePanel(props: { device: UserDevice; state: DevicesPageState }) {
   return (
-    <section class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-2">
+    <section class="border border-[var(--app-border)] bg-[var(--app-panel)] p-2.5">
       <div class="grid gap-3 lg:grid-cols-2">
         <DeviceInstallationsDense device={props.device} state={props.state} />
         <DeviceUploadTokensDense device={props.device} state={props.state} />
@@ -877,13 +881,13 @@ function DeviceCompactCard(props: { device: DeviceViewModel; state: DevicesPageS
   const createdAt = formatDeviceTimestamp(props.device.createdAt)
   return (
     <article
-      class="app-surface-subtle w-full rounded-2xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4 sm:p-4"
+      class="w-full border border-[var(--app-border)] bg-[var(--app-panel)] p-4"
       data-device-card={props.device.id}
       data-device-card-mode="card"
     >
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-3 py-1 text-xs font-bold text-[var(--app-muted)]">
+          <span class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--app-muted)]">
             {formatPlatformLabel(props.device.platform)}
           </span>
           <DeviceStatus device={props.device} />
@@ -895,13 +899,13 @@ function DeviceCompactCard(props: { device: DeviceViewModel; state: DevicesPageS
           <DeviceRenameForm device={props.device} state={props.state} />
         )}
 
-        <dl class="grid gap-2 sm:grid-cols-2">
+        <dl class="grid gap-px border border-[var(--app-border)] bg-[var(--app-border)] sm:grid-cols-2">
           <DeviceTimeMeta label="上次同步" value={lastSyncedAt} />
           <DeviceTimeMeta label="创建时间" value={createdAt} />
         </dl>
 
-        <details class="app-surface-subtle rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
-          <summary class="flex items-center justify-between gap-3 text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">
+        <details class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+          <summary class="flex items-center justify-between gap-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--app-muted)]">
             <span>操作</span>
             <span class="tabular-nums">{isDerivedDeviceGroup(props.device) ? 0 : 2}</span>
           </summary>
@@ -914,8 +918,8 @@ function DeviceCompactCard(props: { device: DeviceViewModel; state: DevicesPageS
           </div>
         </details>
 
-        <details class="app-surface-subtle rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
-          <summary class="flex items-center justify-between gap-3 text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">
+        <details class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+          <summary class="flex items-center justify-between gap-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--app-muted)]">
             <span>安装与凭证</span>
             <span class="tabular-nums">{props.device.installations.length + props.device.uploadTokens.length}</span>
           </summary>
@@ -926,8 +930,8 @@ function DeviceCompactCard(props: { device: DeviceViewModel; state: DevicesPageS
         </details>
 
         {auditLogs.length > 0 ? (
-          <details class="app-surface-subtle rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
-            <summary class="flex items-center justify-between gap-3 text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">
+          <details class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+            <summary class="flex items-center justify-between gap-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--app-muted)]">
               <span>最近操作</span>
               <span class="tabular-nums">{auditLogs.length}</span>
             </summary>
@@ -943,12 +947,12 @@ function DeviceCompactCard(props: { device: DeviceViewModel; state: DevicesPageS
 
 function DeviceTimeMeta(props: { label: string; value: ReturnType<typeof formatDeviceTimestamp> }) {
   return (
-    <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
-      <dt class="text-xs font-black uppercase tracking-wide text-[var(--app-muted)]">{props.label}</dt>
+    <div class="bg-[var(--app-panel)] p-3">
+      <dt class="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--app-muted)]">{props.label}</dt>
       <dd class="mt-1 grid gap-0.5">
-        <span class="block text-lg font-black leading-6 text-[var(--app-text)]">{props.value.primary}</span>
+        <span class="block text-base font-bold leading-6 text-[var(--app-text)]">{props.value.primary}</span>
         {props.value.secondary ? (
-          <span class="block text-xs font-bold leading-5 text-[var(--app-muted)]">{props.value.secondary}</span>
+          <span class="block font-mono text-[11px] leading-5 text-[var(--app-muted)]">{props.value.secondary}</span>
         ) : null}
       </dd>
     </div>
@@ -974,19 +978,19 @@ function InstallationDenseRow(props: { installation: UserDevice['installations']
   return (
     <div class="grid gap-2 border-t border-[var(--app-border)] px-2 py-2.5 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <div class="min-w-0">
-        <p class="truncate text-sm font-black leading-5 text-[var(--app-text)]">
+        <p class="truncate text-sm font-bold leading-5 text-[var(--app-text)]">
           {props.installation.hostname ?? formatPlatformLabel(props.installation.platform)}
         </p>
-        <p class="mt-0.5 truncate text-xs font-bold text-[var(--app-muted)]">
+        <p class="mt-0.5 truncate text-xs font-semibold text-[var(--app-muted)]">
           {formatPlatformLabel(props.installation.platform)} / {props.installation.clientVersion ?? '版本未知'}
         </p>
-        <p class="mt-1 text-xs text-[var(--app-muted)]">
+        <p class="mt-1 font-mono text-xs text-[var(--app-muted)]">
           {lastSeenAt.primary}
           {lastSeenAt.secondary ? <span class="text-[var(--app-subtle)]"> / {lastSeenAt.secondary}</span> : null}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-        <span class="rounded-full border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-2 py-1 text-xs font-bold tabular-nums text-[var(--app-muted)]">
+        <span class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-[var(--app-muted)]">
           可用凭证 {props.installation.activeTokenCount}
         </span>
         <InstallationRevokeForm installation={props.installation} state={props.state} />
@@ -1051,10 +1055,10 @@ function DeviceAuditTrailDense(props: { auditLogs: UserDeviceAuditLog[] }) {
 
 function DenseSection(props: { title: string; count: number; children: Child }) {
   return (
-    <section class="min-w-0 rounded-lg bg-[var(--app-bg-soft)] p-2">
+    <section class="min-w-0 border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-2.5">
       <div class="flex items-center justify-between gap-3 px-2 pb-1.5">
-        <p class="text-xs font-black text-[var(--app-muted)]">{props.title}</p>
-        <span class="text-xs font-bold tabular-nums text-[var(--app-muted)]">{props.count}</span>
+        <p class="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--app-muted)]">{props.title}</p>
+        <span class="font-mono text-xs font-semibold tabular-nums text-[var(--app-muted)]">{props.count}</span>
       </div>
       {props.children}
     </section>
@@ -1063,7 +1067,7 @@ function DenseSection(props: { title: string; count: number; children: Child }) 
 
 function DenseEmpty(props: { children: string }) {
   return (
-    <div class="rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-bold text-[var(--app-muted)]">
+    <div class="border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-semibold text-[var(--app-muted)]">
       {props.children}
     </div>
   )
@@ -1074,9 +1078,9 @@ function DeviceUploadTokens(props: { device: UserDevice; state: DevicesPageState
     return (
       <div class="grid gap-2">
         {props.compact ? null : (
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">凭证记录</p>
+          <p class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">凭证记录</p>
         )}
-        <div class="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-bold text-[var(--app-muted)]">
+        <div class="border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-semibold text-[var(--app-muted)]">
           暂无上传凭证
         </div>
       </div>
@@ -1089,16 +1093,16 @@ function DeviceUploadTokens(props: { device: UserDevice; state: DevicesPageState
         {props.device.uploadTokens.map((token) => {
           const lastUsedAt = formatDeviceTimestamp(token.lastUsedAt, '从未使用')
           return (
-            <div class="grid gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
+            <div class="grid gap-2 border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 text-sm">
-                  <p class="truncate font-black text-[var(--app-text)]">{token.name}</p>
-                  <p class="mt-1 break-words text-xs font-bold text-[var(--app-muted)]">
+                  <p class="truncate font-bold text-[var(--app-text)]">{token.name}</p>
+                  <p class="mt-1 break-words text-xs font-semibold text-[var(--app-muted)]">
                     {token.installationId ? `安装：${token.installationId}` : '未绑定安装'}
                   </p>
-                  <p class="mt-1 text-xs text-[var(--app-muted)]">上次使用：{lastUsedAt.primary}</p>
+                  <p class="mt-1 font-mono text-xs text-[var(--app-muted)]">上次使用：{lastUsedAt.primary}</p>
                   {lastUsedAt.secondary ? (
-                    <p class="mt-1 text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p>
+                    <p class="mt-1 font-mono text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p>
                   ) : null}
                 </div>
               </div>
@@ -1116,21 +1120,21 @@ function DeviceUploadTokens(props: { device: UserDevice; state: DevicesPageState
   return (
     <section class="grid gap-2">
       {props.compact ? null : (
-        <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">凭证记录</p>
+        <p class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">凭证记录</p>
       )}
       {props.device.uploadTokens.map((token) => {
         const lastUsedAt = formatDeviceTimestamp(token.lastUsedAt, '从未使用')
         return (
-          <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+          <div class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
             <div class="flex flex-col gap-3">
               <div class="min-w-0 text-sm">
-                <p class="truncate font-black text-[var(--app-text)]">{token.name}</p>
-                <p class="mt-1 break-words text-xs font-bold text-[var(--app-muted)]">
+                <p class="truncate font-bold text-[var(--app-text)]">{token.name}</p>
+                <p class="mt-1 break-words text-xs font-semibold text-[var(--app-muted)]">
                   {token.installationId ? `安装：${token.installationId}` : '未绑定安装'}
                 </p>
-                <p class="mt-1 text-xs text-[var(--app-muted)]">上次使用：{lastUsedAt.primary}</p>
+                <p class="mt-1 font-mono text-xs text-[var(--app-muted)]">上次使用：{lastUsedAt.primary}</p>
                 {lastUsedAt.secondary ? (
-                  <p class="mt-1 text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p>
+                  <p class="mt-1 font-mono text-xs text-[var(--app-subtle)]">{lastUsedAt.secondary}</p>
                 ) : null}
               </div>
               <div class="flex flex-wrap items-center gap-2">
@@ -1236,8 +1240,8 @@ function DeviceActionForms(props: {
     )
   }
   return (
-    <div class="flex flex-col gap-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
-      <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">操作</p>
+    <div class="flex flex-col gap-2 border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+      <p class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">操作</p>
       <DeviceReconnectForm device={props.device} />
       <DeviceRevokeForm device={props.device} state={props.state} />
     </div>
@@ -1289,9 +1293,9 @@ function DeviceInstallations(props: { device: UserDevice; state: DevicesPageStat
     return (
       <div class="grid gap-2">
         {props.compact ? null : (
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">安装记录</p>
+          <p class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">安装记录</p>
         )}
-        <div class="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-bold text-[var(--app-muted)]">
+        <div class="border border-dashed border-[var(--app-border)] bg-[var(--app-panel)] p-3 text-xs font-semibold text-[var(--app-muted)]">
           暂无安装
         </div>
       </div>
@@ -1304,21 +1308,21 @@ function DeviceInstallations(props: { device: UserDevice; state: DevicesPageStat
         {props.device.installations.map((installation) => {
           const lastSeenAt = formatDeviceTimestamp(installation.lastSeenAt, '从未同步')
           return (
-            <div class="grid gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
+            <div class="grid gap-2 border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 text-sm">
-                  <p class="truncate font-black text-[var(--app-text)]">
+                  <p class="truncate font-bold text-[var(--app-text)]">
                     {installation.hostname ?? formatPlatformLabel(installation.platform)}
                   </p>
                   <p class="mt-1 text-xs text-[var(--app-muted)]">
                     {formatPlatformLabel(installation.platform)} / {installation.clientVersion ?? '版本未知'}
                   </p>
                 </div>
-                <span class="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-2 py-1 text-xs font-bold text-[var(--app-muted)]">
+                <span class="shrink-0 border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-2 py-0.5 font-mono text-xs font-semibold tabular-nums text-[var(--app-muted)]">
                   {installation.activeTokenCount}
                 </span>
               </div>
-              <div class="grid gap-1 text-xs text-[var(--app-muted)]">
+              <div class="grid gap-1 font-mono text-xs text-[var(--app-muted)]">
                 <p>上次同步：{lastSeenAt.primary}</p>
                 {lastSeenAt.secondary ? <p>{lastSeenAt.secondary}</p> : null}
               </div>
@@ -1335,26 +1339,26 @@ function DeviceInstallations(props: { device: UserDevice; state: DevicesPageStat
   return (
     <section class="grid gap-2">
       {props.compact ? null : (
-        <p class="text-xs font-black uppercase tracking-[0.24em] text-[var(--app-muted)]">安装记录</p>
+        <p class="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--app-muted)]">安装记录</p>
       )}
       {props.device.installations.map((installation) => {
         const lastSeenAt = formatDeviceTimestamp(installation.lastSeenAt, '从未同步')
         return (
-          <details class="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
+          <details class="border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3">
             <summary class="flex items-center justify-between gap-3">
               <div class="min-w-0 text-sm">
-                <p class="truncate font-black text-[var(--app-text)]">
+                <p class="truncate font-bold text-[var(--app-text)]">
                   {installation.hostname ?? formatPlatformLabel(installation.platform)}
                 </p>
                 <p class="mt-1 text-xs text-[var(--app-muted)]">
                   {formatPlatformLabel(installation.platform)} / {installation.clientVersion ?? '版本未知'}
                 </p>
               </div>
-              <span class="shrink-0 rounded-full border border-[var(--app-border)] bg-[var(--app-panel)] px-2 py-1 text-xs font-bold text-[var(--app-muted)]">
+              <span class="shrink-0 border border-[var(--app-border)] bg-[var(--app-panel)] px-2 py-0.5 font-mono text-xs font-semibold tabular-nums text-[var(--app-muted)]">
                 {installation.activeTokenCount}
               </span>
             </summary>
-            <div class="mt-3 grid gap-2 text-xs text-[var(--app-muted)]">
+            <div class="mt-3 grid gap-2 font-mono text-xs text-[var(--app-muted)]">
               <p>上次同步：{lastSeenAt.primary}</p>
               {lastSeenAt.secondary ? <p>{lastSeenAt.secondary}</p> : null}
               <div class="flex justify-end">
@@ -1574,8 +1578,8 @@ function DeviceDerivedGroupNote(props: { bodyOnly?: boolean } = {}) {
   )
   if (props.bodyOnly) return body
   return (
-    <section class="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
-      <p class="text-xs font-black text-[var(--app-muted)]">未关联设备</p>
+    <section class="border border-[var(--app-border)] bg-[var(--app-panel)] p-3">
+      <p class="font-mono text-xs font-bold text-[var(--app-muted)]">未关联设备</p>
       <div class="mt-2">{body}</div>
     </section>
   )
@@ -1598,7 +1602,7 @@ function DevicesEmptyState(props: { query?: string }) {
   const hasQuery = props.query?.trim()
   return (
     <div
-      class="app-surface-subtle rounded-2xl border border-dashed border-[var(--app-border)] bg-[var(--app-bg-soft)] p-6 text-sm text-[var(--app-muted)]"
+      class="border border-dashed border-[var(--app-border-strong)] bg-[var(--app-panel)] p-6 text-sm text-[var(--app-muted)]"
       data-devices-empty-state="true"
     >
       {hasQuery ? `没有匹配「${hasQuery}」的设备。` : '还没有设备。'}

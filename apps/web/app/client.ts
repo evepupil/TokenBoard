@@ -8,6 +8,7 @@ import { isValidTimezone, timezoneCookieName } from './lib/timezone'
 import { initDeviceDetailsDialogs } from './client-device-dialog'
 import { initConfirmableActions, initCopyButtons, initSubmitFeedback } from './client-interactions'
 import { initAppNavigation } from './client-navigation'
+import { initFolioTabs } from './folio-interactive-client'
 
 createClient()
 initTheme()
@@ -22,6 +23,7 @@ initAppNavigation(initTimezoneInputs)
 initCustomSelects()
 initPublicCardPreview()
 initDashboardTrendTooltip()
+initFolioTabs()
 
 function initBrowserTimezone() {
   const timezone = detectBrowserTimezone()

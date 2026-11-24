@@ -32,7 +32,7 @@ export default createRoute(async (c) => {
   ])
 
   return c.render(
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>用量详情 - TokenBoard</title>
       <AppNav active="details" email={user.email} />
       <UsageDetailsPanel

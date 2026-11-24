@@ -1,8 +1,8 @@
 export const themeKey = 'tokenboard-theme'
 
 export const themeChromeColors = {
-  dark: '#10130f',
-  light: '#f4f0e8'
+  dark: '#121318',
+  light: '#e8e6ef'
 } as const
 
 export const themeColorSchemes = {

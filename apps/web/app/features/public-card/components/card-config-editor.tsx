@@ -63,21 +63,16 @@ export function PublicCardConfigEditor(props: {
     <div class="space-y-4 border-t border-[var(--app-border)] pt-5" data-public-card-config="true">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 class="text-base font-black text-[var(--app-text)]">README 卡片外观</h2>
+          <p class="app-folio-kicker">FIG. SVG · README CARD</p>
+          <h2 class="mt-1 text-base font-bold text-[var(--app-text)]">README 卡片外观</h2>
           <p class="text-xs text-[var(--app-muted)]">配置会应用到公开 SVG，未公开时仅生成本页预览。</p>
         </div>
-        <span class="rounded-full border border-[var(--app-border)] px-2 py-1 text-xs font-bold text-[var(--app-muted)]">
-          {props.isPublic ? '公开' : '私有预览'}
-        </span>
+        <span class="app-status-pill">{props.isPublic ? '公开' : '私有预览'}</span>
       </div>
 
-      <div class="app-surface-subtle overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-panel)] p-2">
-        {/* Not `loading="lazy"`: the source is a data URI built from the server render, so
-            there is no network request to defer, and the preview sits above the fold. Lazy
-            loading it only gave DevTools a reason to flag the page (lazy images want explicit
-            dimensions; this one has them, the audit still fires on the data URI). */}
+      <div class="app-surface-subtle overflow-hidden border border-[var(--app-border-strong)] bg-[var(--app-bg-soft)] p-3">
         <img
-          class="block h-auto w-full rounded-md"
+          class="block h-auto w-full"
           src={previewSrc}
           alt="TokenBoard README SVG 预览"
           width="520"
@@ -86,13 +81,7 @@ export function PublicCardConfigEditor(props: {
           data-public-card-public-url={props.preview.publicUrl}
         />
       </div>
-      {/* The live preview is a POST to /api/v1/public-card/preview. A rejected body or a
-          dropped connection used to leave the image frozen at its last good render with no
-          sign anything was wrong; this line is where the client reports that. It starts
-          hidden so a working preview adds no visual noise — the `hidden` attribute only, not
-          the `hidden` utility class: the client toggles the attribute, so a class would keep
-          display:none after the attribute came off and the error would never appear. */}
-      <p class="app-flash-error rounded-lg p-3 text-sm" role="status" data-public-card-preview-status="true" hidden />
+      <p class="app-flash-error p-3 text-sm" role="status" data-public-card-preview-status="true" hidden />
 
       <div class="grid gap-3 sm:grid-cols-2">
         <SelectField
@@ -128,8 +117,6 @@ export function PublicCardConfigEditor(props: {
       <div class="grid gap-3 sm:grid-cols-2">
         <Label>
           标题
-          {/* Matches `publicCardConfigSchema`'s max(48), so the limit is enforced before submit
-              rather than only by the server's error message. */}
           <Input name="cardTitle" value={props.config.title} autocomplete="off" maxLength={48} />
         </Label>
         <Label>
@@ -147,7 +134,7 @@ export function PublicCardConfigEditor(props: {
       <Label>
         炫光强度
         <input
-          class="mt-2 w-full accent-lime-300"
+          class="mt-2 w-full accent-[var(--app-accent-bar)]"
           type="range"
           name="cardGlowIntensity"
           min="0"
@@ -158,7 +145,7 @@ export function PublicCardConfigEditor(props: {
       </Label>
 
       <div>
-        <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">指标顺序</p>
+        <p class="mb-2 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">指标顺序</p>
         <div class="grid gap-2 sm:grid-cols-2">
           {Array.from({ length: publicCardMetricSlotCount }, (_, index) => (
             <MetricSlot index={index} value={props.config.metrics[index] ?? ''} />
@@ -209,8 +196,8 @@ function SelectField<T extends string>(props: {
 
 function ToggleField(props: { name: string; checked: boolean; title: string }) {
   return (
-    <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-panel)] px-3 text-sm font-bold text-[var(--app-text)]">
-      <input class="h-4 w-4 accent-lime-300" type="checkbox" name={props.name} checked={props.checked} />
+    <label class="app-surface-subtle flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-panel-strong)] px-3 text-sm font-semibold text-[var(--app-text)]">
+      <input class="h-4 w-4 accent-[var(--app-accent-bar)]" type="checkbox" name={props.name} checked={props.checked} />
       {props.title}
     </label>
   )

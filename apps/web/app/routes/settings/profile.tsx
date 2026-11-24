@@ -49,8 +49,6 @@ export const POST = createRoute(async (c) => {
     await updateProfilePageSettings(c.env.DB, user.id, input)
     return c.redirect('/settings/profile?saved=1', 303)
   } catch (error) {
-    // A plain HTML form POST cannot answer with a JSON body: the browser would render it as
-    // the page and the user's edits would be gone. Redirect back with a code the page renders.
     const formErrorCode = settingsFormErrorCodeForRedirect(error)
     if (formErrorCode) return c.redirect(`/settings/profile?error=${formErrorCode}`, 303)
     return jsonError(c, error)
@@ -62,31 +60,38 @@ export function ProfilePage(props: {
   saved: boolean
   formError?: string
   email: string
-  /** Zones the user's collectors are currently stamping dates in, if any. */
   collectorTimezones?: string[]
 }) {
   return (
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>公开资料 - TokenBoard</title>
       <AppNav active="profile" email={props.email} />
-      <header class="mx-auto mb-5 max-w-6xl">
-        <h1 class="text-3xl font-black tracking-tight sm:text-4xl">公开资料</h1>
-      </header>
 
-      <form
-        method="post"
-        class="mx-auto grid max-w-6xl items-start gap-5 lg:grid-cols-[minmax(22rem,0.8fr)_minmax(0,1.2fr)]"
-        data-public-card-form="true"
-        data-submit-feedback="true"
-      >
-        <ProfileSettingsCard
-          profile={props.profile}
-          saved={props.saved}
-          formError={props.formError}
-          collectorTimezones={props.collectorTimezones}
-        />
-        <PublicLinksCard profile={props.profile} />
-      </form>
+      <div class="app-folio-container space-y-8 pb-14">
+        <header class="space-y-2">
+          <p class="app-folio-kicker">07 — 公开资料与遥测卡片 · PUBLIC PROFILE</p>
+          <h1 class="app-folio-h2">公开资料</h1>
+        </header>
+
+        <form
+          method="post"
+          class="app-folio-spread items-start"
+          data-public-card-form="true"
+          data-submit-feedback="true"
+        >
+          <div class="app-folio-spread-left min-w-0">
+            <ProfileSettingsCard
+              profile={props.profile}
+              saved={props.saved}
+              formError={props.formError}
+              collectorTimezones={props.collectorTimezones}
+            />
+          </div>
+          <div class="app-folio-spread-right min-w-0">
+            <PublicLinksCard profile={props.profile} />
+          </div>
+        </form>
+      </div>
     </main>
   )
 }
@@ -100,7 +105,7 @@ function ProfileSettingsCard(props: {
   return (
     <Card class="min-w-0 self-start">
       <CardHeader>
-        <CardTitle class="text-2xl sm:text-3xl">公开资料设置</CardTitle>
+        <CardTitle class="text-xl sm:text-2xl">公开资料设置</CardTitle>
         <CardDescription>默认保持私有；只有开启公开后，JSON 和 SVG 才会返回真实统计。</CardDescription>
       </CardHeader>
       <CardContent>
@@ -129,9 +134,6 @@ function ProfileSettingsFields(props: { profile: ProfileSettings; collectorTimez
           value={props.profile.displayName}
           autocomplete="name"
           required
-          // Same bound as the profile schema (max(80)) and the preview request: without
-          // it an 81-character name saved fine but froze the README preview, which
-          // silently refused the oversized payload.
           maxLength={80}
         />
       </Label>
@@ -176,36 +178,29 @@ function ProfileSlugInput(props: { profile: ProfileSettings }) {
     <Label>
       公开 slug
       <Input name="slug" value={props.profile.slug} autocomplete="off" required />
-      <span class="mt-1 block text-xs text-[var(--app-muted)]">只能使用小写字母、数字和连字符，长度 3-32。</span>
+      <span class="mt-1 block font-mono text-xs normal-case text-[var(--app-subtle)]">
+        只能使用小写字母、数字和连字符，长度 3-32。
+      </span>
     </Label>
   )
 }
 
-// This form is where the split is created, so it is where it has to be explained. Saving writes
-// only the profile; each collector froze its own zone into its config at install time, and
-// nothing here reaches it. A user who changes this value and nothing else gets a dashboard whose
-// "today" is empty while the month total still counts their rows — the failure mode is silent,
-// and only shows up later on a different page.
 function CollectorTimezoneNotice(props: { timezone: string; collectorTimezones?: string[] }) {
   const collectorTimezones = props.collectorTimezones ?? []
-  // No collectors means nothing is stamping dates yet, so there is nothing to warn about.
   if (collectorTimezones.length === 0) return null
 
-  // Same canonical comparison the dashboard warning uses: "UTC" vs "Etc/UTC" is
-  // one calendar, and a raw string compare here would tell the user to
-  // reinstall a collector that already stamps the right day.
   const stale = findMismatchedUsageTimezones(props.timezone, collectorTimezones)
 
   return (
     <p
-      class="app-surface-subtle rounded-lg border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-3 py-2 text-xs text-[var(--app-muted)]"
+      class="app-surface-subtle border border-[var(--app-border)] bg-[var(--app-bg-soft)] px-3 py-2 text-xs text-[var(--app-muted)]"
       data-timezone-collector-notice="true"
     >
       当前采集端按 {collectorTimezones.join('、')} 写入日期。
       {stale.length > 0
         ? `与这里的时区不一致时，控制台的「今日」会显示为 0；改动后请在「连接设备」页重新安装采集器。`
         : '修改此项不会同步到已安装的采集器，改动后请在「连接设备」页重新安装。'}{' '}
-      <a class="app-accent-link font-bold underline decoration-lime-300/50 underline-offset-4" href="/settings/install">
+      <a class="app-accent-link font-bold underline underline-offset-4" href="/settings/install">
         去连接设备
       </a>
     </p>
@@ -214,8 +209,8 @@ function CollectorTimezoneNotice(props: { timezone: string; collectorTimezones?:
 
 function ProfileCheckbox(props: { name: string; checked: boolean; title: string; children: string }) {
   return (
-    <label class="app-surface-subtle flex items-start gap-3 rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)] p-3 text-sm text-[var(--app-muted)]">
-      <input class="mt-1" type="checkbox" name={props.name} checked={props.checked} />
+    <label class="app-surface-subtle flex items-start gap-3 border border-[var(--app-border)] bg-[var(--app-panel-strong)] p-3 text-sm text-[var(--app-muted)]">
+      <input class="mt-1 accent-[var(--app-accent-bar)]" type="checkbox" name={props.name} checked={props.checked} />
       <span>
         <strong class="block text-[var(--app-text)]">{props.title}</strong>
         {props.children}
@@ -228,7 +223,7 @@ function PublicLinksCard(props: { profile: ProfileSettings }) {
   return (
     <Card class="min-w-0">
       <CardHeader>
-        <CardTitle>公开链接</CardTitle>
+        <CardTitle>公开链接与 README SVG</CardTitle>
         <CardDescription>README SVG 卡片可以直接嵌入 GitHub 个人页或项目 README。</CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">
@@ -260,22 +255,22 @@ function PublicLinksCard(props: { profile: ProfileSettings }) {
 function CopyBlock(props: { label: string; value: string; targetId: string }) {
   return (
     <div>
-      <p class="mb-2 text-sm font-bold text-[var(--app-muted)]">{props.label}</p>
-      <div class="app-surface-subtle grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden rounded-md border border-[var(--app-border)] bg-[var(--app-bg-soft)]">
+      <p class="mb-2 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">{props.label}</p>
+      <div class="app-surface-subtle grid min-w-0 grid-cols-[minmax(0,1fr)_auto] overflow-hidden border border-[var(--app-border)] bg-[var(--app-panel-strong)]">
         <pre
           id={props.targetId}
-          class="min-h-12 overflow-x-auto whitespace-pre-wrap break-all p-3 text-sm leading-6 text-[var(--app-text)]"
+          class="min-h-12 overflow-x-auto whitespace-pre-wrap break-all p-3 font-mono text-xs leading-6 text-[var(--app-text)]"
         >
           {props.value}
         </pre>
         <button
           type="button"
-          class="inline-flex h-full min-h-12 w-12 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] transition hover:bg-[var(--app-hover)] hover:text-[var(--app-text)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-lime-300/30"
+          class="inline-flex h-full min-h-12 w-12 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-muted)] transition hover:bg-[var(--app-text)] hover:text-[var(--app-bg)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--app-accent-bar)]"
           data-copy-target={props.targetId}
           aria-label={`复制 ${props.label}`}
           title={`复制 ${props.label}`}
         >
-          <LucideIcon icon={Copy} size={17} />
+          <LucideIcon icon={Copy} size={16} />
         </button>
       </div>
     </div>

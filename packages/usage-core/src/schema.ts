@@ -1,12 +1,5 @@
 import { z } from 'zod'
-import { isValidIsoDate } from './dates'
-import { isValidTimezone, maxUsageTimezoneLength } from './timezone'
-
-// The timezone helpers live in `./timezone` so the browser can import the check without
-// zod: zod's JIT validators probe `Function("")` at module scope, which a CSP without
-// `unsafe-eval` blocks and reports as a console error. Re-exported here so the
-// `@tokenboard/usage-core` barrel keeps a single surface for server-side callers.
-export { isValidTimezone, maxUsageTimezoneLength, timezoneValidationCacheSize } from './timezone'
+import { isValidTimezone } from './timezone'
 
 export const usageSources = [
   'claude-code',
@@ -31,11 +24,9 @@ export const usageSources = [
   'openclaw',
   'zcode'
 ] as const
-/**
- * Tool sources collected through the pinned ccusage runtime. Each maps to a ccusage
- * subcommand of the same name (`ccusage <tool> daily --json`), except gemini-cli which
- * maps to the `gemini` subcommand to avoid clashing with the Antigravity Gemini core.
- */
+
+export type UsageSource = (typeof usageSources)[number]
+
 export const ccusageToolSources = [
   'amp',
   'droid',
@@ -50,7 +41,10 @@ export const ccusageToolSources = [
   'openclaw',
   'zcode'
 ] as const
-export const ccusageToolCommandNames: Record<(typeof ccusageToolSources)[number], string> = {
+
+export type CcusageToolSource = (typeof ccusageToolSources)[number]
+
+export const ccusageToolCommandNames: Record<CcusageToolSource, string> = {
   amp: 'amp',
   droid: 'droid',
   codebuff: 'codebuff',
@@ -64,13 +58,17 @@ export const ccusageToolCommandNames: Record<(typeof ccusageToolSources)[number]
   openclaw: 'openclaw',
   zcode: 'zcode'
 }
+
 export const antigravityUsageSources = ['antigravity-cli', 'antigravity', 'antigravity-ide'] as const
 
-/**
- * Sources whose local usage records carry no cost figure. Deriving one from a
- * pricing table would be a guess, so the collector uploads `costUsd: 0` and
- * every reporting surface labels the cost as unavailable instead of `$0.00`.
- */
+export type AntigravityUsageSource = (typeof antigravityUsageSources)[number]
+
+const antigravityUsageSourceSet = new Set<string>(antigravityUsageSources)
+
+export function isAntigravityUsageSource(source: UsageSource): source is AntigravityUsageSource {
+  return antigravityUsageSourceSet.has(source)
+}
+
 export const costUnavailableSources = [
   'antigravity-cli',
   'antigravity',
@@ -79,7 +77,9 @@ export const costUnavailableSources = [
   'deepseek-harness'
 ] as const
 
-const costUnavailableMessages: Record<(typeof costUnavailableSources)[number], string> = {
+export type CostUnavailableSource = (typeof costUnavailableSources)[number]
+
+const costUnavailableMessages: Record<CostUnavailableSource, string> = {
   'antigravity-cli': 'Antigravity source costs are unavailable; costUsd must be 0',
   antigravity: 'Antigravity source costs are unavailable; costUsd must be 0',
   'antigravity-ide': 'Antigravity source costs are unavailable; costUsd must be 0',
@@ -87,55 +87,70 @@ const costUnavailableMessages: Record<(typeof costUnavailableSources)[number], s
   'deepseek-harness': 'DeepSeek Harness source costs are unavailable; costUsd must be 0'
 }
 
-export const usageSourceSchema = z.enum(usageSources)
-export const maxUsageModelNameLength = 160
+const costUnavailableSourceSet = new Set<string>(costUnavailableSources)
 
-export const usageTimezoneSchema = z
-  .string()
-  .min(1)
-  .max(maxUsageTimezoneLength)
-  .refine(isValidTimezone, 'Invalid timezone')
+export function isCostUnavailableSource(source: string): source is CostUnavailableSource {
+  return costUnavailableSourceSet.has(source)
+}
+
+export const maxSnapshotTokens = 1_000_000_000_000
+export const maxSnapshotCostUsd = 1_000_000_000
+export const maxUsageModelNameLength = 160
+export const minUploadIsoDate = '2023-01-01'
+
+const isoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/
+
+export function isValidIsoDate(value: string): boolean {
+  const match = isoDatePattern.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1) return false
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+export function maxUploadIsoDate(now = new Date()): string {
+  return new Date(now.getTime() + 86_400_000).toISOString().slice(0, 10)
+}
+
+export type UploadIsoDateIssue = 'invalid' | 'too-far-future' | 'before-history-window' | null
+
+export function uploadIsoDateIssue(value: string, now = new Date()): UploadIsoDateIssue {
+  if (!isValidIsoDate(value)) return 'invalid'
+  if (value > maxUploadIsoDate(now)) return 'too-far-future'
+  if (value < minUploadIsoDate) return 'before-history-window'
+  return null
+}
+
+export function roundUsd(value: number): number {
+  return Math.round(value * 10_000) / 10_000
+}
+
+export const usageSourceSchema = z.enum(usageSources)
 
 export const usageModelSchema = z.string().min(1).max(maxUsageModelNameLength)
 
-/**
- * Ceiling for a single snapshot's `costUsd`. Cost is summed by the aggregation
- * layer alongside the token fields (each of which carries its own ceiling
- * below); an extreme per-row value would drive that sum to `Infinity`, which
- * then serialises to `null` in the public JSON. Six orders of magnitude above
- * the largest per-snapshot cost seen in production, so it bounds the
- * arithmetic without constraining real usage.
- */
-export const maxSnapshotCostUsd = 1_000_000_000
+export const usageCorrectionSchema = z.literal('codex-context-pricing')
 
-/**
- * Ceiling for a single snapshot's token counts. These fields are summed by the aggregation
- * layer, and SQLite evaluates `SUM` over int64: a sum that leaves that range raises `integer
- * overflow` and aborts the entire statement. In a cross-tenant query one such row therefore
- * fails the endpoint for every reader, not only the account whose rows overflowed. Cost already
- * carried a ceiling for the same reason; these fields did not. The value is far above any real
- * single-day usage — a trillion tokens per row. It bounds one row, not a window: the 5-tuple
- * ingest key includes `device_id`, so an account can still create arbitrarily many capped rows,
- * and ~9.2M of them reach the int64 sum. The public read paths (leaderboard, README card)
- * therefore aggregate with `total()`, which accumulates in floating point and cannot overflow;
- * this ceiling keeps any single value in that float faithful to whole tokens below 2^53.
- */
-export const maxSnapshotTokens = 1_000_000_000_000
+const snapshotTokenField = z.number().int().min(0).max(maxSnapshotTokens)
 
 export const usageSnapshotSchema = z
   .object({
     source: usageSourceSchema,
-    usageDate: z.string().refine(isValidIsoDate, 'Invalid ISO date'),
-    timezone: usageTimezoneSchema,
+    usageDate: z.string().refine(isValidIsoDate, { message: 'Invalid ISO date' }),
+    timezone: z.string().refine(isValidTimezone, { message: 'Invalid timezone' }),
     model: usageModelSchema,
-    inputTokens: z.number().int().nonnegative().max(maxSnapshotTokens),
-    outputTokens: z.number().int().nonnegative().max(maxSnapshotTokens),
-    cacheCreationTokens: z.number().int().nonnegative().max(maxSnapshotTokens),
-    cacheReadTokens: z.number().int().nonnegative().max(maxSnapshotTokens),
-    totalTokens: z.number().int().nonnegative().max(maxSnapshotTokens),
-    costUsd: z.number().nonnegative().max(maxSnapshotCostUsd),
-    sessionCount: z.number().int().nonnegative().max(maxSnapshotTokens),
-    correction: z.literal('codex-context-pricing').optional(),
+    inputTokens: snapshotTokenField,
+    outputTokens: snapshotTokenField,
+    cacheCreationTokens: snapshotTokenField,
+    cacheReadTokens: snapshotTokenField,
+    totalTokens: snapshotTokenField,
+    costUsd: z.number().finite().min(0).max(maxSnapshotCostUsd),
+    sessionCount: snapshotTokenField,
+    correction: usageCorrectionSchema.optional(),
     collectedAt: z.string().datetime()
   })
   .superRefine((snapshot, ctx) => {
@@ -146,36 +161,25 @@ export const usageSnapshotSchema = z
         message: 'cacheReadTokens must not exceed totalTokens'
       })
     }
-
     if (isCostUnavailableSource(snapshot.source) && snapshot.costUsd > 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['costUsd'],
-        message: costUnavailableMessages[snapshot.source as (typeof costUnavailableSources)[number]]
+        message: costUnavailableMessages[snapshot.source]
       })
     }
   })
 
-export type UsageSource = z.infer<typeof usageSourceSchema>
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>
 
 export type UsageSnapshotKey = Pick<UsageSnapshot, 'source' | 'usageDate' | 'model'>
 
-export function isAntigravityUsageSource(source: UsageSource) {
-  return (antigravityUsageSources as readonly UsageSource[]).includes(source)
+export function snapshotKey(key: UsageSnapshotKey): string {
+  return `${key.source}\0${key.usageDate}\0${key.model}`
 }
 
-/** True when the source cannot report a cost, so `costUsd` carries no meaning. */
-export function isCostUnavailableSource(source: UsageSource) {
-  return (costUnavailableSources as readonly UsageSource[]).includes(source)
-}
-
-export function snapshotKey(snapshot: UsageSnapshotKey) {
-  return [snapshot.source, snapshot.usageDate, snapshot.model].join('\u0000')
-}
-
-export function snapshotHashPayload(snapshot: UsageSnapshot) {
-  return JSON.stringify({
+export function snapshotHashPayload(snapshot: UsageSnapshot): string {
+  const payload: Record<string, unknown> = {
     source: snapshot.source,
     usageDate: snapshot.usageDate,
     timezone: snapshot.timezone,
@@ -186,7 +190,10 @@ export function snapshotHashPayload(snapshot: UsageSnapshot) {
     cacheReadTokens: snapshot.cacheReadTokens,
     totalTokens: snapshot.totalTokens,
     costUsd: snapshot.costUsd,
-    sessionCount: snapshot.sessionCount,
-    correction: snapshot.correction
-  })
+    sessionCount: snapshot.sessionCount
+  }
+  if (snapshot.correction !== undefined) {
+    payload.correction = snapshot.correction
+  }
+  return JSON.stringify(payload)
 }

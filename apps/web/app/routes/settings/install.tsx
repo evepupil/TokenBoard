@@ -19,7 +19,7 @@ export const GET = createRoute(async (c) => {
   })
   const profile = await getProfileTimezoneSettings(c.env.DB, user.id)
   return c.render(
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>连接 TokenBoard</title>
       <AppNav active="install" email={user.email} />
       <InstallCommand
@@ -69,7 +69,7 @@ export const POST = createRoute(async (c) => {
 
     c.header('Cache-Control', 'no-store')
     return c.render(
-      <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+      <main class="min-h-screen bg-[var(--app-bg)] px-4 py-6 text-[var(--app-text)] sm:px-8 sm:py-8">
         <title>连接 TokenBoard</title>
         <AppNav active="install" email={user.email} />
         <InstallCommand

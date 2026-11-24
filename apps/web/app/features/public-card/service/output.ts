@@ -44,9 +44,9 @@ export async function getPublicUsageCard(
   publicUrl = 'TokenBoard',
   summaryStrict = false
 ) {
-  // The SVG renderer only draws totals and configured metrics. Do not compute the JSON-only
-  // source split for this path: it adds a real SQL aggregate that the renderer never reads.
-  const profile = await getPublicUsageProfileCore(db, slug, now, summaryStrict, false, false)
+  // The SVG renderer draws configured metrics plus the heatmap-style Model Unit Matrix from
+  // `topModels` + `modelCount`. Do not compute the JSON-only `sourceSplit` CTE on this path.
+  const profile = await getPublicUsageProfileCore(db, slug, now, summaryStrict, true, false)
   return renderUsageCardSvg(
     {
       displayName: profile.displayName,
@@ -66,6 +66,8 @@ export async function getPublicUsageCard(
       todayCacheReadRate: profile.todayCacheReadRate,
       todayCostUsd: profile.todayCostUsd,
       todayCostAvailable: profile.todayCostAvailable,
+      models: profile.topModels,
+      totalModelCount: profile.modelCount > 0 ? profile.modelCount : profile.topModels.length,
       // `sourceSplit` is deliberately not passed: `renderUsageCardSvg` never reads it, and the
       // JSON path (`getPublicUsageJson`) is where that data is actually consumed.
       // The card is read from anywhere, so it has to say which day its "今日" covers. Read at

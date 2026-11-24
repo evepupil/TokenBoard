@@ -14,8 +14,8 @@ describe('theme helpers', () => {
   test('uses the shared storage key and browser chrome colors', () => {
     expect(themeKey).toBe('tokenboard-theme')
     expect(themeChromeColors).toEqual({
-      dark: '#10130f',
-      light: '#f4f0e8'
+      dark: '#121318',
+      light: '#e8e6ef'
     })
   })
 

@@ -36,11 +36,10 @@ describe('LeaderboardPanel', () => {
 
     expect(html).toContain('data-leaderboard-mobile-list="true"')
     expect(html).toContain('data-leaderboard-desktop-table="true"')
-    expect(html).toContain('app-surface-raised rounded-xl')
     expect(html).toContain('Example User')
     expect(html).toContain('123,456')
     expect(html).toContain('100,000')
-    expect(html).toContain('grid rounded-full')
+    expect(html).toContain('divide-x divide-[var(--app-border-strong)]')
     expect(html).toContain('grid-cols-3')
     expect(html).toContain('tokens-without-cache-read')
     expect(html).toContain('不含缓存读')
@@ -62,7 +61,7 @@ describe('LeaderboardPanel', () => {
     )
 
     expect(html).toContain('data-leaderboard-empty="true"')
-    expect(html).toContain('app-surface-subtle rounded-xl')
+    expect(html).toContain('border-dashed')
     expect(html).not.toContain('colspan="4"')
   })
 
@@ -216,9 +215,9 @@ describe('LeaderboardPanel current viewer highlight', () => {
     // One marker in the mobile list and one in the desktop table, and no more.
     expect(html.match(/data-leaderboard-current-user="true"/g)).toHaveLength(2)
     expect(html.match(/data-leaderboard-current-user-badge="true"/g)).toHaveLength(2)
-    expect(html).toContain('bg-lime-300/10')
-    expect(html).toContain('border-l-2 border-lime-400')
-    expect(html).toContain('border-r-2 border-lime-400')
+    expect(html).toContain('app-current-viewer-row')
+    expect(html).toContain('app-current-viewer-marker')
+    expect(html).toContain('app-current-viewer-tag')
   })
 
   test('marks nobody for an anonymous viewer', async () => {
@@ -236,7 +235,7 @@ describe('LeaderboardPanel current viewer highlight', () => {
 
     expect(html).not.toContain('data-leaderboard-current-user="true"')
     expect(html).not.toContain('data-leaderboard-current-user-badge="true"')
-    expect(html).not.toContain('border-lime-400')
+    expect(html).not.toContain('app-current-viewer-marker')
   })
 })
 

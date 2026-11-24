@@ -31,7 +31,9 @@ showRoutes(app)
 
 export default {
   async fetch(request, env, ctx) {
-    const headers = await securityHeaders()
+    const headers = await securityHeaders({
+      allowDevIframe: env.TOKENBOARD_ALLOW_DEV_IFRAME === 'true'
+    })
     const redirect = httpsRedirect(request)
     if (redirect) return withSecurityHeaders(redirect, headers)
 

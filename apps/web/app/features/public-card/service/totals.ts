@@ -175,7 +175,8 @@ function publicBreakdownSelect(includeBreakdown: boolean, includeSourceSplit: bo
   if (!includeBreakdown && !includeSourceSplit)
     return `,
           '[]' as sourceSplit,
-          '[]' as topModels`
+          '[]' as topModels,
+          0 as modelCount`
   if (includeSourceSplit && !includeBreakdown)
     return `,
           (
@@ -193,7 +194,8 @@ function publicBreakdownSelect(includeBreakdown: boolean, includeSourceSplit: bo
               ORDER BY total_tokens_without_cache_read DESC, total_tokens DESC
             ) AS ordered_sources
           ) as sourceSplit,
-          '[]' as topModels`
+          '[]' as topModels,
+          0 as modelCount`
   if (includeBreakdown && !includeSourceSplit)
     return `,
           '[]' as sourceSplit,
@@ -216,7 +218,8 @@ function publicBreakdownSelect(includeBreakdown: boolean, includeSourceSplit: bo
               ORDER BY total_tokens_without_cache_read DESC, total_tokens DESC
               LIMIT 5
             ) AS ordered_models
-          ) as topModels`
+          ) as topModels,
+          (SELECT COUNT(*) FROM model_usage) as modelCount`
   return `,
           (
             SELECT COALESCE(json_group_array(json_object(
@@ -252,5 +255,6 @@ function publicBreakdownSelect(includeBreakdown: boolean, includeSourceSplit: bo
               ORDER BY total_tokens_without_cache_read DESC, total_tokens DESC
               LIMIT 5
             ) AS ordered_models
-          ) as topModels`
+          ) as topModels,
+          (SELECT COUNT(*) FROM model_usage) as modelCount`
 }

@@ -34,8 +34,9 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('viewBox="0 0 520 220"')
     expect(svg).toContain('color-scheme="dark"')
     expect(svg).not.toContain('style=')
-    expect(svg).toContain('#161a13')
+    expect(svg).toContain('#121318')
     expect(svg).toContain('url(#glow)')
+    expect(svg).toContain('data-card-cache-waffle="true"')
   })
 
   test('renders English light cards with custom title and no glow', () => {
@@ -62,8 +63,8 @@ describe('public card svg renderer', () => {
     expect(svg).toContain('width="520" height="220"')
     expect(svg).toContain('viewBox="0 0 520 220"')
     expect(svg).not.toContain('style=')
-    expect(svg).toContain('#fffef8')
-    expect(svg).toContain('fill="#365314"')
+    expect(svg).toContain('#e8e6ef')
+    expect(svg).toContain('fill="#5a3be6"')
     expect(svg).not.toContain('fill="url(#glow)"')
     expect(svg).not.toContain('Total Tokens')
   })
@@ -280,12 +281,9 @@ describe('public card timezone caption', () => {
     expect(missing).not.toContain('data-card-updated')
   })
 
-  // The stamp shares the bottom-right footline with the timezone note. Two
-  // right-aligned notes on the same line would overlap, and there is no second
-  // line to give — the fixed `width="520" height="220"` is the embed contract. The
-  // two notes join into one line when both are on; the cost note keeps its own
-  // left end.
-  test('the stamp shares the bottom line with the timezone note and the cost note', () => {
+  // The stamp joins with the timezone note in the top-right masthead so the card
+  // does not need an extra bottom row unless a cost-unavailable footnote is present.
+  test('places the stamp and timezone in the top-right masthead without colliding with the cost note', () => {
     const svg = renderUsageCardSvg(
       { ...input, updatedAtLabel: '11-23 05:00', timezoneLabel: 'UTC+8', todayCostAvailable: false },
       { language: 'en', showUpdatedAt: true, metrics: ['todayCost'] }
@@ -295,16 +293,55 @@ describe('public card timezone caption', () => {
     expect(svg).toContain('data-card-timezone="true"')
     expect(svg).toContain('data-card-updated="true"')
     expect(svg).toContain('* Some sources report no cost')
-    // Exactly two footline texts: the left cost note and the right combined line.
-    expect(svg.match(/y="211"/g)?.length).toBe(2)
+    expect(svg).not.toContain('FIG. 01')
+    expect(svg).not.toContain('TELEMETRY FOLIO')
+    expect(svg).toContain('y="24.5" text-anchor="end"')
+    expect(svg).toContain('y="213"')
   })
 
-  // Without the stamp the timezone keeps its lone bottom-right line — the join is
-  // only paid for when both notes are on.
-  test('the timezone note keeps its lone bottom-right line when no stamp is shown', () => {
+  // Without the stamp the timezone keeps its lone top-right line — the join is
+  // only paid for when both notes are on, and no bottom footer row is opened.
+  test('the timezone note keeps its lone top-right line when no stamp or cost note is shown', () => {
     const svg = renderUsageCardSvg({ ...input, timezoneLabel: 'UTC+8' }, { language: 'en', metrics: ['todayTokens'] })
     expect(svg).toContain('data-card-timezone="true"')
     expect(svg).toContain('Today: UTC+8')
     expect(svg).not.toContain('· Updated')
+    expect(svg).not.toContain('y="213"')
+  })
+
+  test('renders the heatmap-style model unit matrix and folds low-share models into 其他 N 个模型', () => {
+    const models = [
+      { model: 'claude-sonnet-4-6', totalTokens: 578_200_000 },
+      { model: 'gemini-4-hydrogen', totalTokens: 398_500_000 },
+      { model: 'gpt-5.4-codex', totalTokens: 322_400_000 },
+      { model: 'gemini-2.5-pro', totalTokens: 82_200_000 },
+      { model: 'claude-opus-4-6', totalTokens: 66_700_000 },
+      { model: 'deepseek-r1', totalTokens: 57_300_000 },
+      { model: 'o3-mini', totalTokens: 45_120_000 }
+    ]
+
+    const zhSvg = renderUsageCardSvg(
+      { ...input, totalTokens: 1_550_420_000, monthTokens: 482_910_000, models, totalModelCount: 7 },
+      { theme: 'light', layout: 'balanced', language: 'zh' }
+    )
+    expect(zhSvg).toContain('data-card-model-matrix="true"')
+    expect(zhSvg).toContain('1.55B')
+    expect(zhSvg).toContain('482.9M')
+    expect(zhSvg).toContain('claude-sonnet-4-6')
+    expect(zhSvg).toContain('gemini-4-hydrogen')
+    expect(zhSvg).toContain('gpt-5.4-codex')
+    expect(zhSvg).toContain('gemini-2.5-pro')
+    expect(zhSvg).toContain('其他 3 个模型')
+    expect(zhSvg).not.toContain('deepseek-r1')
+    expect(zhSvg).not.toContain('o3-mini')
+    expect(zhSvg).not.toContain('style=')
+
+    const enSvg = renderUsageCardSvg(
+      { ...input, totalTokens: 1_550_420_000, models, totalModelCount: 7 },
+      { theme: 'dark', layout: 'wide', language: 'en' }
+    )
+    expect(enSvg).toContain('data-card-model-matrix="true"')
+    expect(enSvg).toContain('MODEL UNIT MATRIX')
+    expect(enSvg).toContain('Other 3 models')
   })
 })

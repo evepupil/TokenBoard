@@ -1,187 +1,693 @@
-@import 'tailwindcss' source('../app');
-
-/* The dashboard's trend and source-split bars size themselves from the data, so their
-   `h-[N%]` / `w-[N%]` classes are built at render time and the scanner cannot see them
-   in the source text. They are enumerated here instead. This matters beyond styling:
-   the bars used to carry the same values as inline `style` attributes, which the
-   `style-src 'self'` policy drops — a hash or 'unsafe-inline' cannot allow a style
-   attribute, so the only fix is for these to be real classes. */
+@import "tailwindcss";
 @source inline('h-[{0..100}%]');
 @source inline('w-[{0..100}%]');
 
+/* ==========================================================================
+   TokenBoard — Folio Research Telemetry Design System
+   Light Primary: Folio Violet (#e8e6ef archival paper + #6c50f6 band)
+   Dark Complement: Night Edition (#121318 obsidian + #f2b84b editorial band)
+   ========================================================================== */
+
 :root {
+  /* Night Edition (Dark) */
+  --app-bg: #121318;
+  --app-bg-soft: #171920;
+  --app-panel: #1c1e25;
+  --app-panel-strong: #22252e;
+  --app-input: #14161c;
+  --app-border: #3a3c47;
+  --app-border-strong: #eceaf2;
+  --app-text: #eceaf2;
+  --app-muted: #b9b6c4;
+  --app-subtle: #9893a3;
+  --app-accent: #a9b6ff;
+  --app-accent-bar: #f2b84b;
+  --app-accent-bar-ink: #121318;
+  --app-accent-soft: rgba(143, 162, 255, 0.14);
+  --app-hover: rgba(236, 234, 242, 0.06);
+  --app-viz-1: #ff7a59;
+  --app-viz-2: #8fa2ff;
+  --app-viz-3: #e58af0;
+  --app-viz-4: #eceaf2;
+  --app-viz-neutral: #3a3c47;
+  --app-viz-1-tint: #6b3a30;
+  --app-viz-2-tint: #3b437a;
+  --app-danger-text: #ff8f73;
+  --app-danger-border: rgba(255, 122, 89, 0.45);
+  --app-danger-bg: rgba(255, 122, 89, 0.12);
+  --app-danger-hover-bg: rgba(255, 122, 89, 0.22);
+  --app-shadow-subtle: none;
+  --app-shadow-raised: none;
+  --app-shadow-floating: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --app-shadow-logo: none;
+  --app-shadow-tooltip: 0 10px 26px rgba(0, 0, 0, 0.56);
+  --app-shadow-toast: 0 10px 26px rgba(0, 0, 0, 0.52);
+  --app-shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.7);
+  --app-font-sans: 'Geist', 'Helvetica Neue', 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
+  --app-font-mono: 'Geist Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, ui-monospace, monospace;
+  --t-display: clamp(40px, 4.8vw, 76px);
+  --t-h2: clamp(30px, 3.2vw, 50px);
+  --t-kpi: clamp(38px, 4.2vw, 68px);
+  --t-numeral: clamp(88px, 11vw, 172px);
   color-scheme: dark;
-  --app-bg: #10130f;
-  --app-bg-soft: #151812;
-  --app-panel: rgba(12, 13, 10, 0.78);
-  --app-panel-strong: rgba(16, 19, 15, 0.94);
-  --app-border: rgba(120, 113, 108, 0.34);
-  --app-text: #fafaf9;
-  --app-muted: #a8a29e;
-  /* Small body text (12px) needs 4.5:1 against the panel it sits on. The previous #78716c
-     measured 3.9:1 on the dark background and 4.2:1 on the light one, both below AA. Each theme
-     gets a value that clears 4.5:1 on its own background while staying visually subdued. */
-  --app-subtle: #8a857f;
-  --app-hover: rgba(255, 255, 255, 0.06);
-  --app-input: rgba(28, 25, 23, 0.72);
-  --app-shadow-raised: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 26px 70px rgba(0, 0, 0, 0.62), 0 16px 42px -18px rgba(190, 242, 100, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --app-shadow-contained: 0 0 0 1px rgba(255, 255, 255, 0.075), 0 12px 28px rgba(0, 0, 0, 0.5), 0 10px 24px -18px rgba(190, 242, 100, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --app-shadow-subtle: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 14px 34px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --app-shadow-floating: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 38px 92px rgba(0, 0, 0, 0.72), 0 20px 56px -20px rgba(190, 242, 100, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.09);
-  --app-shadow-logo: 0 20px 42px rgba(0, 0, 0, 0.66), 0 12px 32px rgba(190, 242, 100, 0.32), 0 0 0 1px rgba(190, 242, 100, 0.34), 0 0 0 5px rgba(190, 242, 100, 0.05);
-  --app-submit-ring: rgba(190, 242, 100, 0.16);
-  --app-submit-shadow: rgba(0, 0, 0, 0.22);
-  --app-submit-danger-ring: rgba(248, 113, 113, 0.18);
-  --app-submit-danger-shadow: rgba(127, 29, 29, 0.22);
 }
 
 .theme-light {
+  /* Folio Violet (Light Archival Paper — Default) */
+  --app-bg: #e8e6ef;
+  --app-bg-soft: #dfdde8;
+  --app-panel: #f4f3f8;
+  --app-panel-strong: #ffffff;
+  --app-input: #ffffff;
+  --app-border: #b8b4c4;
+  --app-border-strong: #121116;
+  --app-text: #121116;
+  --app-muted: #4a4752;
+  --app-subtle: #5a5763;
+  --app-accent: #5a3be6;
+  --app-accent-bar: #6c50f6;
+  --app-accent-bar-ink: #ffffff;
+  --app-accent-soft: rgba(124, 99, 255, 0.12);
+  --app-hover: rgba(18, 17, 22, 0.05);
+  --app-viz-1: #e2492c;
+  --app-viz-2: #7c63ff;
+  --app-viz-3: #c04bd9;
+  --app-viz-4: #121116;
+  --app-viz-neutral: #cfcbd9;
+  --app-viz-1-tint: #f2a391;
+  --app-viz-2-tint: #b9abfb;
+  --app-danger-text: #b5321a;
+  --app-danger-border: rgba(226, 73, 44, 0.45);
+  --app-danger-bg: rgba(226, 73, 44, 0.08);
+  --app-danger-hover-bg: rgba(226, 73, 44, 0.16);
+  --app-shadow-subtle: none;
+  --app-shadow-raised: none;
+  --app-shadow-floating: 0 12px 28px rgba(18, 17, 22, 0.1);
+  --app-shadow-logo: none;
+  --app-shadow-tooltip: 0 10px 24px rgba(18, 17, 22, 0.14);
+  --app-shadow-toast: 0 10px 24px rgba(18, 17, 22, 0.14);
+  --app-shadow-dialog: 0 24px 56px rgba(18, 17, 22, 0.22);
   color-scheme: only light;
+  forced-color-adjust: none;
   -webkit-force-dark: none;
-  --app-bg: #f4f0e8;
-  --app-bg-soft: #ede6d8;
-  --app-panel: rgba(255, 255, 255, 0.82);
-  --app-panel-strong: rgba(255, 255, 255, 0.95);
-  --app-border: rgba(87, 83, 78, 0.22);
-  --app-text: #1c1917;
-  --app-muted: #57534e;
-  /* See the dark theme's `--app-subtle`: the light background needs a darker value to clear the
-     same 4.5:1 contrast floor. */
-  --app-subtle: #6b6560;
-  --app-hover: rgba(41, 37, 36, 0.07);
-  --app-input: rgba(255, 255, 255, 0.86);
-  --app-shadow-raised: 0 0 0 1px rgba(41, 37, 36, 0.08), 0 22px 50px rgba(68, 64, 60, 0.12), 0 2px 8px rgba(68, 64, 60, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  --app-shadow-contained: 0 0 0 1px rgba(41, 37, 36, 0.07), 0 14px 32px rgba(68, 64, 60, 0.1), 0 1px 6px rgba(68, 64, 60, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.68);
-  --app-shadow-subtle: 0 0 0 1px rgba(41, 37, 36, 0.065), 0 12px 28px rgba(68, 64, 60, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.64);
-  --app-shadow-floating: 0 0 0 1px rgba(41, 37, 36, 0.09), 0 30px 70px rgba(68, 64, 60, 0.16), 0 8px 18px rgba(68, 64, 60, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  --app-shadow-logo: 0 16px 30px rgba(68, 64, 60, 0.18), 0 4px 10px rgba(54, 83, 20, 0.16);
-  --app-submit-ring: rgba(132, 204, 22, 0.22);
-  --app-submit-shadow: rgba(68, 64, 60, 0.14);
-  --app-submit-danger-ring: rgba(248, 113, 113, 0.2);
-  --app-submit-danger-shadow: rgba(127, 29, 29, 0.16);
 }
 
 .theme-light *,
-.theme-light::before,
-.theme-light::after {
+.theme-light *::before,
+.theme-light *::after {
+  color-scheme: only light;
+  forced-color-adjust: none;
   -webkit-force-dark: none;
 }
 
-html,
-body {
-  min-height: 100%;
-  background: var(--app-bg);
-}
-
-body {
+html {
+  background-color: var(--app-bg);
   color: var(--app-text);
+  font-family: var(--app-font-sans);
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.app-accent-text {
-  color: #d9f99d;
+body {
+  margin: 0;
+  background-color: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--app-font-sans);
+  overflow-x: clip;
 }
 
-.theme-light .app-accent-text {
-  color: #365314;
+main {
+  min-width: 0;
 }
 
-/* A tap on a touchscreen leaves `:hover` matching until the user taps elsewhere, so every
-   hand-written hover rule below is wrapped in `(hover: hover)` — the same guard Tailwind puts
-   around its `hover:` utilities. Without it, hover-only styling sticks to whatever was last
-   touched. `lib/hover-rules.test.ts` enforces the wrapper. */
+/* Folio layout container */
+.app-folio-container {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 85rem;
+}
+
+/* Editorial Book-Spread Hairline Architecture */
+.app-folio-rule {
+  border-top: 1px solid var(--app-border-strong);
+}
+
+.app-folio-chapter-rule {
+  border-top: 1px solid var(--app-border);
+}
+
+.app-folio-spread {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.5rem;
+}
+
+@media (min-width: 1024px) {
+  .app-folio-spread {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .app-folio-spread-left {
+    border-right: 1px solid var(--app-border);
+    padding-right: 2.75rem;
+  }
+
+  .app-folio-spread-right {
+    padding-left: 2.75rem;
+  }
+}
+
+/* Editorial Typographic Scale */
+.app-folio-display {
+  font-size: var(--t-display);
+  line-height: 1.06;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.app-folio-h2 {
+  font-size: var(--t-h2);
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.app-folio-kpi-num {
+  font-size: var(--t-kpi);
+  line-height: 1.02;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-folio-kicker {
+  font-family: var(--app-font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--app-subtle);
+}
+
+.app-fig-caption {
+  font-family: var(--app-font-mono);
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--app-subtle);
+}
+
+/* Sharp Bordered Segmented Strip (Folio signature control) */
+.app-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-panel-strong);
+}
+
+.app-segmented-btn {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--app-border-strong);
+  padding: 0.35rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--app-text);
+  background-color: transparent;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.app-segmented-btn:last-child {
+  border-right: none;
+}
+
 @media (hover: hover) {
-  .app-accent-link:hover {
-    color: #d9f99d;
+  .app-segmented-btn:hover {
+    background-color: var(--app-hover);
   }
+}
 
-  .theme-light .app-accent-link:hover {
-    color: #365314;
-  }
+.app-segmented-btn[aria-pressed='true'],
+.app-segmented-btn[aria-current='true'] {
+  background-color: var(--app-text);
+  color: var(--app-bg);
+}
+
+/* Surface utilities */
+.app-surface-subtle {
+  box-shadow: var(--app-shadow-subtle);
 }
 
 .app-surface-raised {
   box-shadow: var(--app-shadow-raised);
 }
 
-.app-surface-contained {
-  box-shadow: var(--app-shadow-contained);
-}
-
-.app-surface-subtle {
-  box-shadow: var(--app-shadow-subtle);
-}
-
 .app-surface-floating {
   box-shadow: var(--app-shadow-floating);
 }
 
-/* Dashboard metric cards (the same component renders on the detail and report pages): a
-   two-pixel lift plus a lime sheen that sweeps across once per hover. Only transform and
-   box-shadow animate, so the compositor does the work; `overflow: hidden` keeps the sheen
-   inside the rounded corner and `pointer-events: none` keeps it out of hit testing. The
-   sheen is a brand tint rather than white so it reads in both themes, and it stays
-   invisible on the lime card, which already is that colour. */
-.app-metric-card {
-  position: relative;
-  overflow: hidden;
-  transition:
-    transform 200ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 200ms cubic-bezier(0.2, 0, 0, 1);
+.app-logo-elevation {
+  box-shadow: var(--app-shadow-logo);
 }
 
-.app-metric-card::after {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(115deg, transparent 38%, rgba(190, 242, 100, 0.22) 50%, transparent 62%);
-  content: '';
-  pointer-events: none;
-  transform: translateX(-130%);
-  transition: transform 650ms cubic-bezier(0.2, 0, 0, 1);
+.app-accent-text {
+  color: var(--app-accent);
+}
+
+.app-accent-link {
+  color: var(--app-accent);
+  text-decoration-color: var(--app-accent);
+}
+
+@media (hover: hover) {
+  .app-accent-link:hover {
+    opacity: 0.82;
+  }
+}
+
+.app-danger-text {
+  color: var(--app-danger-text);
+}
+
+.app-danger-notice {
+  border-color: var(--app-danger-border);
+  background-color: var(--app-danger-bg);
+  color: var(--app-danger-text);
+}
+
+.app-danger-action {
+  border-color: var(--app-danger-border);
+  color: var(--app-danger-text);
+}
+
+.theme-light .app-danger-action {
+  border-color: var(--app-danger-border);
+  color: var(--app-danger-text);
+}
+
+@media (hover: hover) {
+  .app-danger-action:hover {
+    border-color: var(--app-danger-text);
+    background-color: var(--app-danger-hover-bg);
+  }
+
+  .theme-light .app-danger-action:hover {
+    border-color: var(--app-danger-text);
+    background-color: var(--app-danger-hover-bg);
+  }
+}
+
+.app-viz-bar-1 {
+  background-color: var(--app-viz-1);
+}
+
+.app-viz-bar-2 {
+  background-color: var(--app-viz-2);
+}
+
+.app-viz-bar-3 {
+  background-color: var(--app-viz-3);
+}
+
+.app-viz-bar-4 {
+  background-color: var(--app-viz-4);
+}
+
+.app-viz-bar-neutral {
+  background-color: var(--app-viz-neutral);
+}
+
+.app-viz-bar-accent {
+  background-color: var(--app-viz-2);
+}
+
+/* Primary KPI emphasis: Folio editorial accent */
+.app-metric-card {
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 @media (hover: hover) {
   .app-metric-card:hover {
-    transform: translateY(-2px);
-    box-shadow:
-      0 0 0 1px rgba(190, 242, 100, 0.32),
-      var(--app-shadow-raised);
-  }
-
-  .app-metric-card:hover::after {
-    transform: translateX(130%);
+    border-color: var(--app-border-strong);
+    background-color: var(--app-hover);
   }
 }
 
-.app-login-card {
-  position: relative;
-  isolation: isolate;
-  transform-origin: center;
+.app-metric-card-primary {
+  border-top: 2px solid var(--app-viz-2);
+  background-color: var(--app-panel);
+  color: var(--app-text);
 }
 
-.app-login-card::after {
-  position: absolute;
-  inset: -4px;
-  z-index: 1;
-  border: 1px solid rgba(190, 242, 100, 0.72);
-  border-radius: inherit;
-  box-shadow: 0 0 0 4px rgba(190, 242, 100, 0.14), 0 0 48px rgba(190, 242, 100, 0.18);
-  content: '';
-  opacity: 0;
+.app-metric-card-primary-label {
+  color: var(--app-accent);
+}
+
+.app-metric-card-primary-detail {
+  color: var(--app-accent);
+}
+
+/* Sharp architectural status indicators */
+.app-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0px;
+  border: 1px solid var(--app-border);
+  padding: 0.18rem 0.5rem;
+  font-family: var(--app-font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.app-status-pill-ok {
+  border-color: var(--app-viz-2);
+  background-color: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.app-status-pill-warning {
+  border-color: rgba(217, 119, 6, 0.5);
+  background-color: rgba(217, 119, 6, 0.12);
+  color: #92400e;
+}
+
+:root:not(.theme-light) .app-status-pill-warning {
+  color: #f2b84b;
+}
+
+.app-status-pill-danger {
+  border-color: var(--app-danger-border);
+  background-color: var(--app-danger-bg);
+  color: var(--app-danger-text);
+}
+
+.app-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  border: 1px solid var(--app-border);
+  background-color: var(--app-panel);
+  padding: 0.15rem 0.4rem;
+  font-family: var(--app-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text);
+}
+
+.app-rank-badge-top {
+  border-color: var(--app-border-strong);
+  background-color: var(--app-text);
+  color: var(--app-bg);
+}
+
+.app-current-viewer-row {
+  background-color: var(--app-accent-soft);
+}
+
+.app-current-viewer-marker {
+  border-left: 2px solid var(--app-viz-2);
+}
+
+.app-current-viewer-tag {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--app-viz-2);
+  color: #ffffff;
+  padding: 0.1rem 0.45rem;
+  font-family: var(--app-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.app-flash-success {
+  border: 1px solid var(--app-viz-2);
+  background-color: var(--app-accent-soft);
+  color: var(--app-text);
+}
+
+.app-flash-error {
+  border: 1px solid var(--app-danger-border);
+  background-color: var(--app-danger-bg);
+  color: var(--app-danger-text);
+}
+
+.app-skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.75rem;
+  z-index: 90;
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-text);
+  color: var(--app-bg);
+  padding: 0.55rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 120ms ease;
+}
+
+.app-skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--app-viz-2);
+  outline-offset: 2px;
+}
+
+#app-content {
+  scroll-margin-top: 1rem;
+}
+
+#app-content:focus {
+  outline: none;
+}
+
+.app-chart-tooltip {
+  box-shadow: var(--app-shadow-tooltip);
   pointer-events: none;
-  transform: scale(0.985);
+  position: fixed;
+  z-index: 60;
+  max-width: min(17rem, calc(100vw - 1.5rem));
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-panel-strong);
+  padding: 0.6rem 0.75rem;
+  font-family: var(--app-font-mono);
+  color: var(--app-text);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.app-login-card-attention {
-  animation: app-login-card-nudge 680ms ease-out;
+.app-chart-tooltip[data-open='true'],
+.app-chart-tooltip[data-visible='true'] {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.app-login-card-attention::after {
-  animation: app-login-card-ring 680ms ease-out;
+/* Morphing 400-Square Folio Unit Matrix */
+.app-matrix-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
 
-.app-logo-elevation {
-  box-shadow: var(--app-shadow-logo);
+.app-matrix-sq {
+  transition:
+    transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    fill 280ms ease,
+    opacity 180ms ease;
+  will-change: transform;
+}
+
+.app-matrix-group-label {
+  fill: var(--app-text);
+  font-family: var(--app-font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: opacity 220ms ease;
+}
+
+.app-matrix-group-label.is-entering {
+  animation: app-matrix-label-in 240ms ease;
+}
+
+@keyframes app-matrix-label-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.app-matrix-hit {
+  cursor: pointer;
+  outline: none;
+}
+
+.app-matrix-hit:focus-visible {
+  stroke: var(--app-accent);
+  stroke-width: 1.5px;
+}
+
+[data-matrix-dimmed='true'] {
+  opacity: 0.28;
+}
+
+.app-folio-hover-seg {
+  cursor: pointer;
+  outline: none;
+  transition: opacity 160ms ease;
+}
+
+.app-folio-hover-seg:focus-visible {
+  opacity: 0.88;
+}
+
+@media (hover: hover) {
+  .app-folio-hover-seg:hover {
+    opacity: 0.88;
+  }
+}
+
+/* Crisp Swiss Folio Floating Tooltip (matches Folio #s01 hover card) */
+.app-folio-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  pointer-events: none;
+  min-width: 12.5rem;
+  max-width: min(21rem, calc(100vw - 2rem));
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-panel);
+  color: var(--app-text);
+  padding: 0.7rem 1.05rem;
+  box-shadow: var(--app-shadow-tooltip);
+  opacity: 0;
+  transition: opacity 130ms ease;
+  will-change: transform, opacity;
+}
+
+.app-folio-tooltip[data-visible='true'] {
+  opacity: 1;
+}
+
+.app-folio-tooltip-cat {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--app-muted);
+}
+
+.app-folio-tooltip-val {
+  margin-top: 0.25rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--app-text);
+}
+
+.app-folio-tooltip-sub {
+  margin-top: 0.25rem;
+  font-family: var(--app-font-mono);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  color: var(--app-muted);
+}
+
+[data-dashboard-trend-bar][data-selected='true'] {
+  background-color: var(--app-accent-soft);
+  outline: 1px solid var(--app-viz-2);
+}
+
+.app-toast {
+  box-shadow: var(--app-shadow-toast);
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 70;
+  max-width: min(22rem, calc(100vw - 2rem));
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-text);
+  color: var(--app-bg);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.app-toast[data-open='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.app-toast[data-tone='error'] {
+  border-color: var(--app-danger-text);
+  background-color: var(--app-danger-text);
+  color: #ffffff;
+}
+
+.app-device-dialog {
+  box-shadow: var(--app-shadow-dialog);
+  margin: auto;
+  width: min(42rem, calc(100vw - 1.5rem));
+  max-height: min(86vh, 48rem);
+  overflow: hidden;
+  border: 1px solid var(--app-border-strong);
+  background-color: var(--app-panel-strong);
+  color: var(--app-text);
+  padding: 0;
+}
+
+.app-device-dialog::backdrop {
+  background-color: rgba(18, 19, 24, 0.74);
+}
+
+.app-device-dialog-body {
+  max-height: calc(min(86vh, 48rem) - 4.75rem);
+  overflow-y: auto;
+}
+
+.app-login-card[data-login-highlighted='true'] {
+  border-color: var(--app-viz-2);
+  box-shadow: 0 0 0 2px var(--app-accent-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-login-card[data-login-highlighted='true'] {
+    animation: app-login-card-pulse 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes app-login-card-pulse {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.01);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+[data-theme-icon='light'] {
+  display: inline-flex;
 }
 
 [data-theme-icon='dark'] {
@@ -197,607 +703,110 @@ body {
 }
 
 button,
-a[href],
 [role='button'],
-[role='tab'],
+[type='button'],
+[type='submit'],
+[type='reset'],
+a[href],
 summary,
-select,
-input[type='checkbox'],
-input[type='radio'],
-input[type='date'],
-input[type='time'],
-input[type='datetime-local'],
-input[type='file'] {
-  -webkit-tap-highlight-color: transparent;
+label[for] {
   cursor: pointer;
 }
 
-@supports selector(label:has(input)) {
-  label:has(input[type='checkbox']),
-  label:has(input[type='radio']) {
-    -webkit-tap-highlight-color: transparent;
-    cursor: pointer;
-  }
+button:disabled,
+[type='button']:disabled,
+[type='submit']:disabled,
+[type='reset']:disabled {
+  cursor: not-allowed;
 }
 
 button,
-a[data-link-button='true'] {
-  transform-origin: center;
-  transition:
-    transform 120ms ease,
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease,
-    filter 160ms ease;
+a[data-link-button],
+[data-copy-target],
+[data-theme-toggle],
+[data-custom-select-button],
+[data-leaderboard-link] {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 140ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @media (hover: hover) {
-  button:hover:not(:active):not(:disabled):not([aria-disabled='true']),
-  a[data-link-button='true']:hover:not(:active) {
+  button:hover:not(:disabled):not([aria-disabled]):not(:active),
+  a[data-link-button='true']:hover:not([aria-disabled]):not(:active) {
     transform: translateY(-1px);
-    filter: brightness(1.03);
   }
 }
 
 button:active,
 a[data-link-button='true']:active {
-  transform: translateY(1px) scale(0.96);
-  filter: brightness(0.98);
-}
-
-button[data-submitting='true'] {
-  position: relative;
-  cursor: progress;
-  transform: translateY(1px) scale(0.98);
-  box-shadow: 0 0 0 4px var(--app-submit-ring), 0 12px 24px var(--app-submit-shadow);
-  filter: saturate(1.08);
-}
-
-button[data-submitting='true']:disabled {
-  cursor: progress;
-  opacity: 0.86;
-}
-
-button[data-submitting='true']::before {
-  width: 0.95em;
-  height: 0.95em;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 999px;
-  content: '';
-  display: inline-block;
-  flex: 0 0 auto;
-  animation: app-button-spin 700ms linear infinite;
-}
-
-button[data-submitting='true'][data-submitting-tone='danger'] {
-  box-shadow: 0 0 0 4px var(--app-submit-danger-ring), 0 12px 24px var(--app-submit-danger-shadow);
-}
-
-@keyframes app-button-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes app-login-card-nudge {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  22% {
-    transform: translateY(-3px);
-  }
-
-  48% {
-    transform: translateY(1px);
-  }
-}
-
-@keyframes app-login-card-ring {
-  0% {
-    opacity: 0;
-    transform: scale(0.985);
-  }
-
-  28% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale(1.035);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  button,
-  a[data-link-button='true'],
-  a[data-app-nav-link='true'],
-  button[data-copy-target],
-  button[data-submitting='true'],
-  .app-login-card-attention,
-  .app-login-card-attention::after {
-    transition: none;
-  }
-
-  /* The press-scale is a transform, so removing the transition alone would still snap the
-     button 4% smaller under the pointer. Drop the transform outright. Nav links express the
-     same press as the independent `scale` property (Tailwind `active:scale-[0.96]`), which
-     `transform: none` does not reset, so it is dropped separately. */
-  button:active,
-  a[data-link-button='true']:active,
-  a[data-app-nav-link='true']:active {
-    transform: none;
-  }
-
-  a[data-app-nav-link='true']:active {
-    scale: none;
-  }
-
-  button[data-submitting='true']::before {
-    animation: none;
-  }
-
-  .app-login-card-attention {
-    animation: none;
-  }
-
-  .app-login-card-attention::after {
-    animation: app-login-card-reduced-focus 900ms ease-out;
-  }
-}
-
-@keyframes app-login-card-reduced-focus {
-  0%,
-  100% {
-    opacity: 0;
-  }
-
-  18%,
-  78% {
-    opacity: 1;
-  }
-}
-
-button[data-copy-target] {
-  cursor: copy;
-  transition:
-    transform 120ms ease,
-    border-color 160ms ease,
-    background-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
+  transform: scale(0.96);
 }
 
 button[data-copy-target]:active {
   transform: scale(0.9);
 }
 
-button[data-copy-target][data-copied='true'] {
-  border-color: rgba(190, 242, 100, 0.72);
-  background: rgba(190, 242, 100, 0.14);
-  color: #bef264;
-  cursor: default;
-  box-shadow: 0 0 0 4px rgba(190, 242, 100, 0.08);
+[data-theme-toggle]:active:not(:disabled),
+[data-custom-select-button]:active:not(:disabled),
+[data-leaderboard-link]:active {
+  transform: scale(0.97);
 }
 
-.theme-light button[data-copy-target][data-copied='true'] {
-  border-color: rgba(77, 124, 15, 0.36);
-  background: rgba(132, 204, 22, 0.16);
-  color: #365314;
+button[data-submitting='true'] {
+  opacity: 0.72;
+  cursor: wait;
 }
 
-button[data-copy-target][data-copied='false'] {
-  border-color: rgba(248, 113, 113, 0.72);
-  background: rgba(248, 113, 113, 0.12);
-  color: #f87171;
-  cursor: default;
-  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.08);
+[data-copy-target][data-copied='true'] {
+  border-color: var(--app-viz-2);
+  background-color: var(--app-accent-soft);
+  color: var(--app-accent);
 }
 
-.theme-light button[data-copy-target][data-copied='false'] {
-  border-color: rgba(185, 28, 28, 0.34);
-  background: rgba(248, 113, 113, 0.14);
-  color: #7f1d1d;
+[data-leaderboard-panel][data-loading='true'] {
+  opacity: 0.65;
+  transition: opacity 150ms ease;
 }
 
-.app-device-dialog {
-  width: min(76rem, calc(100vw - 1.5rem));
-  max-width: calc(100vw - 1.5rem);
-  height: min(48rem, calc(100vh - 1.5rem));
-  max-height: min(48rem, calc(100vh - 1.5rem));
-  margin: auto;
-  overflow: hidden;
-  padding: 0;
-  border: 1px solid var(--app-border);
-  border-radius: 1rem;
-  background: var(--app-panel-strong);
-  color: var(--app-text);
-  box-shadow: var(--app-shadow-floating);
-}
-
-.app-device-dialog[open] {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.app-device-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-}
-
-.theme-light .app-device-dialog::backdrop {
-  background: rgba(28, 25, 23, 0.28);
-}
-
-.app-device-dialog-body {
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.app-device-dialog .app-surface-subtle:not([class*='border-lime']) {
-  border-color: transparent;
-}
-
-.app-device-list-grid {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .app-device-dialog {
-    width: calc(100vw - 1rem);
-    height: calc(100vh - 1rem);
-    max-height: calc(100vh - 1rem);
-    border-radius: 0.875rem;
-  }
-}
-
-@media (min-width: 768px) {
-  .app-device-list-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 2.4fr) 9rem 9rem 8rem 5.5rem;
-    align-items: center;
-  }
-}
-
-button:disabled,
-button[aria-disabled='true'],
-a[aria-disabled='true'],
-[role='button'][aria-disabled='true'],
-[role='tab'][aria-disabled='true'],
-select:disabled,
-input:disabled,
-button[data-copy-target]:disabled,
-button[data-copy-target][aria-disabled='true'] {
-  cursor: not-allowed;
-}
-
-@supports selector(label:has(input)) {
-  label:has(input:disabled) {
-    cursor: not-allowed;
-  }
-}
-
-.app-toast-viewport {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 80;
-  display: flex;
-  max-width: min(360px, calc(100vw - 32px));
-  flex-direction: column;
-  gap: 8px;
-  pointer-events: none;
-}
-
-.app-toast {
-  min-width: min(280px, calc(100vw - 32px));
-  border: 1px solid var(--app-border);
-  border-radius: 12px;
-  background: var(--app-panel-strong);
-  box-shadow: var(--app-shadow-floating);
-  color: var(--app-text);
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.4;
-  opacity: 0;
-  padding: 12px 14px;
-  transform: translateY(8px) scale(0.98);
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-}
-
-.app-toast[data-visible='true'] {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.app-toast[data-tone='success'] {
-  border-color: rgba(190, 242, 100, 0.5);
-}
-
-.app-toast[data-tone='error'] {
-  border-color: rgba(248, 113, 113, 0.55);
-}
-
-.app-chart-tooltip {
-  position: fixed;
-  z-index: 90;
-  min-width: 180px;
-  pointer-events: none;
-  opacity: 0;
-  transform: translateY(4px) scale(0.98);
-  border: 1px solid var(--app-border);
-  border-radius: 10px;
-  background: var(--app-panel-strong);
-  color: var(--app-text);
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  box-shadow: var(--app-shadow-floating);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
-}
-
-.app-chart-tooltip[data-visible='true'] {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.app-chart-tooltip-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.app-chart-tooltip-line + .app-chart-tooltip-line {
-  margin-top: 4px;
-}
-
-.app-chart-tooltip-label {
-  color: var(--app-muted);
-  font-weight: 700;
-}
-
-.app-chart-tooltip-value {
-  color: var(--app-text);
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-}
-
-.app-flash-success {
-  border: 1px solid rgba(190, 242, 100, 0.42);
-  border-radius: 6px;
-  background: rgba(190, 242, 100, 0.12);
-  color: #d9f99d;
-}
-
-.theme-light .app-flash-success {
-  border-color: rgba(77, 124, 15, 0.34);
-  background: rgba(132, 204, 22, 0.16);
-  color: #365314;
-}
-
-.app-flash-error {
-  border: 1px solid rgba(248, 113, 113, 0.42);
-  border-radius: 8px;
-  background: rgba(248, 113, 113, 0.12);
-  color: #fecaca;
-}
-
-.theme-light .app-flash-error {
-  border-color: rgba(185, 28, 28, 0.34);
-  background: rgba(248, 113, 113, 0.14);
-  color: #7f1d1d;
-}
-
-.app-danger-text {
-  color: #fca5a5;
-}
-
-.theme-light .app-danger-text {
-  color: #b91c1c;
-}
-
-.app-danger-notice {
-  border-color: rgba(248, 113, 113, 0.42);
-  background: rgba(248, 113, 113, 0.12);
-  color: #fca5a5;
-}
-
-.theme-light .app-danger-notice {
-  border-color: rgba(185, 28, 28, 0.34);
-  background: rgba(248, 113, 113, 0.14);
-  color: #7f1d1d;
-}
-
-.app-danger-action {
-  border-color: rgba(248, 113, 113, 0.42);
-  color: #fca5a5;
-}
-
-.theme-light .app-danger-action {
-  border-color: rgba(185, 28, 28, 0.34);
-  color: #b91c1c;
-}
-
-.app-danger-button {
-  border: 1px solid rgba(248, 113, 113, 0.42);
-  background: rgba(248, 113, 113, 0.14);
-  color: #fecaca;
-}
-
-.theme-light .app-danger-button {
-  border-color: rgba(185, 28, 28, 0.24);
-  background: rgba(248, 113, 113, 0.1);
-  color: #991b1b;
-}
-
-@media (hover: hover) {
-  .app-danger-action:hover {
-    background: rgba(248, 113, 113, 0.12);
-  }
-
-  .theme-light .app-danger-action:hover {
-    background: rgba(248, 113, 113, 0.14);
-  }
-
-  .app-danger-button:hover {
-    border-color: rgba(252, 165, 165, 0.62);
-    background: rgba(248, 113, 113, 0.22);
-  }
-
-  .theme-light .app-danger-button:hover {
-    border-color: rgba(185, 28, 28, 0.38);
-    background: rgba(248, 113, 113, 0.16);
-  }
-}
-
-.app-status-pill {
-  display: inline-flex;
-  min-height: 26px;
-  align-items: center;
-  border: 1px solid;
-  border-radius: 9999px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.app-status-pill-ok {
-  border-color: rgba(190, 242, 100, 0.48);
-  background: rgba(190, 242, 100, 0.14);
-  color: #d9f99d;
-}
-
-.theme-light .app-status-pill-ok {
-  border-color: rgba(77, 124, 15, 0.36);
-  background: rgba(132, 204, 22, 0.18);
-  color: #365314;
-}
-
-.app-status-pill-warning {
-  border-color: rgba(251, 191, 36, 0.52);
-  background: rgba(251, 191, 36, 0.14);
-  color: #fde68a;
-}
-
-.theme-light .app-status-pill-warning {
-  border-color: rgba(180, 83, 9, 0.38);
-  background: rgba(251, 191, 36, 0.2);
-  color: #78350f;
-}
-
-.app-status-pill-muted {
-  border-color: var(--app-border);
-  background: var(--app-bg-soft);
-  color: var(--app-muted);
-}
-
-.app-rank-badge {
-  display: inline-flex;
-  min-height: 28px;
-  min-width: 44px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(190, 242, 100, 0.48);
-  border-radius: 9999px;
-  background: rgba(190, 242, 100, 0.14);
-  color: #d9f99d;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.theme-light .app-rank-badge {
-  border-color: rgba(77, 124, 15, 0.3);
-  background: #bef264;
-  color: #1c1917;
-}
-
-@media (max-width: 640px) {
-  .app-toast-viewport {
-    bottom: 16px;
-    left: 16px;
-    right: 16px;
-  }
-
-  .app-toast {
-    width: 100%;
-  }
+[data-public-card-preview][data-loading='true'] {
+  opacity: 0.72;
+  transition: opacity 150ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
   button,
-  button[data-copy-target],
+  a[data-link-button],
+  [data-copy-target],
+  [data-theme-toggle],
+  [data-custom-select-button],
+  [data-leaderboard-link],
+  .app-skip-link,
+  .app-chart-tooltip,
+  .app-folio-tooltip,
+  .app-matrix-sq,
+  .app-matrix-group-label,
   .app-toast {
     transition: none;
   }
 
-  .app-metric-card {
-    transition: none;
-  }
-
-  /* Without motion the sweep would still jump to its end position on hover, which reads as
-     a flash; drop it entirely and keep only the lift's shadow (no transform either). */
-  .app-metric-card:hover {
+  button:hover:not(:disabled):not([aria-disabled]):not(:active),
+  a[data-link-button='true']:hover:not([aria-disabled]):not(:active),
+  button:active,
+  a[data-link-button='true']:active,
+  [data-theme-toggle]:active:not(:disabled),
+  [data-custom-select-button]:active:not(:disabled),
+  [data-leaderboard-link]:active {
     transform: none;
   }
 
-  .app-metric-card::after {
-    display: none;
-  }
-
-  /* Declared below the first reduced-motion block, so its `button:active { transform: none }`
-     never reaches this rule. Without the reset a reduced-motion user still gets a 10% snap
-     under the pointer. */
   button[data-copy-target]:active {
     transform: none;
   }
 }
 
-/* The skip link and its `#app-content` target. The link is the first focusable element in
-   `<body>` and stays off-screen until focused, so keyboard and screen-reader users can jump
-   past the navigation on every page. This has to be a class rather than an inline `style`
-   attribute: the `style-src 'self'` CSP drops style attributes (see the `@source inline`
-   note at the top of this file). `clip-path` hides it without the `display: none` that would
-   take it out of the tab order. */
-.app-skip-link {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 100;
-  padding: 12px 16px;
-  border: 1px solid rgba(190, 242, 100, 0.6);
-  border-radius: 12px;
-  background: #bef264;
-  color: #1c1917;
-  font-size: 14px;
-  font-weight: 900;
-  text-decoration: none;
-  clip-path: inset(50%);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.app-skip-link:focus,
-.app-skip-link:focus-visible {
-  clip-path: none;
-  outline: 2px solid var(--app-text);
-  outline-offset: 2px;
-}
-
-#app-content:focus,
-#app-content:focus-visible {
-  outline: none;
+.app-card-preview-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }

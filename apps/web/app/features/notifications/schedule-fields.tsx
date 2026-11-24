@@ -16,7 +16,9 @@ const weekdayOptions = [
 export function ScheduleTimeFields(props: { scheduleTimesLocal: string[]; disabled?: boolean }) {
   return (
     <fieldset class="md:col-span-2">
-      <legend class="text-sm text-[var(--app-muted)]">推送时间（可填多个）</legend>
+      <legend class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+        推送时间（可填多个）
+      </legend>
       <div class="mt-2 grid gap-2 sm:grid-cols-2">
         {scheduleTimeSlots(props.scheduleTimesLocal).map((time, index) => (
           <Input
@@ -39,15 +41,18 @@ export function ScheduleWeekdayFields(props: { scheduleWeekdays?: number[]; disa
   const scheduleWeekdays = props.scheduleWeekdays ?? defaultScheduleWeekdays
   return (
     <fieldset class="md:col-span-2">
-      <legend class="text-sm text-[var(--app-muted)]">推送日期</legend>
+      <legend class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+        推送日期
+      </legend>
       <input type="hidden" name="scheduleWeekdaysTouched" value="1" disabled={props.disabled} />
       <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {weekdayOptions.map((weekday) => (
           <label
             key={weekday.value}
-            class="app-surface-subtle flex min-h-11 items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]"
+            class="flex min-h-11 items-center gap-2 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]"
           >
             <input
+              class="accent-[var(--app-accent-bar)]"
               type="checkbox"
               name="scheduleWeekdays[]"
               value={String(weekday.value)}

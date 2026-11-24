@@ -11,15 +11,15 @@ export const themeScript = `
       var storedTheme = localStorage.getItem(themeKey)
       if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme
     } catch (_) {}
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+    return 'light'
   }
 
   function syncThemeMeta(theme) {
-    var colorScheme = themeColorSchemes[theme] || themeColorSchemes.dark
+    var colorScheme = themeColorSchemes[theme] || themeColorSchemes.light
     document.documentElement.style.colorScheme = colorScheme
     var themeColorMeta = document.querySelector('meta[name="theme-color"]')
     if (themeColorMeta) {
-      themeColorMeta.setAttribute('content', themeChromeColors[theme] || themeChromeColors.dark)
+      themeColorMeta.setAttribute('content', themeChromeColors[theme] || themeChromeColors.light)
     }
     var colorSchemeMeta = document.querySelector('meta[name="color-scheme"]')
     if (colorSchemeMeta) {

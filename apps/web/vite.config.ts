@@ -1,9 +1,9 @@
 import build from '@hono/vite-build/cloudflare-workers'
-import adapter from '@hono/vite-dev-server/cloudflare'
 import tailwindcss from '@tailwindcss/vite'
 import honox from 'honox/vite'
 import type { HookHandler, Plugin, PluginOption, UserConfig } from 'vite'
 import { defineConfig } from 'vite'
+import { localDevAdapter } from './app/lib/local-dev-adapter'
 
 const clientOptions = {
   input: ['/app/client.ts', '/app/style.css'],
@@ -14,10 +14,15 @@ const clientOptions = {
 const disabledHonoxPlugins = new Set(['honox-vite-client', 'transform-island-components', 'inject-importing-islands'])
 
 export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true
+  },
   plugins: [
     ...withoutPlugins(
       honox({
-        devServer: { adapter },
+        devServer: { adapter: localDevAdapter },
         client: clientOptions,
         islands: false
       }),

@@ -8,7 +8,7 @@ export function UsageMetricGrid(props: { columns?: UsageMetricGridColumns; class
   return (
     <div
       class={cn(
-        'grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2',
+        'grid min-w-0 grid-cols-1 gap-px border-y border-[var(--app-border-strong)] bg-[var(--app-border)] sm:grid-cols-2',
         props.columns === 3 ? 'xl:grid-cols-3' : 'xl:grid-cols-4',
         props.class
       )}
@@ -21,9 +21,6 @@ export function UsageMetricGrid(props: { columns?: UsageMetricGridColumns; class
 
 export function UsageMetricCard(props: { label: string; value: string | UsageMetricValue; tone?: 'lime' }) {
   const metric = readMetricValue(props.value)
-  // `detail` carries the "cost unavailable" notice, and the visible copy of it is
-  // `aria-hidden`. It therefore has to be announced here too, not only when the value was
-  // compacted — otherwise a screen reader never hears that a source's cost is unavailable.
   const exactLabel =
     metric.exactValue === metric.value
       ? `${props.label}: ${metric.exactValue}${metric.detail ? ` (${metric.detail})` : ''}`
@@ -32,16 +29,23 @@ export function UsageMetricCard(props: { label: string; value: string | UsageMet
   return (
     <div
       class={cn(
-        'app-metric-card app-surface-raised min-w-0 rounded-2xl border p-4 backdrop-blur lg:p-3',
+        'app-metric-card min-w-0 p-5 sm:p-6',
         props.tone === 'lime'
-          ? 'border-lime-300/40 bg-lime-300 text-stone-950'
-          : 'border-[var(--app-border)] bg-[var(--app-panel)] text-[var(--app-text)]'
+          ? 'app-metric-card-primary bg-[var(--app-panel-strong)] text-[var(--app-text)]'
+          : 'bg-[var(--app-panel)] text-[var(--app-text)]'
       )}
       data-usage-metric-card="true"
     >
-      <p class={cn('text-sm', props.tone === 'lime' ? 'text-stone-700' : 'text-[var(--app-muted)]')}>{props.label}</p>
+      <p
+        class={cn(
+          'font-mono text-xs font-semibold uppercase tracking-wide',
+          props.tone === 'lime' ? 'app-metric-card-primary-label' : 'text-[var(--app-muted)]'
+        )}
+      >
+        {props.label}
+      </p>
       <div
-        class="mt-2 min-w-0 text-2xl font-black leading-tight tabular-nums sm:text-3xl lg:text-2xl xl:text-3xl [overflow-wrap:anywhere]"
+        class="mt-3 min-w-0 text-3xl font-semibold leading-none tracking-tight tabular-nums sm:text-4xl [overflow-wrap:anywhere]"
         data-usage-metric-value="true"
         title={metric.exactValue}
       >
@@ -49,7 +53,7 @@ export function UsageMetricCard(props: { label: string; value: string | UsageMet
         <span aria-hidden="true">{metric.value}</span>
         {metric.detail ? (
           <span
-            class="mt-1 block text-sm font-bold leading-snug tracking-normal opacity-80 sm:text-base lg:text-sm xl:text-base"
+            class="app-accent-text mt-2 block font-mono text-xs font-medium leading-snug tracking-normal"
             aria-hidden="true"
             data-usage-metric-detail="true"
           >

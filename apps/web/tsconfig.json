@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM"],
-    "types": ["vite/client", "@cloudflare/workers-types"],
+    "types": ["vite/client", "@cloudflare/workers-types", "node"],
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "paths": {

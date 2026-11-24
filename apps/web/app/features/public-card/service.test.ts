@@ -1,4 +1,4 @@
-﻿import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { getPublicUsageCard, getPublicUsageJson, getPublicUsageProfile } from './service'
 import { getPublicTotals } from './service/totals'
 
@@ -198,13 +198,14 @@ describe('public card service', () => {
     expect(svg).not.toContain('Today Cost*')
     expect(svg).not.toContain('Monthly Cost*')
     expect(svg).not.toContain('Monthly Tokens')
-    expect(svg).toContain('card-logo-panel')
-    expect(svg).toContain('card-logo-lime')
-    expect(svg).toContain('M130 118H282V164H229V382H181V164H130V118Z')
-    expect(svg).toContain('M120 390H392')
+    expect(svg).toContain('data-card-cache-waffle="true"')
+    expect(svg).toContain('folio-hatch')
+    expect(svg).toContain('transform="translate(18 12)"')
+    expect(svg).toContain('fill="#6c50f6"')
     expect(sqlStatements).toHaveLength(2)
     expect(sqlStatements.join('\n')).toContain('GROUP BY source')
-    expect(sqlStatements.join('\n')).not.toContain('GROUP BY model')
+    expect(sqlStatements.join('\n')).toContain('GROUP BY model')
+    expect(sqlStatements.join('\n')).not.toContain('FROM source_usage')
   })
 
   test('builds model-only public totals without requiring source split CTEs', async () => {
@@ -484,15 +485,14 @@ describe('public card service', () => {
 
     expect(svg).toContain('<svg')
     expect(sqlStatements).toHaveLength(2)
-    // The bare `FROM source_usage` / `FROM model_usage` reads (and their JSON builders) are the
-    // removed work; the `today_source_usage`-style CTEs that stay are the cost-availability
-    // probes, which the card's metric labels do use.
+    // The bare `FROM source_usage` read (and its JSON builder) stays excluded on the SVG path;
+    // `model_usage` is computed to feed the card's heatmap-style Model Unit Matrix.
     expect(sqlStatements[1]).not.toContain('FROM source_usage')
-    expect(sqlStatements[1]).not.toContain('FROM model_usage')
+    expect(sqlStatements[1]).toContain('FROM model_usage')
     expect(sqlStatements[1]).not.toContain("'source', ordered_sources.source")
-    expect(sqlStatements[1]).not.toContain("'model', ordered_models.model")
+    expect(sqlStatements[1]).toContain("'model', ordered_models.model")
     expect(sqlStatements[1]).toContain("'[]' as sourceSplit")
-    expect(sqlStatements[1]).toContain("'[]' as topModels")
+    expect(sqlStatements[1]).toContain('modelCount')
   })
 
   test('the JSON path still computes the source split', async () => {

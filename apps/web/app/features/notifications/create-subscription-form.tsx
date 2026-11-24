@@ -48,6 +48,7 @@ function ProviderSelect(props: { disabled: boolean }) {
       name="provider"
       value="wecom"
       disabled={props.disabled}
+      wrapperClass="mt-1.5"
       options={[
         { value: 'wecom', label: '企微' },
         { value: 'dingtalk', label: '钉钉' },
@@ -60,12 +61,12 @@ function ProviderSelect(props: { disabled: boolean }) {
 function CreateChecks(props: { disabled: boolean }) {
   return (
     <>
-      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
-        <input type="checkbox" name="sendEmptyReport" disabled={props.disabled} />
+      <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
+        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="sendEmptyReport" disabled={props.disabled} />
         空日报也发送
       </label>
-      <label class="app-surface-subtle flex min-h-11 items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-bold text-[var(--app-text)]">
-        <input type="checkbox" name="enabled" checked disabled={props.disabled} />
+      <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
+        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="enabled" checked disabled={props.disabled} />
         启用定时推送
       </label>
     </>

@@ -7,12 +7,12 @@ describe('theme client', () => {
 
     syncThemeMeta('light', dom.document)
 
-    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#f4f0e8')
+    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#e8e6ef')
     expect(dom.metas['color-scheme'].getAttribute('content')).toBe('only light')
 
     syncThemeMeta('dark', dom.document)
 
-    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#10130f')
+    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#121318')
     expect(dom.metas['color-scheme'].getAttribute('content')).toBe('dark')
   })
 
@@ -48,7 +48,7 @@ describe('theme client', () => {
 
     expect(button.getAttribute('aria-label')).toBe('切换到深色主题')
     expect(button.getAttribute('title')).toBe('切换到深色主题')
-    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#f4f0e8')
+    expect(dom.metas['theme-color'].getAttribute('content')).toBe('#e8e6ef')
     expect(dom.metas['color-scheme'].getAttribute('content')).toBe('only light')
   })
 })

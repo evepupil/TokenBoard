@@ -45,7 +45,7 @@ export default createRoute(async (c) => {
   )
 
   return c.render(
-    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-5 sm:py-6">
+    <main class="min-h-screen bg-[var(--app-bg)] px-4 py-4 text-[var(--app-text)] sm:px-8 sm:py-6">
       <title>{leaderboardDocumentTitle({ period, metric })}</title>
       <AppNav active="leaderboards" email={user?.email} isAuthenticated={Boolean(user)} />
       <LeaderboardPanel

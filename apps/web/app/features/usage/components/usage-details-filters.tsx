@@ -10,7 +10,7 @@ export function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; d
   return (
     <form
       method="get"
-      class="grid gap-3 sm:grid-cols-2 xl:min-w-[900px] xl:grid-cols-[140px_170px_1fr_1fr_1fr_auto_auto]"
+      class="grid gap-3 sm:grid-cols-2 xl:grid-cols-[150px_170px_1fr_1fr_1fr_auto_auto]"
       data-submit-feedback="true"
     >
       <SourceFilter filters={props.filters} />
@@ -18,11 +18,11 @@ export function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; d
       <DateFilter label="开始日期" name="startDate" value={props.filters.startDate} />
       <DateFilter label="结束日期" name="endDate" value={props.filters.endDate} />
       <ModelFilter value={props.filters.modelQuery} />
-      <Button class="h-11 w-full sm:mt-7" type="submit" data-submitting-label="正在应用...">
-        应用
+      <Button class="h-11 w-full sm:mt-6" type="submit" data-submitting-label="正在应用...">
+        应用筛选
       </Button>
-      <LinkButton class="h-11 w-full sm:mt-7" variant="secondary" href={csvHref(props.filters)} download="">
-        CSV
+      <LinkButton class="h-11 w-full sm:mt-6" variant="secondary" href={csvHref(props.filters)} download="">
+        导出 CSV ↓
       </LinkButton>
     </form>
   )
@@ -30,7 +30,7 @@ export function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; d
 
 function SourceFilter(props: { filters: UsageDetailsFilters }) {
   return (
-    <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-2" />
+    <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-1.5" />
   )
 }
 
@@ -41,13 +41,13 @@ function DeviceFilter(props: { filters: UsageDetailsFilters; devices: UserDevice
   ]
 
   return (
-    <CustomSelect label="设备" name="device" value={props.filters.deviceId} options={options} wrapperClass="mt-2" />
+    <CustomSelect label="设备" name="device" value={props.filters.deviceId} options={options} wrapperClass="mt-1.5" />
   )
 }
 
 function DateFilter(props: { label: string; name: string; value: string }) {
   return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
+    <label class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
       {props.label}
       <input class={filterControlClass()} name={props.name} type="date" value={props.value} autocomplete="off" />
     </label>
@@ -56,12 +56,12 @@ function DateFilter(props: { label: string; name: string; value: string }) {
 
 function ModelFilter(props: { value: string }) {
   return (
-    <label class="text-sm font-bold text-[var(--app-muted)]">
+    <label class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
       模型
       <input
         class={filterControlClass('placeholder:text-[var(--app-subtle)]')}
         name="model"
-        placeholder="sonnet"
+        placeholder="sonnet / gpt-5"
         value={props.value}
         autocomplete="off"
       />
@@ -71,16 +71,14 @@ function ModelFilter(props: { value: string }) {
 
 function filterControlClass(extra = '') {
   return [
-    'mt-2 h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-input)] px-3',
-    'text-[var(--app-text)] outline-none transition focus:border-lime-300 focus:ring-2 focus:ring-lime-300/20',
+    'mt-1.5 h-11 w-full border border-[var(--app-border)] bg-[var(--app-input)] px-3 font-sans text-sm',
+    'text-[var(--app-text)] outline-none transition focus:border-[var(--app-accent-bar)] focus:ring-1 focus:ring-[var(--app-accent-bar)]',
     extra
   ]
     .filter(Boolean)
     .join(' ')
 }
 
-// Derived from the source enum so a new source cannot be filterable in the
-// query layer but missing from this control.
 const sourceOptions = [
   { value: 'all', label: formatSource('all') },
   ...usageSources.map((source) => ({ value: source, label: formatSource(source) }))
