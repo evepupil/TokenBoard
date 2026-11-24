@@ -177,6 +177,23 @@ function runCoordinator(trigger, runtime, result) {
         resourcePressure: pressure.detail
       }
     }
+    // The cooldown above is scoped to the last *success*. Without this check a failing upload
+    // endpoint means every session-end trigger starts a fresh scan that fails again — on
+    // 2026-11-24 one such run spent 26.4 minutes scanning and then timed out at upload, with
+    // the cursor unacknowledged, and the next trigger would have repeated it. Transient
+    // failures (a busy collector lock) never reach this checkpoint, so the retry machinery
+    // they schedule is not starved. The source is queued like every other skip.
+    const failureRemainingMs = failureBackoffRemainingMs(runtime)
+    if (failureRemainingMs > 0) {
+      keepCooldownTrigger(trigger, runtime, pendingSources, syncSources)
+      return {
+        ...result,
+        waitedForLock: lock.waited,
+        skippedSync: true,
+        skippedReason: 'failure-backoff',
+        failureBackoffRemainingMs: failureRemainingMs
+      }
+    }
 
     const completed = {
       ...result,
@@ -184,6 +201,7 @@ function runCoordinator(trigger, runtime, result) {
       waitedForLock: lock.waited
     }
     completedResult = completed
+    writeFailureCheckpoint(completed, runtime)
     writeSuccessfulSyncCheckpoint(completed, runtime)
     return scheduleTransientRetries(trigger, runtime, scheduleDeferredFollowUps(trigger, runtime, completed))
   } catch (error) {
@@ -430,6 +448,9 @@ function buildRuntime(options = {}) {
     stateDir: readStateDir(options),
     executeSync: options.executeSync,
     cooldownMs: numberOrDefault(options.cooldownMs, 300_000),
+    // Zero disables it; `notify.mjs` resolves the env/config value and the validator there
+    // allows an explicit 0 for exactly this.
+    failureBackoffMs: numberOrDefault(options.failureBackoffMs, 0),
     scheduleWindow: options.scheduleWindow,
     lockTimeoutMs: numberOrDefault(options.lockTimeoutMs, defaultLockTimeoutMs),
     maxFollowUps: numberOrDefault(options.maxFollowUps, defaultMaxFollowUps),
@@ -595,6 +616,39 @@ function isInsideScheduledWindow(runtime) {
   return isWithinScheduleWindow({ times: window.times, windowMs: window.windowMs, now: runtime.now() })
 }
 
+// Mirrors `cooldownRemainingMs` for the other direction: how long to wait after a run that
+// failed for a reason a rerun would repeat. A success newer than the failure supersedes it,
+// which is what makes the checkpoint self-clearing without a delete (and without a window
+// where a crash between the two writes could drop the success record).
+function failureBackoffRemainingMs(runtime) {
+  if (!(runtime.failureBackoffMs > 0)) return 0
+  const failurePath = join(runtime.stateDir, 'last-failure.json')
+  if (!runtime.exists(failurePath)) return 0
+  let raw
+  try {
+    raw = readTimestamp(failurePath, runtime)
+  } catch (error) {
+    // Unlike the cooldown checkpoint this is best-effort bookkeeping: an unreadable failure
+    // record can only cost an extra scan, so it fails open rather than failing the hook.
+    return 0
+  }
+  const failedAt = new Date(raw).getTime()
+  if (Number.isNaN(failedAt)) return 0
+  const elapsedMs = runtime.now() - failedAt
+  if (elapsedMs < 0) return 0
+  const successPath = join(runtime.stateDir, 'last-success.json')
+  if (runtime.exists(successPath)) {
+    try {
+      const succeededAt = new Date(readTimestamp(successPath, runtime)).getTime()
+      if (!Number.isNaN(succeededAt) && succeededAt >= failedAt) return 0
+    } catch {
+      // An unreadable success checkpoint is already fatal in `cooldownRemainingMs`; there is
+      // no need to fail twice.
+    }
+  }
+  return Math.max(0, runtime.failureBackoffMs - elapsedMs)
+}
+
 function scheduleTrailingSources(trigger, sources, runtime, remainingMs) {
   return sources.reduce(
     (scheduled, source) => runtime.scheduleTrailing({ ...trigger, source }, remainingMs) || scheduled,
@@ -687,6 +741,42 @@ function writeSuccessfulSyncCheckpoint(result, runtime) {
   }
 }
 
+// Records a run whose failure a retry would repeat (an unreachable endpoint, a broken
+// provider). Transient failures are excluded: they already have their own retry chain, and
+// recording them would make that chain's next attempt skip itself. Writing this checkpoint is
+// best-effort — losing it costs one extra scan, while failing the run over it would replace
+// the real failure with a bookkeeping error.
+function writeFailureCheckpoint(result, runtime) {
+  if (!(runtime.failureBackoffMs > 0)) return
+  // Only a run that actually failed counts: a skip is not a failure, and a transient failure
+  // has its own retry chain — recording it would make that chain's next attempt skip itself.
+  if (deriveStatus(result) !== 'error') return
+  if ((result.transientSources || []).length > 0) return
+  const path = join(runtime.stateDir, 'last-failure.json')
+  const value = new Date(runtime.now()).toISOString()
+  try {
+    if (typeof runtime.rename !== 'function') {
+      runtime.writeFile(path, value, { mode: 0o600 })
+      return
+    }
+    const temporaryPath = `${path}.tmp-${randomBytes(8).toString('hex')}`
+    try {
+      runtime.writeFile(temporaryPath, value, { flag: 'wx', mode: 0o600 })
+      runtime.rename(temporaryPath, path)
+    } catch (error) {
+      try {
+        runtime.unlink(temporaryPath)
+      } catch {
+        // Same reasoning as the success checkpoint: cleanup cannot be allowed to hide the
+        // write error it followed.
+      }
+      throw error
+    }
+  } catch {
+    // Best effort, see above.
+  }
+}
+
 function writeRunLog(result, startedAtMs, runtime) {
   const lockPath = join(runtime.stateDir, 'run-logs.lock')
   const owner = acquireRunLogLock(lockPath, runtime)
@@ -723,6 +813,9 @@ function writeRunLogEntry(result, startedAtMs, runtime) {
       ...(result.skippedReason ? { skippedReason: result.skippedReason } : {}),
       ...(result.resourcePressure ? { resourcePressure: result.resourcePressure } : {}),
       ...(result.cooldownRemainingMs != null ? { cooldownRemainingMs: result.cooldownRemainingMs } : {}),
+      ...(result.failureBackoffRemainingMs != null
+        ? { failureBackoffRemainingMs: result.failureBackoffRemainingMs }
+        : {}),
       ...(result.trailingScheduled != null ? { trailingScheduled: result.trailingScheduled } : {}),
       ...(result.trailingDelayMs != null ? { trailingDelayMs: result.trailingDelayMs } : {}),
       ...(result.trailingSources ? { trailingSources: result.trailingSources } : {}),

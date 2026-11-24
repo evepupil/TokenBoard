@@ -193,6 +193,11 @@ thrashing host it runs many times longer and can still fail at upload. Tune it w
 `TOKENBOARD_RESOURCE_MEMORY_FREE_MIN_PERCENT`, `TOKENBOARD_RESOURCE_SWAP_USED_MAX_PERCENT` and
 `TOKENBOARD_RESOURCE_IO_AVG10_MAX` (integer percentages, 1-99), or set
 `TOKENBOARD_RESOURCE_GUARD=off` to disable it. An unreadable metric never blocks a sync.
+After a hook sync fails for a reason a rerun would repeat (an unreachable endpoint, a broken
+provider), further hook triggers wait 10 minutes before trying again; the queued signal is kept
+and the scheduled sync is never gated. Transient failures (a busy collector lock) keep their own
+one-minute retry. Set `TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS` (or `notifyFailureBackoffMs` in the
+config file) to a value from `60000` through `7200000`, or `0` to disable it.
 If a scheduled sync reaches the lock timeout, it records a private deferred state and performs a
 bounded in-process retry: at most five attempts with a one-minute delay after each continued lock
 contention. The retry never runs checkout upgrade and stops immediately for a real collector failure.

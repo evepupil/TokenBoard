@@ -171,6 +171,14 @@ probe fails open, so an unreadable metric never stops a sync. Thresholds are tun
 `TOKENBOARD_RESOURCE_MEMORY_FREE_MIN_PERCENT`, `TOKENBOARD_RESOURCE_SWAP_USED_MAX_PERCENT` and
 `TOKENBOARD_RESOURCE_IO_AVG10_MAX`; `TOKENBOARD_RESOURCE_GUARD=off` disables the guard.
 
+A hook run that fails for a reason a rerun would repeat (an unreachable endpoint a TLS
+handshake cannot complete, a broken provider) writes a private failure checkpoint, and further
+hook triggers wait ten minutes instead of rescanning and failing again. The signal stays queued
+and the scheduled sync is never gated; a transient failure (a busy collector lock) keeps its own
+one-minute retry and does not engage this backoff. Tune it with
+`TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS` or the `notifyFailureBackoffMs` config key (60000-7200000,
+or 0 to disable).
+
 When a scheduled sync cannot acquire that lock within its timeout, it writes a private deferred
 retry state under the TokenBoard config directory and performs a bounded in-process retry. The retry
 attempts only lock contention, makes at most five attempts with a one-minute delay after each
