@@ -83,15 +83,19 @@ describe('reserved version slug migration', () => {
 
     try {
       applyMigrationsBeforeTarget(dbPath)
-      // A user id whose hex form is long enough to overflow the limit if the migration
-      // used the whole id instead of the first seven hex characters.
+      // The plain fallback must be taken so the migration is forced into the user-id suffix
+      // branch: that is the only branch that can overflow the limit (seven hex characters of
+      // the id plus a sequence number), and a test that never reaches it would pass even if
+      // the truncation regressed to the whole id.
+      insertProfile(dbPath, 'taken-user', 'version-legacy', 'Already Taken')
       const longUserId = 'legacy-user-with-a-deliberately-long-identifier'
       insertProfile(dbPath, longUserId, 'version', 'Legacy Version')
       runSqlite(dbPath, readFileSync(join(migrationsDir, targetMigration), 'utf8'))
 
       const renamed = profileSlug(dbPath, longUserId)
+      expect(renamed).toMatch(/^version-legacy-.+/)
       expect(renamed.length).toBeLessThanOrEqual(32)
-      expect(renamed.startsWith('version-legacy')).toBe(true)
+      expect(profileSlug(dbPath, 'taken-user')).toBe('version-legacy')
     } finally {
       rmSync(tempDir, { recursive: true, force: true })
     }
