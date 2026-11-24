@@ -77,9 +77,7 @@ function LeaderboardPanelHeader(props: {
           {costUnavailableSourceNames().join('、')} 费用不可用，费用列和费用排名不包含这些来源成本。主要模型和来源占比按
           total token 计算。
         </p>
-        <span class="shrink-0 font-mono text-[var(--app-subtle)]">
-          INDEX · {props.entryCount} 名公开贡献者
-        </span>
+        <span class="shrink-0 font-mono text-[var(--app-subtle)]">INDEX · {props.entryCount} 名公开贡献者</span>
       </div>
     </header>
   )
@@ -246,7 +244,9 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
         </div>
         <div class="min-w-0">
           <dt class="font-mono text-[11px] font-bold uppercase text-[var(--app-muted)]">缓存率</dt>
-          <dd class="mt-1 break-words font-mono font-bold tabular-nums">{formatPercentRate(props.entry.cacheReadRate)}</dd>
+          <dd class="mt-1 break-words font-mono font-bold tabular-nums">
+            {formatPercentRate(props.entry.cacheReadRate)}
+          </dd>
         </div>
       </dl>
       <dl class="mt-3 grid grid-cols-1 gap-3 border-t border-[var(--app-border)] pt-3 text-sm">
@@ -267,13 +267,12 @@ function LeaderboardMobileItem(props: { entry: LeaderboardEntry }) {
   )
 }
 
-function LeaderboardTable(props: {
-  entries: LeaderboardEntry[]
-  metric: LeaderboardMetric
-  leaderValue: number
-}) {
+function LeaderboardTable(props: { entries: LeaderboardEntry[]; metric: LeaderboardMetric; leaderValue: number }) {
   return (
-    <div class="hidden overflow-x-auto border-t border-[var(--app-border-strong)] md:block" data-leaderboard-desktop-table="true">
+    <div
+      class="hidden overflow-x-auto border-t border-[var(--app-border-strong)] md:block"
+      data-leaderboard-desktop-table="true"
+    >
       <Table class="min-w-[920px]">
         <TableHeader>
           <TableRow>
@@ -292,7 +291,10 @@ function LeaderboardTable(props: {
           {props.entries.map((entry) => {
             const relativePct =
               props.leaderValue > 0
-                ? Math.max(2, Math.min(100, Math.round((metricNumericValue(entry, props.metric) / props.leaderValue) * 100)))
+                ? Math.max(
+                    2,
+                    Math.min(100, Math.round((metricNumericValue(entry, props.metric) / props.leaderValue) * 100))
+                  )
                 : 0
             return (
               <TableRow class={cn(entry.isCurrentViewer && 'app-current-viewer-row')}>
@@ -308,7 +310,10 @@ function LeaderboardTable(props: {
                 </TableCell>
                 <TableCell class="font-bold text-[var(--app-text)]">{entry.displayName}</TableCell>
                 <TableCell class="max-w-[16rem]">
-                  <span class="block break-words font-mono text-xs font-semibold [overflow-wrap:anywhere]" title={entry.primaryModel ?? ''}>
+                  <span
+                    class="block break-words font-mono text-xs font-semibold [overflow-wrap:anywhere]"
+                    title={entry.primaryModel ?? ''}
+                  >
                     {formatPrimaryModel(entry.primaryModel)}
                   </span>
                 </TableCell>
@@ -325,7 +330,9 @@ function LeaderboardTable(props: {
                     </span>
                   </div>
                 </TableCell>
-                <TableCell class="text-right font-mono font-bold tabular-nums">{formatInteger(entry.totalTokens)}</TableCell>
+                <TableCell class="text-right font-mono font-bold tabular-nums">
+                  {formatInteger(entry.totalTokens)}
+                </TableCell>
                 <TableCell class="text-right font-mono font-bold tabular-nums">
                   {formatInteger(entry.totalTokensWithoutCacheRead)}
                 </TableCell>
@@ -393,11 +400,7 @@ function formatPrimaryModel(model: string | null) {
 }
 
 function RankBadge(props: { rank: number }) {
-  return (
-    <span class={cn('app-rank-badge', props.rank <= 3 && 'app-rank-badge-top')}>
-      #{props.rank}
-    </span>
-  )
+  return <span class={cn('app-rank-badge', props.rank <= 3 && 'app-rank-badge-top')}>#{props.rank}</span>
 }
 
 function formatInteger(value: number) {

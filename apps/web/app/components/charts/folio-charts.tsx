@@ -1,8 +1,4 @@
-import {
-  computeFolioMatrixLayout,
-  type FolioMatrixMode,
-  type FolioMatrixTone
-} from '../../lib/folio-matrix-layout'
+import { computeFolioMatrixLayout, type FolioMatrixMode, type FolioMatrixTone } from '../../lib/folio-matrix-layout'
 
 export type FolioSegment = {
   label: string
@@ -203,11 +199,7 @@ export function FolioCacheWaffle(props: {
         <g>{cells}</g>
         {/* Monumental -90deg rotated numeral beside the 10x10 matrix */}
         <g transform={`translate(${gridSpan + 114} 178) rotate(-90)`}>
-          <text
-            x="0"
-            y="0"
-            class="fill-[var(--app-text)] font-sans text-[128px] font-medium tracking-tighter"
-          >
+          <text x="0" y="0" class="fill-[var(--app-text)] font-sans text-[128px] font-medium tracking-tighter">
             {hitPct}
           </text>
         </g>
@@ -290,11 +282,7 @@ export function FolioRotatedColumns(props: { items: FolioRotatedColumnItem[]; ar
             >
               <rect x={x} y={y} width={colW} height={height} class={toneClass[item.tone]} />
               <g transform={`translate(${x + 88} ${baseLineY - 12}) rotate(-90)`} class="pointer-events-none">
-                <text
-                  x="0"
-                  y="0"
-                  class="fill-[var(--app-text)] font-sans text-[92px] font-medium tracking-tighter"
-                >
+                <text x="0" y="0" class="fill-[var(--app-text)] font-sans text-[92px] font-medium tracking-tighter">
                   {pct}%
                 </text>
               </g>
@@ -304,7 +292,14 @@ export function FolioRotatedColumns(props: { items: FolioRotatedColumnItem[]; ar
             </g>
           )
         })}
-        <line x1="0" y1={baseLineY} x2={totalW} y2={baseLineY} class="stroke-[var(--app-border-strong)]" stroke-width="1.2" />
+        <line
+          x1="0"
+          y1={baseLineY}
+          x2={totalW}
+          y2={baseLineY}
+          class="stroke-[var(--app-border-strong)]"
+          stroke-width="1.2"
+        />
       </svg>
     </div>
   )
@@ -315,10 +310,7 @@ export function FolioRotatedColumns(props: { items: FolioRotatedColumnItem[]; ar
  * Renders a single persistent pool of 400 squares in SSR (`all` mode by default, zero inline `style=`),
  * which smoothly flies & regroups into two-column categorical sub-matrices with hover tooltips in the client.
  */
-export function FolioUnitMatrix(props: {
-  initialMode?: FolioMatrixMode
-  ariaLabel: string
-}) {
+export function FolioUnitMatrix(props: { initialMode?: FolioMatrixMode; ariaLabel: string }) {
   const mode = props.initialMode ?? 'all'
   const layout = computeFolioMatrixLayout(mode)
 

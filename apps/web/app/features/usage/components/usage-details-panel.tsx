@@ -171,7 +171,9 @@ function DailySummaryRowHeader(props: { row: UsageDetails['dailyRows'][number]; 
         {props.row.usageDate}
       </span>
       <span class="grid gap-1 md:block">
-        <span class="font-mono text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">Tokens</span>
+        <span class="font-mono text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">
+          Tokens
+        </span>
         <span class="font-mono font-bold tabular-nums">{formatInteger(props.row.totalTokens)}</span>
         <span class="mt-1 hidden h-1 w-full overflow-hidden bg-[var(--app-viz-neutral)] md:block">
           <span class={`app-viz-bar-2 block h-full w-[${barPct}%]`} />
@@ -196,7 +198,9 @@ function DailySummaryRowHeader(props: { row: UsageDetails['dailyRows'][number]; 
 function MobileValue(props: { label: string; children: string }) {
   return (
     <span class="grid gap-1 md:block">
-      <span class="font-mono text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">{props.label}</span>
+      <span class="font-mono text-xs font-bold uppercase tracking-wide text-[var(--app-muted)] md:hidden">
+        {props.label}
+      </span>
       <span class="font-mono tabular-nums">{props.children}</span>
     </span>
   )
@@ -282,7 +286,9 @@ function DailyModelRowsBody(props: { rows: UsageDetails['dailyRows'][number]['mo
           <TableCell class="text-right font-mono tabular-nums">
             {formatInteger(modelRow.totalTokensWithoutCacheRead)}
           </TableCell>
-          <TableCell class="text-right font-mono font-bold tabular-nums">{formatInteger(modelRow.totalTokens)}</TableCell>
+          <TableCell class="text-right font-mono font-bold tabular-nums">
+            {formatInteger(modelRow.totalTokens)}
+          </TableCell>
           <TableCell class="text-right font-mono tabular-nums">
             {formatCostWithAvailability(modelRow.costUsd, [modelRow])}
           </TableCell>

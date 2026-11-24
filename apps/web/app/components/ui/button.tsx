@@ -11,7 +11,8 @@ export const buttonVariants = cva(
           'border border-[var(--app-border-strong)] bg-[var(--app-text)] text-[var(--app-bg)] hover:border-[var(--app-accent-bar)] hover:bg-[var(--app-accent-bar)] hover:text-white',
         secondary:
           'border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[var(--app-text)] hover:bg-[var(--app-text)] hover:text-[var(--app-bg)]',
-        ghost: 'border border-transparent text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
+        ghost:
+          'border border-transparent text-[var(--app-muted)] hover:border-[var(--app-border)] hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]',
         destructive:
           'border border-[var(--app-danger-border)] bg-[var(--app-danger-bg)] text-[var(--app-danger-text)] hover:border-[var(--app-danger-text)] hover:bg-[var(--app-danger-text)] hover:text-white'
       },

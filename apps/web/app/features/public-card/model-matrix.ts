@@ -265,7 +265,9 @@ export function formatUnitScaleTokens(value: number): string {
 
 export function formatSharePercent(share: number): string {
   const pct = Math.max(0, Math.min(100, share * 100))
-  return pct >= 10 || Math.abs(pct - Math.round(pct)) < 0.05 ? `${pct.toFixed(1).replace(/\.0$/, '')}%` : `${pct.toFixed(1)}%`
+  return pct >= 10 || Math.abs(pct - Math.round(pct)) < 0.05
+    ? `${pct.toFixed(1).replace(/\.0$/, '')}%`
+    : `${pct.toFixed(1)}%`
 }
 
 export function truncateModelLabel(label: string, maxChars = 17): string {

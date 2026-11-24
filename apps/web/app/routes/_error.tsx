@@ -22,7 +22,9 @@ const handler: ErrorHandler = (e, c) => {
       <main class="min-h-[70vh] bg-[var(--app-bg)] px-4 py-16 text-[var(--app-text)] sm:px-8">
         <SkipLinkTarget />
         <section class="app-folio-container max-w-3xl border-t border-[var(--app-border-strong)] pt-8">
-          <p class="app-folio-kicker">HTTP {e.status} · {e.code}</p>
+          <p class="app-folio-kicker">
+            HTTP {e.status} · {e.code}
+          </p>
           <h1 class="app-folio-h2 mt-3">{e.message}</h1>
         </section>
       </main>

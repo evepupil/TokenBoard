@@ -62,11 +62,22 @@ function CreateChecks(props: { disabled: boolean }) {
   return (
     <>
       <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
-        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="sendEmptyReport" disabled={props.disabled} />
+        <input
+          class="accent-[var(--app-accent-bar)]"
+          type="checkbox"
+          name="sendEmptyReport"
+          disabled={props.disabled}
+        />
         空日报也发送
       </label>
       <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
-        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="enabled" checked disabled={props.disabled} />
+        <input
+          class="accent-[var(--app-accent-bar)]"
+          type="checkbox"
+          name="enabled"
+          checked
+          disabled={props.disabled}
+        />
         启用定时推送
       </label>
     </>

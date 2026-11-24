@@ -41,9 +41,7 @@ export function ScheduleWeekdayFields(props: { scheduleWeekdays?: number[]; disa
   const scheduleWeekdays = props.scheduleWeekdays ?? defaultScheduleWeekdays
   return (
     <fieldset class="md:col-span-2">
-      <legend class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-        推送日期
-      </legend>
+      <legend class="font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">推送日期</legend>
       <input type="hidden" name="scheduleWeekdaysTouched" value="1" disabled={props.disabled} />
       <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {weekdayOptions.map((weekday) => (

@@ -43,7 +43,9 @@ export default jsxRenderer(({ children }) => {
                 </p>
               </div>
               <div>
-                <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">本地采集隐私原则</p>
+                <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">
+                  本地采集隐私原则
+                </p>
                 <p class="mt-2 text-xs leading-6 text-[var(--app-muted)]">
                   本机采集器仅投影 Token、模型、日期与会话汇总快照；不读取、不留存、不上传任何对话正文或代码路径。
                 </p>
@@ -51,7 +53,8 @@ export default jsxRenderer(({ children }) => {
               <div>
                 <p class="font-mono text-xs font-bold uppercase tracking-wider text-[var(--app-text)]">21 源统一计量</p>
                 <p class="mt-2 text-xs leading-6 text-[var(--app-muted)]">
-                  原生覆盖 Claude Code、Codex、Antigravity、OpenCode、Pi、Grok Build、DeepSeek Harness 等 21 个工具来源。
+                  原生覆盖 Claude Code、Codex、Antigravity、OpenCode、Pi、Grok Build、DeepSeek Harness 等 21
+                  个工具来源。
                 </p>
               </div>
               <div>

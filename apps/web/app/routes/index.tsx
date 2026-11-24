@@ -187,7 +187,8 @@ export default createRoute(async (c) => {
 
               <div class="mt-4 border-t border-[var(--app-border)] pt-2.5">
                 <p class="app-fig-caption">
-                  FIG. 01 — 全周期 3.20B Tokens 映射到 400 格单位矩阵（每 1 个方块 ≈ 8.0M）；点击上方维度即时重组动画，悬浮任意分组查看明细。
+                  FIG. 01 — 全周期 3.20B Tokens 映射到 400 格单位矩阵（每 1 个方块 ≈
+                  8.0M）；点击上方维度即时重组动画，悬浮任意分组查看明细。
                 </p>
               </div>
             </div>
@@ -206,11 +207,7 @@ export default createRoute(async (c) => {
                 caption="全周期累计吞吐 · 缓存读 2.94B"
                 annotation="新增输入 192M · 输出生成 64M"
               />
-              <CoverKpi
-                value="$292.72"
-                caption="已记录计费开销（USD）"
-                annotation="动态定价目录 · 未计费源清晰标注"
-              />
+              <CoverKpi value="$292.72" caption="已记录计费开销（USD）" annotation="动态定价目录 · 未计费源清晰标注" />
               <CoverKpi
                 value="95.4%"
                 caption="全局 Prompt Cache 复用命中率"
@@ -279,8 +276,8 @@ export default createRoute(async (c) => {
                       <strong class="text-[var(--app-text)]">Prompt Cache 命中率</strong>，还原真实的上下文开销。
                     </p>
                     <p>
-                      对于 Antigravity、Grok Build、DeepSeek Harness 等不提供官方费用的来源，全站控制台、日报与
-                      README 卡片均显式标注「费用不可用」，绝不虚构估算成本。
+                      对于 Antigravity、Grok Build、DeepSeek Harness 等不提供官方费用的来源，全站控制台、日报与 README
+                      卡片均显式标注「费用不可用」，绝不虚构估算成本。
                     </p>
                   </div>
                 </div>
@@ -301,9 +298,7 @@ export default createRoute(async (c) => {
                     <p class="mt-1 text-xs leading-5 text-[var(--app-muted)]">内置标准化的本地工具来源</p>
                   </div>
                   <div>
-                    <p class="text-3xl font-medium tracking-tight tabular-nums text-[var(--app-text)] sm:text-4xl">
-                      0
-                    </p>
+                    <p class="text-3xl font-medium tracking-tight tabular-nums text-[var(--app-text)] sm:text-4xl">0</p>
                     <p class="mt-1 text-xs leading-5 text-[var(--app-muted)]">上传至云端的对话正文字节</p>
                   </div>
                 </div>
@@ -345,7 +340,9 @@ export default createRoute(async (c) => {
                 </h2>
                 <div class="mt-5 border-t border-[var(--app-border-strong)] pt-5">
                   <p class="text-[15px] leading-7 text-[var(--app-muted)]">
-                    固定 520×220 矢量规格，与全站同一套档案纸细线书册排版：上方采用大字数字 + 细线描述的指标带，下方嵌入热力图式模型单元矩阵，低占比长尾模型自动归并为「其他 N 个模型」，支持浅深双主题与三种版式。
+                    固定 520×220 矢量规格，与全站同一套档案纸细线书册排版：上方采用大字数字 +
+                    细线描述的指标带，下方嵌入热力图式模型单元矩阵，低占比长尾模型自动归并为「其他 N
+                    个模型」，支持浅深双主题与三种版式。
                   </p>
                 </div>
               </div>

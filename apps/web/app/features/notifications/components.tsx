@@ -133,9 +133,7 @@ function SubscriptionItem(props: { subscription: WebhookSubscriptionSummary }) {
         </span>
       </div>
       {props.subscription.needsRepair ? (
-        <p class="app-danger-notice mt-3 border p-3 text-xs font-bold">
-          这个 Webhook 有旧格式字段，请检查后保存一次。
-        </p>
+        <p class="app-danger-notice mt-3 border p-3 text-xs font-bold">这个 Webhook 有旧格式字段，请检查后保存一次。</p>
       ) : null}
       <SubscriptionForm subscription={props.subscription} />
     </article>
@@ -167,11 +165,21 @@ function SubscriptionChecks(props: { subscription: WebhookSubscriptionSummary })
   return (
     <>
       <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)]">
-        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="sendEmptyReport" checked={props.subscription.sendEmptyReport} />
+        <input
+          class="accent-[var(--app-accent-bar)]"
+          type="checkbox"
+          name="sendEmptyReport"
+          checked={props.subscription.sendEmptyReport}
+        />
         空日报也发送
       </label>
       <label class="flex min-h-11 items-center gap-3 border border-[var(--app-border)] bg-[var(--app-input)] px-3 text-sm font-semibold text-[var(--app-text)] md:col-span-2">
-        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="enabled" checked={props.subscription.enabled} />
+        <input
+          class="accent-[var(--app-accent-bar)]"
+          type="checkbox"
+          name="enabled"
+          checked={props.subscription.enabled}
+        />
         启用定时推送
       </label>
     </>

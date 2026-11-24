@@ -129,13 +129,7 @@ function ProfileSettingsFields(props: { profile: ProfileSettings; collectorTimez
     <div class="space-y-4">
       <Label>
         显示名称
-        <Input
-          name="displayName"
-          value={props.profile.displayName}
-          autocomplete="name"
-          required
-          maxLength={80}
-        />
+        <Input name="displayName" value={props.profile.displayName} autocomplete="name" required maxLength={80} />
       </Label>
       <ProfileSlugInput profile={props.profile} />
       <Label>

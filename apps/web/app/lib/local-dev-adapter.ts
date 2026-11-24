@@ -176,9 +176,7 @@ export function createLocalSqliteD1(dbPath: string): D1Database {
       const database = new DatabaseSync(dbPath, { enableForeignKeyConstraints: false, readBigInts: true })
       try {
         database.exec('BEGIN IMMEDIATE;')
-        const results = statements.map((statement) =>
-          runPreparedStatement(database, statement.sql, statement.bindings)
-        )
+        const results = statements.map((statement) => runPreparedStatement(database, statement.sql, statement.bindings))
         database.exec('COMMIT;')
         return results
       } catch (error) {

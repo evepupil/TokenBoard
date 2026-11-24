@@ -30,7 +30,13 @@ export function UsageDetailsFiltersForm(props: { filters: UsageDetailsFilters; d
 
 function SourceFilter(props: { filters: UsageDetailsFilters }) {
   return (
-    <CustomSelect label="来源" name="source" value={props.filters.source} options={sourceOptions} wrapperClass="mt-1.5" />
+    <CustomSelect
+      label="来源"
+      name="source"
+      value={props.filters.source}
+      options={sourceOptions}
+      wrapperClass="mt-1.5"
+    />
   )
 }
 

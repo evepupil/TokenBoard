@@ -17,7 +17,10 @@ type CustomSelectProps = {
   inputAttrs?: Record<string, string>
 }
 
-export function customSelectOptions<T extends string>(options: readonly T[], labels: Record<T, string>): CustomSelectOption[] {
+export function customSelectOptions<T extends string>(
+  options: readonly T[],
+  labels: Record<T, string>
+): CustomSelectOption[] {
   return options.map((value) => ({ value, label: labels[value] }))
 }
 

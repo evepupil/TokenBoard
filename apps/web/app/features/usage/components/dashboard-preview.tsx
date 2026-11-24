@@ -47,9 +47,7 @@ export function DashboardPreview(props: {
         <header class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div class="min-w-0">
             <p class="app-folio-kicker">01 — 个人遥测控制台 · TELEMETRY OVERVIEW</p>
-            <h1 class="app-folio-h2 mt-2">
-              {props.userName ? `${props.userName} 的算力面板` : 'AI token 使用面板'}
-            </h1>
+            <h1 class="app-folio-h2 mt-2">{props.userName ? `${props.userName} 的算力面板` : 'AI token 使用面板'}</h1>
             <p class="mt-2 font-mono text-xs text-[var(--app-muted)]">
               最近同步：{props.summary.lastSyncedAt ?? '尚未同步'} {' · '}
               <a class="app-accent-link font-bold underline underline-offset-4" href="/settings/devices">
@@ -73,7 +71,11 @@ export function DashboardPreview(props: {
         </header>
 
         <UsageMetricGrid>
-          <UsageMetricCard label="今日 tokens" value={formatUsageMetricInteger(props.summary.todayTokens)} tone="lime" />
+          <UsageMetricCard
+            label="今日 tokens"
+            value={formatUsageMetricInteger(props.summary.todayTokens)}
+            tone="lime"
+          />
           <UsageMetricCard
             label="今日不含缓存读"
             value={formatUsageMetricInteger(props.summary.todayTokensWithoutCacheRead)}
@@ -135,7 +137,8 @@ export function DashboardPreview(props: {
                   峰值里程碑：<strong class="text-[var(--app-text)]">{peakDay.usageDate}</strong>
                 </span>
                 <span class="app-accent-text font-bold tabular-nums">
-                  {formatInteger(peakDay.totalTokens)} total · {formatInteger(peakDay.totalTokensWithoutCacheRead)} 不含缓存读
+                  {formatInteger(peakDay.totalTokens)} total · {formatInteger(peakDay.totalTokensWithoutCacheRead)}{' '}
+                  不含缓存读
                 </span>
               </div>
             ) : null}
@@ -204,16 +207,20 @@ export function DashboardPreview(props: {
 
             {props.summary.sourceSplit.length > 0 ? (
               <>
-                <FolioStackedRibbon
-                  segments={ribbonSegments}
-                  ariaLabel="本月各来源不含缓存读 Token 100% 堆叠构成图"
-                />
+                <FolioStackedRibbon segments={ribbonSegments} ariaLabel="本月各来源不含缓存读 Token 100% 堆叠构成图" />
 
                 <div class="border-t border-[var(--app-border-strong)] pt-3">
                   <div class="divide-y divide-[var(--app-border)]">
                     {props.summary.sourceSplit.map((item, idx) => {
                       const pct = formatPercent(item.totalTokensWithoutCacheRead, totalSourceTokensWithoutCacheRead)
-                      const barTone = idx === 0 ? 'app-viz-bar-2' : idx === 1 ? 'app-viz-bar-1' : idx === 2 ? 'app-viz-bar-3' : 'app-viz-bar-4'
+                      const barTone =
+                        idx === 0
+                          ? 'app-viz-bar-2'
+                          : idx === 1
+                            ? 'app-viz-bar-1'
+                            : idx === 2
+                              ? 'app-viz-bar-3'
+                              : 'app-viz-bar-4'
                       return (
                         <div class="min-w-0 py-3">
                           <div class="flex min-w-0 items-center justify-between gap-4">
@@ -225,8 +232,8 @@ export function DashboardPreview(props: {
                             </span>
                           </div>
                           <p class="mt-1 break-words font-mono text-xs text-[var(--app-muted)] [overflow-wrap:anywhere]">
-                            {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 / {formatInteger(item.totalTokens)}{' '}
-                            total / 缓存率 {formatPercentRate(item.cacheReadRate)}
+                            {formatInteger(item.totalTokensWithoutCacheRead)} 不含缓存读 /{' '}
+                            {formatInteger(item.totalTokens)} total / 缓存率 {formatPercentRate(item.cacheReadRate)}
                           </p>
                           <div class="mt-2 h-1.5 overflow-hidden bg-[var(--app-viz-neutral)]">
                             <div
@@ -257,10 +264,7 @@ export function DashboardPreview(props: {
             </div>
             {rotatedColumns.length > 0 ? (
               <>
-                <FolioRotatedColumns
-                  items={rotatedColumns}
-                  ariaLabel="本月主力来源集中度三柱旋转数字图"
-                />
+                <FolioRotatedColumns items={rotatedColumns} ariaLabel="本月主力来源集中度三柱旋转数字图" />
                 <p class="app-fig-caption border-t border-[var(--app-border)] pt-2.5">
                   FIG. 03 — 基于本月不含缓存读 Token 占比实时计算。
                 </p>
@@ -364,10 +368,7 @@ function CollectorTimezoneMismatchWarning(props: { timezone: string; mismatchedU
   if (mismatched.length === 0) return null
 
   return (
-    <p
-      class="app-danger-notice mt-3 border px-3 py-2 text-xs font-medium"
-      data-dashboard-timezone-mismatch="true"
-    >
+    <p class="app-danger-notice mt-3 border px-3 py-2 text-xs font-medium" data-dashboard-timezone-mismatch="true">
       采集端仍在按 {mismatched.join('、')} 写入日期，与上面「今日」使用的 {props.timezone} 不一致，今日数据可能显示为
       0。 请在{' '}
       <a class="app-accent-link font-bold underline underline-offset-4" href="/settings/install">

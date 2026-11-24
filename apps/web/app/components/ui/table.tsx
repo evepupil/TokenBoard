@@ -15,7 +15,12 @@ export function Table(props: TableElementProps) {
 
 export function TableHeader(props: TableElementProps) {
   return (
-    <thead class={cn('border-b border-[var(--app-border-strong)] font-mono text-[11px] uppercase tracking-wider text-[var(--app-muted)]', props.class)}>
+    <thead
+      class={cn(
+        'border-b border-[var(--app-border-strong)] font-mono text-[11px] uppercase tracking-wider text-[var(--app-muted)]',
+        props.class
+      )}
+    >
       {props.children}
     </thead>
   )

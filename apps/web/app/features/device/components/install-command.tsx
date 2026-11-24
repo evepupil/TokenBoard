@@ -69,9 +69,7 @@ function InstallCommandHeader(props: { mode: 'new' | 'reconnect' }) {
   return (
     <header class="border-b border-[var(--app-border-strong)] pb-6">
       <p class="app-folio-kicker">04 — 本地采集器安装 · TOKENBOARD COLLECTOR</p>
-      <h1 class="app-folio-h2 mt-2">
-        {props.mode === 'reconnect' ? '重新连接旧设备' : '连接这台机器'}
-      </h1>
+      <h1 class="app-folio-h2 mt-2">{props.mode === 'reconnect' ? '重新连接旧设备' : '连接这台机器'}</h1>
       <p class="mt-3 max-w-2xl text-sm leading-6 text-[var(--app-muted)]">
         {props.mode === 'reconnect'
           ? '生成一个短期有效的重连提示词，把新的本地安装挂回旧设备记录。'
@@ -83,11 +81,7 @@ function InstallCommandHeader(props: { mode: 'new' | 'reconnect' }) {
 
 function InstallTimezoneForm(props: { timezone: string; targetDeviceId?: string }) {
   return (
-    <form
-      method="post"
-      class="border border-[var(--app-border)] bg-[var(--app-panel)] p-6"
-      data-submit-feedback="true"
-    >
+    <form method="post" class="border border-[var(--app-border)] bg-[var(--app-panel)] p-6" data-submit-feedback="true">
       <label class="flex flex-col gap-2 font-mono text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
         时区
         <input

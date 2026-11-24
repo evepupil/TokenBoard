@@ -20,12 +20,11 @@ export async function getPublicUsageProfile(
   // property checks do not police spreads, so the field would ride along unnoticed until
   // someone serialised the object directly. Strip it at the boundary where "core" ends and
   // "public" begins.
-  const { userId: _userId, modelCount: _modelCount, ...core } = await getPublicUsageProfileCore(
-    db,
-    slug,
-    now,
-    summaryStrict
-  )
+  const {
+    userId: _userId,
+    modelCount: _modelCount,
+    ...core
+  } = await getPublicUsageProfileCore(db, slug, now, summaryStrict)
 
   return core
 }
@@ -38,7 +37,8 @@ export async function getPublicUsageProfileCore(
   includeBreakdown = true,
   includeSourceSplit = includeBreakdown
 ): Promise<
-  PublicUsageProfileCore & Pick<PublicUsageProfile, 'sourceSplit' | 'topModels'> & { userId: string; modelCount: number }
+  PublicUsageProfileCore &
+    Pick<PublicUsageProfile, 'sourceSplit' | 'topModels'> & { userId: string; modelCount: number }
 > {
   const profile = await db
     .prepare(

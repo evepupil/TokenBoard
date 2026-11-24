@@ -58,11 +58,18 @@ function DailyReportShareSettings(props: { enabled: boolean }) {
     >
       <input type="hidden" name="action" value="update-share-settings" />
       <label class="flex min-h-11 items-center gap-3 text-sm font-bold text-[var(--app-text)]">
-        <input class="accent-[var(--app-accent-bar)]" type="checkbox" name="dailyReportShareEnabled" checked={props.enabled} />
+        <input
+          class="accent-[var(--app-accent-bar)]"
+          type="checkbox"
+          name="dailyReportShareEnabled"
+          checked={props.enabled}
+        />
         日报分享
       </label>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <span class="font-mono text-xs text-[var(--app-muted)]">{props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}</span>
+        <span class="font-mono text-xs text-[var(--app-muted)]">
+          {props.enabled ? '未登录访问已允许' : '未登录访问已关闭'}
+        </span>
         <Button type="submit" data-submitting-label="正在保存...">
           保存分享设置
         </Button>

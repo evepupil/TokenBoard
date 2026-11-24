@@ -27,12 +27,7 @@ export function Card(props: CardProps) {
 
 export function CardHeader(props: CardProps) {
   return (
-    <div
-      class={cn(
-        'flex flex-col gap-1.5 border-b border-[var(--app-border)] px-5 py-4 sm:px-6 sm:py-5',
-        props.class
-      )}
-    >
+    <div class={cn('flex flex-col gap-1.5 border-b border-[var(--app-border)] px-5 py-4 sm:px-6 sm:py-5', props.class)}>
       {props.children}
     </div>
   )

@@ -121,7 +121,10 @@ function applyMatrixLayout(root: HTMLElement, layout: FolioMatrixLayout, animate
     const text = document.createElementNS(SVG_NS, 'text')
     text.setAttribute('x', String(group.headingX))
     text.setAttribute('y', String(group.headingY))
-    text.setAttribute('class', animate && !reducedMotion ? 'app-matrix-group-label is-entering' : 'app-matrix-group-label')
+    text.setAttribute(
+      'class',
+      animate && !reducedMotion ? 'app-matrix-group-label is-entering' : 'app-matrix-group-label'
+    )
     text.dataset.matrixGroupId = group.id
     text.textContent = group.headingText
     labelsLayer.appendChild(text)

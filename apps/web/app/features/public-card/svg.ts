@@ -237,7 +237,9 @@ function buildFullWidthHeatmapSection(input: {
   const freshPct = Math.max(0, 100 - pct)
   const heading = language === 'en' ? 'PROMPT CACHE MATRIX' : 'Prompt Cache 复用矩阵'
   const rightStat =
-    language === 'en' ? `${pct}% hit · ${filledCells}/${totalCells} cells` : `命中 ${pct}% · ${filledCells}/${totalCells} 格`
+    language === 'en'
+      ? `${pct}% hit · ${filledCells}/${totalCells} cells`
+      : `命中 ${pct}% · ${filledCells}/${totalCells} 格`
   const hitLabel = language === 'en' ? `Cache Read ${pct}%` : `缓存读取 ${pct}%`
   const freshLabel = language === 'en' ? `Fresh Input ${freshPct}%` : `新增输入 ${freshPct}%`
 
@@ -283,12 +285,7 @@ function buildModelLegend(
  * Compact 3×2 Swiss Big-Number Grid (`compact` layout):
  * Six big-number-first metrics with crisp labels and cobalt sub-captions, separated by pure hairlines.
  */
-function buildCompactBody(
-  input: UsageCardInput,
-  config: PublicCardConfig,
-  palette: Palette,
-  bodyBottom: number
-) {
+function buildCompactBody(input: UsageCardInput, config: PublicCardConfig, palette: Palette, bodyBottom: number) {
   const items = visibleMetrics(config)
   const bodyHeight = bodyBottom - 43
   const rowHeight = Math.round(bodyHeight / 2)
@@ -408,10 +405,7 @@ function buildMastheadMeta(timezoneNote: string, updatedNote: string, isCompact:
   if (!timezoneNote && !updatedNote) return ''
 
   const text = timezoneNote && updatedNote ? `${timezoneNote} · ${updatedNote}` : timezoneNote || updatedNote
-  const attrs = [
-    timezoneNote ? 'data-card-timezone="true"' : '',
-    updatedNote ? 'data-card-updated="true"' : ''
-  ]
+  const attrs = [timezoneNote ? 'data-card-timezone="true"' : '', updatedNote ? 'data-card-updated="true"' : '']
     .filter(Boolean)
     .join(' ')
   const y = isCompact ? '36.5' : '24.5'
@@ -469,7 +463,11 @@ function metricLabel(metric: PublicCardMetric, config: PublicCardConfig, marksUn
 function metricSubCaption(input: UsageCardInput, metric: PublicCardMetric, config: PublicCardConfig) {
   const isEn = config.language === 'en'
   const totalRate = resolvedCacheRate(input)
-  const monthRate = resolvedRateForWindow(input.monthTokens, input.monthTokensWithoutCacheRead, input.monthCacheReadRate)
+  const monthRate = resolvedRateForWindow(
+    input.monthTokens,
+    input.monthTokensWithoutCacheRead,
+    input.monthCacheReadRate
+  )
   const todayRate = resolvedRateForWindow(
     input.todayTokens ?? 0,
     input.todayTokensWithoutCacheRead,
