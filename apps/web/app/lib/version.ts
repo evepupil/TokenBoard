@@ -19,5 +19,5 @@
 // deployment identifier, commit hash or anything environment-specific here. A per-device
 // client version (what a user actually has installed) comes from `device_installations`,
 // not from this constant.
-export const serverVersion = '0.1.0'
+export const serverVersion = '0.1.1'
 export const clientVersion = '0.2.0'
