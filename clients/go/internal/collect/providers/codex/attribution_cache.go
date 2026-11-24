@@ -1235,12 +1235,14 @@ func sameCodexFileIdentity(left, right codexFileStat) bool {
 }
 
 // codexChangeTimeMillis reproduces Node's fs.Stats#ctimeMs. Go exposes the
-// change time only through the platform stat struct, and this package may not
-// add build-tagged files, so the field is located reflectively: Linux and the
-// BSDs name it Ctim, Darwin Ctimespec, and Windows has no equivalent. Without
-// one the mtime is used — that can only weaken change detection on a platform
-// where the identity check is already weaker (os.FileInfo carries no dev/ino
-// there), never invent a false change on Unix.
+// change time only through the platform stat struct. The package does have
+// build-tagged files (the session cloner), but this lookup stays reflective on
+// purpose: a field read is cheap, and splitting this file per platform to name
+// one field would triple a function whose only platform-dependent part is the
+// field name. Linux and the BSDs name it Ctim, Darwin Ctimespec, and Windows
+// has no equivalent. Without one the mtime is used — that can only weaken
+// change detection on a platform where the identity check is already weaker
+// (os.FileInfo carries no dev/ino there), never invent a false change on Unix.
 func codexChangeTimeMillis(info os.FileInfo) float64 {
 	change, ok := codexChangeTime(info)
 	if !ok {

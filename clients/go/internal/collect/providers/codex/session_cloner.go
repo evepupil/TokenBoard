@@ -6,13 +6,11 @@ package codex
 // The TS cloner clones with macOS clonefile(2) through a persistent Ruby
 // helper and falls back to fs.copyFile (COPYFILE_EXCL) elsewhere, reporting
 // CODEX_SESSION_COPY_FALLBACK_MESSAGE once when the clone is unavailable. The
-// Go client has no helper subprocess, and its standard library exposes no
-// copy-on-write clone that builds on every platform (golang.org/x/sys/unix has
-// no Windows build and this package may not add build-tagged files). The
-// default clone step therefore reports the same fallback message and takes the
-// documented bounded standard copy; CloneFile lets a platform-specific
-// implementation (unix.Clonefile, FICLONE) be injected later without changing
-// the contract the scope relies on.
+// Go cloner has no helper subprocess: `defaultCloneSessionFile` is defined per
+// platform (clonefile(2) on darwin, FICLONE on linux, unavailable elsewhere),
+// and a platform without a primitive reports the same fallback message and
+// takes the documented bounded standard copy. CloneFile still lets a caller
+// inject an implementation without changing the contract the scope relies on.
 //
 // Observable contract kept from the TS cloner:
 //   - Copy creates the target exclusively (a second Copy to the same target
@@ -115,13 +113,6 @@ func (c *sessionCloner) Copy(source, target string) error {
 
 func (c *sessionCloner) Close() error {
 	return nil
-}
-
-// defaultCloneSessionFile is the platform clone attempt. Go's portable API has
-// none, so it reports the unavailable code the TS cloner uses for "no
-// clonefile here" and the caller falls back to the standard copy.
-func defaultCloneSessionFile(_, _ string) error {
-	return errCloneFileUnavailable
 }
 
 // isCopyOnWriteCloneUnavailable ports isCopyOnWriteCloneUnavailable: the codes
