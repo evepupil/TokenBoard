@@ -37,6 +37,18 @@ describe('securityHeaders', () => {
     expect(csp).toContain("script-src 'self' 'sha256-")
   })
 
+  // The sign-in form posts to /auth/sign-in, which answers with a 303 to
+  // github.com/login/oauth/authorize. Chrome and Safari apply `form-action` to that
+  // redirect target, so a `'self'`-only policy silently kills sign-in: the browser blocks
+  // the redirect, the request shows as ERR_ABORTED, and the button stays on
+  // "正在跳转 GitHub..." forever. It shipped that way once (2026-11-24) because nothing in
+  // the suite pinned the allowance; this test is that pin.
+  test('allows the GitHub OAuth redirect target in form-action', async () => {
+    const csp = (await securityHeaders())['Content-Security-Policy']
+    const formAction = csp.split('; ').find((directive) => directive.startsWith('form-action '))
+    expect(formAction).toBe("form-action 'self' https://github.com")
+  })
+
   test('sets the remaining hardening headers', async () => {
     const headers = await securityHeaders()
     expect(headers['X-Content-Type-Options']).toBe('nosniff')

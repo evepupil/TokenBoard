@@ -30,6 +30,15 @@ import { themeScriptHash } from './theme-script'
 const cloudflareAnalyticsScriptOrigin = 'https://static.cloudflareinsights.com'
 const cloudflareAnalyticsConnectOrigin = 'https://cloudflareinsights.com'
 
+// The sign-in form posts to this origin's /auth/sign-in, which answers with a 303 to
+// github.com's OAuth authorize endpoint. Chrome and Safari evaluate `form-action` against
+// the redirect target of a form submission, not just the submitted URL, so a
+// `'self'`-only policy blocks the whole sign-in in those browsers — silently, with the
+// request reported as aborted and the button stuck on its submitting label. The origin is
+// pinned exactly; this is the only cross-origin target a form submission in this app can
+// redirect to (sign-out redirects to '/').
+const githubOAuthOrigin = 'https://github.com'
+
 // The script hash is derived from a module-level constant, so it is computed once and
 // reused. Every response goes through here — including API responses, static assets and
 // 304s — and rehashing per request would be pure waste. The promise is cached rather than
@@ -61,7 +70,7 @@ export async function securityHeaders(): Promise<Record<string, string>> {
       "img-src 'self' data:",
       "font-src 'self'",
       `connect-src 'self' ${cloudflareAnalyticsConnectOrigin}`,
-      "form-action 'self'",
+      `form-action 'self' ${githubOAuthOrigin}`,
       "base-uri 'self'",
       "object-src 'none'",
       "frame-ancestors 'none'"
