@@ -6,11 +6,14 @@
 //   behaviour bumps it (patch for fixes, minor for new surface). It starts at 0.1.0
 //   because the web app never had a version before this file existed.
 // - `clientVersion` is the newest **published** TokenBoard client (collector) release —
-//   the build a user can actually download today. It tracks `gh release list`, not a local
-//   or unreleased build: the footer says "客户端 v0.2.0" only while v0.2.0 is the newest
-//   non-draft release. It is bumped when a client release is published, never when the
-//   Worker deploys. (A locally built client that is newer than the published one is a
-//   per-user state; it shows on the devices page, not here.)
+//   the build a user can actually download today. It tracks the release channel's
+//   `gh release list`, not a local or unreleased build: the footer says "客户端 v0.2.0"
+//   only while v0.2.0 is the newest non-draft release. It is bumped when a client release
+//   is published, never when the Worker deploys. Today the published releases live on the
+//   fork channel (`MisonL/TokenBoard`); upstream `evepupil/TokenBoard` has none yet, and
+//   once it publishes its first release this constant moves with that channel instead.
+//   (A locally built client newer than the published one is a per-user state; it shows on
+//   the devices page, not here.)
 //
 // Both are displayed to users and served over HTTP, so treat them as public: never put a
 // deployment identifier, commit hash or anything environment-specific here. A per-device
