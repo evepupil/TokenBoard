@@ -30,6 +30,19 @@ describe('press feedback', () => {
     expect(hover?.[0]).toContain(':not(:active)')
   })
 
+  // The copy button carries its own, bigger press scale (0.9), declared after the first
+  // reduced-motion block — so a `button:active { transform: none }` there does not reach it.
+  // A reduced-motion user would still get an instant 10% snap under the pointer.
+  test('reduced motion disables the copy button press too', () => {
+    const css = styleSource()
+    const base = css.search(/button\[data-copy-target\]:active\s*\{[^}]*scale\(0\.9\)/)
+    expect(base).toBeGreaterThanOrEqual(0)
+    const resets = [...css.matchAll(/button\[data-copy-target\]:active\s*\{([^}]*)\}/g)].filter(
+      (m) => m.index !== undefined && m.index > base && /transform:\s*none/.test(m[1])
+    )
+    expect(resets.length).toBeGreaterThan(0)
+  })
+
   test('buttons do not stack a second press scale on top', async () => {
     const html = await renderToString(<Button>保存</Button>)
     const link = await renderToString(<LinkButton href="/dashboard">返回</LinkButton>)

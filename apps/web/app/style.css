@@ -745,6 +745,13 @@ button[data-copy-target][aria-disabled='true'] {
   .app-metric-card::after {
     display: none;
   }
+
+  /* Declared below the first reduced-motion block, so its `button:active { transform: none }`
+     never reaches this rule. Without the reset a reduced-motion user still gets a 10% snap
+     under the pointer. */
+  button[data-copy-target]:active {
+    transform: none;
+  }
 }
 
 /* The skip link and its `#app-content` target. The link is the first focusable element in
