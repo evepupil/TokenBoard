@@ -2,12 +2,14 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 
 // node --experimental-strip-types cannot import a .ts file whose relative
 // imports are extensionless, and a temp-dir copy loses node_modules (zod)
-// resolution. Materialise the patched schema (extensionful import) inside
+// resolution. Materialise the patched schema (extensionful imports) inside
 // packages/usage-core where zod resolves, import it, then remove the copy.
+// Every relative sibling import is patched, not just `./dates`: a second one
+// (`./timezone`) was added and the blind spot only failed in CI.
 const usageCoreSrc = new URL('../packages/usage-core/src/', import.meta.url)
 const schemaSource = readFileSync(new URL('schema.ts', usageCoreSrc), 'utf8')
 const patchedPath = new URL('.goldens-tmp-schema.ts', usageCoreSrc)
-writeFileSync(patchedPath, schemaSource.replace("from './dates'", "from './dates.ts'"))
+writeFileSync(patchedPath, schemaSource.replace(/from '\.\/([A-Za-z0-9_-]+)'/g, "from './$1.ts'"))
 let snapshotHashPayload, snapshotKey
 try {
   ;({ snapshotHashPayload, snapshotKey } = await import(patchedPath.href))
