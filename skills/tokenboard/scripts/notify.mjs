@@ -34,6 +34,10 @@ import { createResourcePressureProbe } from './resource-pressure.mjs'
 const childOutputMaxBuffer = 64 * 1024 * 1024
 
 export const defaultNotifyCooldownMs = 15 * 60_000
+// Ten minutes: long enough that a failing endpoint or a wedged provider is not re-scanned on
+// every session end, short enough that a transient outage recovers without waiting for the
+// scheduled run. The scheduled sync is never gated by this value.
+export const defaultNotifyFailureBackoffMs = 10 * 60_000
 const minNotifyCooldownMs = 60_000
 // Two hours. A hook-triggered ccusage scan costs 4.6-7.6 GB of resident memory,
 // and at a one-hour cap a busy afternoon still produced five full scans; the
@@ -55,6 +59,7 @@ export function runNotify(options = {}) {
   return coordinatedSync(trigger, {
     stateDir,
     cooldownMs: readNotifyCooldownMs(options.cooldownMs, env, options.configCooldownMs),
+    failureBackoffMs: readNotifyFailureBackoffMs(options.failureBackoffMs, env, options.configFailureBackoffMs),
     scheduleWindow: readNotifyScheduleWindow(options.scheduleTimes, env, options.configScheduleTimes),
     version: options.version || 'unknown',
     now: options.now,
@@ -326,6 +331,7 @@ export async function runNotifyCli(options = {}) {
           stateDir,
           env,
           configCooldownMs: config.notifyCooldownMs,
+          configFailureBackoffMs: config.notifyFailureBackoffMs,
           configScheduleTimes: config.scheduleTimes,
           trailingProcess: Boolean(trailingLockPath) || delayMs > 0,
           transientAttempts,
@@ -495,6 +501,32 @@ export function readNotifyCooldownMs(explicitValue, env = process.env, configVal
   return defaultNotifyCooldownMs
 }
 
+// After a hook run fails for a reason a rerun would repeat, the next trigger waits this long
+// instead of starting another full scan that fails the same way. Same precedence as the
+// cooldown, except that an explicit 0 is legal here: it restores the pre-backoff behaviour.
+export function readNotifyFailureBackoffMs(explicitValue, env = process.env, configValue) {
+  if (explicitValue !== undefined) {
+    if (!Number.isSafeInteger(explicitValue) || explicitValue < 0) {
+      throw new Error('TokenBoard notify failure backoff must be a nonnegative integer')
+    }
+    return explicitValue
+  }
+  const raw = env.TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS ?? configValue
+  if (raw === undefined || raw === null || raw === '') return defaultNotifyFailureBackoffMs
+  const text = String(raw)
+  if (text === '0') return 0
+  if (!/^[1-9][0-9]*$/.test(text)) {
+    throw new Error('TokenBoard notify failure backoff must be an integer number of milliseconds, or 0')
+  }
+  const value = Number(text)
+  if (!Number.isSafeInteger(value) || value < minNotifyCooldownMs || value > maxNotifyCooldownMs) {
+    throw new Error(
+      `TokenBoard notify failure backoff must be 0 or between ${minNotifyCooldownMs} and ${maxNotifyCooldownMs} milliseconds`
+    )
+  }
+  return value
+}
+
 // The set of scheduled sync times the coordinator should avoid. Precedence
 // mirrors the cooldown: explicit (test injection) > env > config.json
 // `scheduleTimes` (what `setup.mjs --schedule-times` writes) > none. An absent
@@ -605,6 +637,10 @@ const expectedDiagnosticPrefixes = [
   /^TokenBoard model pricing[: ]/,
   /^TokenBoard client version (?:not recorded: |\d)/,
   /^TokenBoard (?:self-update|upgrade|binary recovery) skipped: /,
+  // A per-run cloner notice, not a failure: the Codex scope still copies the file it needs.
+  // On 2026-11-24 it took the terminal slot and reported a run that had actually failed with a
+  // TLS handshake timeout as "copy-on-write clone is unavailable".
+  /^Codex copy-on-write clone is unavailable/,
   /^Skipped \d+ /,
   /^Skipping (unavailable )?\S+ source: /
 ]

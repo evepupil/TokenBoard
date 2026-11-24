@@ -9,8 +9,10 @@ import test from 'node:test'
 import {
   claimDispatchLock,
   defaultNotifyCooldownMs,
+  defaultNotifyFailureBackoffMs,
   executeTokenBoardSync,
   readNotifyCooldownMs,
+  readNotifyFailureBackoffMs,
   readNotifyWorkerErrors,
   recordNotifyWorkerError,
   releaseDispatchLock,
@@ -38,6 +40,22 @@ test('notify accepts an explicit bounded cooldown configuration', () => {
 test('notify accepts a cooldown up to two hours', () => {
   assert.equal(readNotifyCooldownMs(undefined, { TOKENBOARD_NOTIFY_COOLDOWN_MS: '7200000' }), 7_200_000)
   assert.equal(readNotifyCooldownMs(undefined, {}, 7_200_000), 7_200_000)
+})
+
+test('notify waits ten minutes after a failed run by default', () => {
+  assert.equal(defaultNotifyFailureBackoffMs, 600_000)
+  assert.equal(readNotifyFailureBackoffMs(undefined, {}), 600_000)
+  assert.equal(readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '120000' }), 120_000)
+  // 0 is the documented off switch and must survive the validator's minimum.
+  assert.equal(readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '0' }), 0)
+  assert.throws(
+    () => readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '30000' }),
+    /must be 0 or between/
+  )
+  assert.throws(
+    () => readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: 'soon' }),
+    /integer number of milliseconds/
+  )
 })
 
 test('notify carries its cooldown configuration into a trailing process', () => {
@@ -1537,6 +1555,32 @@ test('a substantive Skipping warning reaches the terminal failure line instead o
     (error) => {
       assert.match(error.message, /ccusage exited with code 2/)
       assert.match(error.diagnostics ?? '', /Skipping Codex subagent usage correction/)
+      return true
+    }
+  )
+})
+
+// The Codex cloner's fallback notice is per-run and harmless (the scope still copies the
+// file), and it is printed before the upload. On 2026-11-24 it won the terminal slot and a
+// run that had failed on a TLS handshake timeout was reported as "clone unavailable".
+test('the Codex cloner fallback notice is noise, not the terminal failure reason', () => {
+  assert.throws(
+    () =>
+      executeTokenBoardSync('codex', {
+        lockToken: 'a'.repeat(32),
+        spawn: () => ({
+          status: 1,
+          error: undefined,
+          stderr: [
+            'Codex copy-on-write clone is unavailable; using a bounded standard file copy',
+            'Post "https://tokenboard.example": net/http: TLS handshake timeout'
+          ].join('\n')
+        })
+      }),
+    (error) => {
+      assert.match(error.message, /TLS handshake timeout/)
+      assert.doesNotMatch(error.message, /copy-on-write clone is unavailable/)
+      assert.match(error.diagnostics ?? '', /copy-on-write clone is unavailable/)
       return true
     }
   )
