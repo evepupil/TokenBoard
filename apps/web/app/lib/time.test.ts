@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { localClockTime, localIsoDate, timezoneOffsetLabel } from './time'
+import { localClockTime, localIsoDate, localShortDateTime, timezoneOffsetLabel } from './time'
 
 describe('local calendar helpers', () => {
   test('reads the local date across the day boundary', () => {
@@ -10,6 +10,31 @@ describe('local calendar helpers', () => {
 
   test('reads the local clock in 24-hour form', () => {
     expect(localClockTime(new Date('2026-04-30T18:05:00.000Z'), 'Asia/Shanghai')).toBe('02:05')
+  })
+})
+
+describe('localShortDateTime', () => {
+  // The README card's freshness stamp. It has to read in the *owner's* zone, so the
+  // conversions below are the actual contract: a wrong offset would stamp a plausible but
+  // wrong time, which is the failure mode the stamp exists to prevent.
+  test('formats in the supplied zone, not UTC', () => {
+    expect(localShortDateTime('2026-11-24T01:28:28.000Z', 'Asia/Shanghai')).toBe('11-24 09:28')
+    expect(localShortDateTime('2026-11-24T01:28:28.000Z', 'UTC')).toBe('11-24 01:28')
+  })
+
+  test('handles fractional offsets and midnight', () => {
+    expect(localShortDateTime('2026-11-23T18:30:00.000Z', 'Asia/Kolkata')).toBe('11-24 00:00')
+    expect(localShortDateTime('2026-11-23T18:30:00.000Z', 'Pacific/Chatham')).toBe('11-24 08:15')
+  })
+
+  // Unparseable or absent stamps must yield null so the renderer draws nothing, rather
+  // than a fabricated time. `new Date` accepts a lot of near-misses, so this also pins the
+  // exact failure cases the callers rely on.
+  test('returns null for missing or unparseable stamps', () => {
+    expect(localShortDateTime(null, 'Asia/Shanghai')).toBeNull()
+    expect(localShortDateTime(undefined, 'Asia/Shanghai')).toBeNull()
+    expect(localShortDateTime('', 'Asia/Shanghai')).toBeNull()
+    expect(localShortDateTime('not-a-date', 'Asia/Shanghai')).toBeNull()
   })
 })
 
