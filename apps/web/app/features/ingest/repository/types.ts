@@ -31,6 +31,9 @@ export const summaryRefreshCheckChunkSize = Math.floor(
   (d1MaxBoundParameters - d1BoundParameterHeadroom) / summaryRefreshCheckParameterCount
 )
 export const totalRefreshCheckChunkSize = d1MaxBoundParameters - d1BoundParameterHeadroom
+// Four key columns per row plus the one trailing timestamp, kept under the D1 bound-parameter
+// limit. 15 keys -> 60 bindings, leaving headroom for the timestamp and future additions.
+export const totalsDeltaKeyChunkSize = 15
 
 export async function runStatementBatches(db: D1Database, statements: D1PreparedStatement[]) {
   const results: D1Result<unknown>[] = []

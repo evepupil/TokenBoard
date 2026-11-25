@@ -1,20 +1,33 @@
 import {
   summaryRefreshCheckChunkSize,
   totalRefreshCheckChunkSize,
+  totalsDeltaKeyChunkSize,
   uniqueSummaryKeys,
   usageSummaryBackfillStateId,
   type UsageSummaryKey
 } from './types'
 import { billableCostSql } from '../../../lib/usage-cost'
 
-export function prepareSummaryRefresh(db: D1Database, key: UsageSummaryKey) {
+export function prepareSummaryRefresh(db: D1Database, key: UsageSummaryKey, updatedAt?: string) {
+  const stamp = updatedAt ?? sqlNow()
   return db
     .prepare(refreshSummarySql)
-    .bind(key.userId, key.usageDate, key.source, key.model, key.userId, key.usageDate, key.source, key.model)
+    .bind(key.userId, key.usageDate, key.source, key.model, key.userId, key.usageDate, key.source, key.model, stamp)
 }
 
-export function prepareUserTotalFromSummaryRefresh(db: D1Database, userId: string) {
-  return db.prepare(refreshUserTotalsFromSummarySql).bind(userId, userId)
+export function prepareUserTotalFromSummaryRefresh(db: D1Database, userId: string, updatedAt?: string) {
+  return db.prepare(refreshUserTotalsFromSummarySql).bind(userId, updatedAt ?? sqlNow(), userId)
+}
+
+function sqlNow() {
+  return new Date().toISOString()
+}
+
+export function prepareTotalsDeltaStatement(db: D1Database, keys: UsageSummaryKey[], updatedAt: string = sqlNow()) {
+  const rows = keys.map(() => '(?, ?, ?, ?)').join(', ')
+  return db
+    .prepare(totalsDeltaSql(rows))
+    .bind(...keys.flatMap((key) => [key.userId, key.usageDate, key.source, key.model]), updatedAt)
 }
 
 export async function listSummaryKeysNeedingRefresh(db: D1Database, records: UsageSummaryKey[]) {
@@ -202,7 +215,7 @@ const refreshSummarySql = `
     COALESCE(SUM(total_tokens - cache_read_tokens), 0),
     COALESCE(SUM(${billableCostSql()}), 0),
     COALESCE(SUM(session_count), 0),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    ?
   FROM deduped_usage
   WHERE true
   ON CONFLICT(user_id, usage_date, source, model) DO UPDATE SET
@@ -251,7 +264,7 @@ const refreshUserTotalsFromSummarySql = `
     COALESCE(SUM(total_tokens_without_cache_read), 0),
     COALESCE(SUM(${billableCostSql()}), 0),
     COALESCE(SUM(session_count), 0),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    ?
   FROM totals_refresh_allowed
   LEFT JOIN daily_usage_summary ON daily_usage_summary.user_id = ?
   GROUP BY totals_refresh_allowed.allowed
@@ -266,3 +279,139 @@ const refreshUserTotalsFromSummarySql = `
     OR user_usage_totals.cost_usd <> excluded.cost_usd
     OR user_usage_totals.session_count <> excluded.session_count
 `
+
+// Delta maintenance for one batch of keys. Each row computes the new summary value from
+// daily_usage in a scalar subquery and subtracts the *old* summary row inside the same
+// statement, so concurrent ingests cannot both apply the same delta across round-trips.
+// This must run before the summary upsert for the same key, in the same D1 batch transaction.
+function totalsDeltaSql(keyRows: string) {
+  return `
+    WITH newkeys(user_id, usage_date, source, model) AS (VALUES ${keyRows}),
+    totals_refresh_allowed AS (
+      SELECT 1 AS allowed
+      FROM usage_summary_backfill_state
+      WHERE id = '${usageSummaryBackfillStateId}'
+        AND (
+          phase = 'totals'
+          OR completed_at IS NOT NULL
+        )
+    )
+    UPDATE user_usage_totals
+    SET
+      total_tokens = total_tokens + (
+        SELECT COALESCE(SUM(daily_usage.total_tokens), 0)
+        FROM daily_usage, newkeys
+        WHERE daily_usage.user_id = newkeys.user_id
+          AND newkeys.user_id = user_usage_totals.user_id
+          AND daily_usage.usage_date = newkeys.usage_date
+          AND daily_usage.source = newkeys.source
+          AND daily_usage.model = newkeys.model
+          AND (
+            daily_usage.device_id <> 'legacy'
+            OR NOT EXISTS (
+              SELECT 1 FROM daily_usage AS current_usage
+              WHERE current_usage.user_id = daily_usage.user_id
+                AND current_usage.usage_date = daily_usage.usage_date
+                AND current_usage.source = daily_usage.source
+                AND current_usage.model = daily_usage.model
+                AND current_usage.device_id <> 'legacy'
+            )
+          )
+      ) - COALESCE((
+        SELECT daily_usage_summary.total_tokens
+        FROM daily_usage_summary, newkeys
+        WHERE daily_usage_summary.user_id = newkeys.user_id
+          AND daily_usage_summary.user_id = user_usage_totals.user_id
+          AND daily_usage_summary.usage_date = newkeys.usage_date
+          AND daily_usage_summary.source = newkeys.source
+          AND daily_usage_summary.model = newkeys.model
+      ), 0),
+      total_tokens_without_cache_read = total_tokens_without_cache_read + (
+        SELECT COALESCE(SUM(daily_usage.total_tokens - daily_usage.cache_read_tokens), 0)
+        FROM daily_usage, newkeys
+        WHERE daily_usage.user_id = newkeys.user_id
+          AND newkeys.user_id = user_usage_totals.user_id
+          AND daily_usage.usage_date = newkeys.usage_date
+          AND daily_usage.source = newkeys.source
+          AND daily_usage.model = newkeys.model
+          AND (
+            daily_usage.device_id <> 'legacy'
+            OR NOT EXISTS (
+              SELECT 1 FROM daily_usage AS current_usage
+              WHERE current_usage.user_id = daily_usage.user_id
+                AND current_usage.usage_date = daily_usage.usage_date
+                AND current_usage.source = daily_usage.source
+                AND current_usage.model = daily_usage.model
+                AND current_usage.device_id <> 'legacy'
+            )
+          )
+      ) - COALESCE((
+        SELECT daily_usage_summary.total_tokens_without_cache_read
+        FROM daily_usage_summary, newkeys
+        WHERE daily_usage_summary.user_id = newkeys.user_id
+          AND daily_usage_summary.user_id = user_usage_totals.user_id
+          AND daily_usage_summary.usage_date = newkeys.usage_date
+          AND daily_usage_summary.source = newkeys.source
+          AND daily_usage_summary.model = newkeys.model
+      ), 0),
+      cost_usd = cost_usd + (
+        SELECT COALESCE(SUM(${billableCostSql({ sourceColumn: 'daily_usage.source', costColumn: 'daily_usage.cost_usd' })}), 0)
+        FROM daily_usage, newkeys
+        WHERE daily_usage.user_id = newkeys.user_id
+          AND newkeys.user_id = user_usage_totals.user_id
+          AND daily_usage.usage_date = newkeys.usage_date
+          AND daily_usage.source = newkeys.source
+          AND daily_usage.model = newkeys.model
+          AND (
+            daily_usage.device_id <> 'legacy'
+            OR NOT EXISTS (
+              SELECT 1 FROM daily_usage AS current_usage
+              WHERE current_usage.user_id = daily_usage.user_id
+                AND current_usage.usage_date = daily_usage.usage_date
+                AND current_usage.source = daily_usage.source
+                AND current_usage.model = daily_usage.model
+                AND current_usage.device_id <> 'legacy'
+            )
+          )
+      ) - COALESCE((
+        SELECT ${billableCostSql({ sourceColumn: 'daily_usage_summary.source', costColumn: 'daily_usage_summary.cost_usd' })}
+        FROM daily_usage_summary, newkeys
+        WHERE daily_usage_summary.user_id = newkeys.user_id
+          AND daily_usage_summary.user_id = user_usage_totals.user_id
+          AND daily_usage_summary.usage_date = newkeys.usage_date
+          AND daily_usage_summary.source = newkeys.source
+          AND daily_usage_summary.model = newkeys.model
+      ), 0),
+      session_count = session_count + (
+        SELECT COALESCE(SUM(daily_usage.session_count), 0)
+        FROM daily_usage, newkeys
+        WHERE daily_usage.user_id = newkeys.user_id
+          AND newkeys.user_id = user_usage_totals.user_id
+          AND daily_usage.usage_date = newkeys.usage_date
+          AND daily_usage.source = newkeys.source
+          AND daily_usage.model = newkeys.model
+          AND (
+            daily_usage.device_id <> 'legacy'
+            OR NOT EXISTS (
+              SELECT 1 FROM daily_usage AS current_usage
+              WHERE current_usage.user_id = daily_usage.user_id
+                AND current_usage.usage_date = daily_usage.usage_date
+                AND current_usage.source = daily_usage.source
+                AND current_usage.model = daily_usage.model
+                AND current_usage.device_id <> 'legacy'
+            )
+          )
+      ) - COALESCE((
+        SELECT daily_usage_summary.session_count
+        FROM daily_usage_summary, newkeys
+        WHERE daily_usage_summary.user_id = newkeys.user_id
+          AND daily_usage_summary.user_id = user_usage_totals.user_id
+          AND daily_usage_summary.usage_date = newkeys.usage_date
+          AND daily_usage_summary.source = newkeys.source
+          AND daily_usage_summary.model = newkeys.model
+      ), 0),
+      updated_at = ?
+    WHERE user_id IN (SELECT user_id FROM newkeys)
+      AND EXISTS (SELECT 1 FROM totals_refresh_allowed)
+  `
+}
