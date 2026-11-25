@@ -90,6 +90,81 @@ describe('incremental totals maintenance', () => {
     expect(await totals(db, 'dup-user')).toEqual(await fullRecompute(db, 'dup-user'))
   })
 
+  test('applies a correction snapshot as the new value, not a second increment', async () => {
+    const db = await createTotalsDb(tempDirs)
+    await seedProfile(db, 'correction-user')
+    await upsertUsageSnapshots(db, [makeRecord({ userId: 'correction-user', totalTokens: 1000 })])
+
+    await upsertUsageSnapshots(db, [
+      {
+        ...makeRecord({ userId: 'correction-user', totalTokens: 400, inputTokens: 300, outputTokens: 100 }),
+        collectedAt: '2026-11-25T11:00:00.000Z',
+        correction: 'codex-context-pricing' as const
+      }
+    ])
+
+    expect((await totals(db, 'correction-user')).totalTokens).toBe(400)
+    expect(await totals(db, 'correction-user')).toEqual(await fullRecompute(db, 'correction-user'))
+  })
+
+  test('keeps totals steady when a codex session-only report preserves stored tokens', async () => {
+    const db = await createTotalsDb(tempDirs)
+    await seedProfile(db, 'session-user')
+    await upsertUsageSnapshots(db, [makeRecord({ userId: 'session-user', totalTokens: 1000, sessionCount: 2 })])
+    const before = await totals(db, 'session-user')
+
+    await upsertUsageSnapshots(db, [
+      makeRecord({
+        userId: 'session-user',
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+        sessionCount: 5,
+        collectedAt: '2026-11-25T11:00:00.000Z'
+      })
+    ])
+
+    // Token columns stay at the stored values; only the session count follows the report.
+    expect((await totals(db, 'session-user')).totalTokens).toBe(before.totalTokens)
+    expect(await totals(db, 'session-user')).toEqual(await fullRecompute(db, 'session-user'))
+  })
+
+  test('writes a JavaScript ISO timestamp that sorts after historical SQLite stamps', async () => {
+    const db = await createTotalsDb(tempDirs)
+    await seedProfile(db, 'stamp-user')
+    await upsertUsageSnapshots(db, [makeRecord({ userId: 'stamp-user', totalTokens: 1000 })])
+    await db
+      .prepare(`UPDATE daily_usage_summary SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE user_id = ?`)
+      .bind('stamp-user')
+      .run()
+    await db
+      .prepare(`UPDATE user_usage_totals SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE user_id = ?`)
+      .bind('stamp-user')
+      .run()
+
+    await upsertUsageSnapshots(db, [
+      {
+        ...makeRecord({ userId: 'stamp-user', totalTokens: 1300 }),
+        collectedAt: '2026-11-25T11:00:00.000Z'
+      }
+    ])
+
+    const summaryStamp = (await scalar(
+      db,
+      `SELECT updated_at FROM daily_usage_summary WHERE user_id = 'stamp-user'`
+    )) as string
+    const totalsStamp = (await scalar(
+      db,
+      `SELECT updated_at FROM user_usage_totals WHERE user_id = 'stamp-user'`
+    )) as string
+    expect(summaryStamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(totalsStamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(summaryStamp > '2026-11-01T00:00:00.000Z').toBe(true)
+  })
+
   test('keeps existing snapshot hashes reported when totals are in sync', async () => {
     const db = await createTotalsDb(tempDirs)
     await seedProfile(db, 'hash-user')
@@ -192,6 +267,11 @@ async function fullRecompute(db: D1Database, userId: string) {
   }
   await prepareUserTotalFromSummaryRefresh(db, userId).run()
   return totals(db, userId)
+}
+
+async function scalar(db: D1Database, sql: string) {
+  const row = await db.prepare(sql).bind().first<Record<string, unknown>>()
+  return row ? Object.values(row)[0] : undefined
 }
 
 async function totals(db: D1Database, userId: string) {
