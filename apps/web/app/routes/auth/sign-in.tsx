@@ -2,6 +2,7 @@ import { createRoute } from 'honox/factory'
 import { AppNav } from '../../components/app-nav'
 import { GitHubMark } from '../../components/ui/icon'
 import { getOptionalUser } from '../../features/auth/middleware'
+import { forwardGithubSignIn } from '../../features/auth/service'
 
 const githubLoginBenefits = [
   {
@@ -81,15 +82,17 @@ export const GET = createRoute(async (c) => {
                       GitHub 登录失败。请检查 OAuth 配置后重试。
                     </p>
                   ) : null}
-                  <a
-                    class="inline-flex min-h-12 w-full items-center justify-center gap-3 border border-[var(--app-border-strong)] bg-[var(--app-text)] px-5 py-3 text-sm font-bold text-[var(--app-bg)] transition hover:border-[var(--app-accent-bar)] hover:bg-[var(--app-accent-bar)] hover:text-[var(--app-accent-bar-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent-bar)]"
-                    data-link-button="true"
-                    data-login-primary="true"
-                    href="/api/auth/github"
-                  >
-                    <GitHubMark size={18} />
-                    使用 GitHub 继续 →
-                  </a>
+                  <form method="post" action="/auth/sign-in" data-submit-feedback="true">
+                    <button
+                      class="inline-flex min-h-12 w-full items-center justify-center gap-3 border border-[var(--app-border-strong)] bg-[var(--app-text)] px-5 py-3 text-sm font-bold text-[var(--app-bg)] transition hover:border-[var(--app-accent-bar)] hover:bg-[var(--app-accent-bar)] hover:text-[var(--app-accent-bar-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent-bar)]"
+                      type="submit"
+                      data-login-primary="true"
+                      data-submitting-label="正在跳转 GitHub..."
+                    >
+                      <GitHubMark size={18} />
+                      使用 GitHub 继续 →
+                    </button>
+                  </form>
                   <div class="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--app-border)] pt-3 text-xs text-[var(--app-muted)] max-[359px]:flex-col max-[359px]:items-start">
                     <span>首次登录会自动初始化个人资料</span>
                     <a class="app-accent-link font-mono font-bold underline underline-offset-4" href="/leaderboards">
@@ -105,3 +108,5 @@ export const GET = createRoute(async (c) => {
     </main>
   )
 })
+
+export const POST = createRoute((c) => forwardGithubSignIn(c))

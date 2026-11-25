@@ -1,17 +1,24 @@
 import { renderToString } from 'hono/jsx/dom/server'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { getOptionalUser } from '../../features/auth/middleware'
-import { GET } from './sign-in'
+import { forwardGithubSignIn } from '../../features/auth/service'
+import { GET, POST } from './sign-in'
 
 vi.mock('../../features/auth/middleware', () => ({
   getOptionalUser: vi.fn()
 }))
 
+vi.mock('../../features/auth/service', () => ({
+  forwardGithubSignIn: vi.fn()
+}))
+
 const mockedGetOptionalUser = vi.mocked(getOptionalUser)
+const mockedForwardGithubSignIn = vi.mocked(forwardGithubSignIn)
 
 describe('sign-in route', () => {
   beforeEach(() => {
     mockedGetOptionalUser.mockReset()
+    mockedForwardGithubSignIn.mockReset()
   })
 
   test('redirects authenticated users to the dashboard', async () => {
@@ -78,6 +85,33 @@ describe('sign-in route', () => {
     expect(response.status).toBe(200)
     expect(html).toContain('role="alert"')
     expect(html).toContain('GitHub 登录失败。请检查 OAuth 配置后重试。')
+  })
+
+  // The button is a form submit, not a link. Better Auth exposes social sign-in only as
+  // `POST /api/auth/sign-in/social`; there is no `/api/auth/github` route, so an anchor
+  // there lands on the app's 404 JSON page and the OAuth flow never starts. This shipped
+  // broken once (2026-11-25) when a UI refactor replaced the form with a link.
+  test('starts GitHub sign-in through a form POST to this route', async () => {
+    mockedGetOptionalUser.mockResolvedValue(null)
+
+    const response = (await GET[0](signInContext() as never, async () => undefined)) as Response
+    const html = await response.text()
+
+    expect(html).toContain('<form method="post"')
+    expect(html).toContain('data-submit-feedback="true"')
+    expect(html).toContain('data-login-primary="true"')
+    expect(html).not.toContain('href="/api/auth/github"')
+  })
+
+  test('forwards the sign-in form submission to Better Auth', async () => {
+    const redirected = new Response(null, { status: 303, headers: { location: 'https://github.com/' } })
+    mockedForwardGithubSignIn.mockResolvedValue(redirected as never)
+    const context = signInContext()
+
+    const response = await POST[0](context as never, async () => undefined)
+
+    expect(mockedForwardGithubSignIn).toHaveBeenCalledWith(context)
+    expect(response).toBe(redirected)
   })
 })
 
