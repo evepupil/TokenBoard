@@ -10,6 +10,9 @@ import { runStatementBatches, type UsageSummaryKey } from './types'
 export const dailySelfHealStateId = 'daily-self-heal'
 export const dailySelfHealKeyLimit = 200
 export const dailySelfHealUserLimit = 50
+// Each orphan needs a delta and a delete statement, so the page is capped at half the D1
+// batch-statement limit; a page never spans two transactions.
+export const dailySelfHealOrphanLimit = 50
 
 type HealPhase = 'summaries' | 'totals' | 'orphans' | 'done'
 type HealState = {
@@ -100,7 +103,7 @@ export async function runDailyUsageSelfHeal(input: { db: D1Database; now: Date }
     return { summariesHealed: 0, totalsHealed: stale.length, orphansRemoved: 0 }
   }
 
-  const orphans = await listOrphanPage(input.db, state.cursor, dailySelfHealKeyLimit + 1)
+  const orphans = await listOrphanPage(input.db, state.cursor, dailySelfHealOrphanLimit + 1)
   if (orphans.length === 0) {
     await writeState(input.db, {
       phase: 'done',
@@ -112,7 +115,7 @@ export async function runDailyUsageSelfHeal(input: { db: D1Database; now: Date }
     return { summariesHealed: 0, totalsHealed: 0, orphansRemoved: 0 }
   }
 
-  const page = orphans.slice(0, dailySelfHealKeyLimit)
+  const page = orphans.slice(0, dailySelfHealOrphanLimit)
   const statements = page.flatMap((key) => [
     prepareTotalsDeltaStatement(input.db, [key], stamp),
     input.db.prepare(deleteSummarySql).bind(key.userId, key.usageDate, key.source, key.model)
@@ -120,10 +123,10 @@ export async function runDailyUsageSelfHeal(input: { db: D1Database; now: Date }
   await runStatementBatches(input.db, statements)
   const next = page.at(-1) ?? state.cursor
   await writeState(input.db, {
-    phase: orphans.length > dailySelfHealKeyLimit ? 'orphans' : 'done',
+    phase: orphans.length > dailySelfHealOrphanLimit ? 'orphans' : 'done',
     cursor: next,
     cursorUserId: null,
-    completedAt: orphans.length > dailySelfHealKeyLimit ? null : stamp,
+    completedAt: orphans.length > dailySelfHealOrphanLimit ? null : stamp,
     updatedAt: stamp
   })
   return { summariesHealed: 0, totalsHealed: 0, orphansRemoved: page.length }
