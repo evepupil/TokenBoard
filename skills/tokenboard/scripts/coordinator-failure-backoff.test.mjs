@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { coordinatedSync } from './coordinator.mjs'
-import { fakeProcess, memoryRuntime, writeSignal } from './coordinator-test-helpers.mjs'
+import { fakeProcess, memoryRuntime, sameMemoryPath, writeSignal } from './coordinator-test-helpers.mjs'
 
 // A failed hook run used to leave no trace in the coordinator: the cooldown checkpoint is
 // written only on success, so the very next trigger started another full scan of the same
@@ -301,7 +301,9 @@ test('a failed checkpoint write is recorded instead of swallowed', () => {
       process: fakeProcess(731),
       rename: (source, target) => {
         // Only the failure checkpoint's rename fails; the run log and the lock use other paths.
-        if (target === '/state/last-failure.json') {
+        // Compared through the helper: the coordinator builds this path with `node:path`, so on
+        // Windows it arrives with backslashes and a literal === never matches.
+        if (sameMemoryPath(target, '/state/last-failure.json')) {
           const error = new Error(`EIO: ${source}`)
           error.code = 'EIO'
           throw error
