@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500" role="img" aria-label="TokenBoard 系统架构图">
+  <title>TokenBoard 系统架构图</title>
+  <!-- Outer Canvas -->
+  <rect x="0" y="0" width="1200" height="500" fill="#E8E6EF"/>
+
+  <!-- Top Header Bar -->
+  <rect x="0" y="0" width="1200" height="44" fill="#F4F3F8"/>
+  <line x1="0" y1="44" x2="1200" y2="44" stroke="#121116" stroke-width="1.5"/>
+  <text x="24" y="27" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700" letter-spacing="0.4">ARCHITECTURE // 本地只读投影 × 增量协调上传 × CLOUDFLARE WORKERS + D1 × 多端分发</text>
+  <rect x="1008" y="11" width="168" height="22" fill="#121116"/>
+  <text x="1092" y="26" text-anchor="middle" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11" font-weight="700">ZERO PROMPT UPLOAD</text>
+
+  <!-- Subtle Column Guides -->
+  <line x1="300" y1="44" x2="300" y2="444" stroke="#C2BED0" stroke-width="1" stroke-dasharray="4 4"/>
+  <line x1="600" y1="44" x2="600" y2="444" stroke="#C2BED0" stroke-width="1" stroke-dasharray="4 4"/>
+  <line x1="900" y1="44" x2="900" y2="444" stroke="#C2BED0" stroke-width="1" stroke-dasharray="4 4"/>
+
+  <!-- Column Headers -->
+  <g>
+    <rect x="22" y="64" width="256" height="30" fill="#121116"/>
+    <text x="34" y="83" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11.5" font-weight="700">01 / 21 个本地 AI 工具源</text>
+
+    <rect x="322" y="64" width="256" height="30" fill="#121116"/>
+    <text x="334" y="83" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11.5" font-weight="700">02 / 本机采集器 &amp; HOOK 协调</text>
+
+    <rect x="622" y="64" width="256" height="30" fill="#121116"/>
+    <text x="634" y="83" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11.5" font-weight="700">03 / CLOUDFLARE 边缘后端</text>
+
+    <rect x="922" y="64" width="256" height="30" fill="#121116"/>
+    <text x="934" y="83" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11.5" font-weight="700">04 / 多终端展示与分发</text>
+  </g>
+
+  <!-- Connectors Between Columns -->
+  <g stroke="#121116" stroke-width="1.5" fill="none">
+    <line x1="278" y1="150" x2="316" y2="150"/>
+    <polygon points="322,150 313,145.5 313,154.5" fill="#121116" stroke="none"/>
+
+    <line x1="278" y1="214" x2="316" y2="214"/>
+    <polygon points="322,214 313,209.5 313,218.5" fill="#121116" stroke="none"/>
+
+    <line x1="278" y1="330" x2="316" y2="330"/>
+    <polygon points="322,330 313,325.5 313,334.5" fill="#121116" stroke="none"/>
+
+    <line x1="578" y1="170" x2="616" y2="170"/>
+    <polygon points="622,170 613,165.5 613,174.5" fill="#121116" stroke="none"/>
+
+    <line x1="578" y1="280" x2="616" y2="280"/>
+    <polygon points="622,280 613,275.5 613,284.5" fill="#121116" stroke="none"/>
+
+    <line x1="878" y1="150" x2="916" y2="150"/>
+    <polygon points="922,150 913,145.5 913,154.5" fill="#121116" stroke="none"/>
+
+    <line x1="878" y1="254" x2="916" y2="254"/>
+    <polygon points="922,254 913,249.5 913,258.5" fill="#121116" stroke="none"/>
+
+    <line x1="878" y1="355" x2="916" y2="355"/>
+    <polygon points="922,355 913,350.5 913,359.5" fill="#121116" stroke="none"/>
+  </g>
+
+  <!-- COLUMN 1: LOCAL SOURCES -->
+  <g>
+    <rect x="22" y="112" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="22" y="112" width="6" height="74" fill="#7C63FF"/>
+    <text x="38" y="138" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">Claude Code · Codex</text>
+    <text x="38" y="159" fill="#4A4752" font-family="'SFMono-Regular', Menlo, monospace" font-size="11">~/.claude &amp; ~/.codex JSONL</text>
+    <text x="38" y="175" fill="#5A3BE6" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">增量尾读 + 通知 Hook 联动</text>
+
+    <rect x="22" y="202" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="22" y="202" width="6" height="74" fill="#E2492C"/>
+    <text x="38" y="228" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">Antigravity 三端</text>
+    <text x="38" y="249" fill="#4A4752" font-family="'SFMono-Regular', Menlo, monospace" font-size="11">CLI / GUI / IDE 本地历史</text>
+    <text x="38" y="265" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">只投影 token 元数据 · 标注无计费</text>
+
+    <rect x="22" y="292" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="22" y="292" width="6" height="74" fill="#C04BD9"/>
+    <text x="38" y="318" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14" font-weight="700">OpenCode · Pi · Grok · DSH</text>
+    <text x="38" y="339" fill="#4A4752" font-family="'SFMono-Regular', Menlo, monospace" font-size="11">SQLite 只读投影 / JSONL / zstd</text>
+    <text x="38" y="355" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">有界扫描 · 不跟随符号链接</text>
+
+    <rect x="22" y="382" width="256" height="46" fill="#EEECF4" stroke="#B5B1C3" stroke-width="1"/>
+    <text x="36" y="402" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12" font-weight="700">+ 12 个工具族来源</text>
+    <text x="36" y="419" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="9.5">amp · droid · copilot · gemini-cli ...</text>
+  </g>
+
+  <!-- COLUMN 2: LOCAL COLLECTOR & SKILL -->
+  <g>
+    <rect x="322" y="112" width="256" height="114" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="322" y="112" width="6" height="114" fill="#7C63FF"/>
+    <text x="338" y="138" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">本地采集引擎 (Go / Node)</text>
+    <text x="338" y="160" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• Go 单二进制：21 源全进程内采集</text>
+    <text x="338" y="180" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 标准化 UsageSnapshot + 哈希去重</text>
+    <text x="338" y="200" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 拉取 models.dev 动态定价缓存</text>
+    <text x="338" y="218" fill="#5A3BE6" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">30 条/批 · /api/v1/ingest/check</text>
+
+    <rect x="322" y="242" width="256" height="186" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="322" y="242" width="6" height="186" fill="#121116"/>
+    <text x="338" y="268" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">Skill 协调器 &amp; 运行护栏</text>
+    <text x="338" y="292" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• sync.lock + collector-run.lock 互斥</text>
+    <text x="338" y="313" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• notify.signal.d 合并与 15m 冷却</text>
+    <text x="338" y="334" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 主机内存/Swap/PSI/负载压力守卫</text>
+    <text x="338" y="355" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 持久故障 10m 退避 · 凭据剥离</text>
+    <text x="338" y="376" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 设备配对 &amp; device-link 安全重连</text>
+    <text x="338" y="406" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">HTTPS POST /api/v1/ingest (Bearer)</text>
+  </g>
+
+  <!-- COLUMN 3: CLOUDFLARE EDGE BACKEND -->
+  <g>
+    <rect x="622" y="112" width="256" height="104" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="622" y="112" width="6" height="104" fill="#7C63FF"/>
+    <text x="638" y="138" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">HonoX + Cloudflare Workers</text>
+    <text x="638" y="160" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• Better Auth (GitHub OAuth)</text>
+    <text x="638" y="180" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• Zod 严格校验 · 哈希上传 Token</text>
+    <text x="638" y="200" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 严格 CSP (零内联 style) + IP 限流</text>
+
+    <rect x="622" y="232" width="256" height="96" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="622" y="232" width="6" height="96" fill="#E2492C"/>
+    <text x="638" y="258" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">Cloudflare D1 + Drizzle</text>
+    <text x="638" y="280" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• daily_usage / summary 幂等聚合</text>
+    <text x="638" y="300" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• user_usage_totals 缓存 + 跨设备去重</text>
+    <text x="638" y="318" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">适配 Cloudflare 免费额度写优化</text>
+
+    <rect x="622" y="344" width="256" height="84" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="622" y="344" width="6" height="84" fill="#C04BD9"/>
+    <text x="638" y="370" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">Cron Triggers (*/15 * * * *)</text>
+    <text x="638" y="392" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 有界 Summary Backfill &amp; 定价同步</text>
+    <text x="638" y="412" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">• 按用户时区调度每日 Webhook 投递</text>
+  </g>
+
+  <!-- COLUMN 4: SURFACES -->
+  <g>
+    <rect x="922" y="112" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="922" y="112" width="6" height="74" fill="#7C63FF"/>
+    <text x="938" y="138" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">研究型私有看板 &amp; 排行榜</text>
+    <text x="938" y="159" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">400 格交互单位矩阵 · 明细钻取 · CSV</text>
+    <text x="938" y="175" fill="#5A3BE6" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">/dashboard · /leaderboards</text>
+
+    <rect x="922" y="202" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="922" y="202" width="6" height="74" fill="#E2492C"/>
+    <text x="938" y="228" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">GitHub README SVG &amp; JSON</text>
+    <text x="938" y="249" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">大字指标带 + 模型热力矩阵 · 低占比归并</text>
+    <text x="938" y="265" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">/api/public/:slug.{svg,json}</text>
+
+    <rect x="922" y="292" width="256" height="74" fill="#F4F3F8" stroke="#121116" stroke-width="1.2"/>
+    <rect x="922" y="292" width="6" height="74" fill="#C04BD9"/>
+    <text x="938" y="318" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="14.5" font-weight="700">每日 Webhook &amp; 快照分享</text>
+    <text x="938" y="339" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12">企微 · 钉钉 · 飞书 · Lark 加密推送</text>
+    <text x="938" y="355" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10.5">/reports/daily/:id (可撤销分享)</text>
+
+    <rect x="922" y="382" width="256" height="46" fill="#EEECF4" stroke="#B5B1C3" stroke-width="1"/>
+    <text x="936" y="402" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="12" font-weight="700">动态定价公开目录</text>
+    <text x="936" y="419" fill="#625F6B" font-family="'SFMono-Regular', Menlo, monospace" font-size="10">GET /api/public/model-pricing</text>
+  </g>
+
+  <!-- Bottom Privacy Invariant Bar -->
+  <rect x="0" y="446" width="1200" height="54" fill="#F4F3F8"/>
+  <line x1="0" y1="446" x2="1200" y2="446" stroke="#121116" stroke-width="1.5"/>
+  <rect x="22" y="462" width="136" height="22" fill="#121116"/>
+  <text x="90" y="477" text-anchor="middle" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="10.5" font-weight="700">PRIVACY INVARIANT</text>
+  <text x="174" y="477" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', Arial, sans-serif" font-size="13" font-weight="500">全程不读取、不留存、不上传任何对话原文、Prompt / Completion、本地代码路径或明文上传 Token；费用不可用来源全站显式标注。</text>
+
+  <!-- Outer Frame -->
+  <rect x="0.75" y="0.75" width="1198.5" height="498.5" fill="none" stroke="#121116" stroke-width="1.5"/>
+</svg>

@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="TokenBoard — 多用户 AI 算力用量统计与研究型遥测平台">
+  <title>TokenBoard — 多用户 AI 算力用量统计与研究型遥测平台</title>
+  <!-- Archival Paper Outer Canvas -->
+  <rect x="0" y="0" width="1200" height="360" fill="#E8E6EF"/>
+
+  <!-- Top Editorial Masthead Strip -->
+  <rect x="0" y="0" width="1200" height="42" fill="#F4F3F8"/>
+  <line x1="0" y1="42" x2="1200" y2="42" stroke="#121116" stroke-width="1.5"/>
+
+  <!-- Mini Monogram in Top Bar -->
+  <g transform="translate(24 10)">
+    <rect width="22" height="22" fill="#121116"/>
+    <rect x="3.5" y="4" width="11" height="3.2" fill="#F4F3F8"/>
+    <rect x="15.3" y="4" width="3.2" height="3.2" fill="#6C50F6"/>
+    <rect x="7.8" y="7.2" width="3.2" height="10.8" fill="#F4F3F8"/>
+    <rect x="12.6" y="10" width="2.5" height="2.5" fill="#7C63FF"/>
+    <rect x="15.9" y="10" width="2.5" height="2.5" fill="#E2492C"/>
+    <rect x="12.6" y="13.3" width="2.5" height="2.5" fill="#C04BD9"/>
+    <rect x="16.1" y="13.5" width="2" height="2" fill="none" stroke="#F4F3F8" stroke-opacity="0.45" stroke-width="0.6"/>
+  </g>
+  <text x="58" y="25.5" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12" font-weight="700" letter-spacing="0.6">TOKENBOARD // AI TOKEN TELEMETRY &amp; USAGE OBSERVATORY</text>
+  <rect x="984" y="10" width="192" height="22" fill="#121116"/>
+  <text x="1080" y="25" text-anchor="middle" fill="#F4F3F8" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11" font-weight="700" letter-spacing="0.5">TOKENBOARD.CHAOSYN.COM</text>
+
+  <!-- Main Spread Split Rule -->
+  <line x1="736" y1="42" x2="736" y2="300" stroke="#121116" stroke-width="1.5"/>
+
+  <!-- Left Panel: Monogram + Wordmark + Editorial Copy + Signature Heatmap Ribbon -->
+  <g transform="translate(40 68)">
+    <rect width="62" height="62" fill="#121116"/>
+    <rect x="0.75" y="0.75" width="60.5" height="60.5" fill="none" stroke="#2D2B38" stroke-width="1.5"/>
+    <rect x="10.5" y="11.5" width="31" height="8.7" fill="#F4F3F8"/>
+    <rect x="43.5" y="11.5" width="8" height="8.7" fill="#6C50F6"/>
+    <rect x="22" y="20.2" width="8.7" height="30.3" fill="#F4F3F8"/>
+    <rect x="35.8" y="28" width="6.8" height="6.8" fill="#7C63FF"/>
+    <rect x="44.6" y="28" width="6.8" height="6.8" fill="#E2492C"/>
+    <rect x="35.8" y="36.8" width="6.8" height="6.8" fill="#C04BD9"/>
+    <rect x="45.1" y="37.3" width="5.8" height="5.8" fill="none" stroke="#F4F3F8" stroke-opacity="0.45" stroke-width="1"/>
+    <line x1="35.8" y1="50" x2="51.4" y2="50" stroke="#F4F3F8" stroke-opacity="0.35" stroke-width="1.2"/>
+  </g>
+
+  <text x="120" y="111" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="46" font-weight="800" letter-spacing="-1.4">TokenBoard</text>
+  <text x="122" y="133" fill="#5A3BE6" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="11.5" font-weight="700" letter-spacing="0.4">LOCAL-FIRST COLLECTOR · CLOUDFLARE EDGE TELEMETRY</text>
+
+  <text x="40" y="176" fill="#121116" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="22" font-weight="700" letter-spacing="-0.3">多用户 AI 算力用量统计与研究型遥测平台</text>
+  <text x="40" y="204" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="14" font-weight="500">统一计量 21 个本地 AI 工具的 Token 吞吐、Prompt Cache 命中率与计费开销，零对话正文上传。</text>
+
+  <!-- Signature Unit Matrix Heatmap Ribbon (38 cols x 3 rows) -->
+  <g transform="translate(40 226)">
+    <text x="0" y="9" fill="#625F6B" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="9.5" font-weight="700" letter-spacing="0.4">MODEL &amp; CACHE UNIT MATRIX SPECIMEN</text>
+    <text x="652" y="9" text-anchor="end" fill="#625F6B" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="9.5">21 SOURCES · ZERO PROMPT UPLOAD</text>
+    <!-- Row 0 (y=16), Row 1 (y=30), Row 2 (y=44), size=11, pitch=17.2 -->
+    <!-- Cobalt (#7C63FF): cols 0..13 (42 cells) -->
+    <g fill="#7C63FF">
+      <rect x="0" y="16" width="11" height="11"/><rect x="0" y="30" width="11" height="11"/><rect x="0" y="44" width="11" height="11"/>
+      <rect x="17.2" y="16" width="11" height="11"/><rect x="17.2" y="30" width="11" height="11"/><rect x="17.2" y="44" width="11" height="11"/>
+      <rect x="34.4" y="16" width="11" height="11"/><rect x="34.4" y="30" width="11" height="11"/><rect x="34.4" y="44" width="11" height="11"/>
+      <rect x="51.6" y="16" width="11" height="11"/><rect x="51.6" y="30" width="11" height="11"/><rect x="51.6" y="44" width="11" height="11"/>
+      <rect x="68.8" y="16" width="11" height="11"/><rect x="68.8" y="30" width="11" height="11"/><rect x="68.8" y="44" width="11" height="11"/>
+      <rect x="86" y="16" width="11" height="11"/><rect x="86" y="30" width="11" height="11"/><rect x="86" y="44" width="11" height="11"/>
+      <rect x="103.2" y="16" width="11" height="11"/><rect x="103.2" y="30" width="11" height="11"/><rect x="103.2" y="44" width="11" height="11"/>
+      <rect x="120.4" y="16" width="11" height="11"/><rect x="120.4" y="30" width="11" height="11"/><rect x="120.4" y="44" width="11" height="11"/>
+      <rect x="137.6" y="16" width="11" height="11"/><rect x="137.6" y="30" width="11" height="11"/><rect x="137.6" y="44" width="11" height="11"/>
+      <rect x="154.8" y="16" width="11" height="11"/><rect x="154.8" y="30" width="11" height="11"/><rect x="154.8" y="44" width="11" height="11"/>
+      <rect x="172" y="16" width="11" height="11"/><rect x="172" y="30" width="11" height="11"/><rect x="172" y="44" width="11" height="11"/>
+      <rect x="189.2" y="16" width="11" height="11"/><rect x="189.2" y="30" width="11" height="11"/><rect x="189.2" y="44" width="11" height="11"/>
+      <rect x="206.4" y="16" width="11" height="11"/><rect x="206.4" y="30" width="11" height="11"/><rect x="206.4" y="44" width="11" height="11"/>
+      <rect x="223.6" y="16" width="11" height="11"/><rect x="223.6" y="30" width="11" height="11"/>
+    </g>
+    <!-- Vermilion (#E2492C): cols 13..23 -->
+    <g fill="#E2492C">
+      <rect x="223.6" y="44" width="11" height="11"/>
+      <rect x="240.8" y="16" width="11" height="11"/><rect x="240.8" y="30" width="11" height="11"/><rect x="240.8" y="44" width="11" height="11"/>
+      <rect x="258" y="16" width="11" height="11"/><rect x="258" y="30" width="11" height="11"/><rect x="258" y="44" width="11" height="11"/>
+      <rect x="275.2" y="16" width="11" height="11"/><rect x="275.2" y="30" width="11" height="11"/><rect x="275.2" y="44" width="11" height="11"/>
+      <rect x="292.4" y="16" width="11" height="11"/><rect x="292.4" y="30" width="11" height="11"/><rect x="292.4" y="44" width="11" height="11"/>
+      <rect x="309.6" y="16" width="11" height="11"/><rect x="309.6" y="30" width="11" height="11"/><rect x="309.6" y="44" width="11" height="11"/>
+      <rect x="326.8" y="16" width="11" height="11"/><rect x="326.8" y="30" width="11" height="11"/><rect x="326.8" y="44" width="11" height="11"/>
+      <rect x="344" y="16" width="11" height="11"/><rect x="344" y="30" width="11" height="11"/><rect x="344" y="44" width="11" height="11"/>
+      <rect x="361.2" y="16" width="11" height="11"/><rect x="361.2" y="30" width="11" height="11"/><rect x="361.2" y="44" width="11" height="11"/>
+      <rect x="378.4" y="16" width="11" height="11"/><rect x="378.4" y="30" width="11" height="11"/><rect x="378.4" y="44" width="11" height="11"/>
+      <rect x="395.6" y="16" width="11" height="11"/>
+    </g>
+    <!-- Orchid (#C04BD9): cols 23..30 -->
+    <g fill="#C04BD9">
+      <rect x="395.6" y="30" width="11" height="11"/><rect x="395.6" y="44" width="11" height="11"/>
+      <rect x="412.8" y="16" width="11" height="11"/><rect x="412.8" y="30" width="11" height="11"/><rect x="412.8" y="44" width="11" height="11"/>
+      <rect x="430" y="16" width="11" height="11"/><rect x="430" y="30" width="11" height="11"/><rect x="430" y="44" width="11" height="11"/>
+      <rect x="447.2" y="16" width="11" height="11"/><rect x="447.2" y="30" width="11" height="11"/><rect x="447.2" y="44" width="11" height="11"/>
+      <rect x="464.4" y="16" width="11" height="11"/><rect x="464.4" y="30" width="11" height="11"/><rect x="464.4" y="44" width="11" height="11"/>
+      <rect x="481.6" y="16" width="11" height="11"/><rect x="481.6" y="30" width="11" height="11"/><rect x="481.6" y="44" width="11" height="11"/>
+      <rect x="498.8" y="16" width="11" height="11"/><rect x="498.8" y="30" width="11" height="11"/><rect x="498.8" y="44" width="11" height="11"/>
+      <rect x="516" y="16" width="11" height="11"/><rect x="516" y="30" width="11" height="11"/><rect x="516" y="44" width="11" height="11"/>
+    </g>
+    <!-- Carbon Ink (#18171D): cols 31..33 -->
+    <g fill="#18171D">
+      <rect x="533.2" y="16" width="11" height="11"/><rect x="533.2" y="30" width="11" height="11"/><rect x="533.2" y="44" width="11" height="11"/>
+      <rect x="550.4" y="16" width="11" height="11"/><rect x="550.4" y="30" width="11" height="11"/><rect x="550.4" y="44" width="11" height="11"/>
+      <rect x="567.6" y="16" width="11" height="11"/>
+    </g>
+    <!-- Other Models (#B5B1C3): cols 33..37 -->
+    <g fill="#B5B1C3">
+      <rect x="567.6" y="30" width="11" height="11"/><rect x="567.6" y="44" width="11" height="11"/>
+      <rect x="584.8" y="16" width="11" height="11"/><rect x="584.8" y="30" width="11" height="11"/><rect x="584.8" y="44" width="11" height="11"/>
+      <rect x="602" y="16" width="11" height="11"/><rect x="602" y="30" width="11" height="11"/><rect x="602" y="44" width="11" height="11"/>
+      <rect x="619.2" y="16" width="11" height="11"/><rect x="619.2" y="30" width="11" height="11"/><rect x="619.2" y="44" width="11" height="11"/>
+      <rect x="636.4" y="16" width="11" height="11"/><rect x="636.4" y="30" width="11" height="11"/><rect x="636.4" y="44" width="11" height="11"/>
+    </g>
+  </g>
+
+  <!-- Right Panel: 3 Swiss Spec Rows -->
+  <!-- Row 1 -->
+  <rect x="764" y="64" width="11" height="11" fill="#7C63FF"/>
+  <text x="785" y="74" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">01 / 21 AI TOOL SOURCES</text>
+  <text x="764" y="101" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="13.5" font-weight="500">Claude Code · Codex · Antigravity · OpenCode · Pi + 12 工具族</text>
+  <line x1="736" y1="128" x2="1199" y2="128" stroke="#C2BED0" stroke-width="1"/>
+
+  <!-- Row 2 -->
+  <rect x="764" y="150" width="11" height="11" fill="#E2492C"/>
+  <text x="785" y="160" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">02 / STRICT PRIVACY BOUNDARY</text>
+  <text x="764" y="187" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="13.5" font-weight="500">仅本地投影 Token / 模型 / 日期快照，绝不上传原文与路径</text>
+  <line x1="736" y1="214" x2="1199" y2="214" stroke="#C2BED0" stroke-width="1"/>
+
+  <!-- Row 3 -->
+  <rect x="764" y="236" width="11" height="11" fill="#C04BD9"/>
+  <text x="785" y="246" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">03 / GO NATIVE + CLOUDFLARE D1</text>
+  <text x="764" y="273" fill="#4A4752" font-family="'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif" font-size="13.5" font-weight="500">Go 进程内原生采集（无 ccusage 依赖）· Workers 边缘托管</text>
+
+  <!-- Bottom Protocol Bar -->
+  <rect x="0" y="300" width="1200" height="60" fill="#F4F3F8"/>
+  <line x1="0" y1="300" x2="1200" y2="300" stroke="#121116" stroke-width="1.5"/>
+
+  <rect x="24" y="317" width="12" height="26" fill="#7C63FF"/>
+  <text x="46" y="335" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">400-CELL UNIT MATRIX</text>
+  <line x1="300" y1="300" x2="300" y2="360" stroke="#C2BED0" stroke-width="1"/>
+
+  <rect x="324" y="317" width="12" height="26" fill="#E2492C"/>
+  <text x="346" y="335" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">CACHE HIT &amp; COST AUDIT</text>
+  <line x1="600" y1="300" x2="600" y2="360" stroke="#C2BED0" stroke-width="1"/>
+
+  <rect x="624" y="317" width="12" height="26" fill="#C04BD9"/>
+  <text x="646" y="335" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">520×220 README SVG</text>
+  <line x1="900" y1="300" x2="900" y2="360" stroke="#C2BED0" stroke-width="1"/>
+
+  <rect x="924" y="317" width="12" height="26" fill="#121116"/>
+  <text x="946" y="335" fill="#121116" font-family="'SFMono-Regular', Menlo, Monaco, Consolas, monospace" font-size="12.5" font-weight="700">DAILY WEBHOOK REPORTS</text>
+
+  <!-- Crisp Outer Border -->
+  <rect x="0.75" y="0.75" width="1198.5" height="358.5" fill="none" stroke="#121116" stroke-width="1.5"/>
+</svg>
