@@ -1,6 +1,5 @@
 import {
   listSummaryKeysNeedingRefresh,
-  listUserIdsNeedingTotalRefresh,
   prepareSummaryRefresh,
   prepareTotalsDeltaStatement,
   prepareUserTotalFromSummaryRefresh
@@ -39,15 +38,7 @@ async function upsertUsageSnapshotBatch(db: D1Database, records: IngestRecord[],
   const unchangedRecords = records.filter((_, index) => !statementChanged(results[index]))
   const missingOrStaleSummaryKeys = await listSummaryKeysNeedingRefresh(db, unchangedRecords)
   const summaryKeysToRefresh = uniqueSummaryKeys([...changedRecords, ...missingOrStaleSummaryKeys])
-  const knownSummaryRefreshUserIds = new Set(uniqueUserIds(summaryKeysToRefresh))
-  const totalUserIdsToRefresh = [
-    ...knownSummaryRefreshUserIds,
-    ...(await listUserIdsNeedingTotalRefresh(
-      db,
-      uniqueUserIds(unchangedRecords).filter((userId) => !knownSummaryRefreshUserIds.has(userId))
-    ))
-  ]
-  if (summaryKeysToRefresh.length === 0 && totalUserIdsToRefresh.length === 0) {
+  if (summaryKeysToRefresh.length === 0) {
     return changedRecords.length
   }
 
@@ -61,9 +52,6 @@ async function upsertUsageSnapshotBatch(db: D1Database, records: IngestRecord[],
     ...summaryKeysToRefresh.map((key) => prepareSummaryRefresh(db, key, stamp)),
     ...uniqueUserIds(summaryKeysToRefresh)
       .filter((userId) => !existingTotalsUserIds.has(userId))
-      .map((userId) => prepareUserTotalFromSummaryRefresh(db, userId, stamp)),
-    ...totalUserIdsToRefresh
-      .filter((userId) => !knownSummaryRefreshUserIds.has(userId))
       .map((userId) => prepareUserTotalFromSummaryRefresh(db, userId, stamp))
   ]
   await runStatementBatches(db, refreshStatements)

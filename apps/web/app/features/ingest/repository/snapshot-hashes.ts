@@ -1,4 +1,4 @@
-import { listSummaryKeysNeedingRefresh, listUserIdsNeedingTotalRefresh } from './refresh'
+import { listSummaryKeysNeedingRefresh } from './refresh'
 import { snapshotHashQueryChunkSize, summaryKeyId, type ExistingSnapshotHash, type UsageSummaryKey } from './types'
 import type { UsageSnapshotKey } from '@tokenboard/usage-core'
 
@@ -55,7 +55,5 @@ async function filterExistingHashesWithCurrentCaches(db: D1Database, userId: str
     }))
   )
   const staleKeyIds = new Set(staleSummaryKeys.map(summaryKeyId))
-  const staleTotalUserIds = new Set(await listUserIdsNeedingTotalRefresh(db, [userId]))
-  if (staleTotalUserIds.has(userId)) return []
   return rows.filter((row) => !staleKeyIds.has(summaryKeyId({ userId, ...row } as UsageSummaryKey)))
 }
