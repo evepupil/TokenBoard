@@ -3,9 +3,6 @@
 package codex
 
 import (
-	"errors"
-	"os"
-
 	"golang.org/x/sys/unix"
 )
 
@@ -15,19 +12,13 @@ import (
 // that touches a changed date re-copies its scoped files; before this the Go client reported
 // the clone as unavailable and paid for a full duplicate every time.
 //
-// clonefile creates the target exclusively (EEXIST when it exists), which is the `Copy`
-// contract. A cross-device target fails with EXDEV and the cloner's existing per-file fallback
-// handles it; the other "cannot clone here" codes latch the cloner into the copy path.
+// clonefile creates the target exclusively — "The named file dst must not exist for the call to
+// be successful" (clonefile(2)), EEXIST when it does — and the clone is a single APFS metadata
+// transaction, so a failed call never leaves a partial target behind. There is therefore no
+// destination to clean up: removing the target on a non-EEXIST error would destroy a pre-existing
+// frozen copy. Verified on this machine: with the source gone and the target present, clonefile
+// returns ENOENT and the target is untouched. The caller's standard copy opens with O_EXCL, so a
+// genuinely absent target is the only state it expects, and clonefile failure leaves it that way.
 func defaultCloneSessionFile(source, target string) error {
-	err := unix.Clonefile(source, target, 0)
-	if err == nil {
-		return nil
-	}
-	// clonefile can leave a partial target behind on failure, and the fallback copy opens the
-	// target with O_EXCL. Only a path this call created is removed — an EEXIST target belongs
-	// to someone else.
-	if !errors.Is(err, unix.EEXIST) {
-		_ = os.Remove(target)
-	}
-	return err
+	return unix.Clonefile(source, target, 0)
 }

@@ -54,14 +54,47 @@ func TestDefaultCloneSessionFileDarwinClonesExclusively(t *testing.T) {
 	}
 }
 
+// A vanished source with a pre-existing target must leave the target alone. clonefile(2)
+// answers ENOENT without touching the destination (verified on this machine), and ENOENT is
+// not EEXIST — a cleanup keyed on "not EEXIST" therefore deleted a file this call never
+// created. The scope runs under the sync lock, but the frozen target belongs to an earlier
+// successful copy and a spurious delete would drop collected usage for the day.
+func TestDefaultCloneSessionFileDarwinKeepsExistingTargetWhenSourceVanishes(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "gone.jsonl")
+	target := filepath.Join(root, "target.jsonl")
+	if err := os.WriteFile(target, []byte("already collected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := defaultCloneSessionFile(source, target)
+	if !errors.Is(err, unix.ENOENT) {
+		t.Fatalf("clone with a missing source = %v, want ENOENT", err)
+	}
+	content, readErr := os.ReadFile(target)
+	if readErr != nil || string(content) != "already collected\n" {
+		t.Fatalf("the pre-existing target was disturbed: %q, %v", content, readErr)
+	}
+}
+
 // The cloner must not report the fallback when the platform primitive works; this is the
-// assertion that the darwin implementation actually got wired in.
+// assertion that the darwin implementation actually got wired in. A volume that cannot clone
+// at all is an environment fact, not a defect, and skips this test like it skips the one above.
 func TestCodexSessionClonerUsesTheDarwinDefaultWithoutAFallback(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "source.jsonl")
 	target := filepath.Join(root, "target.jsonl")
 	if err := os.WriteFile(source, []byte("first\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if err := defaultCloneSessionFile(source, filepath.Join(root, "probe-target.jsonl")); err != nil {
+		if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.EXDEV) {
+			t.Skipf("this volume cannot clone: %v", err)
+		}
+		if errors.Is(err, errCloneFileUnavailable) {
+			t.Skipf("this build reports clone as unavailable: %v", err)
+		}
+		t.Fatalf("clone probe = %v", err)
 	}
 
 	fallbacks := 0
