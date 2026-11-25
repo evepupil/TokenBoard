@@ -174,8 +174,10 @@ probe fails open, so an unreadable metric never stops a sync. Thresholds are tun
 A hook run that fails for a reason a rerun would repeat (an unreachable endpoint a TLS
 handshake cannot complete, a broken provider) writes a private failure checkpoint, and further
 hook triggers wait ten minutes instead of rescanning and failing again. The signal stays queued
-and the scheduled sync is never gated; a transient failure (a busy collector lock) keeps its own
-one-minute retry and does not engage this backoff. Tune it with
+and the scheduled sync is never gated; a run whose failures were all transient (a busy collector
+lock) writes no checkpoint and keeps its own one-minute retry, while a mixed run — one source down
+and one transiently busy — waits out the backoff. A checkpoint that cannot be written is recorded
+in the run log as `failureCheckpointError`. Tune the wait with
 `TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS` or the `notifyFailureBackoffMs` config key (60000-7200000,
 or 0 to disable).
 

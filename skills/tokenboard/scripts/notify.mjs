@@ -503,7 +503,9 @@ export function readNotifyCooldownMs(explicitValue, env = process.env, configVal
 
 // After a hook run fails for a reason a rerun would repeat, the next trigger waits this long
 // instead of starting another full scan that fails the same way. Same precedence as the
-// cooldown, except that an explicit 0 is legal here: it restores the pre-backoff behaviour.
+// cooldown, including its empty-string rule: a shell that exports `TOKENBOARD_NOTIFY_...=` with
+// nothing after it means "unset", not "zero", or it would silently override a config file that
+// disabled the backoff. An explicit 0 is legal here: it restores the pre-backoff behaviour.
 export function readNotifyFailureBackoffMs(explicitValue, env = process.env, configValue) {
   if (explicitValue !== undefined) {
     if (!Number.isSafeInteger(explicitValue) || explicitValue < 0) {
@@ -511,7 +513,8 @@ export function readNotifyFailureBackoffMs(explicitValue, env = process.env, con
     }
     return explicitValue
   }
-  const raw = env.TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS ?? configValue
+  const configuredValue = env.TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS
+  const raw = configuredValue !== undefined && configuredValue !== '' ? configuredValue : configValue
   if (raw === undefined || raw === null || raw === '') return defaultNotifyFailureBackoffMs
   const text = String(raw)
   if (text === '0') return 0

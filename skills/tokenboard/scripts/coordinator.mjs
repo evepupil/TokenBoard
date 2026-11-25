@@ -180,9 +180,11 @@ function runCoordinator(trigger, runtime, result) {
     // The cooldown above is scoped to the last *success*. Without this check a failing upload
     // endpoint means every session-end trigger starts a fresh scan that fails again — on
     // 2026-11-24 one such run spent 26.4 minutes scanning and then timed out at upload, with
-    // the cursor unacknowledged, and the next trigger would have repeated it. Transient
-    // failures (a busy collector lock) never reach this checkpoint, so the retry machinery
-    // they schedule is not starved. The source is queued like every other skip.
+    // the cursor unacknowledged, and the next trigger would have repeated it. The source is
+    // queued like every other skip. A run whose failures were all transient (a busy collector
+    // lock) never writes this checkpoint, so the retry chain those schedule keeps its own
+    // cadence; a mixed run does write it, and the transient retry waits with everything else
+    // rather than re-scanning a source that just failed permanently.
     const failureRemainingMs = failureBackoffRemainingMs(runtime)
     if (failureRemainingMs > 0) {
       keepCooldownTrigger(trigger, runtime, pendingSources, syncSources)
@@ -640,7 +642,12 @@ function failureBackoffRemainingMs(runtime) {
   if (runtime.exists(successPath)) {
     try {
       const succeededAt = new Date(readTimestamp(successPath, runtime)).getTime()
-      if (!Number.isNaN(succeededAt) && succeededAt >= failedAt) return 0
+      // A success record in the future is unusable, exactly as in `cooldownRemainingMs`:
+      // after a clock rollback it would outrank every failure written at the old reading
+      // and keep cancelling the backoff, re-running the failing scan on every trigger —
+      // the loop this checkpoint exists to stop. Treating it as absent costs one scan.
+      const successElapsed = runtime.now() - succeededAt
+      if (!Number.isNaN(succeededAt) && successElapsed >= 0 && succeededAt >= failedAt) return 0
     } catch {
       // An unreadable success checkpoint is already fatal in `cooldownRemainingMs`; there is
       // no need to fail twice.
@@ -745,13 +752,20 @@ function writeSuccessfulSyncCheckpoint(result, runtime) {
 // provider). Transient failures are excluded: they already have their own retry chain, and
 // recording them would make that chain's next attempt skip itself. Writing this checkpoint is
 // best-effort — losing it costs one extra scan, while failing the run over it would replace
-// the real failure with a bookkeeping error.
+// the real failure with a bookkeeping error. The lost write is still reported: a checkpoint
+// that silently never lands turns the backoff off invisibly, which is how the unwritten
+// success checkpoint hid a stuck cooldown before that error was made fatal.
 function writeFailureCheckpoint(result, runtime) {
   if (!(runtime.failureBackoffMs > 0)) return
-  // Only a run that actually failed counts: a skip is not a failure, and a transient failure
-  // has its own retry chain — recording it would make that chain's next attempt skip itself.
+  // Only a run that actually failed counts: a skip is not a failure.
   if (deriveStatus(result) !== 'error') return
-  if ((result.transientSources || []).length > 0) return
+  // A failure is worth backing off from only if some failed cycle was *not* transient. When
+  // every failure was a busy collector lock, the retry chain owns the schedule and recording
+  // the failure would make that chain's next attempt skip itself. A mixed run — one source
+  // permanently down, one transiently busy — does record: without it the permanently failing
+  // source re-scans through every minute of the retry chain.
+  const hasPermanentFailure = (result.cycles || []).some((cycle) => cycle?.error && cycle.transient !== true)
+  if (!hasPermanentFailure) return
   const path = join(runtime.stateDir, 'last-failure.json')
   const value = new Date(runtime.now()).toISOString()
   try {
@@ -772,8 +786,9 @@ function writeFailureCheckpoint(result, runtime) {
       }
       throw error
     }
-  } catch {
-    // Best effort, see above.
+  } catch (error) {
+    // Best effort, see above — but recorded, so a checkpoint that never lands is not invisible.
+    result.failureCheckpointError = errorMessage(error)
   }
 }
 
@@ -816,6 +831,7 @@ function writeRunLogEntry(result, startedAtMs, runtime) {
       ...(result.failureBackoffRemainingMs != null
         ? { failureBackoffRemainingMs: result.failureBackoffRemainingMs }
         : {}),
+      ...(result.failureCheckpointError ? { failureCheckpointError: result.failureCheckpointError } : {}),
       ...(result.trailingScheduled != null ? { trailingScheduled: result.trailingScheduled } : {}),
       ...(result.trailingDelayMs != null ? { trailingDelayMs: result.trailingDelayMs } : {}),
       ...(result.trailingSources ? { trailingSources: result.trailingSources } : {}),

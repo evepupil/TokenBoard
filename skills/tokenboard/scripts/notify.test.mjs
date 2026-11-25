@@ -58,6 +58,15 @@ test('notify waits ten minutes after a failed run by default', () => {
   )
 })
 
+// A shell that exports `TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS=` with nothing after it means
+// "unset", the same rule the neighbouring cooldown follows. Reading it as a value would
+// silently override a config file that disabled the backoff with `0`.
+test('an empty backoff environment variable falls through to the config file', () => {
+  assert.equal(readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '' }, 0), 0)
+  assert.equal(readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '' }, 120_000), 120_000)
+  assert.equal(readNotifyFailureBackoffMs(undefined, { TOKENBOARD_NOTIFY_FAILURE_BACKOFF_MS: '' }), 600_000)
+})
+
 test('notify carries its cooldown configuration into a trailing process', () => {
   const files = memoryFileMap([['/state/last-success.json', '2026-05-22T10:00:00.000Z']])
   const spawned = []
