@@ -8,15 +8,15 @@
   },
   "packageManager": "pnpm@10.21.0",
   "scripts": {
-    "dev": "npm --workspace=@tokenboard/web run dev",
-    "build": "npm --workspace=@tokenboard/web run build",
-    "preview": "npm --workspace=@tokenboard/web run preview",
-    "deploy": "npm --workspace=@tokenboard/web run deploy",
+    "dev": "pnpm --filter @tokenboard/web dev",
+    "build": "pnpm --filter @tokenboard/web build",
+    "preview": "pnpm --filter @tokenboard/web preview",
+    "deploy": "pnpm --filter @tokenboard/web run deploy",
     "format": "prettier --write '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
     "format:check": "prettier --check '**/*.{js,mjs,mts,ts,tsx,json,jsonc}'",
-    "lint": "npm --workspace=@tokenboard/web run typecheck",
-    "typecheck": "npm --workspaces --if-present run typecheck",
-    "test": "npm --workspaces --if-present run test"
+    "lint": "pnpm --filter @tokenboard/web run typecheck",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 test"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
