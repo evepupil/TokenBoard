@@ -216,6 +216,15 @@ const refreshSummarySql = `
     cost_usd = excluded.cost_usd,
     session_count = excluded.session_count,
     updated_at = excluded.updated_at
+  WHERE daily_usage_summary.timezone <> excluded.timezone
+    OR daily_usage_summary.input_tokens <> excluded.input_tokens
+    OR daily_usage_summary.output_tokens <> excluded.output_tokens
+    OR daily_usage_summary.cache_creation_tokens <> excluded.cache_creation_tokens
+    OR daily_usage_summary.cache_read_tokens <> excluded.cache_read_tokens
+    OR daily_usage_summary.total_tokens <> excluded.total_tokens
+    OR daily_usage_summary.total_tokens_without_cache_read <> excluded.total_tokens_without_cache_read
+    OR daily_usage_summary.cost_usd <> excluded.cost_usd
+    OR daily_usage_summary.session_count <> excluded.session_count
 `
 
 const refreshUserTotalsFromSummarySql = `
@@ -252,4 +261,8 @@ const refreshUserTotalsFromSummarySql = `
     cost_usd = excluded.cost_usd,
     session_count = excluded.session_count,
     updated_at = excluded.updated_at
+  WHERE user_usage_totals.total_tokens <> excluded.total_tokens
+    OR user_usage_totals.total_tokens_without_cache_read <> excluded.total_tokens_without_cache_read
+    OR user_usage_totals.cost_usd <> excluded.cost_usd
+    OR user_usage_totals.session_count <> excluded.session_count
 `
