@@ -92,6 +92,32 @@ func TestAcknowledgeUploadCursorsClearsPendingClaudeEntriesInHookMode(t *testing
 	}
 }
 
+// A row the server blocked reached nobody: the cursor entry must stay pending
+// so a later run retries it, exactly like a row that never left the machine.
+func TestAcknowledgeUploadCursorsKeepsBlockedRowsPending(t *testing.T) {
+	stateDir := t.TempDir()
+	snapshot := hookAckFixture(t, stateDir)
+	env := func(key string) string {
+		if key == "TOKENBOARD_HOOK_MODE" {
+			return "1"
+		}
+		return ""
+	}
+	if err := acknowledgeUploadCursors(stateDir, collection{
+		collectedSources: []contract.Source{contract.SourceClaudeCode},
+		snapshots:        []contract.Snapshot{snapshot},
+	}, upload.Result{Blocked: []upload.BlockedSnapshot{{
+		Snapshot: snapshot,
+		Code:     "usage-date-too-far-future",
+	}}}, Options{}, "", env); err != nil {
+		t.Fatal(err)
+	}
+	entry := readHookAckCursor(t, stateDir)
+	if entry.PendingUpload == nil || !*entry.PendingUpload {
+		t.Errorf("a blocked row must not be acknowledged: %+v", entry)
+	}
+}
+
 // The endpoint origin scopes the *Antigravity* cursors only. The session-file
 // sources write the unscoped `claude-code-cursor.json`, and reading a missing
 // cursor is not an error — so passing the origin here silently acknowledged

@@ -122,7 +122,7 @@
 - **status.mjs**：同时读 v1/v2，输出按来源列出暂停状态（脱敏不变）。
 - **调用点**：Go `cli.go:294-302` 的 `RecordFailure` 传入当前 source；暂停检查（`cli.go:274`）只查当前 source 的条目；TS 对齐（`cli.ts:188-203, 233`）。
 - **签名与调用方全量清单**（改契约必须同步改这些，漏一处就是编译错或静默写平铺老形状）：Go `upload.IsPaused(stateDir, now)`（`upload.go:602`）、`upload.RecordFailure(stateDir, err, now)`（`:619`）、`upload.RecordSuccess(stateDir)`（`:635`，当前是直接 `os.Remove` 整个文件——分键后必须改为只删该来源条目）；TS `loadUploadBackoff` / `isUploadPaused` / `recordUploadFailure` / `recordUploadSuccess`（`upload-backoff.ts:22,40,48,66`）；skill `status.mjs:306-323` 的 `readUploadBackoff`（只读，需同时认 v1/v2）。
-- **配置作用域**：来源键用 usage source 字符串；`all` 运行时逐来源判断。
+- **配置作用域**：键取**本次运行的 source**（`options.Source`；调度运行的 `all` 就是 `all`，hook 运行是它自己的那个来源）。一次上传是一个混合批次，失败无法归属到批内的某一来源，所以不按批内来源拆分；hook 运行逐来源隔离，调度 `all` 运行仍是一把键——与今天的行为一致，只是多了按运行来源隔离的能力。
 - **跨端形状测试**：Go 与 TS 各加一条「v2 文件可被对端解析」的固定 JSON 用例（放各自测试里，JSON 常量相同），防漂移。
 
 ### 2.5 验收

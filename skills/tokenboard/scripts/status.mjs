@@ -236,7 +236,7 @@ export function readClientVersionNotice(stateDir) {
 // The rule lives in ./redact-path.mjs because notify.mjs records the same class
 // of diagnostic into its worker error log, which also gets pasted into issues.
 // Re-exported here so existing importers keep working.
-export { redactPath }
+export { readUploadBackoff, redactPath }
 
 function hookState(value) {
   return value === 'installed' || value === 'installed-local-history' || value === 'not-installed' || value === 'error'
@@ -306,16 +306,40 @@ export function readClientStatus({ configDir, platform = process.platform, spawn
 // or null when it cannot run or prints nothing usable. The two binaries print
 // differently ("tokenboard (go) 1.2.3" and "ccusage 20.0.33"), so the last
 // whitespace-separated field is the version in both.
+// readUploadBackoff reports the active upload pause. v2 files key the state by
+// source; the legacy flat fields still cover every source until their pause
+// expires (they are never attributed to one source). Only active pauses are
+// reported, and the top-level `pausedUntil` is the latest one across sources so
+// a reader that only knows the old shape still sees a meaningful date.
 function readUploadBackoff(stateDir) {
   try {
     const parsed = JSON.parse(readFileSync(join(stateDir, 'upload-backoff.json'), 'utf8'))
     if (typeof parsed !== 'object' || parsed === null) return null
-    const pausedUntil = typeof parsed.pausedUntil === 'string' ? parsed.pausedUntil : null
-    if (!pausedUntil) return null
-    if (!(Date.parse(pausedUntil) > Date.now())) return null
+    const now = Date.now()
+    const active = (value) => typeof value === 'string' && Date.parse(value) > now
+    const sources = {}
+    if (typeof parsed.sources === 'object' && parsed.sources !== null) {
+      for (const [source, entry] of Object.entries(parsed.sources)) {
+        if (typeof entry !== 'object' || entry === null) continue
+        if (!active(entry.pausedUntil)) continue
+        sources[source] = {
+          pausedUntil: entry.pausedUntil,
+          consecutiveFailures: Number.isSafeInteger(entry.consecutiveFailures) ? entry.consecutiveFailures : null
+        }
+      }
+    }
+    const legacyActive = active(parsed.pausedUntil)
+    const sourceEntries = Object.values(sources)
+    if (!legacyActive && sourceEntries.length === 0) return null
+    // Order by the parsed instant: Go writes RFC3339Nano and would not sort
+    // against the collector's toISOString spelling as strings.
+    const pausedUntil = [legacyActive ? parsed.pausedUntil : null, ...sourceEntries.map((entry) => entry.pausedUntil)]
+      .filter(Boolean)
+      .reduce((latest, candidate) => (latest === null || Date.parse(candidate) > Date.parse(latest) ? candidate : latest), null)
     return {
       pausedUntil,
-      consecutiveFailures: Number.isSafeInteger(parsed.consecutiveFailures) ? parsed.consecutiveFailures : null
+      consecutiveFailures: Number.isSafeInteger(parsed.consecutiveFailures) ? parsed.consecutiveFailures : null,
+      ...(sourceEntries.length > 0 ? { sources } : {})
     }
   } catch {
     return null

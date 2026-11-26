@@ -75,6 +75,10 @@ type Result struct {
 	// the collection: a row dropped here never reached the server, and
 	// acknowledging it would clear its pending entry so it is never retried.
 	Delivered []contract.Snapshot
+	// Blocked names rows the server rejected with a validation detail. They are
+	// neither delivered nor permanently rejected: they stay pending, out of the
+	// acknowledgement set, until a later run gets them through.
+	Blocked []BlockedSnapshot
 }
 
 // RejectedSnapshot is one snapshot the upload path dropped because the server
@@ -82,6 +86,116 @@ type Result struct {
 type RejectedSnapshot struct {
 	Snapshot contract.Snapshot
 	Issue    string
+}
+
+// BlockedSnapshot is one snapshot the server rejected with a named validation
+// detail (the `error.details` entries of a 400). Unlike Rejected it is not
+// permanently unuploadable — the condition may clear (a clock catching up, a
+// server-side fix) — so it stays pending in the cursor and must never be
+// acknowledged.
+type BlockedSnapshot struct {
+	Snapshot contract.Snapshot
+	Code     string
+}
+
+// maxIsolationRounds bounds how many times one batch is shrunk and re-sent
+// after the server named rejected rows. A server that keeps naming rows must
+// not be able to loop the client; after two rounds the batch fails as before.
+const maxIsolationRounds = 2
+
+// maxValidationBodyBytes mirrors the TS reader's cap. A 400 body larger than
+// this is not one of ours and is treated as having no details.
+const maxValidationBodyBytes = 64 * 1024
+
+// validationIssue is one parsed `error.details` entry.
+type validationIssue struct {
+	Index int
+	Code  string
+}
+
+// ValidationError is a 400 whose body named the rows it rejected. Callers use
+// it to isolate those rows and deliver the rest of the batch.
+type ValidationError struct {
+	// Kind is "Upload" or "Snapshot check", keeping the pre-existing failure
+	// wording: callers and tests classify failures by these strings.
+	Kind      string
+	Status    int
+	Snapshots []validationIssue
+	Keys      []validationIssue
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("%s failed with status %d", e.Kind, e.Status)
+}
+
+// parseValidationDetailPath accepts exactly the paths the server's whitelist
+// emits: `<root>.<n>` or `<root>.<n>.<field>`, root being snapshots or keys.
+func parseValidationDetailPath(path string) (root string, index int, ok bool) {
+	parts := strings.Split(path, ".")
+	if len(parts) != 2 && len(parts) != 3 {
+		return "", 0, false
+	}
+	if parts[0] != "snapshots" && parts[0] != "keys" {
+		return "", 0, false
+	}
+	parsed, err := strconv.Atoi(parts[1])
+	if err != nil || parsed < 0 {
+		return "", 0, false
+	}
+	return parts[0], parsed, true
+}
+
+// parseValidationError reads a bounded 400 body and turns it into a
+// ValidationError, or returns the plain status error when the body carries no
+// usable details (an old server, a proxy, a non-JSON body).
+func parseValidationError(response *http.Response, kind string) error {
+	plain := fmt.Errorf("%s failed with status %d", kind, response.StatusCode)
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxValidationBodyBytes+1))
+	if err != nil || len(body) > maxValidationBodyBytes {
+		return plain
+	}
+	var payload struct {
+		Error struct {
+			Details []struct {
+				Path string `json:"path"`
+				Code string `json:"code"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return plain
+	}
+	validation := &ValidationError{Kind: kind, Status: response.StatusCode}
+	seenSnapshots := map[int]bool{}
+	seenKeys := map[int]bool{}
+	for _, detail := range payload.Error.Details {
+		root, index, ok := parseValidationDetailPath(detail.Path)
+		if !ok {
+			continue
+		}
+		code := detail.Code
+		if code == "" {
+			code = "invalid-value"
+		}
+		switch root {
+		case "snapshots":
+			if seenSnapshots[index] {
+				continue
+			}
+			seenSnapshots[index] = true
+			validation.Snapshots = append(validation.Snapshots, validationIssue{Index: index, Code: code})
+		case "keys":
+			if seenKeys[index] {
+				continue
+			}
+			seenKeys[index] = true
+			validation.Keys = append(validation.Keys, validationIssue{Index: index, Code: code})
+		}
+	}
+	if len(validation.Snapshots) == 0 && len(validation.Keys) == 0 {
+		return plain
+	}
+	return validation
 }
 
 // SnapshotHash is the dedup identity the server stores and compares:
@@ -138,17 +252,15 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 	var result Result
 	result.RejectedUsageDates = rejected
 	result.Rejected = rejectedDetails
-	// Every uploadable row is either posted or already present server-side (the
-	// /check skip path compares identical snapshot hashes), so all of them are
-	// safe to acknowledge. Rows dropped above are not.
-	result.Delivered = uploadable
 	if len(uploadable) == 0 {
 		// Nothing left to send. The empty batch is not posted: unlike the no-snapshots
 		// case above, this run did have rows and the server has nothing to say about
 		// them that the count does not already.
+		result.Delivered = uploadable
 		return result, nil
 	}
 
+	blocked := make(map[contract.Snapshot]bool)
 	uploaded := false
 	for _, batch := range chunk(uploadable, snapshotBatchSize) {
 		checked, err := filterChanged(ctx, config, batch, client)
@@ -159,11 +271,15 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 		if len(checked.snapshots) == 0 {
 			continue
 		}
-		upserted, err := uploadBatch(ctx, config, checked.snapshots, client)
+		upserted, blockedRows, err := uploadBatchWithIsolation(ctx, config, checked.snapshots, client)
 		if err != nil {
 			return Result{}, err
 		}
 		result.Upserted += upserted
+		for _, row := range blockedRows {
+			blocked[row.Snapshot] = true
+			result.Blocked = append(result.Blocked, row)
+		}
 		uploaded = true
 	}
 	if !uploaded {
@@ -173,7 +289,56 @@ func UploadSnapshots(ctx context.Context, config Config, snapshots []contract.Sn
 		}
 		result.Upserted += upserted
 	}
+	// Every uploadable row reached the server or already sat there — except the
+	// ones the server named as rejected, which stay pending and unacknowledged.
+	result.Delivered = make([]contract.Snapshot, 0, len(uploadable))
+	for _, snapshot := range uploadable {
+		if blocked[snapshot] {
+			continue
+		}
+		result.Delivered = append(result.Delivered, snapshot)
+	}
 	return result, nil
+}
+
+// uploadBatchWithIsolation posts one batch, and on a 400 that names rows,
+// removes exactly those rows and re-sends the rest — at most
+// maxIsolationRounds times. Rows the server named come back as Blocked; any
+// other error (no usable details, a non-validation failure, rounds exhausted)
+// fails the upload as it would have before.
+func uploadBatchWithIsolation(ctx context.Context, config Config, snapshots []contract.Snapshot, client *http.Client) (int, []BlockedSnapshot, error) {
+	send := snapshots
+	blocked := make([]BlockedSnapshot, 0)
+	for round := 0; ; round++ {
+		upserted, err := uploadBatch(ctx, config, send, client)
+		if err == nil {
+			return upserted, blocked, nil
+		}
+		var validation *ValidationError
+		if !errors.As(err, &validation) || round == maxIsolationRounds {
+			return 0, blocked, err
+		}
+		removed := map[int]bool{}
+		for _, issue := range validation.Snapshots {
+			if issue.Index < len(send) {
+				removed[issue.Index] = true
+				blocked = append(blocked, BlockedSnapshot{Snapshot: send[issue.Index], Code: issue.Code})
+			}
+		}
+		if len(removed) == 0 {
+			return 0, blocked, err
+		}
+		kept := make([]contract.Snapshot, 0, len(send)-len(removed))
+		for index, snapshot := range send {
+			if !removed[index] {
+				kept = append(kept, snapshot)
+			}
+		}
+		if len(kept) == 0 {
+			return 0, blocked, nil
+		}
+		send = kept
+	}
 }
 
 type filterResult struct {
@@ -182,6 +347,10 @@ type filterResult struct {
 }
 
 func filterChanged(ctx context.Context, config Config, snapshots []contract.Snapshot, client *http.Client) (filterResult, error) {
+	// The check keys are parallel to the snapshots; when the server rejects a
+	// key, only that key is dropped and re-checked around. A dropped key simply
+	// does not appear in `existing`, so its snapshot stays in the changed set —
+	// the ingest isolation decides whether it is blocked.
 	keys := make([]map[string]string, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		keys = append(keys, map[string]string{
@@ -190,12 +359,40 @@ func filterChanged(ctx context.Context, config Config, snapshots []contract.Snap
 			"model":     snapshot.Model,
 		})
 	}
-	existing, unsupported, err := fetchExistingHashes(ctx, config, keys, client)
-	if err != nil {
-		return filterResult{}, err
-	}
-	if unsupported {
-		return filterResult{snapshots: snapshots}, nil
+	var existing []ExistingSnapshotHash
+	for round := 0; ; round++ {
+		var unsupported bool
+		var err error
+		existing, unsupported, err = fetchExistingHashes(ctx, config, keys, client)
+		if err == nil {
+			if unsupported {
+				return filterResult{snapshots: snapshots}, nil
+			}
+			break
+		}
+		var validation *ValidationError
+		if !errors.As(err, &validation) || round == maxIsolationRounds {
+			return filterResult{}, err
+		}
+		removed := map[int]bool{}
+		for _, issue := range validation.Keys {
+			if issue.Index < len(keys) {
+				removed[issue.Index] = true
+			}
+		}
+		if len(removed) == 0 {
+			return filterResult{}, err
+		}
+		kept := make([]map[string]string, 0, len(keys)-len(removed))
+		for index, key := range keys {
+			if !removed[index] {
+				kept = append(kept, key)
+			}
+		}
+		keys = kept
+		if len(keys) == 0 {
+			return filterResult{snapshots: snapshots}, nil
+		}
 	}
 	hashes := make(map[string]string, len(existing))
 	for _, row := range existing {
@@ -283,6 +480,9 @@ func parseCheckResponse(response *http.Response) (parsedResponse, error) {
 	if response.StatusCode == 404 || response.StatusCode == 405 || response.StatusCode == 501 {
 		return parsedResponse{unsupported: true}, nil
 	}
+	if response.StatusCode == http.StatusBadRequest {
+		return parsedResponse{}, parseValidationError(response, "Snapshot check")
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return parsedResponse{}, fmt.Errorf("Snapshot check failed with status %d", response.StatusCode)
 	}
@@ -315,6 +515,11 @@ func parseCheckResponse(response *http.Response) (parsedResponse, error) {
 }
 
 func parseUploadResponse(response *http.Response) (parsedResponse, error) {
+	if response.StatusCode == http.StatusBadRequest {
+		// A validation 400 names the rejected rows; the caller isolates them and
+		// re-sends the rest instead of failing the whole batch.
+		return parsedResponse{}, parseValidationError(response, "Upload")
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return parsedResponse{}, fmt.Errorf("Upload failed with status %d", response.StatusCode)
 	}
@@ -556,91 +761,216 @@ const (
 	backoffFileName             = "upload-backoff.json"
 )
 
-// BackoffState is the persisted consecutive-failure record.
+// BackoffState is one source's persisted consecutive-failure record (a v2
+// `sources.<name>` entry).
 type BackoffState struct {
 	ConsecutiveFailures int    `json:"consecutiveFailures"`
 	LastErrorSummary    string `json:"lastErrorSummary"`
 	PausedUntil         string `json:"pausedUntil,omitempty"`
 }
 
-// LoadBackoff reads the pause state; any read or parse problem yields nil
-// (absent state). Mirrors the TS loader's type gate: consecutiveFailures
-// must be a number and lastErrorSummary a string, or the record is treated
-// as absent rather than half-read.
-func LoadBackoff(stateDir string) *BackoffState {
+// backoffFile is the on-disk shape: versioned per-source entries, plus the
+// pre-v2 flat fields that are still honoured until their pause expires.
+type backoffFile struct {
+	Version int                     `json:"version,omitempty"`
+	Sources map[string]backoffEntry `json:"sources,omitempty"`
+	// Legacy v1 fields. They carry no source attribution, so they are never
+	// migrated onto a source: they keep pausing every source until their
+	// pause expires, then a later write drops them.
+	LegacyFailures *float64 `json:"consecutiveFailures,omitempty"`
+	LegacySummary  *string  `json:"lastErrorSummary,omitempty"`
+	LegacyPaused   string   `json:"pausedUntil,omitempty"`
+}
+
+// backoffEntry mirrors BackoffState with the loader's float gate so a
+// hostile `consecutiveFailures` cannot wrap negative through int conversion.
+type backoffEntry struct {
+	ConsecutiveFailures *float64 `json:"consecutiveFailures"`
+	LastErrorSummary    *string  `json:"lastErrorSummary"`
+	PausedUntil         string   `json:"pausedUntil"`
+}
+
+func (entry backoffEntry) state() BackoffState {
+	state := BackoffState{LastErrorSummary: "", PausedUntil: entry.PausedUntil}
+	if entry.LastErrorSummary != nil {
+		state.LastErrorSummary = *entry.LastErrorSummary
+	}
+	if entry.ConsecutiveFailures != nil {
+		state.ConsecutiveFailures = clampFailureCount(*entry.ConsecutiveFailures)
+	}
+	return state
+}
+
+// clampFailureCount guards the int conversion: int(1e30) is
+// implementation-defined and wraps to a negative on amd64/arm64, which would
+// silently stop the pause from ever engaging again. Every value at or past
+// the threshold pauses alike, so the exact count beyond it does not matter.
+func clampFailureCount(failures float64) int {
+	if failures < 0 || math.IsNaN(failures) {
+		return 0
+	}
+	if failures > uploadFailurePauseThreshold {
+		return uploadFailurePauseThreshold
+	}
+	return int(failures)
+}
+
+// loadBackoffFile reads the state file; any read or parse problem yields nil
+// (absent state), matching the TS loader's fail-open behaviour.
+func loadBackoffFile(stateDir string) *backoffFile {
 	data, err := os.ReadFile(filepath.Join(stateDir, backoffFileName))
 	if err != nil {
 		return nil
 	}
-	var raw struct {
-		ConsecutiveFailures *float64 `json:"consecutiveFailures"`
-		LastErrorSummary    *string  `json:"lastErrorSummary"`
-		PausedUntil         string   `json:"pausedUntil"`
-	}
-	if json.Unmarshal(data, &raw) != nil || raw.ConsecutiveFailures == nil || raw.LastErrorSummary == nil {
+	var file backoffFile
+	if json.Unmarshal(data, &file) != nil {
 		return nil
 	}
-	// Clamp before converting: int(1e30) is implementation-defined and wraps to
-	// a negative on amd64/arm64, which would silently stop the pause from ever
-	// engaging again. Every value at or past the threshold pauses alike, so the
-	// exact count beyond it does not matter.
-	failures := *raw.ConsecutiveFailures
-	if failures < 0 || math.IsNaN(failures) {
-		failures = 0
-	}
-	if failures > uploadFailurePauseThreshold {
-		failures = uploadFailurePauseThreshold
-	}
-	return &BackoffState{
-		ConsecutiveFailures: int(failures),
-		LastErrorSummary:    *raw.LastErrorSummary,
-		PausedUntil:         raw.PausedUntil,
-	}
+	return &file
 }
 
-// IsPaused reports an active pause window, or nil when uploads may proceed.
-func IsPaused(stateDir string, now time.Time) (string, bool) {
-	state := LoadBackoff(stateDir)
-	if state == nil || state.PausedUntil == "" {
+func parsePausedUntil(value string, now time.Time) (string, bool) {
+	if value == "" {
 		return "", false
 	}
-	until, err := time.Parse(time.RFC3339, state.PausedUntil)
+	until, err := time.Parse(time.RFC3339, value)
 	if err != nil || !until.After(now) {
 		return "", false
 	}
-	return state.PausedUntil, true
+	return value, true
 }
 
-// RecordFailure counts one non-transient upload failure and pauses uploads
-// for a day once five accumulate. Pending snapshots stay in the cursor, so
-// pausing loses nothing. A failed write is returned, not swallowed: the caller
-// reports it the way the TS collector does, and a silent failure would leave
-// the run claiming a pause that was never persisted.
-func RecordFailure(stateDir string, uploadErr error, now time.Time) (BackoffState, error) {
-	previous := LoadBackoff(stateDir)
-	state := BackoffState{
-		ConsecutiveFailures: 1,
-		LastErrorSummary:    Summarize(uploadErr),
+// pauseLaterThan compares two valid pause timestamps. String order is not
+// enough: Go writes RFC3339Nano (fractional part variable-length) and the TS
+// collector writes toISOString (always .000Z), so equal instants can spell
+// differently and mixed files must still order correctly.
+func pauseLaterThan(left, right string) bool {
+	leftTime, leftErr := time.Parse(time.RFC3339, left)
+	rightTime, rightErr := time.Parse(time.RFC3339, right)
+	if leftErr != nil {
+		return false
 	}
-	if previous != nil {
-		state.ConsecutiveFailures = previous.ConsecutiveFailures + 1
+	if rightErr != nil {
+		return true
+	}
+	return leftTime.After(rightTime)
+}
+
+// LoadBackoff reads the legacy (pre-v2) flat pause record; nil when the file
+// has no complete flat record. Kept for the v1 compatibility tests and the
+// status surface; per-source state goes through IsPaused.
+func LoadBackoff(stateDir string) *BackoffState {
+	file := loadBackoffFile(stateDir)
+	if file == nil || file.LegacyFailures == nil || file.LegacySummary == nil {
+		return nil
+	}
+	return &BackoffState{
+		ConsecutiveFailures: clampFailureCount(*file.LegacyFailures),
+		LastErrorSummary:    *file.LegacySummary,
+		PausedUntil:         file.LegacyPaused,
+	}
+}
+
+// IsPaused reports an active pause window for the source, or false when
+// uploads may proceed. A legacy flat pause still covers every source (that is
+// what it did before the split); a v2 pause covers only its own source.
+func IsPaused(stateDir string, source string, now time.Time) (string, bool) {
+	file := loadBackoffFile(stateDir)
+	if file == nil {
+		return "", false
+	}
+	pausedUntil, paused := "", false
+	if entry, exists := file.Sources[source]; exists {
+		pausedUntil, paused = parsePausedUntil(entry.PausedUntil, now)
+	}
+	if legacy, ok := parsePausedUntil(file.LegacyPaused, now); ok {
+		if !paused || pauseLaterThan(legacy, pausedUntil) {
+			pausedUntil, paused = legacy, true
+		}
+	}
+	return pausedUntil, paused
+}
+
+// RecordFailure counts one non-transient upload failure for the source and
+// pauses that source for a day once five accumulate. Pending snapshots stay in
+// the cursor, so pausing loses nothing. A failed write is returned, not
+// swallowed: the caller reports it the way the TS collector does, and a silent
+// failure would leave the run claiming a pause that was never persisted.
+func RecordFailure(stateDir string, source string, uploadErr error, now time.Time) (BackoffState, error) {
+	file := loadBackoffFile(stateDir)
+	if file == nil {
+		file = &backoffFile{}
+	}
+	if file.Sources == nil {
+		file.Sources = map[string]backoffEntry{}
+	}
+	previous := 0
+	if entry, exists := file.Sources[source]; exists {
+		// A v2 entry is the only thing that carries over. The legacy count is
+		// deliberately not inherited: it cannot be attributed to this source,
+		// and inheriting it could pause a healthy source on its first failure.
+		previous = clampFailureCount(valueOrZero(entry.ConsecutiveFailures))
+	}
+	state := BackoffState{
+		ConsecutiveFailures: previous + 1,
+		LastErrorSummary:    Summarize(uploadErr),
 	}
 	if state.ConsecutiveFailures >= uploadFailurePauseThreshold {
 		state.PausedUntil = now.Add(uploadFailurePauseMs).UTC().Format(time.RFC3339Nano)
 	}
-	return state, writeBackoff(stateDir, state)
+	file.Sources[source] = backoffEntry{
+		ConsecutiveFailures: float64Ptr(float64(state.ConsecutiveFailures)),
+		LastErrorSummary:    &state.LastErrorSummary,
+		PausedUntil:         state.PausedUntil,
+	}
+	file.Version = 2
+	dropExpiredLegacy(file, now)
+	return state, writeBackoffFile(stateDir, file)
 }
 
-// RecordSuccess clears the backoff state entirely.
-func RecordSuccess(stateDir string) {
-	_ = os.Remove(filepath.Join(stateDir, backoffFileName))
+// RecordSuccess clears the source's entry. The legacy flat fields go only once
+// their pause has expired; while it is active they still pause every source,
+// and dropping them early would lift a machine-wide pause nobody asked to lift.
+func RecordSuccess(stateDir string, source string) {
+	file := loadBackoffFile(stateDir)
+	if file == nil {
+		return
+	}
+	delete(file.Sources, source)
+	dropExpiredLegacy(file, time.Now())
+	if len(file.Sources) == 0 && file.LegacyFailures == nil && file.LegacySummary == nil {
+		_ = os.Remove(filepath.Join(stateDir, backoffFileName))
+		return
+	}
+	file.Version = 2
+	_ = writeBackoffFile(stateDir, file)
 }
 
-func writeBackoff(stateDir string, state BackoffState) error {
+func dropExpiredLegacy(file *backoffFile, now time.Time) {
+	if file.LegacyPaused != "" {
+		if _, active := parsePausedUntil(file.LegacyPaused, now); active {
+			return
+		}
+	}
+	file.LegacyFailures = nil
+	file.LegacySummary = nil
+	file.LegacyPaused = ""
+}
+
+func valueOrZero(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func float64Ptr(value float64) *float64 { return &value }
+
+func writeBackoffFile(stateDir string, file *backoffFile) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return err
 	}
-	payload, err := json.MarshalIndent(state, "", "  ")
+	payload, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err
 	}

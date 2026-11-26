@@ -28,7 +28,14 @@ import { withCursorLock } from './providers/session-cursor-store'
 import { isTransientNetworkError } from './transient-error'
 import { assertSecureEndpoint } from './endpoint'
 import { isUploadPaused, recordUploadFailure, recordUploadSuccess, summarize } from './upload-backoff'
-import { readUploadDelivered, readUploadRejected, uploadSnapshots, type RejectedUploadSnapshot } from './upload'
+import {
+  readUploadBlocked,
+  readUploadDelivered,
+  readUploadRejected,
+  uploadSnapshots,
+  type BlockedUploadSnapshot,
+  type RejectedUploadSnapshot
+} from './upload'
 import { assertValidTimeZone } from './timezone'
 import { isAllDateFilter } from './iso-calendar-date'
 
@@ -186,7 +193,7 @@ export async function runCollectorCli(
     }
 
     const uploadStateDir = resolveStateDir(env)
-    const paused = await isUploadPaused(uploadStateDir)
+    const paused = await isUploadPaused(uploadStateDir, options.source)
     if (paused) {
       // Pending snapshots stay in the cursor; the pause only skips the futile upload
       // round while the server keeps rejecting. Say so loudly instead of silently
@@ -206,6 +213,7 @@ export async function runCollectorCli(
     let uploadError: unknown
     let delivered = collection.snapshots
     let rejected: RejectedUploadSnapshot[] | undefined
+    let blocked: BlockedUploadSnapshot[] | undefined
     let result: unknown
     try {
       result = await timePhase(timings, 'upload', () =>
@@ -222,6 +230,7 @@ export async function runCollectorCli(
       )
       delivered = readUploadDelivered(result) ?? collection.snapshots
       rejected = readUploadRejected(result)
+      blocked = readUploadBlocked(result)
       uploadSucceeded = true
     } catch (error) {
       uploadError = error
@@ -230,7 +239,7 @@ export async function runCollectorCli(
         // recording the failure itself throws (disk full, permissions), swallow that
         // secondary error and keep rethrowing the one that actually failed the sync.
         try {
-          const state = await recordUploadFailure(uploadStateDir, error)
+          const state = await recordUploadFailure(uploadStateDir, options.source, error)
           collectorDeps.stderr(
             `TokenBoard upload failed (${state.consecutiveFailures} consecutive non-transient failures` +
               `${state.pausedUntil ? `; pausing uploads until ${state.pausedUntil}` : ''})`
@@ -241,7 +250,7 @@ export async function runCollectorCli(
       }
       throw error
     }
-    if (uploadSucceeded) await recordUploadSuccess(uploadStateDir)
+    if (uploadSucceeded) await recordUploadSuccess(uploadStateDir, options.source)
 
     // Rows we may acknowledge away: the delivered set plus any row dropped for a
     // reason that can never change (an invalid or before-window usageDate). Those
@@ -252,9 +261,25 @@ export async function runCollectorCli(
       rejected === undefined
         ? delivered
         : [...delivered, ...rejected.filter((entry) => entry.issue !== 'too-far-future').map((entry) => entry.snapshot)]
+    // One aggregate line, codes only: the blocked row's values belong to the local
+    // session files, not to a log. The rows are pending, not lost.
+    if (blocked !== undefined && blocked.length > 0) {
+      const counts = new Map<string, number>()
+      for (const entry of blocked) counts.set(entry.code, (counts.get(entry.code) ?? 0) + 1)
+      const summary = [...counts.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([code, count]) => `${code} x${count}`)
+        .join(', ')
+      collectorDeps.stderr(
+        `TokenBoard upload: ${blocked.length} snapshot(s) blocked by server validation: ${summary}; they stay pending`
+      )
+    }
+    // A blocked row was not delivered, so the group rule already withholds it; the
+    // Codex file-level rule must also step aside or it retires a row it cannot name.
     const codexFutureRejected =
-      rejected !== undefined &&
-      rejected.some((entry) => entry.snapshot.source === 'codex' && entry.issue === 'too-far-future')
+      (rejected !== undefined &&
+        rejected.some((entry) => entry.snapshot.source === 'codex' && entry.issue === 'too-far-future')) ||
+      (blocked !== undefined && blocked.length > 0)
     await timePhase(timings, 'cursorAck', () =>
       ackUploadCursors({
         collectedSources: collection.collectedSources,
