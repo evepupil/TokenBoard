@@ -318,7 +318,7 @@ function totalsDeltaSql(keyRows: string) {
             )
           )
       ) - COALESCE((
-        SELECT daily_usage_summary.total_tokens
+        SELECT SUM(daily_usage_summary.total_tokens)
         FROM daily_usage_summary, newkeys
         WHERE daily_usage_summary.user_id = newkeys.user_id
           AND daily_usage_summary.user_id = user_usage_totals.user_id
@@ -346,7 +346,7 @@ function totalsDeltaSql(keyRows: string) {
             )
           )
       ) - COALESCE((
-        SELECT daily_usage_summary.total_tokens_without_cache_read
+        SELECT SUM(daily_usage_summary.total_tokens_without_cache_read)
         FROM daily_usage_summary, newkeys
         WHERE daily_usage_summary.user_id = newkeys.user_id
           AND daily_usage_summary.user_id = user_usage_totals.user_id
@@ -374,7 +374,7 @@ function totalsDeltaSql(keyRows: string) {
             )
           )
       ) - COALESCE((
-        SELECT ${billableCostSql({ sourceColumn: 'daily_usage_summary.source', costColumn: 'daily_usage_summary.cost_usd' })}
+        SELECT SUM(${billableCostSql({ sourceColumn: 'daily_usage_summary.source', costColumn: 'daily_usage_summary.cost_usd' })})
         FROM daily_usage_summary, newkeys
         WHERE daily_usage_summary.user_id = newkeys.user_id
           AND daily_usage_summary.user_id = user_usage_totals.user_id
@@ -402,7 +402,7 @@ function totalsDeltaSql(keyRows: string) {
             )
           )
       ) - COALESCE((
-        SELECT daily_usage_summary.session_count
+        SELECT SUM(daily_usage_summary.session_count)
         FROM daily_usage_summary, newkeys
         WHERE daily_usage_summary.user_id = newkeys.user_id
           AND daily_usage_summary.user_id = user_usage_totals.user_id

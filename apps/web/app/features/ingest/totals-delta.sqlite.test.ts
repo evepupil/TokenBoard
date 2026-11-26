@@ -58,6 +58,35 @@ describe('incremental totals maintenance', () => {
     expect(await totals(db, 'legacy-user')).toEqual(expected)
   })
 
+  test('subtracts every old summary value when one delta carries multiple changed keys', async () => {
+    const db = await createTotalsDb(tempDirs)
+    await seedProfile(db, 'multi-user')
+    const first = Array.from({ length: 6 }, (_, index) => ({
+      ...makeRecord({
+        userId: 'multi-user',
+        model: `model-${index}`,
+        inputTokens: 100 + index,
+        outputTokens: 0,
+        totalTokens: 100 + index,
+        costUsd: (index + 1) / 10,
+        sessionCount: 1
+      })
+    }))
+    await upsertUsageSnapshots(db, first)
+
+    const second = first.map((record, index) => ({
+      ...record,
+      inputTokens: 200 + index,
+      totalTokens: 200 + index,
+      costUsd: (index + 2) / 10,
+      collectedAt: '2026-11-25T11:00:00.000Z'
+    }))
+    await upsertUsageSnapshots(db, second)
+
+    expect(await totals(db, 'multi-user')).toEqual(await fullRecompute(db, 'multi-user'))
+    expect((await totals(db, 'multi-user')).totalTokens).toBe(second.reduce((sum, record) => sum + record.totalTokens, 0))
+  })
+
   test('applies deltas to the right user when a batch carries two users', async () => {
     const db = await createTotalsDb(tempDirs)
     await seedProfile(db, 'user-a')
