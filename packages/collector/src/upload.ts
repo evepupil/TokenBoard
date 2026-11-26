@@ -59,10 +59,24 @@ export function readUploadRejected(value: unknown): RejectedUploadSnapshot[] | u
   return Array.isArray(rejected) ? rejected : undefined
 }
 
+// The rows the server rejected with a validation detail (`error.details`). They are
+// neither delivered nor permanently rejected: they stay pending in the cursor so a
+// later run retries them, exactly like a row that never left the machine.
+export const uploadBlockedSymbol = Symbol('tokenboard.uploadBlocked')
+
+export type BlockedUploadSnapshot = { snapshot: UsageSnapshot; code: string }
+
+export function readUploadBlocked(value: unknown): BlockedUploadSnapshot[] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const blocked = (value as { [uploadBlockedSymbol]?: BlockedUploadSnapshot[] })[uploadBlockedSymbol]
+  return Array.isArray(blocked) ? blocked : undefined
+}
+
 function withDelivered<T extends object>(
   payload: T,
   delivered: UsageSnapshot[],
-  rejected: RejectedUploadSnapshot[]
+  rejected: RejectedUploadSnapshot[],
+  blocked: BlockedUploadSnapshot[]
 ): T {
   Object.defineProperty(payload, uploadDeliveredSymbol, {
     configurable: false,
@@ -74,6 +88,12 @@ function withDelivered<T extends object>(
     configurable: false,
     enumerable: false,
     value: rejected,
+    writable: false
+  })
+  Object.defineProperty(payload, uploadBlockedSymbol, {
+    configurable: false,
+    enumerable: false,
+    value: blocked,
     writable: false
   })
   return payload
@@ -119,22 +139,23 @@ export async function uploadSnapshots(
     // empty run. A run whose only snapshots were rejected sends no batch: posting an
     // empty one would claim a delivery that did not happen.
     const upserted = snapshots.length === 0 ? await uploadSnapshotBatch(config, [], fetcher) : 0
-    return withDelivered(withRejectionCount({ upserted, skipped: 0 }, rejected.length), [], rejected)
+    return withDelivered(withRejectionCount({ upserted, skipped: 0 }, rejected.length), [], rejected, [])
   }
 
   let upserted = 0
   let skipped = 0
   let uploaded = false
+  const blocked: BlockedUploadSnapshot[] = []
 
   for (const batch of chunkSnapshots(uploadable, snapshotBatchSize)) {
-    const checked = await filterChangedSnapshots(batch, (keys) => fetchExistingSnapshotHashes(config, keys, fetcher))
+    const checked = await filterChangedWithIsolation(config, batch, fetcher)
     skipped += checked.skipped
 
     if (checked.snapshots.length === 0) {
       continue
     }
 
-    upserted += await uploadSnapshotBatch(config, checked.snapshots, fetcher)
+    upserted += await uploadBatchWithIsolation(config, checked.snapshots, fetcher, blocked)
     uploaded = true
   }
 
@@ -145,7 +166,190 @@ export async function uploadSnapshots(
     upserted += await uploadSnapshotBatch(config, [], fetcher)
   }
 
-  return withDelivered(withRejectionCount({ upserted, skipped }, rejected.length), uploadable, rejected)
+  // A blocked row never reached the server: it must not be acknowledged. Everything
+  // else in `uploadable` did (posted, or already present server-side).
+  const blockedRows = new Set(blocked.map((entry) => entry.snapshot))
+  const delivered = uploadable.filter((snapshot) => !blockedRows.has(snapshot))
+  return withDelivered(withRejectionCount({ upserted, skipped }, rejected.length), delivered, rejected, blocked)
+}
+
+// The server can only reject a key it can name. A rejected key is dropped and the
+// remaining keys are checked again; its snapshot stays in the upload list (absent from
+// `existing` counts as changed) and the ingest isolation decides whether it is blocked.
+async function filterChangedWithIsolation(
+  config: CollectorConfig,
+  snapshots: UsageSnapshot[],
+  fetcher: Fetcher
+): Promise<{ snapshots: UsageSnapshot[]; skipped: number }> {
+  const excluded = new Set<number>()
+  let existing: ExistingSnapshotHash[] = []
+  for (let round = 0; ; round += 1) {
+    const included = snapshots.map((_, index) => index).filter((index) => !excluded.has(index))
+    if (included.length === 0) break
+    try {
+      existing = (
+        await fetchExistingSnapshotHashes(
+          config,
+          included.map((index) => ({
+            source: snapshots[index].source,
+            usageDate: snapshots[index].usageDate,
+            model: snapshots[index].model
+          })),
+          fetcher
+        )
+      ).existing
+      break
+    } catch (error) {
+      if (!(error instanceof ValidationRejection) || error.keys.length === 0 || round >= maxIsolationRounds) {
+        throw error
+      }
+      let added = false
+      for (const issue of error.keys) {
+        const position = included[issue.index]
+        if (position !== undefined && !excluded.has(position)) {
+          excluded.add(position)
+          added = true
+        }
+      }
+      if (!added) throw error
+    }
+  }
+  const hashes = new Map(existing.map((row) => [snapshotKey(row), row.snapshotHash]))
+  const changed: UsageSnapshot[] = []
+  let skipped = 0
+  for (const [index, snapshot] of snapshots.entries()) {
+    if (!excluded.has(index) && hashes.get(snapshotKey(snapshot)) === (await snapshotHash(snapshot))) {
+      skipped += 1
+      continue
+    }
+    changed.push(snapshot)
+  }
+  return { snapshots: changed, skipped }
+}
+
+// Posts one batch; when the server names rejected rows, removes exactly those and
+// re-sends the rest, at most `maxIsolationRounds` times. Rows the server named land in
+// `blockedAcc`; any other error (no usable details, a non-validation failure, rounds
+// exhausted) fails the upload as it would have before.
+async function uploadBatchWithIsolation(
+  config: CollectorConfig,
+  snapshots: UsageSnapshot[],
+  fetcher: Fetcher,
+  blockedAcc: BlockedUploadSnapshot[]
+): Promise<number> {
+  let send = snapshots
+  for (let round = 0; ; round += 1) {
+    try {
+      return await uploadSnapshotBatch(config, send, fetcher)
+    } catch (error) {
+      if (!(error instanceof ValidationRejection) || error.snapshots.length === 0 || round >= maxIsolationRounds) {
+        throw error
+      }
+      const removed = new Set<number>()
+      for (const issue of error.snapshots) {
+        if (issue.index >= 0 && issue.index < send.length && !removed.has(issue.index)) {
+          removed.add(issue.index)
+          blockedAcc.push({ snapshot: send[issue.index], code: issue.code })
+        }
+      }
+      if (removed.size === 0) throw error
+      send = send.filter((_, index) => !removed.has(index))
+      if (send.length === 0) return 0
+    }
+  }
+}
+
+const maxIsolationRounds = 2
+const maxValidationBodyBytes = 64 * 1024
+
+type ValidationIssue = { index: number; code: string }
+
+// A 400 whose body named the rejected rows. `kind` keeps the pre-existing failure
+// wording ("Upload failed with status 400"), which callers classify by string.
+class ValidationRejection extends Error {
+  constructor(
+    readonly kind: 'Upload' | 'Snapshot check',
+    readonly status: number,
+    readonly snapshots: ValidationIssue[],
+    readonly keys: ValidationIssue[]
+  ) {
+    super(`${kind} failed with status ${status}`)
+  }
+}
+
+function parseValidationDetailPath(path: unknown): { root: 'snapshots' | 'keys'; index: number } | null {
+  if (typeof path !== 'string') return null
+  const match = /^(snapshots|keys)\.(\d+)(?:\.[A-Za-z]+)?$/.exec(path)
+  if (!match) return null
+  return { root: match[1] as 'snapshots' | 'keys', index: Number(match[2]) }
+}
+
+// Reads a bounded 400 body and returns the rejection it describes, or null when the
+// body carries no usable details (an old server, a proxy, a non-JSON body).
+async function parseValidationRejection(
+  kind: 'Upload' | 'Snapshot check',
+  response: Response
+): Promise<ValidationRejection | null> {
+  const text = await readBoundedText(response, maxValidationBodyBytes)
+  if (text === null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.error) || !Array.isArray(parsed.error.details)) return null
+  const snapshots: ValidationIssue[] = []
+  const keys: ValidationIssue[] = []
+  const seen = new Set<string>()
+  for (const detail of parsed.error.details) {
+    if (!isRecord(detail)) continue
+    const resolved = parseValidationDetailPath(detail.path)
+    if (!resolved) continue
+    const code = typeof detail.code === 'string' && detail.code !== '' ? detail.code : 'invalid-value'
+    const dedupeKey = `${resolved.root}|${resolved.index}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    ;(resolved.root === 'snapshots' ? snapshots : keys).push({ index: resolved.index, code })
+  }
+  if (snapshots.length === 0 && keys.length === 0) return null
+  return new ValidationRejection(kind, response.status, snapshots, keys)
+}
+
+async function readBoundedText(response: Response, limit: number): Promise<string | null> {
+  const body = response.body
+  if (!body) {
+    try {
+      const text = await response.text()
+      return text.length <= limit ? text : null
+    } catch {
+      return null
+    }
+  }
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+      chunks.push(value)
+    }
+  } catch {
+    return null
+  }
+  const joined = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    joined.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(joined)
 }
 
 // Only surfaces the count when something was actually dropped, so a clean run's result
@@ -205,6 +409,10 @@ async function fetchExistingSnapshotHashes(config: CollectorConfig, keys: UsageS
       body: JSON.stringify({ keys })
     },
     async (candidate) => {
+      if (candidate.status === 400) {
+        const rejection = await parseValidationRejection('Snapshot check', candidate)
+        if (rejection) throw rejection
+      }
       if (isUnsupportedSnapshotCheckResponse(candidate) || !candidate.ok) return undefined
       return parseExistingSnapshotHashResponse(await candidate.json())
     }
@@ -238,6 +446,10 @@ async function uploadSnapshotBatch(config: CollectorConfig, snapshots: UsageSnap
       body: JSON.stringify({ snapshots })
     },
     async (candidate) => {
+      if (candidate.status === 400) {
+        const rejection = await parseValidationRejection('Upload', candidate)
+        if (rejection) throw rejection
+      }
       if (!candidate.ok) return undefined
       return parseUploadResponse(await candidate.json())
     }

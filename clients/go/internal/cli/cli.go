@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -271,7 +272,7 @@ func syncLocked(
 	}
 	shouldFailForSourceErrors := collectionFailed(outcome, options)
 
-	if pausedUntil, paused := upload.IsPaused(stateDir, time.Now()); paused {
+	if pausedUntil, paused := upload.IsPaused(stateDir, options.Source, time.Now()); paused {
 		fmt.Fprintf(stderr,
 			"TokenBoard upload paused until %s after repeated non-transient failures; collected snapshots remain queued in the cursor\n",
 			pausedUntil)
@@ -293,13 +294,13 @@ func syncLocked(
 	result, uploadErr := upload.UploadSnapshots(ctx, config, outcome.snapshots, nil)
 	timings["upload"] = elapsedMillis(phaseStarted)
 	if uploadErr == nil {
-		upload.RecordSuccess(stateDir)
+		upload.RecordSuccess(stateDir, options.Source)
 	} else {
 		if !collect.IsTransientNetworkError(uploadErr) {
 			// The backoff bookkeeping must not replace the original upload error:
 			// if recording the failure itself fails (disk full, permissions), say
 			// so and keep classifying the one that actually failed the sync.
-			recorded, recordErr := upload.RecordFailure(stateDir, uploadErr, time.Now())
+			recorded, recordErr := upload.RecordFailure(stateDir, options.Source, uploadErr, time.Now())
 			if recordErr != nil {
 				fmt.Fprintf(stderr, "TokenBoard upload failure could not be recorded: %s\n",
 					upload.Summarize(recordErr))
@@ -352,6 +353,26 @@ func syncLocked(
 			fmt.Fprintf(stderr, "TokenBoard upload: %d more snapshots dropped for the same reason\n",
 				result.RejectedUsageDates-10)
 		}
+	}
+	// Blocked rows are pending, not lost: they stay in the cursor for a later
+	// run. One aggregate line, codes only — the blocking row's values belong
+	// to the local session files, not to a log.
+	if len(result.Blocked) > 0 {
+		counts := map[string]int{}
+		for _, blocked := range result.Blocked {
+			counts[blocked.Code]++
+		}
+		codes := make([]string, 0, len(counts))
+		for code := range counts {
+			codes = append(codes, code)
+		}
+		sort.Strings(codes)
+		parts := make([]string, 0, len(codes))
+		for _, code := range codes {
+			parts = append(parts, fmt.Sprintf("%s x%d", code, counts[code]))
+		}
+		fmt.Fprintf(stderr, "TokenBoard upload: %d snapshot(s) blocked by server validation: %s; they stay pending\n",
+			len(result.Blocked), strings.Join(parts, ", "))
 	}
 	payloadFields := map[string]any{
 		"upserted": result.Upserted,
@@ -1163,12 +1184,16 @@ func acknowledgeUploadCursors(
 	// queued: the per-file acknowledgement cannot tell which file the row came
 	// from, so it is skipped this run and the group rule withholds the affected
 	// file until the clock catches up.
-	codexFutureRejected := false
+	codexSkipFileAck := false
 	for _, rejected := range delivered.Rejected {
 		if rejected.Snapshot.Source == contract.SourceCodex && rejected.Issue == "too-far-future" {
-			codexFutureRejected = true
+			codexSkipFileAck = true
 		}
 	}
+	// A row the server blocked this run is not in Delivered, so group
+	// acknowledgement already withholds it — but the Codex file-level rule
+	// would still clear the file and retire a blocked row it cannot name.
+	codexSkipFileAck = codexSkipFileAck || len(delivered.Blocked) > 0
 	for _, source := range outcome.collectedSources {
 		acknowledged := map[string]bool{}
 		for _, snapshot := range delivered.Delivered {
@@ -1199,7 +1224,7 @@ func acknowledgeUploadCursors(
 			// side reads its metadata off the delivered snapshots and falls back
 			// to the delivered-group rule when it is absent; mirror that.
 			var ackErr error
-			if len(acknowledged) > 0 && !codexFutureRejected {
+			if len(acknowledged) > 0 && !codexSkipFileAck {
 				ackErr = acknowledgeCodexCursors(stateDir, outcome.codexAcknowledgement, env)
 			} else {
 				ackErr = acknowledgeCodexGroups(stateDir, acknowledged, env)

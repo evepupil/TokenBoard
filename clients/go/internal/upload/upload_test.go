@@ -262,25 +262,25 @@ func TestBackoffPausesAfterFiveConsecutiveFailures(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 4; i++ {
-		state, recordErr := RecordFailure(dir, os.ErrPermission, now)
+		state, recordErr := RecordFailure(dir, "codex", os.ErrPermission, now)
 		if recordErr != nil {
 			t.Fatalf("record %d: %v", i+1, recordErr)
 		}
 		if state.ConsecutiveFailures != i+1 {
 			t.Fatalf("failure %d recorded as %d", i+1, state.ConsecutiveFailures)
 		}
-		if _, paused := IsPaused(dir, now); paused {
+		if _, paused := IsPaused(dir, "codex", now); paused {
 			t.Fatalf("paused early at failure %d", i+1)
 		}
 	}
-	state, recordErr := RecordFailure(dir, os.ErrPermission, now)
+	state, recordErr := RecordFailure(dir, "codex", os.ErrPermission, now)
 	if recordErr != nil {
 		t.Fatalf("record 5: %v", recordErr)
 	}
 	if state.ConsecutiveFailures != 5 {
 		t.Fatalf("5th failure = %d", state.ConsecutiveFailures)
 	}
-	pausedUntil, paused := IsPaused(dir, now)
+	pausedUntil, paused := IsPaused(dir, "codex", now)
 	if !paused {
 		t.Fatal("must pause after 5 consecutive failures")
 	}
@@ -288,7 +288,7 @@ func TestBackoffPausesAfterFiveConsecutiveFailures(t *testing.T) {
 		t.Errorf("pause window %v", until.Sub(now))
 	}
 	// Pause expires on its own.
-	if _, paused := IsPaused(dir, now.Add(25*time.Hour)); paused {
+	if _, paused := IsPaused(dir, "codex", now.Add(25*time.Hour)); paused {
 		t.Error("pause must expire")
 	}
 }
@@ -296,14 +296,14 @@ func TestBackoffPausesAfterFiveConsecutiveFailures(t *testing.T) {
 func TestBackoffSuccessClearsState(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
-	if _, err := RecordFailure(dir, os.ErrPermission, now); err != nil {
+	if _, err := RecordFailure(dir, "codex", os.ErrPermission, now); err != nil {
 		t.Fatalf("record: %v", err)
 	}
-	RecordSuccess(dir)
+	RecordSuccess(dir, "codex")
 	if _, err := os.Stat(filepath.Join(dir, "upload-backoff.json")); !os.IsNotExist(err) {
 		t.Error("success must remove the state file")
 	}
-	if _, paused := IsPaused(dir, now); paused {
+	if _, paused := IsPaused(dir, "codex", now); paused {
 		t.Error("cleared state must not pause")
 	}
 }
@@ -311,7 +311,7 @@ func TestBackoffSuccessClearsState(t *testing.T) {
 func TestBackoffSummarizesLongErrors(t *testing.T) {
 	dir := t.TempDir()
 	long := strings.Repeat("x", 500)
-	state, recordErr := RecordFailure(dir, errString(long), time.Now().UTC())
+	state, recordErr := RecordFailure(dir, "codex", errString(long), time.Now().UTC())
 	if recordErr != nil {
 		t.Fatalf("record: %v", recordErr)
 	}
@@ -557,7 +557,7 @@ func TestRecordFailureReportsAWriteFailure(t *testing.T) {
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RecordFailure(blocked, os.ErrPermission, time.Now()); err == nil {
+	if _, err := RecordFailure(blocked, "codex", os.ErrPermission, time.Now()); err == nil {
 		t.Fatal("a write failure must be reported, not swallowed")
 	}
 }

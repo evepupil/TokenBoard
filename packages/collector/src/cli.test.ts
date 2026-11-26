@@ -1792,7 +1792,7 @@ describe('upload backoff integration', () => {
       // Five consecutive prior failures recorded through the real helper.
       const { recordUploadFailure } = await import('./upload-backoff')
       for (let index = 0; index < 5; index += 1) {
-        await recordUploadFailure(stateDir, new Error('status 400 from server'))
+        await recordUploadFailure(stateDir, 'claude-code', new Error('status 400 from server'))
       }
       const result = await runCollectorCli(
         ['sync', '--source', 'claude-code', '--endpoint', 'https://collector.example/api/v1/ingest'],
@@ -1824,7 +1824,7 @@ describe('upload backoff integration', () => {
     try {
       const { recordUploadFailure } = await import('./upload-backoff')
       for (let index = 0; index < 5; index += 1) {
-        await recordUploadFailure(stateDir, new Error('status 400 from server'))
+        await recordUploadFailure(stateDir, 'claude-code', new Error('status 400 from server'))
       }
       const result = await runCollectorCli(
         ['sync', '--source', 'claude-code', '--endpoint', 'https://collector.example/api/v1/ingest'],
@@ -1872,8 +1872,8 @@ describe('upload backoff integration', () => {
       expect(result).toBe(1)
       expect(stderr.some((line) => line.includes('1 consecutive non-transient failures'))).toBe(true)
       const { loadUploadBackoff, recordUploadSuccess } = await import('./upload-backoff')
-      expect((await loadUploadBackoff(stateDir))?.consecutiveFailures).toBe(1)
-      await recordUploadSuccess(stateDir)
+      expect((await loadUploadBackoff(stateDir))?.sources?.['claude-code']?.consecutiveFailures).toBe(1)
+      await recordUploadSuccess(stateDir, 'claude-code')
       expect(await loadUploadBackoff(stateDir)).toBeNull()
     } finally {
       await rm(stateDir, { recursive: true, force: true })

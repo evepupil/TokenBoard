@@ -10,6 +10,7 @@ import {
   collectRecentRunSummary,
   readClientStatus,
   readClientVersionNotice,
+  readUploadBackoff,
   redactPath
 } from './status.mjs'
 import { clientVersionStatePath } from './client-version-state.mjs'
@@ -1113,4 +1114,67 @@ test('redaction leaves a reason without a path and a bare timestamp alone', () =
 // is neither the reason nor a useful trace.
 test('redaction replaces a URL as a whole', () => {
   assert.equal(redactPath('failed at https://example.com/releases/tag/v1.2.3'), 'failed at <url>')
+})
+
+test('status reads a legacy v1 upload pause without a sources map', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'status-backoff-v1-'))
+  try {
+    writeFileSync(
+      join(stateDir, 'upload-backoff.json'),
+      JSON.stringify({
+        consecutiveFailures: 5,
+        lastErrorSummary: 'Upload failed with status 400',
+        pausedUntil: new Date(Date.now() + 3_600_000).toISOString()
+      })
+    )
+    const backoff = readUploadBackoff(stateDir)
+    assert.equal(typeof backoff.pausedUntil, 'string')
+    assert.equal(backoff.consecutiveFailures, 5)
+    assert.equal('sources' in backoff, false)
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})
+
+// v2 keys the pause by source: the machine's operator needs to see which
+// source is stuck, and only active pauses belong in the status output.
+test('status reads a v2 upload pause per source and lists only active ones', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'status-backoff-v2-'))
+  try {
+    const active = new Date(Date.now() + 3_600_000).toISOString()
+    writeFileSync(
+      join(stateDir, 'upload-backoff.json'),
+      JSON.stringify({
+        version: 2,
+        sources: {
+          codex: { consecutiveFailures: 5, lastErrorSummary: 'status 400', pausedUntil: active },
+          'claude-code': { consecutiveFailures: 1, lastErrorSummary: 'status 400' }
+        }
+      })
+    )
+    const backoff = readUploadBackoff(stateDir)
+    assert.equal(typeof backoff.pausedUntil, 'string')
+    assert.deepEqual(Object.keys(backoff.sources), ['codex'])
+    assert.equal(backoff.sources.codex.consecutiveFailures, 5)
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true })
+  }
+})
+
+test('status reports no upload pause when every entry expired', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'status-backoff-expired-'))
+  try {
+    writeFileSync(
+      join(stateDir, 'upload-backoff.json'),
+      JSON.stringify({
+        version: 2,
+        sources: {
+          codex: { consecutiveFailures: 5, lastErrorSummary: 'status 400', pausedUntil: '2020-01-01T00:00:00.000Z' }
+        }
+      })
+    )
+    assert.equal(readUploadBackoff(stateDir), null)
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true })
+  }
 })

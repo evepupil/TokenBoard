@@ -18,14 +18,14 @@ describe('upload backoff', () => {
     try {
       const now = new Date('2026-10-14T00:00:00.000Z')
       for (let index = 1; index < uploadFailurePauseThreshold; index += 1) {
-        const state = await recordUploadFailure(stateDir, new Error('status 400 from server'), now)
+        const state = await recordUploadFailure(stateDir, 'codex', new Error('status 400 from server'), now)
         expect(state.consecutiveFailures).toBe(index)
         expect(state.pausedUntil).toBeUndefined()
       }
-      const final = await recordUploadFailure(stateDir, new Error('status 401 unauthorized'), now)
+      const final = await recordUploadFailure(stateDir, 'codex', new Error('status 401 unauthorized'), now)
       expect(final.consecutiveFailures).toBe(uploadFailurePauseThreshold)
       expect(final.pausedUntil).toBe('2026-10-15T00:00:00.000Z')
-      expect((await isUploadPaused(stateDir, now))?.pausedUntil).toBe('2026-10-15T00:00:00.000Z')
+      expect((await isUploadPaused(stateDir, 'codex', now))?.pausedUntil).toBe('2026-10-15T00:00:00.000Z')
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -34,10 +34,10 @@ describe('upload backoff', () => {
   test('a successful upload clears the counter and the file', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-clear-'))
     try {
-      await recordUploadFailure(stateDir, new Error('status 400'))
-      await recordUploadSuccess(stateDir)
+      await recordUploadFailure(stateDir, 'codex', new Error('status 400'))
+      await recordUploadSuccess(stateDir, 'codex')
       expect(await loadUploadBackoff(stateDir)).toBeNull()
-      expect(await isUploadPaused(stateDir)).toBeNull()
+      expect(await isUploadPaused(stateDir, 'codex')).toBeNull()
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -46,15 +46,14 @@ describe('upload backoff', () => {
   test('an expired pause no longer blocks', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-expired-'))
     try {
-      await recordUploadFailure(stateDir, new Error('status 400'), new Date('2026-10-01T00:00:00.000Z'))
-      await recordUploadFailure(stateDir, new Error('status 400'), new Date('2026-10-02T00:00:00.000Z'))
-      // Force the threshold directly through the state file shape.
+      await recordUploadFailure(stateDir, 'codex', new Error('status 400'), new Date('2026-10-01T00:00:00.000Z'))
+      // Force the threshold directly through the v2 state file shape.
       const stateFile = join(stateDir, 'upload-backoff.json')
       const state = JSON.parse(await readFile(stateFile, 'utf8'))
-      state.consecutiveFailures = 5
-      state.pausedUntil = '2026-10-03T00:00:00.000Z'
+      state.sources.codex.consecutiveFailures = 5
+      state.sources.codex.pausedUntil = '2026-10-03T00:00:00.000Z'
       await writeFile(stateFile, JSON.stringify(state))
-      expect(await isUploadPaused(stateDir, new Date('2026-10-14T00:00:00.000Z'))).toBeNull()
+      expect(await isUploadPaused(stateDir, 'codex', new Date('2026-10-14T00:00:00.000Z'))).toBeNull()
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -65,7 +64,96 @@ describe('upload backoff', () => {
     try {
       await writeFile(join(stateDir, 'upload-backoff.json'), '{"consecutiveFailures": ')
       expect(await loadUploadBackoff(stateDir)).toBeNull()
-      expect(await isUploadPaused(stateDir)).toBeNull()
+      expect(await isUploadPaused(stateDir, 'codex')).toBeNull()
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  test('one source pausing leaves the others uploadable', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-source-'))
+    try {
+      const now = new Date('2026-10-14T00:00:00.000Z')
+      for (let index = 0; index < uploadFailurePauseThreshold; index += 1) {
+        await recordUploadFailure(stateDir, 'codex', new Error('status 400'), now)
+      }
+      expect(await isUploadPaused(stateDir, 'codex', now)).not.toBeNull()
+      expect(await isUploadPaused(stateDir, 'claude-code', now)).toBeNull()
+      // A success clears only its own entry.
+      await recordUploadSuccess(stateDir, 'claude-code')
+      expect(await isUploadPaused(stateDir, 'codex', now)).not.toBeNull()
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  // The v1 file has no source attribution: its pause covers every source, and
+  // its count is never inherited by whichever source writes first.
+  test('a legacy v1 pause covers every source without attributing its count', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-legacy-'))
+    try {
+      const now = new Date('2026-10-14T00:00:00.000Z')
+      await writeFile(
+        join(stateDir, 'upload-backoff.json'),
+        JSON.stringify({
+          consecutiveFailures: 4,
+          lastErrorSummary: 'Upload failed with status 400',
+          pausedUntil: '2026-10-14T01:00:00.000Z'
+        })
+      )
+      expect(await isUploadPaused(stateDir, 'codex', now)).not.toBeNull()
+      expect(await isUploadPaused(stateDir, 'claude-code', now)).not.toBeNull()
+      const state = await recordUploadFailure(stateDir, 'codex', new Error('status 400'), now)
+      expect(state.consecutiveFailures).toBe(1)
+      const file = JSON.parse(await readFile(join(stateDir, 'upload-backoff.json'), 'utf8'))
+      expect(file.consecutiveFailures).toBe(4)
+      expect(file.pausedUntil).toBe('2026-10-14T01:00:00.000Z')
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  test('expired legacy fields are cleaned on the next success', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-legacy-expired-'))
+    try {
+      await writeFile(
+        join(stateDir, 'upload-backoff.json'),
+        JSON.stringify({
+          consecutiveFailures: 5,
+          lastErrorSummary: 'Upload failed with status 400',
+          pausedUntil: '2026-10-13T00:00:00.000Z'
+        })
+      )
+      await recordUploadSuccess(stateDir, 'codex')
+      expect(await loadUploadBackoff(stateDir)).toBeNull()
+    } finally {
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  // Shape pinned against the Go fixture in
+  // clients/go/internal/upload/backoff_sources_test.go.
+  test('reads the cross-language v2 shape', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'upload-backoff-crosslang-'))
+    try {
+      await writeFile(
+        join(stateDir, 'upload-backoff.json'),
+        JSON.stringify({
+          version: 2,
+          sources: {
+            'claude-code': {
+              consecutiveFailures: 2,
+              lastErrorSummary: 'status 400',
+              pausedUntil: '2026-05-09T13:00:00.000Z'
+            }
+          }
+        })
+      )
+      const now = new Date('2026-05-09T12:00:00.000Z')
+      expect(await isUploadPaused(stateDir, 'claude-code', now)).toEqual({
+        pausedUntil: '2026-05-09T13:00:00.000Z'
+      })
+      expect(await isUploadPaused(stateDir, 'codex', now)).toBeNull()
     } finally {
       await rm(stateDir, { recursive: true, force: true })
     }
@@ -89,6 +177,7 @@ describe('upload backoff', () => {
     try {
       const state = await recordUploadFailure(
         stateDir,
+        'codex',
         new Error('request to https://tokenboard.example/ingest?token=secret failed'),
         new Date('2026-10-14T00:00:00.000Z')
       )
