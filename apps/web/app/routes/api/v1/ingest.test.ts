@@ -105,6 +105,72 @@ describe('ingest route', () => {
     const response = (await POST[0](context as never, async () => undefined)) as Response
 
     expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Invalid request',
+        details: [{ index: 0, path: 'snapshots.0.usageDate', code: 'usage-date-too-far-future' }]
+      }
+    })
+  })
+
+  // An element that is not an object only has a two-segment path; the client isolates rows by
+  // index, so the element-level path must still carry index 0.
+  test('reports an element-level issue with its row index', async () => {
+    const context = {
+      env: { DB: {} },
+      req: {
+        raw: new Request('https://tokenboard.example/api/v1/ingest', { method: 'POST' }),
+        header: vi.fn(() => 'Bearer token'),
+        json: vi.fn(async () => ({ snapshots: [null] }))
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+
+    mockedVerifyUploadToken.mockResolvedValue({
+      id: 'user_1',
+      uploadTokenHash: 'token_hash',
+      deviceId: null,
+      installationId: null
+    })
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Invalid request',
+        details: [{ index: 0, path: 'snapshots.0', code: 'invalid-type' }]
+      }
+    })
+  })
+
+  // A body that is not JSON never reaches the schema; it keeps the plain 400 the collector
+  // already knows, and the client falls back to treating the whole batch as rejected.
+  test('keeps the plain 400 for a body that is not JSON', async () => {
+    const context = {
+      env: { DB: {} },
+      req: {
+        raw: new Request('https://tokenboard.example/api/v1/ingest', { method: 'POST' }),
+        header: vi.fn(() => 'Bearer token'),
+        json: vi.fn(async () => {
+          throw new SyntaxError('Unexpected token h in JSON at position 0')
+        })
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+
+    mockedVerifyUploadToken.mockResolvedValue({
+      id: 'user_1',
+      uploadTokenHash: 'token_hash',
+      deviceId: null,
+      installationId: null
+    })
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } })
   })
 

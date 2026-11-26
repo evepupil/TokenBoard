@@ -137,4 +137,33 @@ describe('jsonError', () => {
     jsonError(c, error)
     expect(isRouteRenderedNotFound(c)).toBe(false)
   })
+
+  // The collector needs to know *which* rows a 400 rejected to isolate them; a batch that
+  // fails as a whole pauses every source on the machine after five attempts. The details
+  // ride on the ApiError because the generic ZodError branch cannot know the request shape.
+  test('includes ApiError details and the truncation flag in the body', () => {
+    const { c, captured } = fakeContext()
+    jsonError(
+      c,
+      new ApiError('BAD_REQUEST', 'Invalid request', 400, undefined, {
+        details: [{ index: 3, path: 'snapshots.3.usageDate', code: 'usage-date-too-far-future' }],
+        truncated: true
+      })
+    )
+    expect(captured.status).toBe(400)
+    expect(captured.body).toEqual({
+      error: {
+        code: 'BAD_REQUEST',
+        message: 'Invalid request',
+        details: [{ index: 3, path: 'snapshots.3.usageDate', code: 'usage-date-too-far-future' }],
+        truncated: true
+      }
+    })
+  })
+
+  test('omits details when the list is empty, keeping the plain body', () => {
+    const { c, captured } = fakeContext()
+    jsonError(c, new ApiError('BAD_REQUEST', 'Invalid request', 400, undefined, { details: [], truncated: false }))
+    expect(captured.body).toEqual({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } })
+  })
 })

@@ -15,8 +15,18 @@ export class ApiError extends Error {
     readonly code: ApiErrorCode,
     message: string,
     readonly status: ContentfulStatusCode = 400,
-    readonly headers?: Record<string, string>
+    readonly headers?: Record<string, string>,
+    // Machine-readable per-item detail for a validation failure. Stays opaque to this module:
+    // each feature builds its own shape, and `jsonError` only serializes it. `truncated`
+    // marks that the producer capped the list.
+    readonly details?: { details: ApiErrorDetail[]; truncated: boolean }
   ) {
     super(message)
   }
+}
+
+export type ApiErrorDetail = {
+  index?: number
+  path: string
+  code: string
 }

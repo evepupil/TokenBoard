@@ -63,4 +63,32 @@ describe('snapshot check route', () => {
     expect(mockedVerifyUploadToken).not.toHaveBeenCalled()
     expect(context.req.json).not.toHaveBeenCalled()
   })
+
+  // The uploader uses /check to skip unchanged rows; a rejected key must be named so the
+  // client can drop it and keep checking the rest of the batch.
+  test('names the rejected key in a 400', async () => {
+    const context = {
+      env: { DB: {} },
+      req: {
+        raw: new Request('https://tokenboard.example/api/v1/ingest/check', { method: 'POST' }),
+        header: vi.fn(() => 'Bearer token'),
+        json: vi.fn(async () => ({ keys: [{ source: 'codex', usageDate: 'SENTINEL-DATE', model: 'gpt-5' }] }))
+      },
+      json: vi.fn((body: unknown, status = 200) => Response.json(body, { status }))
+    }
+
+    mockedVerifyUploadToken.mockResolvedValue({
+      id: 'user_1',
+      uploadTokenHash: 'token_hash',
+      deviceId: null,
+      installationId: null
+    })
+
+    const response = (await POST[0](context as never, async () => undefined)) as Response
+
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: { details: unknown[] } }
+    expect(body.error.details).toEqual([{ index: 0, path: 'keys.0.usageDate', code: 'invalid-date' }])
+    expect(JSON.stringify(body)).not.toContain('SENTINEL-DATE')
+  })
 })

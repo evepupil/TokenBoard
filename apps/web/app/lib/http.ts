@@ -43,7 +43,19 @@ export function jsonError(c: Context, error: unknown) {
     // changed, which is exactly why it went unnoticed. Mark the response so the root handler keeps
     // the route's own `{error:{code,message}}` instead of the generic `Route not found` shell.
     if (error.status === 404) markRouteRenderedNotFound(c)
-    return c.json({ error: { code: error.code, message: error.message } }, error.status, headers)
+    const { details } = error
+    const body =
+      details && details.details.length > 0
+        ? {
+            error: {
+              code: error.code,
+              message: error.message,
+              details: details.details,
+              ...(details.truncated ? { truncated: true } : {})
+            }
+          }
+        : { error: { code: error.code, message: error.message } }
+    return c.json(body, error.status, headers)
   }
 
   if (error instanceof ZodError) {

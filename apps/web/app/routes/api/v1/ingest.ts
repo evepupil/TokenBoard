@@ -1,5 +1,6 @@
 import { createRoute } from 'honox/factory'
 import { verifyUploadToken } from '../../../features/auth/middleware'
+import { toIngestErrorDetails } from '../../../features/ingest/error-details'
 import { ingestRequestSchema, maxIngestSnapshotBatchSize } from '../../../features/ingest/schema'
 import { ingestSnapshots } from '../../../features/ingest/service'
 import { ApiError } from '../../../lib/errors'
@@ -26,8 +27,13 @@ export const POST = createRoute(async (c) => {
     if (Number.isFinite(declaredLength) && declaredLength > maxIngestBodyBytes) {
       throw new ApiError('PAYLOAD_TOO_LARGE', 'Request body too large', 413)
     }
-    const body = ingestRequestSchema.parse(await c.req.json())
-    const result = await ingestSnapshots(c.env.DB, user, body.snapshots)
+    const parsed = ingestRequestSchema.safeParse(await c.req.json())
+    if (!parsed.success) {
+      // The details let the collector isolate the rejected rows and deliver the rest; without
+      // them a single bad row fails the whole batch until uploads pause for a day.
+      throw new ApiError('BAD_REQUEST', 'Invalid request', 400, undefined, toIngestErrorDetails(parsed.error))
+    }
+    const result = await ingestSnapshots(c.env.DB, user, parsed.data.snapshots)
     return c.json(result)
   } catch (error) {
     return jsonError(c, error)
