@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { ZodError, type ZodIssue } from 'zod'
-import {
-  ingestRequestSchema,
-  snapshotCheckRequestSchema,
-  maxIngestSnapshotBatchSize
-} from './schema'
+import { ingestRequestSchema, snapshotCheckRequestSchema, maxIngestSnapshotBatchSize } from './schema'
 import { maxIngestErrorDetails, toIngestErrorDetails } from './error-details'
 
 function detailsOf(schema: { safeParse: (v: unknown) => { success: boolean; error?: ZodError } }, body: unknown) {

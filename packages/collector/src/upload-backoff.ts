@@ -56,7 +56,11 @@ export async function loadUploadBackoff(stateDir: string): Promise<UploadBackoff
     }
     const legacy =
       typeof file.consecutiveFailures === 'number' && typeof file.lastErrorSummary === 'string'
-        ? { consecutiveFailures: file.consecutiveFailures, lastErrorSummary: file.lastErrorSummary, pausedUntil: file.pausedUntil }
+        ? {
+            consecutiveFailures: file.consecutiveFailures,
+            lastErrorSummary: file.lastErrorSummary,
+            pausedUntil: file.pausedUntil
+          }
         : null
     if (Object.keys(sources).length === 0 && legacy === null) return null
     return { version: file.version, sources, ...(legacy ?? {}) }

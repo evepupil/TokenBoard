@@ -335,7 +335,10 @@ function readUploadBackoff(stateDir) {
     // against the collector's toISOString spelling as strings.
     const pausedUntil = [legacyActive ? parsed.pausedUntil : null, ...sourceEntries.map((entry) => entry.pausedUntil)]
       .filter(Boolean)
-      .reduce((latest, candidate) => (latest === null || Date.parse(candidate) > Date.parse(latest) ? candidate : latest), null)
+      .reduce(
+        (latest, candidate) => (latest === null || Date.parse(candidate) > Date.parse(latest) ? candidate : latest),
+        null
+      )
     return {
       pausedUntil,
       consecutiveFailures: Number.isSafeInteger(parsed.consecutiveFailures) ? parsed.consecutiveFailures : null,

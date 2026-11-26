@@ -39,7 +39,9 @@ function isolationFetcher(state: { ingestCalls: number; badCode?: string }) {
             error: {
               code: 'BAD_REQUEST',
               message: 'Invalid request',
-              details: [{ index, path: `snapshots.${index}.usageDate`, code: state.badCode ?? 'usage-date-too-far-future' }]
+              details: [
+                { index, path: `snapshots.${index}.usageDate`, code: state.badCode ?? 'usage-date-too-far-future' }
+              ]
             }
           },
           400
@@ -73,14 +75,20 @@ describe('upload isolation', () => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { snapshots: unknown[] }
       if (body.snapshots.length === 0) return jsonResponse({ upserted: 0 })
       return jsonResponse(
-        { error: { code: 'BAD_REQUEST', message: 'Invalid request', details: [{ index: 0, path: 'snapshots.0.model', code: 'invalid-value' }] } },
+        {
+          error: {
+            code: 'BAD_REQUEST',
+            message: 'Invalid request',
+            details: [{ index: 0, path: 'snapshots.0.model', code: 'invalid-value' }]
+          }
+        },
         400
       )
     }
 
-    await expect(
-      uploadSnapshots(config, [snapshot('a'), snapshot('b'), snapshot('c')], fetcher)
-    ).rejects.toThrow('Upload failed with status 400')
+    await expect(uploadSnapshots(config, [snapshot('a'), snapshot('b'), snapshot('c')], fetcher)).rejects.toThrow(
+      'Upload failed with status 400'
+    )
     expect(ingestCalls).toBe(3)
   })
 
@@ -92,9 +100,7 @@ describe('upload isolation', () => {
       return jsonResponse({ error: { code: 'BAD_REQUEST', message: 'Invalid request' } }, 400)
     }
 
-    await expect(uploadSnapshots(config, [snapshot('a')], fetcher)).rejects.toThrow(
-      'Upload failed with status 400'
-    )
+    await expect(uploadSnapshots(config, [snapshot('a')], fetcher)).rejects.toThrow('Upload failed with status 400')
     expect(ingestCalls).toBe(1)
   })
 

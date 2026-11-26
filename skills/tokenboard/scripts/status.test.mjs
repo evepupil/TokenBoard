@@ -1168,7 +1168,9 @@ test('status reports no upload pause when every entry expired', () => {
       join(stateDir, 'upload-backoff.json'),
       JSON.stringify({
         version: 2,
-        sources: { codex: { consecutiveFailures: 5, lastErrorSummary: 'status 400', pausedUntil: '2020-01-01T00:00:00.000Z' } }
+        sources: {
+          codex: { consecutiveFailures: 5, lastErrorSummary: 'status 400', pausedUntil: '2020-01-01T00:00:00.000Z' }
+        }
       })
     )
     assert.equal(readUploadBackoff(stateDir), null)
