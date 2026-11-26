@@ -65,12 +65,12 @@ describe('upsertUsageSnapshots', () => {
     const result = await upsertUsageSnapshots(db, [makeRecord(), makeRecord({ model: 'claude-opus-4-5' })])
 
     expect(result).toEqual({ upserted: 2 })
-    expect(sqlStatements[0]).toContain('INSERT INTO daily_usage')
-    expect(sqlStatements[0]).toContain('ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET')
-    expect(sqlStatements[0]).toContain('daily_usage.snapshot_hash IS NULL')
-    expect(sqlStatements[0]).toContain('OR daily_usage.snapshot_hash <> excluded.snapshot_hash')
-    expect(sqlStatements[0]).toContain("excluded.source = 'codex'")
-    expect(sqlStatements[0]).toContain('daily_usage.total_tokens > 0')
+    const usageUpsertSql = sqlStatements.find((sql) => sql.includes('INSERT INTO daily_usage')) ?? ''
+    expect(usageUpsertSql).toContain('ON CONFLICT(user_id, device_id, source, usage_date, model) DO UPDATE SET')
+    expect(usageUpsertSql).toContain('daily_usage.snapshot_hash IS NULL')
+    expect(usageUpsertSql).toContain('OR daily_usage.snapshot_hash <> excluded.snapshot_hash')
+    expect(usageUpsertSql).toContain("excluded.source = 'codex'")
+    expect(usageUpsertSql).toContain('daily_usage.total_tokens > 0')
     expect(runCount).toBe(0)
     expect(batches).toHaveLength(2)
     expect(batches[0]).toHaveLength(2)
@@ -193,8 +193,8 @@ describe('upsertUsageSnapshots', () => {
       makeRecord({ usageDate: '2026-04-29' })
     ])
 
-    const summaryBindings = bindings.filter((values) => values.length === 8)
-    const totalsBindings = bindings.filter((values) => values.length === 2)
+    const summaryBindings = bindings.filter((values) => values.length === 9)
+    const totalsBindings = bindings.filter((values) => values.length === 3)
     expect(summaryBindings).toEqual([
       [
         'seed-user',
@@ -204,7 +204,8 @@ describe('upsertUsageSnapshots', () => {
         'seed-user',
         '2026-04-28',
         'claude-code',
-        'claude-sonnet-4-5'
+        'claude-sonnet-4-5',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
       ],
       [
         'seed-user',
@@ -214,10 +215,11 @@ describe('upsertUsageSnapshots', () => {
         'seed-user',
         '2026-04-29',
         'claude-code',
-        'claude-sonnet-4-5'
+        'claude-sonnet-4-5',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
       ]
     ])
-    expect(totalsBindings).toEqual([['seed-user', 'seed-user']])
+    expect(totalsBindings).toEqual([['seed-user', expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/), 'seed-user']])
     const totalRefreshSql = sqlStatements.find((sql) => sql.includes('INSERT INTO user_usage_totals')) ?? ''
     expect(totalRefreshSql).toContain('FROM usage_summary_backfill_state')
     expect(totalRefreshSql).toContain('LEFT JOIN daily_usage_summary')
@@ -261,7 +263,7 @@ describe('upsertUsageSnapshots', () => {
 
     expect(result).toEqual({ upserted: 0 })
     expect(sqlStatements.some((sql) => sql.includes('expected_summary'))).toBe(true)
-    expect(sqlStatements.some((sql) => sql.includes('expected_totals'))).toBe(true)
+    expect(sqlStatements.some((sql) => sql.includes('expected_totals'))).toBe(false)
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(2)
     expect(
@@ -319,14 +321,16 @@ describe('upsertUsageSnapshots', () => {
     expect(sqlStatements.some((sql) => sql.includes('expected_totals'))).toBe(false)
     expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO daily_usage_summary'))).toHaveLength(1)
     expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO user_usage_totals'))).toHaveLength(1)
-    expect(bindings.some((values) => values.length === 8)).toBe(true)
-    expect(bindings.some((values) => values.length === 2 && values.every((value) => value === 'seed-user'))).toBe(true)
+    expect(bindings.some((values) => values.length === 9)).toBe(true)
+    expect(
+      bindings.some((values) => values.length === 3 && values[0] === 'seed-user' && values[2] === 'seed-user')
+    ).toBe(true)
     expect(batches).toHaveLength(2)
     expect(batches[0]).toHaveLength(1)
     expect(batches[1]).toHaveLength(2)
   })
 
-  test('repairs stale totals after an unchanged retry with current summaries', async () => {
+  test('leaves stale totals to the daily self-heal instead of an online full check', async () => {
     const sqlStatements: string[] = []
     const batches: unknown[][] = []
     let statementIndex = 0
@@ -340,10 +344,7 @@ describe('upsertUsageSnapshots', () => {
               values,
               statementIndex: statementIndex++,
               async all() {
-                if (sql.includes('expected_totals')) {
-                  return { results: [{ userId: 'seed-user' }] }
-                }
-                return { results: [] }
+                return sql.includes('FROM user_usage_totals') ? { results: [{ userId: 'seed-user' }] } : { results: [] }
               }
             }
           }
@@ -351,23 +352,15 @@ describe('upsertUsageSnapshots', () => {
       },
       async batch(statements: unknown[]) {
         batches.push(statements)
-        return statements.map((statement) => ({
-          success: true,
-          meta: { changes: (statement as { sql: string }).sql.includes('INSERT INTO daily_usage') ? 0 : 1 }
-        }))
+        return statements.map(() => ({ success: true }))
       }
     } as unknown as D1Database
 
-    const result = await upsertUsageSnapshots(db, [makeRecord()])
+    await upsertUsageSnapshots(db, [makeRecord()])
 
-    expect(result).toEqual({ upserted: 0 })
-    expect(sqlStatements.some((sql) => sql.includes('expected_summary'))).toBe(true)
-    expect(sqlStatements.some((sql) => sql.includes('expected_totals'))).toBe(true)
-    expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO daily_usage_summary'))).toHaveLength(0)
-    expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO user_usage_totals'))).toHaveLength(1)
+    expect(sqlStatements.some((sql) => sql.includes('expected_totals'))).toBe(false)
+    expect(sqlStatements.some((sql) => sql.includes('INSERT INTO user_usage_totals'))).toBe(false)
     expect(batches).toHaveLength(2)
-    expect(batches[0]).toHaveLength(1)
-    expect(batches[1]).toHaveLength(1)
   })
 
   test('marks the upload token and device as synced after ingest', async () => {
@@ -797,7 +790,9 @@ describe('backfillUsageSummaryCache', () => {
     expect(sqlStatements.join('\n')).not.toContain('aggregate_totals AS')
     expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO daily_usage_summary'))).toHaveLength(0)
     expect(sqlStatements.filter((sql) => sql.includes('INSERT INTO user_usage_totals'))).toHaveLength(2)
-    expect(bindings.some((values) => values.length === 2 && values.every((value) => value === 'user_1'))).toBe(true)
+    expect(bindings.some((values) => values.length === 3 && values[0] === 'user_1' && values[2] === 'user_1')).toBe(
+      true
+    )
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(2)
   })
@@ -897,7 +892,7 @@ describe('findExistingSnapshotHashes', () => {
     expect(sqlStatements[0]).toContain('FROM daily_usage')
     expect(sqlStatements[0]).toContain('user_id = ?')
     expect(sqlStatements[0]).toContain('device_id = ?')
-    expect(sqlStatements[0]).toContain('(source = ? AND usage_date = ? AND model = ?)')
+    expect(sqlStatements[0]).toContain('(source, usage_date, model) IN (VALUES')
     expect(sqlStatements[1]).toContain('expected_summary')
     expect(bindings[0]).toEqual([
       'seed-user',
@@ -957,7 +952,7 @@ describe('findExistingSnapshotHashes', () => {
     expect(result).toEqual([])
   })
 
-  test('does not report existing hashes when user totals are missing or stale', async () => {
+  test('reports existing hashes even when totals are stale (self-heal owns that repair)', async () => {
     const db = {
       prepare(sql: string) {
         return {
@@ -993,7 +988,7 @@ describe('findExistingSnapshotHashes', () => {
       keys: [{ source: 'codex', usageDate: '2026-04-28', model: 'gpt-5' }]
     })
 
-    expect(result).toEqual([])
+    expect(result).toEqual([{ source: 'codex', usageDate: '2026-04-28', model: 'gpt-5', snapshotHash: 'hash_1' }])
   })
 
   test('keeps existing hash queries under the D1 bound parameter limit', async () => {
@@ -1046,6 +1041,6 @@ describe('findExistingSnapshotHashes', () => {
     expect(bindings.every((values) => values.length <= 100)).toBe(true)
     // Each chunk keeps one parameter of headroom below the D1 limit, so a statement that later
     // gains a binding still fits.
-    expect(bindings.map((values) => values.length)).toEqual([98, 26, 96, 64, 1])
+    expect(bindings.map((values) => values.length)).toEqual([98, 26, 96, 64])
   })
 })

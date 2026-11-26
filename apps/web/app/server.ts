@@ -1,6 +1,10 @@
 import { showRoutes } from 'hono/dev'
 import { createApp } from 'honox/server'
-import { backfillUsageSummaryCache, usageSummaryBackfillLimit } from './features/ingest/repository'
+import {
+  backfillUsageSummaryCache,
+  runDailyUsageSelfHeal,
+  usageSummaryBackfillLimit
+} from './features/ingest/repository'
 import { runDueWebhookNotifications } from './features/notifications/service'
 import { webhookDiagnostic } from './features/notifications/config'
 import { modelPricingSyncEnabled, runModelPricingSync } from './features/model-pricing/service'
@@ -247,6 +251,7 @@ async function runScheduledTasks(env: Bindings, now: Date) {
     runScheduledNotifications(env, now),
     dailyMaintenance ? runRateLimitPrune(env, now) : Promise.resolve(),
     dailyMaintenance ? runDeviceRetentionPrune(env, now) : Promise.resolve(),
+    dailyMaintenance ? runDailyUsageSelfHeal({ db: env.DB, now }) : Promise.resolve(),
     runScheduledModelPricing(env)
   ])
   const reasons = results

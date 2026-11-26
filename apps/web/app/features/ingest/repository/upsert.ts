@@ -1,31 +1,36 @@
 import {
   listSummaryKeysNeedingRefresh,
-  listUserIdsNeedingTotalRefresh,
   prepareSummaryRefresh,
+  prepareTotalsDeltaStatement,
   prepareUserTotalFromSummaryRefresh
 } from './refresh'
 import {
   runStatementBatches,
   snapshotHash,
   statementChanged,
+  totalsDeltaKeyChunkSize,
   uniqueSummaryKeys,
   uniqueUserIds,
-  type IngestRecord
+  type IngestRecord,
+  type UsageSummaryKey
 } from './types'
 
 const snapshotUpsertBatchSize = 30
 
 export async function upsertUsageSnapshots(db: D1Database, records: IngestRecord[]) {
+  // One point read per request, before any batch: a user whose totals row is already there
+  // gets delta maintenance; only a missing row falls back to the full refresh.
+  const existingTotalsUserIds = await findExistingTotalsUserIds(db, uniqueUserIds(records))
   let upserted = 0
   for (let index = 0; index < records.length; index += snapshotUpsertBatchSize) {
     const batch = records.slice(index, index + snapshotUpsertBatchSize)
-    upserted += await upsertUsageSnapshotBatch(db, batch)
+    upserted += await upsertUsageSnapshotBatch(db, batch, existingTotalsUserIds)
   }
 
   return { upserted }
 }
 
-async function upsertUsageSnapshotBatch(db: D1Database, records: IngestRecord[]) {
+async function upsertUsageSnapshotBatch(db: D1Database, records: IngestRecord[], existingTotalsUserIds: Set<string>) {
   if (records.length === 0) return 0
   const usageStatements = await Promise.all(records.map((record) => prepareUsageUpsert(db, record)))
   const results = await runStatementBatches(db, usageStatements)
@@ -33,21 +38,48 @@ async function upsertUsageSnapshotBatch(db: D1Database, records: IngestRecord[])
   const unchangedRecords = records.filter((_, index) => !statementChanged(results[index]))
   const missingOrStaleSummaryKeys = await listSummaryKeysNeedingRefresh(db, unchangedRecords)
   const summaryKeysToRefresh = uniqueSummaryKeys([...changedRecords, ...missingOrStaleSummaryKeys])
-  const knownSummaryRefreshUserIds = new Set(uniqueUserIds(summaryKeysToRefresh))
-  const totalUserIdsToRefresh = [
-    ...knownSummaryRefreshUserIds,
-    ...(await listUserIdsNeedingTotalRefresh(
-      db,
-      uniqueUserIds(unchangedRecords).filter((userId) => !knownSummaryRefreshUserIds.has(userId))
-    ))
-  ]
-  if (summaryKeysToRefresh.length > 0 || totalUserIdsToRefresh.length > 0) {
-    await runStatementBatches(db, [
-      ...summaryKeysToRefresh.map((key) => prepareSummaryRefresh(db, key)),
-      ...totalUserIdsToRefresh.map((userId) => prepareUserTotalFromSummaryRefresh(db, userId))
-    ])
+  if (summaryKeysToRefresh.length === 0) {
+    return changedRecords.length
   }
+
+  const stamp = new Date().toISOString()
+  const refreshStatements = [
+    ...totalsDeltaStatements(
+      db,
+      summaryKeysToRefresh.filter((key) => existingTotalsUserIds.has(key.userId)),
+      stamp
+    ),
+    ...summaryKeysToRefresh.map((key) => prepareSummaryRefresh(db, key, stamp)),
+    ...uniqueUserIds(summaryKeysToRefresh)
+      .filter((userId) => !existingTotalsUserIds.has(userId))
+      .map((userId) => prepareUserTotalFromSummaryRefresh(db, userId, stamp))
+  ]
+  await runStatementBatches(db, refreshStatements)
   return changedRecords.length
+}
+
+const userTotalsExistsSql = `
+  SELECT user_id as userId
+  FROM user_usage_totals
+  WHERE user_id IN (SELECT value FROM json_each(?))
+`
+
+async function findExistingTotalsUserIds(db: D1Database, userIds: string[]) {
+  if (userIds.length === 0) return new Set<string>()
+  const bound = db.prepare(userTotalsExistsSql).bind(JSON.stringify(userIds)) as {
+    all?: () => Promise<{ results?: { userId: string }[] }>
+  }
+  if (typeof bound.all !== 'function') return new Set<string>()
+  const rows = await bound.all()
+  return new Set((rows.results ?? []).map((row) => row.userId))
+}
+
+function totalsDeltaStatements(db: D1Database, keys: UsageSummaryKey[], stamp: string) {
+  const statements = []
+  for (let index = 0; index < keys.length; index += totalsDeltaKeyChunkSize) {
+    statements.push(prepareTotalsDeltaStatement(db, keys.slice(index, index + totalsDeltaKeyChunkSize), stamp))
+  }
+  return statements
 }
 
 async function prepareUsageUpsert(db: D1Database, record: IngestRecord) {
